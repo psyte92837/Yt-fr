@@ -1,7 +1,7 @@
 From ed01a918efe80ab007634ee840e121bf9bc81d62 Mon Sep 17 00:00:00 2001
 From: Lumen <yabalak.business@gmail.com>
 Date: Sun, 25 Oct 2026 18:09:27 +0600
-Subject: [PATCH 1/4] Lumen: YouTube topic analysis fork of NewPipe
+Subject: [PATCH 1/5] Lumen: YouTube topic analysis fork of NewPipe
 
 - New launcher module org.schabi.newpipe.lumen: projects, AI domain refinement,
   filtered search, channel/playlist import, collection of metadata, subtitles and
@@ -5815,7 +5815,7 @@ index 0000000..0c18a61
 From 579f50bfd94e2d884793dfb3fe18506b5ecabac1 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 26 Oct 2026 00:12:30 +0600
-Subject: [PATCH 2/4] Lumen: recommendation graph, audience research and SEO
+Subject: [PATCH 2/5] Lumen: recommendation graph, audience research and SEO
  pipeline
 
 - Recommendations tab: snowball beam search (default depth 10), autoplay
@@ -10504,7 +10504,7 @@ index 0000000..73edaba
 From aeaee54f9fda85e41932d66c0d39c96928294559 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 26 Oct 2026 01:09:46 +0600
-Subject: [PATCH 3/4] Fix crash when switching graph colouring: detach reused
+Subject: [PATCH 3/5] Fix crash when switching graph colouring: detach reused
  views before re-render
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
@@ -10534,7 +10534,7 @@ index 188d562..89647fe 100644
 From 59f8a9962982b4b5df27d8b69cfd5a7f83276f8a Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 26 Oct 2026 01:13:20 +0600
-Subject: [PATCH 4/4] Lumen: unified log and developer report
+Subject: [PATCH 4/5] Lumen: unified log and developer report
 
 - Rotating on-device log (3 x 512 KB) with automatic secret redaction
 - Logs screen errors, AI HTTP calls, background tasks, recommendations,
@@ -11144,6 +11144,780 @@ index 9c485fd..f896293 100644
 +        assertEquals("GET api.openai.com/v1/models → 200", L.redact("GET api.openai.com/v1/models → 200"))
 +    }
 +}
+-- 
+2.43.0
+
+
+From c4e547b52fd698676ea4d03dbe77b6153e6984e6 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 26 Oct 2026 01:19:16 +0600
+Subject: [PATCH 5/5] Lumen: broader unit tests (45) and pure parsers
+
+- Extract provider response parsing (LlmParse) and file import (ImportParser)
+- Tests: model JSON round-trips, recommendation graph, analytics, provider
+  parsers, imports, SEO helpers and prompts, formatting, log redaction
+- Real org.json for JVM unit tests; Android-free LumenEnv flag
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LhBPWxLs885Adn1n6RLzRC
+---
+ app/build.gradle.kts                          |   1 +
+ .../java/org/schabi/newpipe/lumen/Core.kt     |  12 +-
+ .../main/java/org/schabi/newpipe/lumen/Llm.kt |  60 +--
+ .../java/org/schabi/newpipe/lumen/LlmParse.kt | 100 +++++
+ .../main/java/org/schabi/newpipe/lumen/Seo.kt |  80 ++--
+ .../org/schabi/newpipe/lumen/LumenCoreTest.kt | 357 ++++++++++++++++++
+ gradle/libs.versions.toml                     |   2 +
+ 7 files changed, 525 insertions(+), 87 deletions(-)
+ create mode 100644 app/src/main/java/org/schabi/newpipe/lumen/LlmParse.kt
+ create mode 100644 app/src/test/java/org/schabi/newpipe/lumen/LumenCoreTest.kt
+
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 3e2b28c..f33f4bf 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -339,6 +339,7 @@ dependencies {
+ 
+     // Testing
+     testImplementation(libs.junit)
++    testImplementation(libs.json)
+     testImplementation(libs.mockito.core)
+ 
+     androidTestImplementation(libs.androidx.junit)
+diff --git a/app/src/main/java/org/schabi/newpipe/lumen/Core.kt b/app/src/main/java/org/schabi/newpipe/lumen/Core.kt
+index f2bd65f..b85e85a 100644
+--- a/app/src/main/java/org/schabi/newpipe/lumen/Core.kt
++++ b/app/src/main/java/org/schabi/newpipe/lumen/Core.kt
+@@ -23,12 +23,15 @@ object Lumen {
+         private set
+ 
+     val io: ExecutorService = Executors.newFixedThreadPool(3)
+-    private val main = Handler(Looper.getMainLooper())
++    private val main by lazy { Handler(Looper.getMainLooper()) }
++
++
+ 
+     fun init(ctx: Context) {
+         if (::app.isInitialized) return
+         app = ctx.applicationContext
+         prefs = app.getSharedPreferences("lumen_prefs", Context.MODE_PRIVATE)
++        LumenEnv.ready = true
+         L.init(app)
+     }
+ 
+@@ -117,7 +120,12 @@ object Settings {
+ }
+ 
+ /** Inline RU/EN localisation, switchable inside the app without changing the system locale. */
+-fun t(ru: String, en: String): String = if (Settings.lang == "en") en else ru
++/** Android-free flag: false in plain JVM unit tests, where no app context exists. */
++object LumenEnv {
++    @Volatile var ready = false
++}
++
++fun t(ru: String, en: String): String = if (LumenEnv.ready && Settings.lang == "en") en else ru
+ 
+ object Fmt {
+     fun date(ms: Long): String =
+diff --git a/app/src/main/java/org/schabi/newpipe/lumen/Llm.kt b/app/src/main/java/org/schabi/newpipe/lumen/Llm.kt
+index f32b062..5290f68 100644
+--- a/app/src/main/java/org/schabi/newpipe/lumen/Llm.kt
++++ b/app/src/main/java/org/schabi/newpipe/lumen/Llm.kt
+@@ -104,13 +104,7 @@ object Llm {
+         L.i("llm", "$method $where → $code in ${System.currentTimeMillis() - started}ms, ${text.length}ch")
+         if (code !in 200..299) {
+             L.e("llm", "$where error $code: ${text.take(500)}")
+-            val msg = try {
+-                val o = JSONObject(text)
+-                o.optJSONObject("error")?.optString("message") ?: o.optString("message", text)
+-            } catch (e: Exception) {
+-                text
+-            }
+-            throw LlmException("HTTP $code: ${msg.take(400)}")
++            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}")
+         }
+         return text
+     }
+@@ -154,24 +148,12 @@ object Llm {
+                 if (json && p != Provider.OLLAMA && p != Provider.CUSTOM) {
+                     body.put("response_format", JSONObject().put("type", "json_object"))
+                 }
+-                val o = JSONObject(http("${p.baseUrl}/chat/completions", "POST", headers, body.toString()))
+-                val text = o.getJSONArray("choices").getJSONObject(0).getJSONObject("message").optString("content")
+-                val u = o.optJSONObject("usage")
+-                LlmReply(text, u?.optInt("prompt_tokens") ?: estimateTokens(system + user),
+-                    u?.optInt("completion_tokens") ?: estimateTokens(text), o.optString("model", model))
++                LlmParse.openAi(http("${p.baseUrl}/chat/completions", "POST", headers, body.toString()), model, estimateTokens(system + user))
+             }
+             ApiKind.ANTHROPIC -> {
+                 val body = JSONObject().put("model", model).put("max_tokens", maxTokens).put("system", system)
+                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
+-                val o = JSONObject(http("${p.baseUrl}/messages", "POST", headers, body.toString()))
+-                val content = o.getJSONArray("content")
+-                val sb = StringBuilder()
+-                for (i in 0 until content.length()) {
+-                    val b = content.getJSONObject(i)
+-                    if (b.optString("type") == "text") sb.append(b.optString("text"))
+-                }
+-                val u = o.optJSONObject("usage")
+-                LlmReply(sb.toString(), u?.optInt("input_tokens") ?: 0, u?.optInt("output_tokens") ?: 0, model)
++                LlmParse.anthropic(http("${p.baseUrl}/messages", "POST", headers, body.toString()), model)
+             }
+             ApiKind.GEMINI -> {
+                 val parts = JSONArray()
+@@ -185,44 +167,14 @@ object Llm {
+                     .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
+                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
+                     .put("generationConfig", gen)
+-                val o = JSONObject(http("${p.baseUrl}/models/$model:generateContent", "POST", headers, body.toString()))
+-                val cands = o.optJSONArray("candidates")
+-                val sb = StringBuilder()
+-                if (cands != null && cands.length() > 0) {
+-                    val ps = cands.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
+-                    if (ps != null) for (i in 0 until ps.length()) sb.append(ps.getJSONObject(i).optString("text"))
+-                }
+-                if (sb.isEmpty()) {
+-                    val reason = o.optJSONObject("promptFeedback")?.optString("blockReason") ?: "empty response"
+-                    throw LlmException("Gemini: $reason")
+-                }
+-                val u = o.optJSONObject("usageMetadata")
+-                LlmReply(sb.toString(), u?.optInt("promptTokenCount") ?: 0, u?.optInt("candidatesTokenCount") ?: 0, model)
++                LlmParse.gemini(http("${p.baseUrl}/models/$model:generateContent", "POST", headers, body.toString()), model)
+             }
+         }
+     }
+ 
+     /** Lists models available for the provider, where its API supports it. */
+-    fun listModels(p: Provider): List<String> {
+-        val headers = authHeaders(p)
+-        val o = JSONObject(http("${p.baseUrl}/models", "GET", headers, null))
+-        val out = mutableListOf<String>()
+-        when (p.kind) {
+-            ApiKind.GEMINI -> {
+-                val a = o.optJSONArray("models") ?: JSONArray()
+-                for (i in 0 until a.length()) {
+-                    val m = a.getJSONObject(i)
+-                    val methods = m.optJSONArray("supportedGenerationMethods")?.toString() ?: ""
+-                    if (methods.contains("generateContent")) out.add(m.optString("name").removePrefix("models/"))
+-                }
+-            }
+-            else -> {
+-                val a = o.optJSONArray("data") ?: JSONArray()
+-                for (i in 0 until a.length()) out.add(a.getJSONObject(i).optString("id"))
+-            }
+-        }
+-        return out.sorted()
+-    }
++    fun listModels(p: Provider): List<String> =
++        LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(p), null), p.kind == ApiKind.GEMINI)
+ 
+     fun ping(p: Provider): String {
+         val r = complete(p, p.fastModel, "You are a test.", "Reply with the single word: OK", maxTokens = 16)
+diff --git a/app/src/main/java/org/schabi/newpipe/lumen/LlmParse.kt b/app/src/main/java/org/schabi/newpipe/lumen/LlmParse.kt
+new file mode 100644
+index 0000000..7010c45
+--- /dev/null
++++ b/app/src/main/java/org/schabi/newpipe/lumen/LlmParse.kt
+@@ -0,0 +1,100 @@
++/*
++ * SPDX-FileCopyrightText: 2026 Lumen contributors
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.schabi.newpipe.lumen
++
++import org.json.JSONArray
++import org.json.JSONObject
++
++/** Pure parsers of provider responses (covered by unit tests). */
++object LlmParse {
++    fun errorMessage(body: String): String = try {
++        val o = JSONObject(body)
++        o.optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }
++            ?: o.optString("message").takeIf { it.isNotBlank() }
++            ?: body
++    } catch (e: Exception) {
++        body
++    }
++
++    /** OpenAI-compatible /chat/completions (OpenAI, OpenRouter, DeepSeek, Groq, Ollama, LM Studio). */
++    fun openAi(body: String, model: String, promptTokensEstimate: Int): LlmReply {
++        val o = JSONObject(body)
++        o.optJSONObject("error")?.let { throw LlmException(it.optString("message", "error")) }
++        val choices = o.optJSONArray("choices")
++        if (choices == null || choices.length() == 0) throw LlmException("empty response")
++        val msg = choices.getJSONObject(0).optJSONObject("message")
++        val text = when (val c = msg?.opt("content")) {
++            is String -> c
++            is JSONArray -> (0 until c.length()).joinToString("") { c.optJSONObject(it)?.optString("text") ?: "" }
++            else -> ""
++        }
++        val u = o.optJSONObject("usage")
++        return LlmReply(
++            text,
++            u?.optInt("prompt_tokens") ?: promptTokensEstimate,
++            u?.optInt("completion_tokens") ?: Llm.estimateTokens(text),
++            o.optString("model", model).ifBlank { model }
++        )
++    }
++
++    /** Anthropic Messages API: concatenates text blocks. */
++    fun anthropic(body: String, model: String): LlmReply {
++        val o = JSONObject(body)
++        if (o.optString("type") == "error") throw LlmException(o.optJSONObject("error")?.optString("message") ?: "error")
++        val content = o.optJSONArray("content") ?: JSONArray()
++        val sb = StringBuilder()
++        for (i in 0 until content.length()) {
++            val b = content.getJSONObject(i)
++            if (b.optString("type") == "text") sb.append(b.optString("text"))
++        }
++        val u = o.optJSONObject("usage")
++        return LlmReply(sb.toString(), u?.optInt("input_tokens") ?: 0, u?.optInt("output_tokens") ?: 0, o.optString("model", model).ifBlank { model })
++    }
++
++    /** Gemini generateContent: first candidate's text parts; blocked or empty → exception. */
++    fun gemini(body: String, model: String): LlmReply {
++        val o = JSONObject(body)
++        val cands = o.optJSONArray("candidates")
++        val sb = StringBuilder()
++        if (cands != null && cands.length() > 0) {
++            val ps = cands.getJSONObject(0).optJSONObject("content")?.optJSONArray("parts")
++            if (ps != null) {
++                for (i in 0 until ps.length()) {
++                    val part = ps.getJSONObject(i)
++                    if (!part.optBoolean("thought")) sb.append(part.optString("text"))
++                }
++            }
++        }
++        if (sb.isEmpty()) {
++            val reason = o.optJSONObject("promptFeedback")?.optString("blockReason")?.takeIf { it.isNotBlank() }
++                ?: cands?.optJSONObject(0)?.optString("finishReason")?.takeIf { it.isNotBlank() }
++                ?: "empty response"
++            throw LlmException("Gemini: $reason")
++        }
++        val u = o.optJSONObject("usageMetadata")
++        return LlmReply(sb.toString(), u?.optInt("promptTokenCount") ?: 0, u?.optInt("candidatesTokenCount") ?: 0, model)
++    }
++
++    /** Model list: Gemini {models:[{name, supportedGenerationMethods}]}, others {data:[{id}]}. */
++    fun models(body: String, gemini: Boolean): List<String> {
++        val o = JSONObject(body)
++        val out = mutableListOf<String>()
++        if (gemini) {
++            val a = o.optJSONArray("models") ?: JSONArray()
++            for (i in 0 until a.length()) {
++                val m = a.getJSONObject(i)
++                val methods = m.optJSONArray("supportedGenerationMethods")?.toString() ?: ""
++                if (methods.contains("generateContent")) out.add(m.optString("name").removePrefix("models/"))
++            }
++        } else {
++            val a = o.optJSONArray("data") ?: o.optJSONArray("models") ?: JSONArray()
++            for (i in 0 until a.length()) {
++                val m = a.optJSONObject(i) ?: continue
++                out.add(m.optString("id").ifBlank { m.optString("name") })
++            }
++        }
++        return out.filter { it.isNotBlank() }.distinct().sorted()
++    }
++}
+diff --git a/app/src/main/java/org/schabi/newpipe/lumen/Seo.kt b/app/src/main/java/org/schabi/newpipe/lumen/Seo.kt
+index 706616d..66b1756 100644
+--- a/app/src/main/java/org/schabi/newpipe/lumen/Seo.kt
++++ b/app/src/main/java/org/schabi/newpipe/lumen/Seo.kt
+@@ -592,23 +592,61 @@ object Seo {
+     // ------------------------------------------------------------------ manual import (TXT / CSV / JSON)
+     /** Imports a transcript or comments file as a local source. Returns the created source. */
+     fun importFile(pid: String, name: String, text: String): Video {
++        val parsed = ImportParser.parse(name, text, Settings.anonymizeAuthors)
+         val id = LOCAL_PREFIX + newId()
+-        val v = Video(id = id, url = "", title = name, channel = t("файл", "file"), query = "import", collected = true)
++        val v = Video(id = id, url = "", title = parsed.title, channel = t("файл", "file"), query = "import", collected = true)
++        if (parsed.transcript.isNotBlank()) {
++            Store.saveTranscript(pid, id, parsed.transcript)
++            v.hasTranscript = true
++            v.transcriptSource = "import"
++        }
++        if (parsed.comments.isNotEmpty()) {
++            Store.saveComments(pid, id, parsed.comments)
++            v.commentsCount = parsed.comments.size
++        }
++        Store.mergeVideos(pid, listOf(v))
++        L.i("import", "$name → transcript=${parsed.transcript.length}ch comments=${parsed.comments.size}")
++        return v
++    }
++}
++
++/** Pure parser of imported files (covered by unit tests). */
++object ImportParser {
++    data class Parsed(val title: String, val transcript: String, val comments: List<Comment>)
++
++    private fun pseudo(name: String, anonymize: Boolean) = if (anonymize && name.isNotBlank()) "u_" + sha1(name).take(8) else name
++
++    private fun commentOf(x: Any?, anonymize: Boolean): Comment? = when (x) {
++        is String -> if (x.isBlank()) null else Comment(author = "", text = x, likes = 0, dateMs = -1, dateText = "", replyCount = 0, isReply = false)
++        is JSONObject -> {
++            val text = x.optString("text").ifBlank { x.optString("comment").ifBlank { x.optString("body") } }
++            if (text.isBlank()) null else Comment(id = x.optString("id"), author = pseudo(x.optString("author"), anonymize), text = text,
++                likes = x.optInt("likes", x.optInt("like_count")), dateMs = -1, dateText = x.optString("date"), replyCount = 0, isReply = false)
++        }
++        else -> null
++    }
++
++    /**
++     * TXT/VTT → transcript; CSV/TSV → comments (column text/comment/body/…; author; likes);
++     * JSON → array of comments (strings or objects) or {title, transcript, comments}.
++     */
++    fun parse(name: String, text: String, anonymize: Boolean): Parsed {
+         val lower = name.lowercase()
++        var title = name
+         val comments = mutableListOf<Comment>()
+         var transcript = ""
+         when {
+             lower.endsWith(".json") -> {
+-                val trimmed = text.trim()
++                val trimmed = text.trim().removePrefix("\uFEFF")
+                 if (trimmed.startsWith("[")) {
+                     val a = JSONArray(trimmed)
+-                    for (i in 0 until a.length()) comments.add(commentOf(a.opt(i)) ?: continue)
++                    for (i in 0 until a.length()) commentOf(a.opt(i), anonymize)?.let { comments.add(it) }
+                 } else {
+                     val o = JSONObject(trimmed)
+                     transcript = o.optString("transcript")
+-                    o.optString("title").takeIf { it.isNotBlank() }?.let { v.title = it }
++                    o.optString("title").takeIf { it.isNotBlank() }?.let { title = it }
+                     val a = o.optJSONArray("comments") ?: JSONArray()
+-                    for (i in 0 until a.length()) comments.add(commentOf(a.opt(i)) ?: continue)
++                    for (i in 0 until a.length()) commentOf(a.opt(i), anonymize)?.let { comments.add(it) }
+                 }
+             }
+             lower.endsWith(".csv") || lower.endsWith(".tsv") -> {
+@@ -621,38 +659,18 @@ object Seo {
+                     val body = if (ti >= 0) rows.drop(1) else rows
+                     val col = maxOf(0, ti)
+                     for (r in body) {
+-                        val t = r.getOrNull(col)?.trim().orEmpty()
+-                        if (t.isEmpty()) continue
++                        val tx = r.getOrNull(col)?.trim().orEmpty()
++                        if (tx.isEmpty()) continue
+                         val author = if (ai >= 0) r.getOrNull(ai).orEmpty() else ""
+-                        comments.add(Comment(author = anonymize(author), text = t, likes = if (li >= 0) r.getOrNull(li)?.trim()?.toIntOrNull() ?: 0 else 0,
++                        comments.add(Comment(author = pseudo(author, anonymize), text = tx,
++                            likes = if (li >= 0) r.getOrNull(li)?.trim()?.toIntOrNull() ?: 0 else 0,
+                             dateMs = -1, dateText = "", replyCount = 0, isReply = false))
+                     }
+                 }
+             }
+             else -> transcript = text
+         }
+-        if (transcript.isNotBlank()) {
+-            Store.saveTranscript(pid, id, if (transcript.trimStart().startsWith("WEBVTT")) Vtt.toText(transcript) else transcript)
+-            v.hasTranscript = true
+-            v.transcriptSource = "import"
+-        }
+-        if (comments.isNotEmpty()) {
+-            Store.saveComments(pid, id, comments)
+-            v.commentsCount = comments.size
+-        }
+-        Store.mergeVideos(pid, listOf(v))
+-        return v
+-    }
+-
+-    private fun anonymize(name: String) = if (Settings.anonymizeAuthors && name.isNotBlank()) "u_" + sha1(name).take(8) else name
+-
+-    private fun commentOf(x: Any?): Comment? = when (x) {
+-        is String -> if (x.isBlank()) null else Comment(author = "", text = x, likes = 0, dateMs = -1, dateText = "", replyCount = 0, isReply = false)
+-        is JSONObject -> {
+-            val text = x.optString("text").ifBlank { x.optString("comment").ifBlank { x.optString("body") } }
+-            if (text.isBlank()) null else Comment(id = x.optString("id"), author = anonymize(x.optString("author")), text = text,
+-                likes = x.optInt("likes", x.optInt("like_count")), dateMs = -1, dateText = x.optString("date"), replyCount = 0, isReply = false)
+-        }
+-        else -> null
++        if (transcript.trimStart().startsWith("WEBVTT")) transcript = Vtt.toText(transcript)
++        return Parsed(title, transcript.trim(), comments)
+     }
+ }
+diff --git a/app/src/test/java/org/schabi/newpipe/lumen/LumenCoreTest.kt b/app/src/test/java/org/schabi/newpipe/lumen/LumenCoreTest.kt
+new file mode 100644
+index 0000000..98c949d
+--- /dev/null
++++ b/app/src/test/java/org/schabi/newpipe/lumen/LumenCoreTest.kt
+@@ -0,0 +1,357 @@
++/*
++ * SPDX-FileCopyrightText: 2026 Lumen contributors
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++package org.schabi.newpipe.lumen
++
++import org.json.JSONObject
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertTrue
++import org.junit.Assert.fail
++import org.junit.Test
++
++private const val DAY = 86_400_000L
++
++private fun video(id: String, channel: String = "A", views: Long = 100, uploadMs: Long = -1, likes: Long = -1, comments: Int = 0) =
++    Video(id = id, url = "https://www.youtube.com/watch?v=$id", title = "title $id", channel = channel, views = views,
++        uploadMs = uploadMs, likes = likes, commentsCount = comments)
++
++class ModelsTest {
++    @Test
++    fun projectRoundTripKeepsAllSettings() {
++        val p = Project(name = "EV", phrase = "электромобили", domain = "авто", queries = mutableListOf("ev", "tesla"))
++        p.filters.period = "custom"
++        p.filters.from = "2026-01-01"
++        p.filters.excludeShorts = true
++        p.collect.commentsLimit = 500
++        p.monitor.enabled = true
++        p.monitor.recDrip = 3
++        p.recs.depth = 12
++        p.recs.relevance = "ai"
++        p.recs.blocked = "spam channel"
++        p.seo.country = "KG"
++        p.seo.existingPages = "https://x/a | A"
++        p.runs.add(RunRecord(1L, "search", 10, 5, "n"))
++        val back = Project.from(JSONObject(p.toJson().toString()))
++        assertEquals(p, back)
++    }
++
++    @Test
++    fun missingFieldsGetDefaults() {
++        val p = Project.from(JSONObject("""{"id":"x","phrase":"q"}"""))
++        assertEquals(10, p.recs.depth)
++        assertEquals("keywords", p.recs.relevance)
++        assertEquals(0, p.monitor.recDrip)
++        assertEquals(listOf("q"), p.effectiveQueries())
++    }
++
++    @Test
++    fun videoAndCommentRoundTrip() {
++        val v = video("abcdefghijk", likes = 7, comments = 3).apply {
++            labels = mutableListOf("важное")
++            tags = mutableListOf("t1")
++            hasTranscript = true
++            transcriptSource = "auto"
++        }
++        assertEquals(v, Video.from(JSONObject(v.toJson().toString())))
++        val c = Comment("cid", "u_1234", "текст", 5, 10L, "1 day ago", 2, true)
++        assertEquals(c, Comment.from(JSONObject(c.toJson().toString())))
++        // old comment files without id still load
++        assertEquals("", Comment.from(JSONObject("""{"author":"a","text":"t"}""")).id)
++    }
++
++    @Test
++    fun recNodeRoundTripAndVideoConversion() {
++        val n = RecNode("abcdefghijk", title = "T", channel = "C", depth = 3, hits = 4, weight = 1.5, pr = 0.01, relevant = 1, seed = true)
++        assertEquals(n, RecNode.from(JSONObject(n.toJson().toString())))
++        val v = n.toVideo("rec")
++        assertEquals("rec", v.query)
++        assertEquals(n.url, v.url)
++    }
++}
++
++class RecGraphTest {
++    private fun graph(): RecGraph {
++        val g = RecGraph()
++        listOf("s", "a", "b", "c").forEach { g.nodes[it] = RecNode(it, depth = if (it == "s") 0 else 1, seed = it == "s") }
++        g.addEdge("s", "a", 0)
++        g.addEdge("s", "b", 1)
++        g.addEdge("a", "b", 0)
++        g.addEdge("c", "b", 2)
++        return g
++    }
++
++    @Test
++    fun edgesAreDedupedAndCountHits() {
++        val g = graph()
++        assertFalse(g.addEdge("s", "a", 3))
++        assertFalse(g.addEdge("a", "a", 0))
++        assertEquals(4, g.edges.size)
++        assertEquals(3, g.nodes["b"]!!.hits)
++        assertEquals(1.0 / 2 + 1.0 + 1.0 / 3, g.nodes["b"]!!.weight, 1e-9)
++        assertEquals(listOf("s", "a", "c"), g.parents("b").map { it.id })
++        assertEquals(listOf("a", "b"), g.children("s").map { it.id })
++    }
++
++    @Test
++    fun rankingAndPageRank() {
++        val g = graph()
++        g.computePageRank()
++        assertEquals(1.0, g.nodes.values.sumOf { it.pr }, 1e-6)
++        assertEquals("b", RecEngine.ranked(g, "hits").first().id)
++        assertEquals("b", RecEngine.ranked(g, "pr").first().id)
++        assertTrue(RecEngine.ranked(g, "hits").none { it.seed })
++    }
++
++    @Test
++    fun driftByDepth() {
++        val g = graph()
++        g.nodes["a"]!!.relevant = 1
++        g.nodes["b"]!!.relevant = 0
++        g.nodes["s"]!!.relevant = 1
++        val d = RecEngine.drift(g)
++        assertEquals(listOf(0, 1), d.map { it.depth })
++        assertEquals(3, d[1].nodes)
++        assertEquals(1, d[1].onTopic)
++    }
++
++    @Test
++    fun jsonShape() {
++        val o = graph().toJson()
++        assertEquals(4, o.getJSONArray("nodes").length())
++        assertEquals(4, o.getJSONArray("edges").length())
++        assertEquals("s", o.getJSONArray("edges").getJSONArray(0).getString(0))
++    }
++
++    @Test
++    fun requestEstimate() {
++        val c = RecConfig(budget = 150, depth = 10)
++        assertEquals(150, RecEngine.estimateRequests(c, 5))
++        assertEquals(50, RecEngine.estimateRequests(c.copy(mode = "chain"), 5))
++        assertEquals(5, RecEngine.estimateRequests(c.copy(mode = "mix"), 5))
++    }
++}
++
++class AnalyticsTest {
++    private val now = System.currentTimeMillis()
++
++    @Test
++    fun statsAndTopChannels() {
++        val vids = listOf(video("1", "A", 100, now - DAY), video("2", "A", 300, now - 2 * DAY), video("3", "B", 1000, now - DAY, comments = 4), video("4", "C", -1))
++        val s = Analytics.stats(vids)
++        assertEquals(4, s.total)
++        assertEquals(1400, s.totalViews)
++        assertEquals(466, s.avgViews)
++        assertEquals(4, s.comments)
++        assertEquals("A", Analytics.topChannels(vids, "videos").first().name)
++        assertEquals("B", Analytics.topChannels(vids, "views").first().name)
++    }
++
++    @Test
++    fun trendGroupsByDay() {
++        val base = now - 10 * DAY
++        val vids = listOf(video("1", uploadMs = base), video("2", uploadMs = base + 1000), video("3", uploadMs = base + 3 * DAY))
++        val t = Analytics.trend(vids, "day")
++        assertEquals(2, t.size)
++        assertEquals(2, t[0].count)
++        assertEquals(200, t[0].views)
++        assertTrue(Analytics.trend(emptyList()).isEmpty())
++    }
++
++    @Test
++    fun velocityAndEngagement() {
++        val fresh = video("1", views = 10_000, uploadMs = now - DAY)
++        val old = video("2", views = 50_000, uploadMs = now - 100 * DAY)
++        assertEquals("1", Analytics.topVideos(listOf(old, fresh), "velocity").first().id)
++        assertEquals("2", Analytics.topVideos(listOf(old, fresh), "views").first().id)
++        assertEquals(-1, Analytics.velocity(video("3")))
++        assertEquals("—", Analytics.engagementPct(video("4", likes = -1)))
++        assertEquals("2.00%", Analytics.engagementPct(video("5", views = 1000, likes = 15, comments = 5)))
++    }
++
++    @Test
++    fun youtubeClientSideSort() {
++        val list = listOf(video("1", views = 5, uploadMs = 3), video("2", views = 50, uploadMs = 1), video("3", views = 1, uploadMs = 9))
++        assertEquals(listOf("2", "1", "3"), YouTube.sort(list, "views").map { it.id })
++        assertEquals(listOf("3", "1", "2"), YouTube.sort(list, "date").map { it.id })
++        assertEquals(listOf("1", "2", "3"), YouTube.sort(list, "relevance").map { it.id })
++    }
++}
++
++class LlmParseTest {
++    @Test
++    fun openAiCompatible() {
++        val r = LlmParse.openAi("""{"model":"gpt-x","choices":[{"message":{"content":"Привет"}}],"usage":{"prompt_tokens":12,"completion_tokens":3}}""", "m", 99)
++        assertEquals("Привет", r.text)
++        assertEquals(12, r.inTokens)
++        assertEquals(3, r.outTokens)
++        assertEquals("gpt-x", r.model)
++        // no usage → estimates; array content (some gateways)
++        val r2 = LlmParse.openAi("""{"choices":[{"message":{"content":[{"type":"text","text":"a"},{"type":"text","text":"b"}]}}]}""", "m", 42)
++        assertEquals("ab", r2.text)
++        assertEquals(42, r2.inTokens)
++        assertEquals("m", r2.model)
++    }
++
++    @Test
++    fun openAiErrorsThrow() {
++        try {
++            LlmParse.openAi("""{"error":{"message":"quota"}}""", "m", 1)
++            fail()
++        } catch (e: LlmException) {
++            assertEquals("quota", e.message)
++        }
++        try {
++            LlmParse.openAi("""{"choices":[]}""", "m", 1)
++            fail()
++        } catch (e: LlmException) {
++            assertEquals("empty response", e.message)
++        }
++    }
++
++    @Test
++    fun anthropicConcatenatesTextBlocks() {
++        val r = LlmParse.anthropic("""{"model":"claude","content":[{"type":"thinking","thinking":"x"},{"type":"text","text":"A"},{"type":"text","text":"B"}],"usage":{"input_tokens":5,"output_tokens":2}}""", "m")
++        assertEquals("AB", r.text)
++        assertEquals(5, r.inTokens)
++        assertEquals("claude", r.model)
++    }
++
++    @Test
++    fun geminiSkipsThoughtsAndReportsBlocks() {
++        val r = LlmParse.gemini("""{"candidates":[{"content":{"parts":[{"text":"t","thought":true},{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":1}}""", "g")
++        assertEquals("ok", r.text)
++        assertEquals(7, r.inTokens)
++        try {
++            LlmParse.gemini("""{"promptFeedback":{"blockReason":"SAFETY"}}""", "g")
++            fail()
++        } catch (e: LlmException) {
++            assertEquals("Gemini: SAFETY", e.message)
++        }
++        try {
++            LlmParse.gemini("""{"candidates":[{"finishReason":"MAX_TOKENS","content":{}}]}""", "g")
++            fail()
++        } catch (e: LlmException) {
++            assertEquals("Gemini: MAX_TOKENS", e.message)
++        }
++    }
++
++    @Test
++    fun modelLists() {
++        assertEquals(listOf("gemini-a"), LlmParse.models("""{"models":[{"name":"models/gemini-a","supportedGenerationMethods":["generateContent"]},{"name":"models/emb","supportedGenerationMethods":["embedContent"]}]}""", true))
++        assertEquals(listOf("a", "b"), LlmParse.models("""{"data":[{"id":"b"},{"id":"a"},{"id":"a"}]}""", false))
++    }
++
++    @Test
++    fun errorMessages() {
++        assertEquals("bad key", LlmParse.errorMessage("""{"error":{"message":"bad key"}}"""))
++        assertEquals("nope", LlmParse.errorMessage("""{"message":"nope"}"""))
++        assertEquals("<html>", LlmParse.errorMessage("<html>"))
++    }
++}
++
++class ImportParserTest {
++    @Test
++    fun csvWithHeaderAndAnonymisation() {
++        val p = ImportParser.parse("c.csv", "author,text,likes\nИван,\"Не работает, помогите\",5\n,Без автора,\n", true)
++        assertEquals(2, p.comments.size)
++        assertEquals("Не работает, помогите", p.comments[0].text)
++        assertEquals(5, p.comments[0].likes)
++        assertTrue(p.comments[0].author.startsWith("u_"))
++        assertEquals("", p.comments[1].author)
++        assertEquals("", p.transcript)
++    }
++
++    @Test
++    fun csvWithoutHeaderUsesFirstColumn() {
++        val p = ImportParser.parse("c.csv", "первый\nвторой\n", false)
++        assertEquals(listOf("первый", "второй"), p.comments.map { it.text })
++    }
++
++    @Test
++    fun jsonFormats() {
++        val a = ImportParser.parse("a.json", """["один", {"text":"два","author":"x","likes":3}, {"nope":1}]""", false)
++        assertEquals(listOf("один", "два"), a.comments.map { it.text })
++        assertEquals("x", a.comments[1].author)
++        val o = ImportParser.parse("o.json", """{"title":"Видео","transcript":"[00:01] привет","comments":["к1"]}""", false)
++        assertEquals("Видео", o.title)
++        assertEquals("[00:01] привет", o.transcript)
++        assertEquals(1, o.comments.size)
++    }
++
++    @Test
++    fun textAndVtt() {
++        assertEquals("просто текст", ImportParser.parse("t.txt", "  просто текст \n", false).transcript)
++        val v = ImportParser.parse("s.vtt", "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nстрока\n", false)
++        assertEquals("[00:01] строка", v.transcript)
++    }
++}
++
++class SeoPureTest {
++    @Test
++    fun sourceUrls() {
++        val v = video("abcdefghijk")
++        assertEquals("https://www.youtube.com/watch?v=abcdefghijk&lc=UgxABC", Seo.sourceUrl(v, "UgxABC", "01:00"))
++        assertEquals("https://www.youtube.com/watch?v=abcdefghijk&t=65s", Seo.sourceUrl(v, null, "01:05"))
++        assertEquals(v.url, Seo.sourceUrl(v, null, null))
++        assertEquals("", Seo.sourceUrl(Video(id = LOCAL_PREFIX + "x", url = ""), null, "01:05"))
++        assertEquals("", Seo.sourceUrl(null, null, null))
++    }
++
++    @Test
++    fun checklistMatchesDocument() {
++        assertEquals(6, SeoChecklist.sections.size)
++        assertEquals(32, SeoChecklist.total)
++        assertEquals(listOf("", "pass", "revise", "fail", "not_applicable"), SeoChecklist.states)
++    }
++
++    @Test
++    fun promptsHaveTheirInputs() {
++        val need = mapOf(
++            "p1_insights" to listOf("{project_context}", "{transcript}", "{comments}"),
++            "p2_clusters" to listOf("{insights}"),
++            "p3_qualify" to listOf("{topic}", "{evidence}", "{existing_pages}", "{keyword_data}", "{serp_data}"),
++            "p4_brief" to listOf("{topic}", "{research}", "{serp_notes}", "{site_context}"),
++            "p5_article" to listOf("{brief}", "{sources}", "{product_context}", "---META---"),
++            "p6_quality" to listOf("{article}", "{brief}", "{sources}", "{existing_pages}"),
++            "p7_ideas" to listOf("{clusters}", "{product}")
++        )
++        assertEquals(need.keys, SEO_PROMPTS.keys)
++        need.forEach { (k, list) -> list.forEach { ph -> assertTrue("$k misses $ph", SEO_PROMPTS[k]!!.contains(ph)) } }
++        SEO_PROMPTS.values.forEach { assertTrue(it.contains("{lang}")) }
++    }
++
++    @Test
++    fun insightTypesFollowSchema() {
++        assertEquals(setOf("question", "pain", "jtbd", "voc", "search_intent", "objection", "unmet_need", "content_gap", "topic", "evidence", "hypothesis"), Seo.INSIGHT_TYPES)
++    }
++}
++
++class FmtTest {
++    @Test
++    fun numbersAndDurations() {
++        assertEquals("—", Fmt.num(-1))
++        assertEquals("999", Fmt.num(999))
++        assertEquals("1.5K", Fmt.num(1500))
++        assertEquals("25K", Fmt.num(25_000))
++        assertEquals("3.2M", Fmt.num(3_200_000))
++        assertEquals("1:05", Fmt.duration(65))
++        assertEquals("1:01:01", Fmt.duration(3661))
++        assertEquals("—", Fmt.duration(0))
++    }
++
++    @Test
++    fun isoDays() {
++        val ms = Fmt.parseIsoDay("2026-10-26")
++        assertTrue(ms > 0)
++        assertEquals("2026-10-26", Fmt.isoDay(ms))
++        assertEquals(-1L, Fmt.parseIsoDay("not a date"))
++    }
++
++    @Test
++    fun translationFallsBackWithoutContext() {
++        assertFalse(LumenEnv.ready)
++        assertEquals("ру", t("ру", "en"))
++    }
++}
+diff --git a/gradle/libs.versions.toml b/gradle/libs.versions.toml
+index bd4d44e..0d04cb7 100644
+--- a/gradle/libs.versions.toml
++++ b/gradle/libs.versions.toml
+@@ -28,6 +28,7 @@ exoplayer = "2.19.1"
+ fragment = "1.9.1"
+ groupie = "2.10.1"
+ jsoup = "1.23.2"
++json = "20250517" # real org.json for JVM unit tests (android.jar only has stubs)
+ junit = "4.13.2"
+ junit-ext = "1.3.0"
+ kermit = "2.2.0"
+@@ -145,6 +146,7 @@ jetbrains-lifecycle-navigation3 = { module = "org.jetbrains.androidx.lifecycle:l
+ jetbrains-lifecycle-viewmodel = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+ jetbrains-navigation3-ui = { module = "org.jetbrains.androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+ jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
++json = { module = "org.json:json", version.ref = "json" }
+ junit = { module = "junit:junit", version.ref = "junit" }
+ koin-annotations = { module = "io.insert-koin:koin-annotations", version.ref = "koin" }
+ koin-compose-navigation3 = { module = "io.insert-koin:koin-compose-navigation3", version.ref = "koin" }
 -- 
 2.43.0
 

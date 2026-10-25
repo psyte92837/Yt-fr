@@ -60,6 +60,34 @@ jobs:
         working-directory: NewPipe
         run: ./gradlew assembleDebug testDebugUnitTest -DskipChecks --stacktrace
 
+      - name: Test summary
+        if: always()
+        working-directory: NewPipe
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          files = glob.glob("app/build/test-results/testDebugUnitTest/*.xml")
+          total = fail = skip = 0
+          lumen = []
+          for f in files:
+              r = ET.parse(f).getroot()
+              t, fl, sk = int(r.get("tests", 0)), int(r.get("failures", 0)) + int(r.get("errors", 0)), int(r.get("skipped", 0))
+              total += t; fail += fl; skip += sk
+              if ".lumen." in r.get("name", ""):
+                  lumen.append((r.get("name").split(".")[-1], t, fl))
+          print(f"### Unit tests: {total} run, {fail} failed, {skip} skipped\n")
+          print("| Lumen suite | tests | failed |\n|---|---|---|")
+          for n, t, fl in sorted(lumen):
+              print(f"| {n} | {t} | {fl} |")
+          PY
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: NewPipe/app/build/reports/tests/
+
       - name: Build release APK
         if: inputs.release
         working-directory: NewPipe

@@ -45,6 +45,8 @@ jobs:
             || graphify extract . >> graphify-out/BUILD_LOG.txt 2>&1 \
             || graphify . --code-only --no-viz >> graphify-out/BUILD_LOG.txt 2>&1
           echo "exit=$?" >> graphify-out/BUILD_LOG.txt
+          graphify cluster-only . --no-viz --no-label >> graphify-out/BUILD_LOG.txt 2>&1
+          echo "cluster exit=$?" >> graphify-out/BUILD_LOG.txt
           ls -la graphify-out >> graphify-out/BUILD_LOG.txt
           test -s graphify-out/graph.json
 
@@ -52,7 +54,7 @@ jobs:
         run: |
           rm -rf graphify-out
           cp -r "$RUNNER_TEMP/src/graphify-out" graphify-out
-          rm -rf graphify-out/graph.html graphify-out/cache
+          rm -rf graphify-out/graph.html graphify-out/cache graphify-out/.graphify_analysis.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add graphify-out

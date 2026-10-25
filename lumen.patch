@@ -1,7 +1,7 @@
 From ed01a918efe80ab007634ee840e121bf9bc81d62 Mon Sep 17 00:00:00 2001
 From: Lumen <yabalak.business@gmail.com>
 Date: Sun, 25 Oct 2026 18:09:27 +0600
-Subject: [PATCH 1/2] Lumen: YouTube topic analysis fork of NewPipe
+Subject: [PATCH 1/3] Lumen: YouTube topic analysis fork of NewPipe
 
 - New launcher module org.schabi.newpipe.lumen: projects, AI domain refinement,
   filtered search, channel/playlist import, collection of metadata, subtitles and
@@ -5815,7 +5815,7 @@ index 0000000..0c18a61
 From 579f50bfd94e2d884793dfb3fe18506b5ecabac1 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Mon, 26 Oct 2026 00:12:30 +0600
-Subject: [PATCH 2/2] Lumen: recommendation graph, audience research and SEO
+Subject: [PATCH 2/3] Lumen: recommendation graph, audience research and SEO
  pipeline
 
 - Recommendations tab: snowball beam search (default depth 10), autoplay
@@ -10497,6 +10497,36 @@ index 0000000..73edaba
 +Ручная загрузка транскрипта и комментариев, анализ через подключаемую
 +LLM, сохранение результата в JSON и генерация черновика Markdown.
 +Автоматический сбор и CMS-интеграции добавляются позже.
+-- 
+2.43.0
+
+
+From aeaee54f9fda85e41932d66c0d39c96928294559 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 26 Oct 2026 01:09:46 +0600
+Subject: [PATCH 3/3] Fix crash when switching graph colouring: detach reused
+ views before re-render
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01LhBPWxLs885Adn1n6RLzRC
+---
+ app/src/main/java/org/schabi/newpipe/lumen/Ui.kt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/app/src/main/java/org/schabi/newpipe/lumen/Ui.kt b/app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
+index 188d562..89647fe 100644
+--- a/app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
++++ b/app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
+@@ -482,6 +482,9 @@ abstract class LumenBase : Activity() {
+         fab: Pair<String, () -> Unit>? = null,
+         scroll: Boolean = true
+     ) {
++        // views may be reused between re-renders (e.g. the graph view): detach them from the old layout first
++        (content.parent as? ViewGroup)?.removeView(content)
++        header?.let { h -> (h.parent as? ViewGroup)?.removeView(h) }
+         val column = LinearLayout(this).apply {
+             orientation = LinearLayout.VERTICAL
+             setBackgroundColor(Palette.SURFACE)
 -- 
 2.43.0
 

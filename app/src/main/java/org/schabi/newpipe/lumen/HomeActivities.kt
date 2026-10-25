@@ -304,6 +304,15 @@ class NewProjectActivity : LumenBase() {
     private fun render() {
         val c = Col(this)
         c.title(t("Что исследуем?", "What to research?"))
+        c.card {
+            add(text(ctx, t("Есть ссылка на видео, канал или плейлист? Вставьте — анализ запустится сразу (или поделитесь ей из приложения YouTube → Lumen).",
+                "Have a video, channel or playlist link? Paste it — the analysis starts at once (or share it from the YouTube app → Lumen)."), 13f, color = Palette.MUTED), 0)
+            val link = edt(ctx, "https://youtube.com/…")
+            add(link, 8)
+            add(btn(ctx, t("Анализировать ссылку", "Analyse link"), primary = true) {
+                if (QuickAnalysis.start(this@NewProjectActivity, link.text.toString())) finish()
+            }, 8)
+        }
         val input = c.edit(t("Слово или фраза, напр. «электромобили»", "Word or phrase, e.g. \"electric cars\""), phrase)
         input.addTextChangedListener(SimpleWatcher { phrase = it })
         val ai = Provider.active()

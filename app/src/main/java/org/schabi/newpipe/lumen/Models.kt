@@ -50,11 +50,12 @@ data class CollectConfig(
     var commentsLimit: Int = 200,
     var commentsSort: String = "top", // top | new
     var replies: Boolean = false,
-    var aiTranscribe: Boolean = false
+    var aiTranscribe: Boolean = false,
+    var channelStats: Boolean = true
 ) {
     fun toJson() = JSONObject().put("meta", meta).put("subtitles", subtitles).put("subLang", subLang)
         .put("comments", comments).put("commentsLimit", commentsLimit).put("commentsSort", commentsSort)
-        .put("replies", replies).put("aiTranscribe", aiTranscribe)
+        .put("replies", replies).put("aiTranscribe", aiTranscribe).put("channelStats", channelStats)
 
     companion object {
         fun from(o: JSONObject?) = CollectConfig().apply {
@@ -67,6 +68,7 @@ data class CollectConfig(
             commentsSort = o.optString("commentsSort", "top")
             replies = o.optBoolean("replies", false)
             aiTranscribe = o.optBoolean("aiTranscribe", false)
+            channelStats = o.optBoolean("channelStats", true)
         }
     }
 }
@@ -191,6 +193,8 @@ data class Project(
     var monitor: MonitorConfig = MonitorConfig(),
     var recs: RecConfig = RecConfig(),
     var seo: SeoContext = SeoContext(),
+    var source: String = "", // shared link for instant analysis
+    var sourceType: String = "", // video | channel | playlist
     var createdAt: Long = System.currentTimeMillis(),
     var lastRunAt: Long = 0,
     var archived: Boolean = false,
@@ -202,7 +206,7 @@ data class Project(
 
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("phrase", phrase)
         .put("domain", domain).put("queries", queries.toJsonArray()).put("filters", filters.toJson())
-        .put("collect", collect.toJson()).put("monitor", monitor.toJson()).put("recs", recs.toJson()).put("seo", seo.toJson()).put("createdAt", createdAt)
+        .put("collect", collect.toJson()).put("monitor", monitor.toJson()).put("recs", recs.toJson()).put("seo", seo.toJson()).put("source", source).put("sourceType", sourceType).put("createdAt", createdAt)
         .put("lastRunAt", lastRunAt).put("archived", archived).put("newCount", newCount)
         .put("videoCount", videoCount)
         .put("runs", JSONArray().also { a -> runs.takeLast(100).forEach { a.put(it.toJson()) } })
@@ -219,6 +223,8 @@ data class Project(
             monitor = MonitorConfig.from(o.optJSONObject("monitor")),
             recs = RecConfig.from(o.optJSONObject("recs")),
             seo = SeoContext.from(o.optJSONObject("seo")),
+            source = o.optString("source"),
+            sourceType = o.optString("sourceType"),
             createdAt = o.optLong("createdAt"),
             lastRunAt = o.optLong("lastRunAt"),
             archived = o.optBoolean("archived"),

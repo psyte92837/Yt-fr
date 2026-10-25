@@ -106,11 +106,12 @@ class RecGraph {
     }
 
     companion object {
-        private const val FILE = "recs.json"
+        const val FILE = "recs.json"
+        const val CHANNELS_FILE = "chgraph.json"
 
-        fun load(pid: String): RecGraph {
+        fun load(pid: String, file: String = FILE): RecGraph {
             val g = RecGraph()
-            val text = Store.readFile(pid, FILE) ?: return g
+            val text = Store.readFile(pid, file) ?: return g
             try {
                 val o = JSONObject(text)
                 val na = o.optJSONArray("nodes") ?: JSONArray()
@@ -134,9 +135,9 @@ class RecGraph {
             return g
         }
 
-        fun save(pid: String, g: RecGraph) = Store.writeFile(pid, FILE, g.toJson().toString())
+        fun save(pid: String, g: RecGraph, file: String = FILE) = Store.writeFile(pid, file, g.toJson().toString())
 
-        fun clear(pid: String) = Store.writeFile(pid, FILE, RecGraph().toJson().toString())
+        fun clear(pid: String, file: String = FILE) = Store.writeFile(pid, file, RecGraph().toJson().toString())
     }
 }
 

@@ -215,6 +215,8 @@ class GraphView(ctx: Context) : View(ctx) {
 class GraphActivity : LumenBase() {
     private lateinit var pid: String
     private lateinit var graph: RecGraph
+    private var file = RecGraph.FILE
+    private val channels get() = file == RecGraph.CHANNELS_FILE
     private lateinit var view: GraphView
     private var colorBy = "depth"
     private var onlyOnTopic = false
@@ -223,7 +225,8 @@ class GraphActivity : LumenBase() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pid = intent.getStringExtra("pid") ?: return finish()
-        graph = RecGraph.load(pid)
+        file = intent.getStringExtra("file") ?: RecGraph.FILE
+        graph = RecGraph.load(pid, file)
         view = GraphView(this)
         view.onTap = { showNode(it) }
         build()
@@ -248,7 +251,7 @@ class GraphActivity : LumenBase() {
         header.addView(legend)
         val pr = Store.project(pid)
         page(
-            pr?.name ?: t("Граф", "Graph"), view, header = header, scroll = false,
+            (if (channels) t("Каналы · ", "Channels · ") else "") + (pr?.name ?: t("Граф", "Graph")), view, header = header, scroll = false,
             actions = listOf("⤢" to {
                 view.selected = -1
                 view.fit()
@@ -280,6 +283,10 @@ class GraphActivity : LumenBase() {
     }
 
     private fun showNode(n: RecNode) {
+        if (channels) {
+            ChannelActivity.open(this, pid, n.url)
+            return
+        }
         val parents = graph.parents(n.id)
         val children = graph.children(n.id)
         val msg = buildString {

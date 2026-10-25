@@ -21,10 +21,11 @@ class SettingsActivity : LumenBase() {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("ai", false)) section = 1
         if (intent.getBooleanExtra("logs", false)) section = 4
+        if (intent.getBooleanExtra("quick", false)) section = 6
         render()
     }
 
-    private val sections get() = listOf(t("Общие", "General"), "AI", t("Промпты", "Prompts"), t("Резервная копия", "Backup"), t("Логи", "Logs"), t("О приложении", "About"))
+    private val sections get() = listOf(t("Общие", "General"), "AI", t("Промпты", "Prompts"), t("Резервная копия", "Backup"), t("Логи", "Logs"), t("О приложении", "About"), t("Быстрый анализ", "Instant analysis"))
 
     private fun render() {
         val c = Col(this)
@@ -34,7 +35,8 @@ class SettingsActivity : LumenBase() {
             2 -> prompts(c)
             3 -> backup(c)
             4 -> logs(c)
-            else -> about(c)
+            5 -> about(c)
+            else -> quick(c)
         }
         page(t("Настройки", "Settings"), c.root, header = tabBar(this, sections, section) {
             section = it
@@ -286,6 +288,34 @@ class SettingsActivity : LumenBase() {
                 toast(t("Восстановлено", "Restored"))
             }
         }
+    }
+
+    private fun quick(c: Col) {
+        val q = QuickConfig.load()
+        val save = { QuickConfig.save(q) }
+        c.muted(t("Что считается сразу, когда вы делитесь видео, каналом или плейлистом из YouTube или вставляете ссылку.",
+            "What runs at once when you share a video, channel or playlist from YouTube or paste a link."))
+        c.h2(t("Видео", "Video"))
+        c.check(t("Метаданные, расшифровка, комментарии", "Metadata, transcript, comments"), q.collect) { q.collect = it; save() }
+        c.check(t("AI-сводка видео", "AI video summary"), q.aiSummary) { q.aiSummary = it; save() }
+        c.check(t("Статистика канала, ссылки, плейлисты", "Channel stats, links, playlists"), q.channelStats) { q.channelStats = it; save() }
+        c.spinner(t("Видео канала для статистики", "Channel videos for stats"), listOf(15, 30, 50, 100, 200).map { it to it.toString() }, q.channelRecent) { q.channelRecent = it; save() }
+        c.h2(t("Канал и плейлист", "Channel & playlist"))
+        c.spinner(t("Импортировать видео канала", "Import channel videos"), listOf(20, 50, 100, 200, 500).map { it to it.toString() }, q.channelImport) { q.channelImport = it; save() }
+        c.spinner(t("Видео плейлиста", "Playlist videos"), listOf(50, 100, 200, 500, 1000).map { it to it.toString() }, q.playlistLimit) { q.playlistLimit = it; save() }
+        c.spinner(t("Собрать комментарии и расшифровки у топ-N видео", "Collect comments & transcripts of top N videos"), listOf(0, 5, 10, 20, 50).map { it to it.toString() }, q.collectTop) { q.collectTop = it; save() }
+        c.check(t("AI-сводка по каналу", "AI channel summary"), q.aiChannelSummary) { q.aiChannelSummary = it; save() }
+        c.check(t("AI-сводка по проекту", "AI project summary"), q.aiProjectSummary) { q.aiProjectSummary = it; save() }
+        c.h2(t("Похожие и рекомендации", "Similar & recommended"))
+        c.check(t("Искать похожие видео", "Find similar videos"), q.recs) { q.recs = it; save() }
+        c.spinner(t("Сколько видео", "How many videos"), listOf(30, 50, 100, 200, 300, 500).map { it to it.toString() }, q.recVideos) { q.recVideos = it; save() }
+        c.spinner(t("Глубина", "Depth"), (1..20).map { it to it.toString() }, q.recDepth) { q.recDepth = it; save() }
+        c.h2(t("Граф каналов", "Channel graph"))
+        c.check(t("Искать связанные каналы", "Find related channels"), q.channelGraph) { q.channelGraph = it; save() }
+        c.spinner(t("Сколько каналов", "How many channels"), listOf(20, 50, 100, 200, 300).map { it to it.toString() }, q.graphChannels) { q.graphChannels = it; save() }
+        c.spinner(t("Глубина", "Depth"), (1..6).map { it to it.toString() }, q.graphDepth) { q.graphDepth = it; save() }
+        c.muted(t("100 видео + 100 каналов ≈ 400–600 запросов к YouTube (10–15 мин в фоне при паузе 0,8 с).",
+            "100 videos + 100 channels ≈ 400–600 YouTube requests (10–15 min in background at 0.8 s delay)."))
     }
 
     private var errorsOnly = false

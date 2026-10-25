@@ -46,7 +46,13 @@ class VideoActivity : LumenBase() {
         c.add(img, 0).layoutParams = LinearLayout.LayoutParams(-1, (resources.displayMetrics.widthPixels - dp(32)) * 9 / 16)
         Thumbs.load(img, v.thumb)
         c.add(text(this, v.title, Type.TITLE_L), 16)
-        c.muted(v.channel + (if (v.subscribers > 0) " · " + Fmt.num(v.subscribers) + t(" подписчиков", " subscribers") else ""))
+        val ch = if (v.channelUrl.isNotBlank()) ChannelStore.get(pid, v.channelUrl) else null
+        c.add(text(this, "👤 " + v.channel + (if (v.subscribers > 0) " · " + Fmt.num(v.subscribers) + t(" подписчиков", " subscribers") else "") +
+            (ch?.let { "\n" + ChannelStats.line(it) + t(" · ссылок ", " · links ") + it.links.size + t(" · плейлистов ", " · playlists ") + it.playlists.size } ?: ""),
+            13f, color = Palette.ACCENT).apply {
+            minHeight = dp(40)
+            setOnClickListener { if (v.channelUrl.isNotBlank()) ChannelActivity.open(this@VideoActivity, pid, v.channelUrl) }
+        }, 4)
         c.chips(listOfNotNull(
             chip(this, "👁 " + Fmt.num(v.views)),
             if (v.likes >= 0) chip(this, "👍 " + Fmt.num(v.likes)) else null,

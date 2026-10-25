@@ -72,6 +72,8 @@ object CollectState {
     fun summary(): String = when {
         !running -> ""
         kind == "recs" -> t("Рекомендации: ", "Recommendations: ") + current
+        kind == "quick" -> t("Быстрый анализ: ", "Instant analysis: ") + current
+        kind == "chgraph" -> current
         else -> "$done / $total · ${t("ошибок", "errors")}: $errors\n$current"
     }
 }
@@ -116,7 +118,20 @@ class CollectService : Service() {
         CollectState.lastError = ""
         Thread {
             try {
-                if (kind == "recs") {
+                if (kind == "quick") {
+                    CollectState.lastResult = QuickAnalysis.run(pid, CollectState.cancel) { msg ->
+                        CollectState.current = msg
+                        startFg(msg.substringBefore('\n'), 0, 0)
+                    }
+                } else if (kind == "chgraph") {
+                    val seeds = (Store.readFile(pid, "chgraph_seeds.txt") ?: "").lines().filter { it.isNotBlank() }
+                    val q = QuickConfig.load()
+                    CollectState.lastResult = ChannelExplorer.run(pid, seeds,
+                        ChannelExplorer.Config(depth = q.graphDepth, maxChannels = q.graphChannels, budget = q.graphChannels * 3), CollectState.cancel) { msg ->
+                        CollectState.current = msg
+                        startFg(msg.substringAfter('\n'), 0, 0)
+                    }
+                } else if (kind == "recs") {
                     CollectState.lastResult = RecEngine.run(pid, CollectState.cancel) { msg ->
                         CollectState.current = msg
                         startFg(msg.substringAfter('\n'), 0, 0)
@@ -183,6 +198,14 @@ class CollectService : Service() {
             }
             CollectState.done++
         }
+        // channel statistics and links for the collected videos (cached for 12 h)
+        if (project.collect.channelStats && !CollectState.cancel.get()) {
+            val vids = Store.videos(pid).values.filter { it.id in ids }
+            ChannelFetch.forVideos(pid, vids, CollectState.cancel, 50) { msg ->
+                CollectState.current = msg
+                startFg(msg, CollectState.done, CollectState.total)
+            }
+        }
         Store.project(pid)?.let {
             it.runs.add(RunRecord(System.currentTimeMillis(), "collect", ids.size, added,
                 if (CollectState.cancel.get()) "stopped" else "errors=${CollectState.errors}"))
@@ -199,6 +222,8 @@ class CollectService : Service() {
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(
                 if (CollectState.kind == "recs") "Lumen: " + t("рекомендации", "recommendations")
+                else if (CollectState.kind == "quick") "Lumen: " + t("быстрый анализ", "instant analysis")
+                else if (CollectState.kind == "chgraph") "Lumen: " + t("граф каналов", "channel graph")
                 else "Lumen: ${t("сбор", "collecting")} $done/$total"
             )
             .setContentText(text)
@@ -226,6 +251,11 @@ class CollectService : Service() {
         fun start(ctx: Context, projectId: String, videoIds: List<String>) {
             val i = Intent(ctx, CollectService::class.java).putExtra("id", projectId)
                 .putStringArrayListExtra("videos", ArrayList(videoIds))
+            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+        }
+
+        fun startKind(ctx: Context, projectId: String, kind: String) {
+            val i = Intent(ctx, CollectService::class.java).putExtra("id", projectId).putExtra("kind", kind)
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
 

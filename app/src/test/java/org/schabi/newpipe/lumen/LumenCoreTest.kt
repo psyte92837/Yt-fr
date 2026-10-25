@@ -376,3 +376,63 @@ class TruncationTest {
         assertTrue(LlmParse.anthropic("""{"stop_reason":"max_tokens","content":[{"type":"text","text":"x"}]}""", "m").truncated)
     }
 }
+
+class QuickAndChannelsTest {
+    @Test
+    fun sharedLinksAreClassified() {
+        assertEquals(YtLink.Link("video", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            YtLink.classify("Смотри это видео https://youtu.be/dQw4w9WgXcQ?si=abc"))
+        assertEquals("video", YtLink.classify("https://m.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123").type)
+        assertEquals("video", YtLink.classify("https://youtube.com/shorts/abcdefghijk?feature=share").type)
+        assertEquals(YtLink.Link("playlist", "https://www.youtube.com/playlist?list=PLx_1-2"),
+            YtLink.classify("https://youtube.com/playlist?list=PLx_1-2&si=q"))
+        assertEquals(YtLink.Link("channel", "https://www.youtube.com/@mkbhd"), YtLink.classify("https://youtube.com/@mkbhd?si=x"))
+        assertEquals(YtLink.Link("channel", "https://www.youtube.com/channel/UC123_abc"), YtLink.classify("https://www.youtube.com/channel/UC123_abc/videos"))
+        assertEquals("unknown", YtLink.classify("просто текст").type)
+        assertEquals("unknown", YtLink.classify("https://example.com/watch?v=dQw4w9WgXcQ").type)
+    }
+
+    @Test
+    fun channelStats() {
+        val now = 100 * DAY
+        val recent = listOf(
+            video("1", views = 100, uploadMs = now - 1 * DAY).apply { duration = 600 },
+            video("2", views = 300, uploadMs = now - 8 * DAY).apply { duration = 30; isShort = true },
+            video("3", views = 1000, uploadMs = now - 15 * DAY).apply { duration = 1200 },
+            video("4", views = 200, uploadMs = now - 22 * DAY).apply { duration = 600 }
+        )
+        val s = ChannelStats.of(recent, now)
+        assertEquals(4, s.videos)
+        assertEquals(400, s.avgViews)
+        assertEquals(250, s.medianViews)
+        assertEquals(1000, s.maxViews)
+        assertEquals(now - DAY, s.lastUploadMs)
+        assertEquals(4 / (22.0 / 7), s.perWeek, 1e-6)
+        assertEquals(0.25, s.shortsShare, 1e-9)
+        assertEquals("3", s.top.first().id)
+        val empty = ChannelStats.of(emptyList(), now)
+        assertEquals(-1, empty.avgViews)
+        assertEquals(0.0, empty.perWeek, 0.0)
+    }
+
+    @Test
+    fun channelLinksAndKeys() {
+        assertEquals(listOf("https://t.me/chan", "https://site.ru/a?b=1"),
+            ChannelStats.links("Пишите: https://t.me/chan. Сайт (https://site.ru/a?b=1), снова https://t.me/chan"))
+        assertEquals(ChannelStore.key("https://m.youtube.com/@Chan/"), ChannelStore.key("https://www.youtube.com/@chan?si=1"))
+    }
+
+    @Test
+    fun modelsRoundTrip() {
+        val c = ChannelData("https://www.youtube.com/@x", name = "X", subscribers = 5, links = mutableListOf("https://a"),
+            playlists = mutableListOf(PlaylistRef("P", "https://www.youtube.com/playlist?list=1", 7)), featured = mutableListOf("https://www.youtube.com/@y"),
+            recent = mutableListOf(video("abcdefghijk")), fetchedAt = 9)
+        assertEquals(c, ChannelData.from(JSONObject(c.toJson().toString())))
+        val q = QuickConfig(recVideos = 50, graphChannels = 30, graphDepth = 3, aiSummary = false)
+        assertEquals(q, QuickConfig.from(JSONObject(q.toJson().toString())))
+        assertEquals(100, QuickConfig.from(null).recVideos)
+        assertEquals(100, QuickConfig.from(null).graphChannels)
+        val p = Project(name = "n", source = "https://youtu.be/x", sourceType = "video")
+        assertEquals(p, Project.from(JSONObject(p.toJson().toString())))
+    }
+}

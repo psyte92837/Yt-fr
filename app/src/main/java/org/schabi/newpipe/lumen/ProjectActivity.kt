@@ -77,6 +77,7 @@ class ProjectActivity : LumenBase() {
             return
         }
         project = p
+        tab = intent.getStringExtra("tab") ?: if (p.source.isNotBlank()) "overview" else "videos"
         if (project.newCount > 0) {
             project.newCount = 0
             Store.save(project)
@@ -110,9 +111,9 @@ class ProjectActivity : LumenBase() {
         videos = Store.videos(project.id)
     }
 
-    private val tabs get() = listOf(
+    private val tabs get() = (if (project.source.isNotBlank()) listOf("overview" to t("Обзор", "Overview")) else emptyList()) + listOf(
         "videos" to t("Видео", "Videos"), "collect" to t("Сбор", "Collect"),
-        "recs" to t("Рекомендации", "Recommendations"), "analytics" to t("Анализ", "Analytics"),
+        "recs" to t("Рекомендации", "Recommendations"), "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"),
         "audience" to t("Аудитория", "Audience"), "seo" to "SEO", "ai" to "AI",
         "export" to t("Экспорт", "Export"), "settings" to t("Настройки", "Settings")
     )
@@ -135,6 +136,8 @@ class ProjectActivity : LumenBase() {
             "videos" -> videosTab(c)
             "collect" -> collectTab(c)
             "recs" -> recsTab(c)
+            "overview" -> overviewTab(c)
+            "channels" -> channelsTab(c)
             "analytics" -> analyticsTab(c)
             "audience" -> audienceTab(c)
             "seo" -> seoTab(c)
@@ -199,10 +202,13 @@ class ProjectActivity : LumenBase() {
             t("Плейлист", "Playlist"),
             t("Отдельные ссылки на видео", "Single video links"),
             t("Тренды YouTube", "YouTube trending"),
-            t("Файл TXT / CSV / JSON (транскрипт или комментарии)", "TXT / CSV / JSON file (transcript or comments)")
+            t("Файл TXT / CSV / JSON (транскрипт или комментарии)", "TXT / CSV / JSON file (transcript or comments)"),
+            t("Быстрый анализ ссылки (отдельный проект)", "Instant analysis of a link (new project)")
         )
         AlertDialog.Builder(this).setTitle(t("Импорт", "Import")).setItems(items) { _, which ->
-            if (which == 3) {
+            if (which == 5) {
+                prompt(t("Ссылка на видео, канал или плейлист", "Video, channel or playlist link"), "https://youtube.com/…") { QuickAnalysis.start(this, it) }
+            } else if (which == 3) {
                 importTrending()
             } else if (which == 4) {
                 @Suppress("DEPRECATION")

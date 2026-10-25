@@ -54,6 +54,14 @@ class TopicActivity : LumenBase() {
     private fun metaLine(m: JSONObject?) = if (m == null) "" else
         "${m.optString("model")} · prompt ${m.optString("prompt_version")} · ${Fmt.dateTime(m.optLong("at"))} · ${m.optInt("in_tokens")}/${m.optInt("out_tokens")}"
 
+    /** Link to the full raw AI answer of a pipeline step (also for cut-off or failed answers). */
+    private fun answerLink(c: Col, task: String) {
+        val e = AiJournal.list(pid).firstOrNull { it.task == task } ?: return
+        c.add(btn(this, t("Ответ AI целиком · ", "Full AI answer · ") + AiJournal.statusLabel(e.status), style = BtnStyle.TEXT) {
+            AiJournalActivity.open(this, id = e.id)
+        }, 4)
+    }
+
     private fun render() {
         val cl = Seo.cluster(pid, cid) ?: return finish()
         val p = project()
@@ -111,6 +119,7 @@ class TopicActivity : LumenBase() {
                 add(text(ctx, t("Решение: ", "Decision: ") + qf.optString("decision").uppercase() + " — " + qf.optString("decision_reason"), 14f, bold = true,
                     color = when (qf.optString("decision")) { "reject" -> Palette.BAD; "merge" -> Palette.WARN; else -> Palette.OK }), 8)
                 muted(metaLine(pl.optJSONObject("qualify_meta")))
+                answerLink(this, "p3_qualify")
             }
         }
         c.button(if (qf == null) t("Квалифицировать", "Qualify") else t("Пересчитать", "Re-run"), primary = qf == null) {
@@ -131,6 +140,7 @@ class TopicActivity : LumenBase() {
                 showList(this, t("Внутренние ссылки", "Internal links"), br.optJSONArray("internal_link_candidates"))
                 showList(this, t("Вопросы без надёжного ответа", "Open questions"), br.optJSONArray("open_questions"))
                 muted(metaLine(pl.optJSONObject("brief_meta")))
+                answerLink(this, "p4_brief")
             }
         }
         c.button(if (br == null) t("Создать бриф", "Create brief") else t("Пересоздать бриф", "Re-create brief"), primary = qf != null && br == null) {
@@ -156,6 +166,7 @@ class TopicActivity : LumenBase() {
                 add(text(ctx, art.take(1200) + if (art.length > 1200) "…" else "", 13f), 8)
                 showList(this, t("Вопросы редактору", "Questions for the editor"), am.optJSONArray("editor_questions"))
                 muted(metaLine(pl.optJSONObject("article_ai")))
+                answerLink(this, "p5_article")
             }
             c.row(
                 btn(this, t("Читать", "Read"), style = BtnStyle.TONAL) { showText(am.optString("title"), art) },
@@ -189,6 +200,7 @@ class TopicActivity : LumenBase() {
                             color = if (it.optString("severity") == "critical") Palette.BAD else Palette.ON_SURFACE), 6)
                     }
                     muted(metaLine(pl.optJSONObject("qa_meta")))
+                answerLink(this, "p6_quality")
                 }
             }
             c.button(if (qa == null) t("Проверить", "Check") else t("Проверить снова", "Check again"), primary = qa == null) {
@@ -279,7 +291,7 @@ class TopicActivity : LumenBase() {
             }
             if (!metrics.isNull("ctr") && metrics.has("ctr")) c.muted("CTR: " + String.format("%.2f%%", metrics.optDouble("ctr") * 100))
         }
-        page(t("Тема", "Topic"), c.root)
+        page(t("Тема", "Topic"), c.root, actions = listOf("🧾" to { AiJournalActivity.open(this, pid) }))
     }
 
     private fun setApproval(on: Boolean) {

@@ -38,6 +38,28 @@ object JsonText {
     }
 }
 
+/** Recovers the complete objects of an array from a JSON reply cut off by the token limit. */
+object JsonSalvage {
+    /** Returns {"<key>": [complete objects…]} or null when nothing complete was found. */
+    fun array(text: String, key: String): String? {
+        val k = text.indexOf("\"$key\"")
+        if (k < 0) return null
+        val open = text.indexOf('[', k)
+        if (open < 0) return null
+        val items = mutableListOf<String>()
+        var i = open + 1
+        while (i < text.length) {
+            val start = text.indexOf('{', i)
+            if (start < 0) break
+            val obj = JsonText.firstObject(text.substring(start)) ?: break
+            items.add(obj)
+            i = start + obj.length
+        }
+        if (items.isEmpty()) return null
+        return "{\"$key\":[" + items.joinToString(",") + "]}"
+    }
+}
+
 object Vtt {
     private val timeLine = Regex("""^(\d{1,2}:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+.*$""")
     private val tag = Regex("<[^>]+>")

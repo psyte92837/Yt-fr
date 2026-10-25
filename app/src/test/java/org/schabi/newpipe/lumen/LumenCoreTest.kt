@@ -355,3 +355,24 @@ class FmtTest {
         assertEquals("ру", t("ру", "en"))
     }
 }
+
+class TruncationTest {
+    @Test
+    fun salvageCompleteItemsFromCutJson() {
+        val cut = """{"items":[{"type":"pain","statement":"a {x}","quote":"q1"},{"type":"voc","statement":"b","quote":"Бесплатно рассказали и объяснили то, что люди продают за"""
+        val s = JsonSalvage.array(cut, "items")!!
+        val o = JSONObject(s)
+        assertEquals(1, o.getJSONArray("items").length())
+        assertEquals("a {x}", o.getJSONArray("items").getJSONObject(0).getString("statement"))
+        assertEquals(null, JsonSalvage.array("""{"items":[{"type":"pa""", "items"))
+        assertEquals(null, JsonSalvage.array("no json", "items"))
+    }
+
+    @Test
+    fun providersReportTruncation() {
+        assertTrue(LlmParse.gemini("""{"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"{\"items\":["}]}}]}""", "g").truncated)
+        assertFalse(LlmParse.gemini("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"ok"}]}}]}""", "g").truncated)
+        assertTrue(LlmParse.openAi("""{"choices":[{"finish_reason":"length","message":{"content":"x"}}]}""", "m", 1).truncated)
+        assertTrue(LlmParse.anthropic("""{"stop_reason":"max_tokens","content":[{"type":"text","text":"x"}]}""", "m").truncated)
+    }
+}

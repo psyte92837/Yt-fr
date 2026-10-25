@@ -27,7 +27,7 @@ val SEO_PROMPTS = linkedMapOf(
             "speaker_type, comment_id (например c12) или null, timestamp (mm:ss из транскрипта) или null, " +
             "confidence (high|medium|low), interpretation, hypothesis. JTBD формулируй: «Когда [ситуация], я хочу [действие], чтобы [результат]».\n" +
             "Объединяй точные дубли, не смешивай разные задачи. Язык формулировок: {lang}.\n" +
-            "Верни компактный JSON {\"items\":[...]}. Максимум 20 элементов.\n\n" +
+            "Цитаты — до 200 символов, statement — одно предложение. Верни компактный JSON {\"items\":[...]} без пробелов-отступов. Максимум 15 элементов.\n\n" +
             "PROJECT: {project_context}\nTRANSCRIPT:\n{transcript}\nCOMMENTS:\n{comments}"
         ),
     "p2_clusters" to (
@@ -176,36 +176,56 @@ object Seo {
     private fun ctx(p: Project) = p.seo.summary(p)
 
     /** JSON call with schema check and one retry, logged to usage.json. */
-    private fun aiJson(p: Project, key: String, vars: Map<String, String>, required: String, maxTokens: Int = 6000): Pair<JSONObject, JSONObject> {
+    private fun aiJson(p: Project, key: String, vars: Map<String, String>, required: String, maxTokens: Int = 8000): Pair<JSONObject, JSONObject> {
         val prov = AiTasks.requireProvider()
-        var prompt = Prompts.fill(key, vars + ("lang" to lang()))
+        val base = Prompts.fill(key, vars + ("lang" to lang()))
+        var prompt = base
+        var limit = maxTokens
         var last = ""
-        for (attempt in 0..1) {
+        var salvaged: Pair<JSONObject, JSONObject>? = null
+        for (attempt in 0..2) {
             val r = try {
-                Llm.complete(prov, prov.smartModel, SEO_SYSTEM, prompt, json = true, maxTokens = maxTokens)
+                Llm.complete(prov, prov.smartModel, SEO_SYSTEM, prompt, json = true, maxTokens = limit, task = key, pid = p.id)
             } catch (e: Exception) {
                 logUsage(p.id, key, prov.smartModel, 0, 0, e.message)
                 throw e
             }
-            val o = try {
-                JsonText.firstObject(r.text)?.let { JSONObject(it) }
-            } catch (e: Exception) {
-                null
-            }
-            val ok = o != null && o.has(required)
-            logUsage(p.id, key, r.model, r.inTokens, r.outTokens, if (ok) null else "invalid json")
-            L.i("seo", "$key attempt ${attempt + 1}: ${if (ok) "ok" else "invalid json: " + r.text.take(200)} in=${r.inTokens} out=${r.outTokens}")
+            val o = parseJson(r.text, required)
+            val ok = o != null && !r.truncated
+            logUsage(p.id, key, r.model, r.inTokens, r.outTokens, if (ok) null else if (r.truncated) "truncated" else "invalid json")
+            L.i("seo", "$key attempt ${attempt + 1}: ${if (ok) "ok" else if (r.truncated) "truncated at limit $limit" else "invalid json: " + r.text.take(200)} in=${r.inTokens} out=${r.outTokens}")
             if (ok) return o!! to meta(key, r)
+            // keep the complete part of a cut-off answer as a fallback
+            if (o == null) JsonSalvage.array(r.text, required)?.let { s -> salvaged = JSONObject(s).put("_partial", true) to meta(key, r) }
+            else if (salvaged == null) salvaged = o.put("_partial", true) to meta(key, r)
             last = r.text.take(200)
-            prompt += "\n\nПредыдущий ответ не был валидным JSON с ключом \"$required\". Верни только JSON."
+            if (r.truncated || o == null && looksCut(r.text)) {
+                limit = minOf(limit * 2, 32000)
+                prompt = base + "\n\nПредыдущий ответ оборвался из-за лимита длины. Отвечай компактнее: короткие statement, цитаты до 200 символов, не больше 12 элементов. Верни только JSON."
+            } else {
+                prompt = base + "\n\nПредыдущий ответ не был валидным JSON с ключом \"$required\". Верни только JSON."
+            }
+        }
+        salvaged?.let {
+            L.w("seo", "$key: using partial answer with ${it.first.optJSONArray(required)?.length() ?: 0} items")
+            return it
         }
         throw LlmException(t("Модель вернула невалидный JSON: ", "The model returned invalid JSON: ") + last)
     }
 
+    private fun parseJson(text: String, required: String): JSONObject? = try {
+        JsonText.firstObject(text)?.let { JSONObject(it) }?.takeIf { it.has(required) }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Opened but never closed JSON = cut off by the output limit. */
+    private fun looksCut(text: String) = text.trim().let { it.startsWith("{") && !it.endsWith("}") }
+
     private fun aiText(p: Project, key: String, vars: Map<String, String>, maxTokens: Int = 8000): Pair<String, JSONObject> {
         val prov = AiTasks.requireProvider()
         val r = try {
-            Llm.complete(prov, prov.smartModel, SEO_SYSTEM, Prompts.fill(key, vars + ("lang" to lang())), maxTokens = maxTokens)
+            Llm.complete(prov, prov.smartModel, SEO_SYSTEM, Prompts.fill(key, vars + ("lang" to lang())), maxTokens = maxTokens, task = key, pid = p.id)
         } catch (e: Exception) {
             logUsage(p.id, key, prov.smartModel, 0, 0, e.message)
             throw e
@@ -265,7 +285,7 @@ object Seo {
                 "transcript" to tr.ifBlank { "(нет)" },
                 "comments" to sb.toString().ifBlank { "(нет)" }
             ),
-            "items"
+            "items", 12000
         )
         val items = o.optJSONArray("items") ?: JSONArray()
         val norms = comments.map { Voc.normalize(it.text) }

@@ -90,6 +90,10 @@
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <activity
+            android:name=".lumen.AiJournalActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme" />
+        <activity
             android:name=".lumen.TopicActivity"
             android:exported="false"
             android:theme="@style/LumenTheme"

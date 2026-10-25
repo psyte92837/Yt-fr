@@ -236,7 +236,7 @@ object YouTube {
                     p, p.fastModel, Prompts.SYSTEM,
                     "Transcribe the speech of this video verbatim in its original language. " +
                         "Put a [mm:ss] timecode at the start of each paragraph. Topic hint: $phrase",
-                    fileUri = v.url, maxTokens = 32000
+                    fileUri = v.url, maxTokens = 32000, task = "transcribe", pid = projectId
                 )
                 Store.saveTranscript(projectId, v.id, r.text)
                 v.hasTranscript = true

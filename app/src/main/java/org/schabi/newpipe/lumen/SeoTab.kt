@@ -139,6 +139,7 @@ fun ProjectActivity.seoTab(c: Col) {
     val usage = Seo.usage(project.id)
     if (usage.isNotEmpty()) {
         c.h2(t("Учёт AI", "AI usage"))
+        c.button(t("Все ответы AI (полный текст)", "All AI answers (full text)"), style = BtnStyle.OUTLINED) { AiJournalActivity.open(this, project.id) }
         val inTok = usage.sumOf { it.optInt("in") }
         val outTok = usage.sumOf { it.optInt("out") }
         val errors = usage.count { !it.isNull("error") }

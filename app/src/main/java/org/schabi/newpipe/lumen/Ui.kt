@@ -530,6 +530,11 @@ abstract class LumenBase : Activity() {
         AlertDialog.Builder(this).setTitle(t("Ошибка", "Error")).setMessage(msg).setPositiveButton("OK", null)
             .setNeutralButton(t("Отчёт", "Report")) { _, _ ->
                 shareText("Lumen report", L.report(this, t, "screen: ${javaClass.simpleName}", errorsOnly = true, maxLines = 150))
+            }
+            .also { b ->
+                // any recent AI answer (incl. cut-off / invalid) can be opened right from the error
+                val last = AiJournal.latest()?.takeIf { System.currentTimeMillis() - it.at < 10 * 60_000 }
+                if (last != null) b.setNegativeButton(t("Ответ AI", "AI answer")) { _, _ -> AiJournalActivity.open(this, id = last.id) }
             }.show()
     }
 

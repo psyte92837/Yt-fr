@@ -87,6 +87,7 @@ class SettingsActivity : LumenBase() {
                 "Fast model — domain refinement and chunks; smart model — final summaries. Keys are encrypted with an Android Keystore key and never exported."))
         }
         if (testing.isNotEmpty()) c.p(testing, 13f, Palette.MUTED)
+        c.button(t("Журнал всех ответов AI (", "Journal of all AI answers (") + AiJournal.list().size + ")", style = BtnStyle.OUTLINED) { AiJournalActivity.open(this) }
         for (p in Provider.entries) {
             val card = c.card {
                 val configured = p.isConfigured

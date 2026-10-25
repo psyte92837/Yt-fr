@@ -86,6 +86,11 @@ fun ProjectActivity.audienceTab(c: Col) {
 
     // ---------------- AI insights
     c.h2(t("AI-инсайты с цитатами (P1)", "AI insights with quotes (P1)"))
+    AiJournal.list(project.id).firstOrNull { it.task == "p1_insights" || it.task == "p2_clusters" }?.let { last ->
+        c.button(t("Последний ответ AI: ", "Last AI answer: ") + AiJournal.statusLabel(last.status) + " · " + Fmt.dateTime(last.at), style = BtnStyle.TEXT) {
+            AiJournalActivity.open(this, id = last.id)
+        }
+    }
     val ins = Seo.insights(project.id)
     val pending = scope.filter { (it.commentsCount > 0 || it.hasTranscript) && !Seo.hasInsights(project.id, it.id) }
     c.muted(t("Pain, JTBD, вопросы, VOC-цитаты, возражения, неудовлетворённые потребности, пробелы контента. Каждая цитата проверяется на наличие в источнике.",

@@ -64,9 +64,11 @@ enum class Provider(
     }
 }
 
-data class LlmReply(val text: String, val inTokens: Int, val outTokens: Int, val model: String)
+/** [truncated] = the provider stopped because of the output token limit. */
+data class LlmReply(val text: String, val inTokens: Int, val outTokens: Int, val model: String, val truncated: Boolean = false)
 
-class LlmException(msg: String) : IOException(msg)
+/** [raw] keeps the provider response body (shown in the AI journal). */
+class LlmException(msg: String, val raw: String = "") : IOException(msg)
 
 object Llm {
     fun estimateTokens(text: String): Int = (text.length / 3.6).toInt() + 1
@@ -104,7 +106,7 @@ object Llm {
         L.i("llm", "$method $where → $code in ${System.currentTimeMillis() - started}ms, ${text.length}ch")
         if (code !in 200..299) {
             L.e("llm", "$where error $code: ${text.take(500)}")
-            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}")
+            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}", text)
         }
         return text
     }
@@ -134,7 +136,33 @@ object Llm {
         user: String,
         json: Boolean = false,
         fileUri: String? = null,
-        maxTokens: Int = 4096
+        maxTokens: Int = 4096,
+        task: String = "",
+        pid: String = ""
+    ): LlmReply {
+        val started = System.currentTimeMillis()
+        var raw: String? = null
+        try {
+            val r = completeRaw(p, model, system, user, json, fileUri, maxTokens) { raw = it }
+            AiJournal.record(pid, task, p.name, r.model, system, user, r.text, raw ?: "", r.inTokens, r.outTokens,
+                if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started)
+            return r
+        } catch (e: Exception) {
+            AiJournal.record(pid, task, p.name, model, system, user, "", raw ?: (e as? LlmException)?.raw ?: "", 0, 0,
+                "error", e.message ?: e.javaClass.simpleName, System.currentTimeMillis() - started)
+            throw e
+        }
+    }
+
+    private fun completeRaw(
+        p: Provider,
+        model: String,
+        system: String,
+        user: String,
+        json: Boolean,
+        fileUri: String?,
+        maxTokens: Int,
+        onRaw: (String) -> Unit
     ): LlmReply {
         val headers = authHeaders(p)
         return when (p.kind) {
@@ -148,12 +176,12 @@ object Llm {
                 if (json && p != Provider.OLLAMA && p != Provider.CUSTOM) {
                     body.put("response_format", JSONObject().put("type", "json_object"))
                 }
-                LlmParse.openAi(http("${p.baseUrl}/chat/completions", "POST", headers, body.toString()), model, estimateTokens(system + user))
+                LlmParse.openAi(http("${p.baseUrl}/chat/completions", "POST", headers, body.toString()).also(onRaw), model, estimateTokens(system + user))
             }
             ApiKind.ANTHROPIC -> {
                 val body = JSONObject().put("model", model).put("max_tokens", maxTokens).put("system", system)
                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
-                LlmParse.anthropic(http("${p.baseUrl}/messages", "POST", headers, body.toString()), model)
+                LlmParse.anthropic(http("${p.baseUrl}/messages", "POST", headers, body.toString()).also(onRaw), model)
             }
             ApiKind.GEMINI -> {
                 val parts = JSONArray()
@@ -167,7 +195,7 @@ object Llm {
                     .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
                     .put("generationConfig", gen)
-                LlmParse.gemini(http("${p.baseUrl}/models/$model:generateContent", "POST", headers, body.toString()), model)
+                LlmParse.gemini(http("${p.baseUrl}/models/$model:generateContent", "POST", headers, body.toString()).also(onRaw), model)
             }
         }
     }
@@ -177,7 +205,7 @@ object Llm {
         LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(p), null), p.kind == ApiKind.GEMINI)
 
     fun ping(p: Provider): String {
-        val r = complete(p, p.fastModel, "You are a test.", "Reply with the single word: OK", maxTokens = 16)
+        val r = complete(p, p.fastModel, "You are a test.", "Reply with the single word: OK", maxTokens = 16, task = "ping")
         return r.text.trim().take(60)
     }
 }

@@ -24,7 +24,8 @@ object LlmParse {
         o.optJSONObject("error")?.let { throw LlmException(it.optString("message", "error")) }
         val choices = o.optJSONArray("choices")
         if (choices == null || choices.length() == 0) throw LlmException("empty response")
-        val msg = choices.getJSONObject(0).optJSONObject("message")
+        val first = choices.getJSONObject(0)
+        val msg = first.optJSONObject("message")
         val text = when (val c = msg?.opt("content")) {
             is String -> c
             is JSONArray -> (0 until c.length()).joinToString("") { c.optJSONObject(it)?.optString("text") ?: "" }
@@ -35,7 +36,8 @@ object LlmParse {
             text,
             u?.optInt("prompt_tokens") ?: promptTokensEstimate,
             u?.optInt("completion_tokens") ?: Llm.estimateTokens(text),
-            o.optString("model", model).ifBlank { model }
+            o.optString("model", model).ifBlank { model },
+            first.optString("finish_reason") == "length"
         )
     }
 
@@ -50,7 +52,8 @@ object LlmParse {
             if (b.optString("type") == "text") sb.append(b.optString("text"))
         }
         val u = o.optJSONObject("usage")
-        return LlmReply(sb.toString(), u?.optInt("input_tokens") ?: 0, u?.optInt("output_tokens") ?: 0, o.optString("model", model).ifBlank { model })
+        return LlmReply(sb.toString(), u?.optInt("input_tokens") ?: 0, u?.optInt("output_tokens") ?: 0, o.optString("model", model).ifBlank { model },
+            o.optString("stop_reason") == "max_tokens")
     }
 
     /** Gemini generateContent: first candidate's text parts; blocked or empty → exception. */
@@ -74,7 +77,8 @@ object LlmParse {
             throw LlmException("Gemini: $reason")
         }
         val u = o.optJSONObject("usageMetadata")
-        return LlmReply(sb.toString(), u?.optInt("promptTokenCount") ?: 0, u?.optInt("candidatesTokenCount") ?: 0, model)
+        return LlmReply(sb.toString(), u?.optInt("promptTokenCount") ?: 0, u?.optInt("candidatesTokenCount") ?: 0, model,
+            cands?.optJSONObject(0)?.optString("finishReason") == "MAX_TOKENS")
     }
 
     /** Model list: Gemini {models:[{name, supportedGenerationMethods}]}, others {data:[{id}]}. */

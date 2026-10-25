@@ -146,7 +146,7 @@ object AiTasks {
     fun domains(phrase: String): List<Triple<String, String, List<String>>> {
         val p = requireProvider()
         val prompt = Prompts.get("domain").replace("{phrase}", phrase).replace("{lang}", lang())
-        val r = Llm.complete(p, p.fastModel, Prompts.SYSTEM, prompt, json = true)
+        val r = Llm.complete(p, p.fastModel, Prompts.SYSTEM, prompt, json = true, task = "domain")
         val obj = org.json.JSONObject(JsonText.firstObject(r.text) ?: throw LlmException("Bad JSON: " + r.text.take(200)))
         val arr = obj.optJSONArray("domains") ?: return emptyList()
         return (0 until arr.length()).map { i ->
@@ -181,7 +181,7 @@ object AiTasks {
         val body = if (data.length > max) {
             // map: summarise chunks with the fast model, reduce with the smart model
             val parts = Chunks.split(data, max).map { chunk ->
-                val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, Prompts.fill("chunk_summary", vars(p, chunk)), maxTokens = 1500)
+                val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, Prompts.fill("chunk_summary", vars(p, chunk)), maxTokens = 1500, task = "chunk_summary", pid = p.id)
                 inTok += r.inTokens
                 outTok += r.outTokens
                 r.text
@@ -190,7 +190,7 @@ object AiTasks {
         } else {
             data
         }
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("video_summary", vars(p, body)), maxTokens = 2500)
+        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("video_summary", vars(p, body)), maxTokens = 2500, task = "video_summary", pid = p.id)
         val res = AiResult(key, "video_summary", v.id, r.model, r.text, inTok + r.inTokens, outTok + r.outTokens)
         Store.saveAi(p.id, res)
         return res
@@ -226,7 +226,7 @@ object AiTasks {
         val full = if (previous != null) data + "\n\nPrevious report (to describe what changed):\n" + previous.take(3000) else data
         val key = sha1("project_summary|${prov.smartModel}|${Prompts.get("project_summary")}|${data.hashCode()}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("project_summary", vars(p, full)), maxTokens = 4000)
+        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("project_summary", vars(p, full)), maxTokens = 4000, task = "project_summary", pid = p.id)
         return AiResult(key, "project_summary", "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 
@@ -236,7 +236,7 @@ object AiTasks {
             .joinToString("\n").take(Settings.chunkChars * 3)
         val key = sha1("clusters|${prov.smartModel}|${Prompts.get("clusters")}|${data.hashCode()}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("clusters", vars(p, data)), maxTokens = 3000)
+        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("clusters", vars(p, data)), maxTokens = 3000, task = "clusters", pid = p.id)
         return AiResult(key, "clusters", "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 
@@ -256,7 +256,7 @@ object AiTasks {
         val data = sb.toString()
         val key = sha1("sentiment|${prov.smartModel}|${Prompts.get("sentiment")}|${data.hashCode()}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("sentiment", vars(p, data)), maxTokens = 3000)
+        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("sentiment", vars(p, data)), maxTokens = 3000, task = "sentiment", pid = p.id)
         return AiResult(key, "sentiment", "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 
@@ -264,7 +264,7 @@ object AiTasks {
         val prov = requireProvider()
         val r = Llm.complete(
             prov, prov.smartModel, Prompts.SYSTEM,
-            Prompts.fill("chat", vars(p, boundedCorpus(p, videos), question)), maxTokens = 2500
+            Prompts.fill("chat", vars(p, boundedCorpus(p, videos), question)), maxTokens = 2500, task = "chat", pid = p.id
         )
         val res = AiResult(sha1("chat|${System.nanoTime()}"), "chat", question.take(200), r.model, r.text, r.inTokens, r.outTokens)
         Store.saveAi(p.id, res)

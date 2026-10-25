@@ -247,7 +247,7 @@ object RecEngine {
                         val prompt = Prompts.get("relevance").replace("{phrase}", ctx.p.phrase)
                             .replace("{domain}", ctx.p.domain.ifBlank { "-" }).replace("{data}", data)
                             .replace("{lang}", if (Settings.lang == "en") "English" else "русский")
-                        val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 600)
+                        val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 600, task = "relevance", pid = ctx.p.id)
                         val arr = JSONObject(JsonText.firstObject(r.text) ?: "{}").optJSONArray("relevant") ?: JSONArray()
                         val yes = (0 until arr.length()).map { arr.optInt(it) }.toSet()
                         batch.forEachIndexed { i, n -> n.relevant = if ((i + 1) in yes) 1 else 0 }

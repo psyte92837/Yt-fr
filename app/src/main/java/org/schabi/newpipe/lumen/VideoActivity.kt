@@ -81,6 +81,11 @@ class VideoActivity : LumenBase() {
 
         // AI summary
         c.h2(t("AI-сводка", "AI summary"))
+        AiJournal.list(pid).firstOrNull { it.task == "video_summary" && it.status != "ok" }?.let { bad ->
+            c.button(t("Последний неудачный ответ AI: ", "Last failed AI answer: ") + AiJournal.statusLabel(bad.status), style = BtnStyle.TEXT) {
+                AiJournalActivity.open(this, id = bad.id)
+            }
+        }
         val summary = Store.latestAi(pid, "video_summary", v.id)
         if (summary != null) {
             c.card {

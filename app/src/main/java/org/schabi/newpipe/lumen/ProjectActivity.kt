@@ -756,6 +756,9 @@ class ProjectActivity : LumenBase() {
             aiRun(t("Ответ", "Answer"), AiTasks.estimateProject(project, scope)) { AiTasks.chat(project, scope, question) }
         }
 
+        c.button(t("Все ответы AI проекта (", "All AI answers of the project (") + AiJournal.list(project.id).size + ")", style = BtnStyle.OUTLINED) {
+            AiJournalActivity.open(this, project.id)
+        }
         c.h2(t("Результаты", "Results"))
         val results = Store.aiAll(project.id).filter { it.kind != "video_summary" }
         if (results.isEmpty()) c.muted("—")

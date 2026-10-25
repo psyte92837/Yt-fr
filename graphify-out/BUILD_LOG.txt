@@ -71,12 +71,18 @@ Commands:
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
-total 1348
-drwxr-xr-x 3 runner runner    4096 Oct 25 22:00 .
-drwxr-xr-x 4 runner runner    4096 Oct 25 22:00 ..
--rw-r--r-- 1 runner runner   63223 Oct 25 22:00 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 25 22:00 .graphify_root
--rw-r--r-- 1 runner runner    5851 Oct 25 22:00 BUILD_LOG.txt
-drwxr-xr-x 3 runner runner    4096 Oct 25 22:00 cache
--rw-r--r-- 1 runner runner 1274881 Oct 25 22:00 graph.json
--rw-r--r-- 1 runner runner    8382 Oct 25 22:00 manifest.json
+Loading existing graph...
+Graph: 854 nodes, 2839 edges
+Re-clustering...
+Done - 28 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+cluster exit=0
+total 1380
+drwxr-xr-x 3 runner runner    4096 Oct 25 22:01 .
+drwxr-xr-x 4 runner runner    4096 Oct 25 22:01 ..
+-rw-r--r-- 1 runner runner   65255 Oct 25 22:01 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 25 22:01 .graphify_root
+-rw-r--r-- 1 runner runner    6032 Oct 25 22:01 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner    6673 Oct 25 22:01 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 25 22:01 cache
+-rw-r--r-- 1 runner runner 1301624 Oct 25 22:01 graph.json
+-rw-r--r-- 1 runner runner    8382 Oct 25 22:01 manifest.json

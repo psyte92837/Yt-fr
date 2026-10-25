@@ -1,0 +1,62 @@
+# Lumen: rebuilds the code knowledge graph (Graphify) so mobile Claude sessions
+# can read graphify-out/GRAPH_REPORT.md instead of opening many source files.
+# Code is parsed locally with tree-sitter: no API key, no LLM calls.
+name: Graphify
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/src/main/java/org/schabi/newpipe/lumen/**', 'app/src/test/java/org/schabi/newpipe/lumen/**', '.github/workflows/graphify.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: graphify
+  cancel-in-progress: true
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install Graphify
+        run: pip install graphifyy
+
+      - name: Copy only Lumen sources (keeps the NewPipe core out of the graph)
+        run: |
+          mkdir -p "$RUNNER_TEMP/src"
+          cp --parents -r app/src/main/java/org/schabi/newpipe/lumen app/src/test/java/org/schabi/newpipe/lumen "$RUNNER_TEMP/src/"
+
+      - name: Build graph (offline, code only)
+        working-directory: ${{ runner.temp }}/src
+        env:
+          GRAPHIFY_BACKEND: none
+        run: |
+          mkdir -p graphify-out
+          { echo "# graphify build log"; pip show graphifyy | head -3; graphify --help 2>&1 | head -60; } > graphify-out/BUILD_LOG.txt 2>&1 || true
+          set +e
+          graphify extract . --no-viz >> graphify-out/BUILD_LOG.txt 2>&1 \
+            || graphify extract . >> graphify-out/BUILD_LOG.txt 2>&1 \
+            || graphify . --code-only --no-viz >> graphify-out/BUILD_LOG.txt 2>&1
+          echo "exit=$?" >> graphify-out/BUILD_LOG.txt
+          ls -la graphify-out >> graphify-out/BUILD_LOG.txt
+          test -s graphify-out/graph.json
+
+      - name: Commit graph to the repo
+        run: |
+          rm -rf graphify-out
+          cp -r "$RUNNER_TEMP/src/graphify-out" graphify-out
+          rm -rf graphify-out/graph.html graphify-out/cache
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add graphify-out
+          git diff --cached --quiet && exit 0
+          git commit -m "Update code graph [skip ci]"
+          git pull --rebase origin main
+          git push

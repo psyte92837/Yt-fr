@@ -3,7 +3,7 @@ name: Build APK
 
 on:
   push:
-    paths-ignore: ['**.md', 'doc/**', 'fastlane/**', 'assets/**']
+    paths-ignore: ['**.md', 'doc/**', 'fastlane/**', 'assets/**', 'graphify-out/**']
   pull_request:
   workflow_dispatch:
 

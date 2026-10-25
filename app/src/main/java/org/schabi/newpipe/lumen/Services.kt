@@ -127,7 +127,7 @@ class CollectService : Service() {
                     val seeds = (Store.readFile(pid, "chgraph_seeds.txt") ?: "").lines().filter { it.isNotBlank() }
                     val q = QuickConfig.load()
                     CollectState.lastResult = ChannelExplorer.run(pid, seeds,
-                        ChannelExplorer.Config(depth = q.graphDepth, maxChannels = q.graphChannels, budget = q.graphChannels * 3), CollectState.cancel) { msg ->
+                        ChannelExplorer.Config(depth = q.graphDepth, maxChannels = q.graphChannels, budget = q.graphChannels * 3, topic = q.topicFilter), CollectState.cancel) { msg ->
                         CollectState.current = msg
                         startFg(msg.substringAfter('\n'), 0, 0)
                     }

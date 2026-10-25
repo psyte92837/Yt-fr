@@ -33,9 +33,12 @@ object YtLink {
                 val m = Regex("""youtube\.com/(@[^/?#]+|channel/[A-Za-z0-9_-]+|c/[^/?#]+|user/[^/?#]+)""").find(u)!!
                 Link("channel", "https://www.youtube.com/" + m.groupValues[1])
             }
-            else -> Link("unknown", url)
+            else -> Link("unknown", stripQuery(url))
         }
     }
+
+    /** Drops everything after "?" or "#" (si=, feature=, t=, utm_…); watch/playlist links are rebuilt from v= / list= by [classify]. */
+    fun stripQuery(url: String): String = url.substringBefore('#').substringBefore('?')
 }
 
 /** What the instant analysis runs automatically; edited in Settings → Instant analysis. */
@@ -54,13 +57,14 @@ data class QuickConfig(
     var graphChannels: Int = 100,
     var graphDepth: Int = 2,
     var aiChannelSummary: Boolean = true,
-    var aiProjectSummary: Boolean = false
+    var aiProjectSummary: Boolean = false,
+    var topicFilter: Boolean = true
 ) {
     fun toJson(): JSONObject = JSONObject().put("collect", collect).put("aiSummary", aiSummary).put("channelStats", channelStats)
         .put("channelRecent", channelRecent).put("channelImport", channelImport).put("collectTop", collectTop)
         .put("playlistLimit", playlistLimit).put("recs", recs).put("recVideos", recVideos).put("recDepth", recDepth)
         .put("channelGraph", channelGraph).put("graphChannels", graphChannels).put("graphDepth", graphDepth)
-        .put("aiChannelSummary", aiChannelSummary).put("aiProjectSummary", aiProjectSummary)
+        .put("aiChannelSummary", aiChannelSummary).put("aiProjectSummary", aiProjectSummary).put("topicFilter", topicFilter)
 
     companion object {
         fun from(o: JSONObject?) = QuickConfig().apply {
@@ -80,6 +84,7 @@ data class QuickConfig(
             graphDepth = o.optInt("graphDepth", graphDepth)
             aiChannelSummary = o.optBoolean("aiChannelSummary", aiChannelSummary)
             aiProjectSummary = o.optBoolean("aiProjectSummary", aiProjectSummary)
+            topicFilter = o.optBoolean("topicFilter", topicFilter)
         }
 
         fun load(): QuickConfig = from(Lumen.prefs.getString("quick_cfg", null)?.let { try { JSONObject(it) } catch (e: Exception) { null } })
@@ -147,7 +152,7 @@ object QuickAnalysis {
         p.source = link.url
         p.sourceType = link.type
         p.recs.seeds = "all"
-        p.recs.relevance = "off"
+        p.recs.relevance = if (QuickConfig.load().topicFilter) "ai" else "off"
         Store.save(p)
         return p
     }
@@ -266,7 +271,7 @@ object QuickAnalysis {
                         pr.recs.budget = maxOf(20, cfg.recVideos)
                         pr.recs.seeds = "marked"
                         pr.recs.seedCount = 5
-                        pr.recs.relevance = "off"
+                        pr.recs.relevance = if (cfg.topicFilter) "ai" else "off"
                         Store.save(pr)
                         RecEngine.run(pid, cancel) { progress(it) }
                     }
@@ -274,7 +279,7 @@ object QuickAnalysis {
                         val seeds = listOf(channelUrl).filter { it.isNotBlank() }.ifEmpty {
                             Store.videos(pid).values.groupingBy { it.channelUrl }.eachCount().entries.sortedByDescending { it.value }.take(3).map { it.key }.filter { it.isNotBlank() }
                         }
-                        ChannelExplorer.run(pid, seeds, ChannelExplorer.Config(depth = cfg.graphDepth, maxChannels = cfg.graphChannels, budget = cfg.graphChannels * 3), cancel) { progress(it) }
+                        ChannelExplorer.run(pid, seeds, ChannelExplorer.Config(depth = cfg.graphDepth, maxChannels = cfg.graphChannels, budget = cfg.graphChannels * 3, topic = cfg.topicFilter), cancel) { progress(it) }
                     }
                     "channel_ai" -> {
                         val c = ChannelStore.get(pid, channelUrl)

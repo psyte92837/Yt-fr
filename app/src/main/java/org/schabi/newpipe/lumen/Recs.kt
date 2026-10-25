@@ -84,6 +84,11 @@ class RecGraph {
         return true
     }
 
+    fun rebuildKeys() {
+        keys.clear()
+        edges.forEach { keys.add("${it.from}>${it.to}") }
+    }
+
     fun parents(id: String): List<RecNode> = edges.filter { it.to == id }.mapNotNull { nodes[it.from] }
     fun children(id: String): List<RecNode> = edges.filter { it.from == id }.sortedBy { it.rank }.mapNotNull { nodes[it.to] }
 
@@ -155,7 +160,7 @@ object RecEngine {
         val cancel: AtomicBoolean,
         val progress: (String) -> Unit
     ) {
-        val keywords = Relevance.keywords(p.phrase + " " + p.queries.joinToString(" ") + " " + p.domain + " " + cfg.keywords)
+        val keywords = TopicFilter.keywordsOf(p, cfg.keywords)
         val blocked = cfg.blocked.split(',', '\n', ';').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
         val perChannel = HashMap<String, Int>().also { m -> g.nodes.values.forEach { m[it.channel] = (m[it.channel] ?: 0) + 1 } }
         val now = System.currentTimeMillis()
@@ -317,6 +322,10 @@ object RecEngine {
 
     /** Runs the explorer for project [pid]; returns a short summary. */
     fun run(pid: String, cancel: AtomicBoolean, progress: (String) -> Unit): String {
+        if ((Store.project(pid)?.recs?.relevance ?: "off") != "off") {
+            progress(t("Подтверждение темы…", "Confirming topic…"))
+            TopicFilter.ensure(pid)
+        }
         val p = Store.project(pid) ?: return ""
         val cfg = p.recs
         val g = if (cfg.keepGraph) RecGraph.load(pid) else RecGraph()

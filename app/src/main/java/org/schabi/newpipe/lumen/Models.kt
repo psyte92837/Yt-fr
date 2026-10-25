@@ -141,7 +141,7 @@ data class RecConfig(
     var fanout: Int = 5,
     var budget: Int = 150, // max YouTube requests per run
     var maxNodes: Int = 500,
-    var relevance: String = "keywords", // off | keywords | ai
+    var relevance: String = "ai", // off | keywords | ai (ai falls back to keywords without a provider)
     var keywords: String = "",
     var expandOffTopic: Boolean = false,
     var excludeShorts: Boolean = true,

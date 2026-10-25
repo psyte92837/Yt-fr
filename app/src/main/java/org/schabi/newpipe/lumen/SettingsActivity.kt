@@ -194,6 +194,8 @@ class SettingsActivity : LumenBase() {
             "sentiment" to t("Тональность комментариев", "Comment sentiment"),
             "chat" to t("Чат с проектом", "Project chat"),
             "relevance" to t("Фильтр релевантности рекомендаций", "Recommendation relevance filter"),
+            "relevance_channels" to t("Фильтр каналов по теме", "Channel topic filter"),
+            "topic" to t("Подтверждение темы (домена)", "Topic (domain) confirmation"),
             "p1_insights" to t("P1 · Извлечение аудитории", "P1 · Audience extraction"),
             "p2_clusters" to t("P2 · Кластеризация", "P2 · Clustering"),
             "p3_qualify" to t("P3 · SEO-квалификация темы", "P3 · SEO topic qualification"),
@@ -306,6 +308,9 @@ class SettingsActivity : LumenBase() {
         c.spinner(t("Собрать комментарии и расшифровки у топ-N видео", "Collect comments & transcripts of top N videos"), listOf(0, 5, 10, 20, 50).map { it to it.toString() }, q.collectTop) { q.collectTop = it; save() }
         c.check(t("AI-сводка по каналу", "AI channel summary"), q.aiChannelSummary) { q.aiChannelSummary = it; save() }
         c.check(t("AI-сводка по проекту", "AI project summary"), q.aiProjectSummary) { q.aiProjectSummary = it; save() }
+        c.check(t("Фильтр по теме (AI): только подходящие видео и каналы", "Topic filter (AI): only on-topic videos and channels"), q.topicFilter) { q.topicFilter = it; save() }
+        c.muted(t("AI определяет доменную область по видео и отбрасывает остальное. Без AI — по ключевым словам. Каждый ответ виден в «Ответах AI».",
+            "AI states the domain from the videos and drops the rest. Keywords are used without AI. Every answer is in AI answers."))
         c.h2(t("Похожие и рекомендации", "Similar & recommended"))
         c.check(t("Искать похожие видео", "Find similar videos"), q.recs) { q.recs = it; save() }
         c.spinner(t("Сколько видео", "How many videos"), listOf(30, 50, 100, 200, 300, 500).map { it to it.toString() }, q.recVideos) { q.recVideos = it; save() }

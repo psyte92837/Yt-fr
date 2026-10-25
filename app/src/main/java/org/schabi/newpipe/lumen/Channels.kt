@@ -261,7 +261,8 @@ object ChannelExplorer {
         val videosPerChannel: Int = 2,
         val perVideo: Int = 10,
         val useFeatured: Boolean = true,
-        val budget: Int = 300
+        val budget: Int = 300,
+        val topic: Boolean = true
     )
 
     private val yt get() = ServiceList.YouTube
@@ -270,28 +271,53 @@ object ChannelExplorer {
         val g = RecGraph.load(pid, RecGraph.CHANNELS_FILE)
         g.mode = "channels"
         var requests = 0
-        fun limit() = cancel.get() || requests >= cfg.budget || g.nodes.size >= cfg.maxChannels
+        if (cfg.topic) {
+            progress(t("Подтверждение темы…", "Confirming topic…"))
+            TopicFilter.ensure(pid)
+        }
+        val project = Store.project(pid)
+        val topicOn = cfg.topic && project != null
+        // off-topic channels do not count against the limit and are removed at the end
+        fun size() = g.nodes.values.count { it.relevant != 0 }
+        fun limit() = cancel.get() || requests >= cfg.budget || size() >= cfg.maxChannels
         fun node(url: String, name: String, depth: Int, from: String): RecNode {
             val k = ChannelStore.key(url)
-            return g.nodes.getOrPut(k) { RecNode(k, url = url, title = name, channel = name, depth = depth, from = from, relevant = 1) }
+            return g.nodes.getOrPut(k) { RecNode(k, url = url, title = name, channel = name, depth = depth, from = from, relevant = if (topicOn) -1 else 1) }
         }
-        for (s in seeds.distinctBy { ChannelStore.key(it) }) node(s, "", 0, "").apply { seed = true; depth = 0 }
+        fun fill(n: RecNode, c: ChannelData) {
+            n.title = c.name.ifBlank { n.title }
+            n.channel = n.title
+            n.views = c.subscribers
+            n.thumb = c.avatar
+            n.uploadText = ChannelStats.line(c)
+        }
+        fun judge(batch: List<Pair<RecNode, ChannelData>>) {
+            val todo = batch.filter { it.first.relevant == -1 && !it.first.seed }
+            if (!topicOn || todo.isEmpty()) return
+            val verdict = TopicFilter.judgeChannels(project!!, todo.map { it.first.id to it.second }) { progress(it) }
+            todo.forEach { (n, _) -> n.relevant = if (verdict[n.id] == true) 1 else 0 }
+        }
+        for (s in seeds.distinctBy { ChannelStore.key(it) }) node(s, "", 0, "").apply { seed = true; depth = 0; relevant = 1 }
         val beam = maxOf(1, ceil(cfg.maxChannels.toDouble() / maxOf(1, cfg.depth)).toInt())
         for (level in 0 until cfg.depth) {
             if (limit()) break
-            val frontier = g.nodes.values.filter { it.depth == level && !it.expanded }
+            val frontier = g.nodes.values.filter { it.depth == level && !it.expanded && it.relevant != 0 }
                 .sortedWith(compareByDescending<RecNode> { it.seed }.thenByDescending { it.hits }.thenByDescending { it.views })
                 .let { if (level == 0) it else it.take(beam) }
+            // 1) fetch every channel of the level, 2) ask the topic filter once for the whole level, 3) expand only on-topic ones
+            val fetched = ArrayList<Pair<RecNode, ChannelData>>()
             for (n in frontier) {
-                if (limit()) break
-                progress(t("Каналы: глубина ${level + 1}/${cfg.depth} · найдено ${g.nodes.size}\n", "Channels: depth ${level + 1}/${cfg.depth} · found ${g.nodes.size}\n") + n.title.ifBlank { n.url })
+                if (cancel.get() || requests >= cfg.budget) break
+                progress(t("Каналы: глубина ${level + 1}/${cfg.depth} · найдено ${size()}\n", "Channels: depth ${level + 1}/${cfg.depth} · found ${size()}\n") + n.title.ifBlank { n.url })
                 val c = ChannelFetch.fetch(pid, n.url, recentLimit = 15, withPlaylists = cfg.useFeatured)
                 requests += 3
-                n.title = c.name.ifBlank { n.title }
-                n.channel = n.title
-                n.views = c.subscribers
-                n.thumb = c.avatar
-                n.uploadText = ChannelStats.line(c)
+                fill(n, c)
+                fetched.add(n to c)
+            }
+            judge(fetched)
+            for ((n, c) in fetched) {
+                if (limit()) break
+                if (n.relevant == 0) continue
                 n.expanded = true
                 val counts = LinkedHashMap<String, Pair<String, Int>>() // url -> (name, count)
                 if (cfg.useFeatured) c.featured.forEach { u -> counts[u] = (counts[u]?.first ?: "") to ((counts[u]?.second ?: 0) + 2) }
@@ -314,7 +340,7 @@ object ChannelExplorer {
                 var rank = 0
                 for ((u, p) in counts.entries.sortedByDescending { it.value.second }) {
                     val k = ChannelStore.key(u)
-                    if (!g.nodes.containsKey(k) && g.nodes.size >= cfg.maxChannels) break
+                    if (!g.nodes.containsKey(k) && g.nodes.size >= cfg.maxChannels * (if (topicOn) 3 else 1)) break
                     val child = node(u, p.first, level + 1, n.id)
                     if (g.addEdge(n.id, child.id, rank)) {
                         child.weight += p.second - 1.0 / (rank + 1) // weight = how many links between the channels
@@ -323,22 +349,28 @@ object ChannelExplorer {
                 }
             }
         }
-        // stats for leaves that were never expanded (light fetch, no playlists)
-        for (n in g.nodes.values.filter { !it.expanded && it.uploadText.isBlank() }) {
-            if (cancel.get() || requests >= cfg.budget + cfg.maxChannels) break
+        // leaves that were never fetched: light fetch (no playlists), then the topic filter
+        val light = ArrayList<Pair<RecNode, ChannelData>>()
+        for (n in g.nodes.values.filter { !it.expanded && (it.uploadText.isBlank() || it.relevant == -1) && it.relevant != 0 }) {
+            if (cancel.get() || requests >= cfg.budget + cfg.maxChannels * 2) break
             progress(t("Статистика каналов: ", "Channel stats: ") + n.title)
             val c = ChannelFetch.fetch(pid, n.url, recentLimit = 15, withPlaylists = false)
             requests += 2
-            n.title = c.name.ifBlank { n.title }
-            n.channel = n.title
-            n.views = c.subscribers
-            n.thumb = c.avatar
-            n.uploadText = ChannelStats.line(c)
+            fill(n, c)
+            light.add(n to c)
         }
+        judge(light)
+        // anything still undecided (budget ran out) is not confirmed on-topic -> dropped when the filter is on
+        if (topicOn) g.nodes.values.filter { it.relevant == -1 && !it.seed }.forEach { it.relevant = 0 }
+        if (topicOn) { // keep the strongest on-topic channels within the limit
+            g.nodes.values.filter { it.relevant != 0 && !it.seed }.sortedByDescending { it.weight }.drop(maxOf(0, cfg.maxChannels - g.nodes.values.count { it.seed }))
+                .forEach { it.relevant = 0 }
+        }
+        val dropped = if (topicOn) TopicFilter.prune(g) else 0
         g.computePageRank()
         g.requests += requests
         g.updatedAt = System.currentTimeMillis()
         RecGraph.save(pid, g, RecGraph.CHANNELS_FILE)
-        return t("Каналов: ${g.nodes.size}, связей: ${g.edges.size}, запросов: $requests", "Channels: ${g.nodes.size}, edges: ${g.edges.size}, requests: $requests")
+        return t("Каналов: ${g.nodes.size}, связей: ${g.edges.size}, не по теме отброшено: $dropped, запросов: $requests", "Channels: ${g.nodes.size}, edges: ${g.edges.size}, off-topic dropped: $dropped, requests: $requests")
     }
 }

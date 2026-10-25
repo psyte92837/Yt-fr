@@ -219,7 +219,7 @@ class GraphActivity : LumenBase() {
     private val channels get() = file == RecGraph.CHANNELS_FILE
     private lateinit var view: GraphView
     private var colorBy = "depth"
-    private var onlyOnTopic = false
+    private var onlyOnTopic = true
     private val layoutCache = HashMap<Boolean, Pair<DoubleArray, DoubleArray>>()
 
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -41,7 +41,7 @@ class ModelsTest {
     fun missingFieldsGetDefaults() {
         val p = Project.from(JSONObject("""{"id":"x","phrase":"q"}"""))
         assertEquals(10, p.recs.depth)
-        assertEquals("keywords", p.recs.relevance)
+        assertEquals("ai", p.recs.relevance)
         assertEquals(0, p.monitor.recDrip)
         assertEquals(listOf("q"), p.effectiveQueries())
     }

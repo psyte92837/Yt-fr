@@ -1,0 +1,82 @@
+# graphify build log
+Name: graphifyy
+Version: 0.9.95
+Summary: AI coding assistant skill (Claude Code, CodeBuddy, Codex, OpenCode, Kilo Code, Cursor, Gemini CLI, Aider, OpenClaw, Factory Droid, Trae, Hermes, Kiro, Pi, Devin CLI, Google Antigravity) - turn any folder of code, docs, papers, images, or videos into a queryable knowledge graph
+ERROR: Pipe to stdout was broken
+Usage: graphify <command>
+
+Commands:
+  install [--platform P]  copy skill to platform config dir (claude|codex|opencode|kilo|aider|copilot|claw|droid|trae|trae-cn|hermes|kiro|pi|codebuddy|antigravity|antigravity-windows|windows|kimi|amp|agents|devin|gemini|cursor)
+  uninstall               remove graphify from all detected platforms in one shot
+    --purge                 also delete graphify-out/ directory
+  path "A" "B"            shortest path between two nodes in graph.json
+    --graph <path>          path to graph.json (default graphify-out/graph.json)
+    --directed              force a directed search (the default;
+                            the JSON 'directed' flag is NOT consulted)
+    --undirected            ignore edge direction
+  explain "X"             plain-language explanation of a node and its neighbors
+    --all                   list every connection (default: the 20 most connected)
+    --graph <path>          path to graph.json (default graphify-out/graph.json)
+  diagnose multigraph    report same-endpoint edge collapse risk in graph.json
+    --graph <path>          path to graph/extraction JSON
+                            (default graphify-out/graph.json)
+    --json                  emit machine-readable JSON
+    --max-examples N        max same-endpoint examples to print (default 5)
+    --directed              force directed post-build simulation
+    --undirected            force undirected post-build simulation
+                            (default follows JSON directed flag;
+                             raw extraction with no flag defaults directed)
+    --extract-path PATH     extractor source for suppression scan
+  clone <github-url>      clone a GitHub repo locally and print its path for /graphify
+  merge-driver <base> <current> <other>  git merge driver: union-merge two graph.json files (set up via hook install)
+  merge-graphs <g1> <g2>  merge two or more graph.json files into one cross-repo graph
+    --out <path>            output path (default: graphify-out/merged-graph.json)
+    --previous <path>       restore the previous merged clustering's community ids
+                            (by node id) instead of each input's own per-source ids,
+                            so a later cluster-only run reuses labels correctly
+    --branch <branch>       checkout a specific branch (default: repo default)
+    --out <dir>             clone to a custom directory (default: ~/.graphify/repos/<owner>/<repo>)
+  add <url>               fetch a URL and save it to ./raw, then update the graph
+    --author "Name"         tag the author of the content
+    --contributor "Name"    tag who added it to the corpus
+    --dir <path>            target directory (default: ./raw)
+  watch <path>            watch a folder and rebuild the graph on code changes
+  update <path>           re-extract code files and update the graph (no LLM needed)
+    --force                 overwrite graph.json even if the rebuild has fewer nodes
+                            (also: GRAPHIFY_FORCE=1 env var; use after refactors that delete code)
+    --no-cluster            skip clustering, write raw extraction only
+  cluster-only <path>     rerun clustering on an existing graph.json and regenerate report
+    --no-viz                skip graph.html generation (useful for >5000 node graphs / CI)
+    --graph <path>          path to graph.json (default <path>/graphify-out/graph.json)
+    --no-label              keep 'Community N' placeholders (skip LLM community naming)
+    --backend=<name>        backend to use for community naming (default: auto-detect)
+    --model=<name>          model to use for community naming (claude-cli also reads GRAPHIFY_CLAUDE_CLI_MODEL)
+    --max-concurrency=N     parallel community-labeling LLM calls (default 4; forced to 1 for ollama/claude-cli)
+    --batch-size=N          communities per labeling LLM call (default 100, sized for ~16k context; use 40 for 8k)
+  label <path>            (re)name communities with the configured LLM backend, regenerate report
+    --missing-only         keep existing labels and only name missing/placeholder communities
+    --backend=<name>        backend to use (default: auto-detect from API keys)
+    --model=<name>          model to use for community naming (claude-cli also reads GRAPHIFY_CLAUDE_CLI_MODEL)
+    --max-concurrency=N     parallel labeling LLM calls (default 4; forced to 1 for ollama/claude-cli)
+    --batch-size=N          communities per labeling LLM call (default 100)
+  query "<question>"       BFS traversal of graph.json for a question
+    --dfs                   use depth-first instead of breadth-first
+    --context C             explicit edge-context filter (repeatable)
+    --seed X                start at node X (id, label or file path; repeatable)
+[graphify extract] scanning /home/runner/work/_temp/src
+[graphify extract] found 35 code, 0 docs, 0 papers, 0 images
+[graphify extract] AST extraction on 35 code files...
+  warning: 1 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (first error at line 1, 3 symbol(s) extracted)
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 854 nodes, 2839 edges, 28 communities
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
+[graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
+exit=0
+total 1348
+drwxr-xr-x 3 runner runner    4096 Oct 25 22:00 .
+drwxr-xr-x 4 runner runner    4096 Oct 25 22:00 ..
+-rw-r--r-- 1 runner runner   63223 Oct 25 22:00 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 25 22:00 .graphify_root
+-rw-r--r-- 1 runner runner    5851 Oct 25 22:00 BUILD_LOG.txt
+drwxr-xr-x 3 runner runner    4096 Oct 25 22:00 cache
+-rw-r--r-- 1 runner runner 1274881 Oct 25 22:00 graph.json
+-rw-r--r-- 1 runner runner    8382 Oct 25 22:00 manifest.json

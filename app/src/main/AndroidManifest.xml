@@ -370,12 +370,7 @@
                 <data android:pathPrefix="/" />
             </intent-filter>
 
-            <!-- Share filter -->
-            <intent-filter>
-                <action android:name="android.intent.action.SEND" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="text/plain" />
-            </intent-filter>
+            <!-- Lumen: NewPipe's share filter removed, "Share" goes to LinkActivity (instant analysis) only -->
 
             <!-- media.ccc.de filter -->
             <intent-filter>

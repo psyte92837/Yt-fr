@@ -78,12 +78,12 @@ Re-clustering...
 Done - 35 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
 total 1836
-drwxr-xr-x 3 runner runner    4096 Oct 28 16:19 .
-drwxr-xr-x 4 runner runner    4096 Oct 28 16:18 ..
--rw-r--r-- 1 runner runner   90042 Oct 28 16:19 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 28 16:18 .graphify_root
--rw-r--r-- 1 runner runner    6097 Oct 28 16:19 BUILD_LOG.txt
--rw-r--r-- 1 runner runner    7910 Oct 28 16:19 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Oct 28 16:18 cache
--rw-r--r-- 1 runner runner 1744661 Oct 28 16:19 graph.json
--rw-r--r-- 1 runner runner   11015 Oct 28 16:18 manifest.json
+drwxr-xr-x 3 runner runner    4096 Oct 28 16:22 .
+drwxr-xr-x 4 runner runner    4096 Oct 28 16:22 ..
+-rw-r--r-- 1 runner runner   90042 Oct 28 16:22 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 28 16:22 .graphify_root
+-rw-r--r-- 1 runner runner    6097 Oct 28 16:22 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner    7910 Oct 28 16:22 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 28 16:22 cache
+-rw-r--r-- 1 runner runner 1744661 Oct 28 16:22 graph.json
+-rw-r--r-- 1 runner runner   11021 Oct 28 16:22 manifest.json

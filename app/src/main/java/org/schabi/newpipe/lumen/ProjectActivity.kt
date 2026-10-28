@@ -157,8 +157,19 @@ class ProjectActivity : LumenBase() {
                 tab = tabs[it].first
                 render()
             },
+            actions = listOf("⋮" to { sectionsMenu() }),
             fab = if (busy.isEmpty()) fab else null
         )
+    }
+
+    /** All sections at a glance: the tab row scrolls, this list does not hide anything. */
+    private fun sectionsMenu() {
+        val list = tabs
+        val names = list.map { (id, name) -> if (id == tab) "● $name" else name }.toTypedArray()
+        AlertDialog.Builder(this).setTitle(t("Разделы проекта", "Project sections")).setItems(names) { _, i ->
+            tab = list[i].first
+            render()
+        }.show()
     }
 
     // ------------------------------------------------------------------ Videos

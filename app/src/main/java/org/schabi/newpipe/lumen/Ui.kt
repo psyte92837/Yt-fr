@@ -12,6 +12,12 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -171,6 +177,176 @@ fun roundBg(color: Int, radiusDp: Float = 12f, ctx: Context, stroke: Int = 0): G
 fun ripple(ctx: Context, content: Drawable, onColor: Int): RippleDrawable {
     val stateLayer = (onColor and 0x00FFFFFF) or 0x29000000
     return RippleDrawable(ColorStateList.valueOf(stateLayer), content, null)
+}
+
+/** Line icons for the top app bar, drawn in code on a 24-unit grid (Material Symbols Outlined look). */
+enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB }
+
+/** App-bar actions are passed as short glyphs; this maps them to an icon (null = draw the glyph as text). */
+fun glyphIcon(glyph: String): Ic? = when (glyph) {
+    "←" -> Ic.BACK
+    "⋮" -> Ic.MORE
+    "＋", "+" -> Ic.ADD
+    "⚙" -> Ic.SETTINGS
+    "🐞" -> Ic.BUG
+    "⤴" -> Ic.SHARE
+    "↗" -> Ic.OPEN
+    "⤢" -> Ic.FIT
+    "⧉" -> Ic.COPY
+    "🗑" -> Ic.DELETE
+    "🧾" -> Ic.JOURNAL
+    "🌐" -> Ic.WEB
+    else -> null
+}
+
+/** Spoken label for an app-bar action (TalkBack), falls back to the glyph itself. */
+fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
+    Ic.BACK -> t("Назад", "Back")
+    Ic.MORE -> t("Ещё", "More")
+    Ic.ADD -> t("Добавить", "Add")
+    Ic.SETTINGS -> t("Настройки", "Settings")
+    Ic.BUG -> t("Журнал и отчёт об ошибке", "Logs and bug report")
+    Ic.SHARE -> t("Поделиться", "Share")
+    Ic.OPEN -> t("Открыть в браузере", "Open in browser")
+    Ic.FIT -> t("Вписать в экран", "Fit to screen")
+    Ic.COPY -> t("Копировать", "Copy")
+    Ic.DELETE -> t("Очистить", "Clear")
+    Ic.JOURNAL -> t("Ответы AI", "AI answers")
+    Ic.WEB -> t("Браузер", "Browser")
+    null -> glyph
+}
+
+class IconDrawable(private val ic: Ic, color: Int) : Drawable() {
+    private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        strokeWidth = 2f
+        this.color = color
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color }
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        val k = minOf(b.width(), b.height()) / 24f
+        canvas.save()
+        canvas.translate(b.left + (b.width() - 24 * k) / 2, b.top + (b.height() - 24 * k) / 2)
+        canvas.scale(k, k)
+        fun line(vararg p: Float) {
+            val path = Path().apply {
+                moveTo(p[0], p[1])
+                var i = 2
+                while (i < p.size) {
+                    lineTo(p[i], p[i + 1])
+                    i += 2
+                }
+            }
+            canvas.drawPath(path, stroke)
+        }
+        when (ic) {
+            Ic.BACK -> {
+                line(20f, 12f, 4f, 12f)
+                line(11f, 5f, 4f, 12f, 11f, 19f)
+            }
+            Ic.MORE -> floatArrayOf(5f, 12f, 19f).forEach { canvas.drawCircle(12f, it, 1.8f, fill) }
+            Ic.ADD -> {
+                line(12f, 5f, 12f, 19f)
+                line(5f, 12f, 19f, 12f)
+            }
+            Ic.SETTINGS -> {
+                canvas.drawCircle(12f, 12f, 3f, stroke)
+                canvas.drawCircle(12f, 12f, 7f, stroke)
+                for (i in 0 until 8) {
+                    val a = Math.PI * i / 4
+                    val c = Math.cos(a).toFloat()
+                    val s = Math.sin(a).toFloat()
+                    line(12 + 7 * c, 12 + 7 * s, 12 + 9.5f * c, 12 + 9.5f * s)
+                }
+            }
+            Ic.BUG -> {
+                canvas.drawRoundRect(RectF(7f, 8f, 17f, 21f), 5f, 5f, stroke)
+                line(12f, 12f, 12f, 21f)
+                line(9f, 8f, 7f, 4f)
+                line(15f, 8f, 17f, 4f)
+                line(7f, 13f, 3f, 12f)
+                line(17f, 13f, 21f, 12f)
+                line(7f, 17f, 3f, 18f)
+                line(17f, 17f, 21f, 18f)
+            }
+            Ic.SHARE -> {
+                canvas.drawCircle(18f, 5f, 2.5f, stroke)
+                canvas.drawCircle(6f, 12f, 2.5f, stroke)
+                canvas.drawCircle(18f, 19f, 2.5f, stroke)
+                line(8.2f, 10.8f, 15.8f, 6.2f)
+                line(8.2f, 13.2f, 15.8f, 17.8f)
+            }
+            Ic.OPEN -> {
+                line(11f, 4f, 4f, 4f, 4f, 20f, 20f, 20f, 20f, 13f)
+                line(10f, 14f, 20f, 4f)
+                line(14f, 4f, 20f, 4f, 20f, 10f)
+            }
+            Ic.FIT -> {
+                line(4f, 9f, 4f, 4f, 9f, 4f)
+                line(15f, 4f, 20f, 4f, 20f, 9f)
+                line(20f, 15f, 20f, 20f, 15f, 20f)
+                line(9f, 20f, 4f, 20f, 4f, 15f)
+            }
+            Ic.COPY -> {
+                canvas.drawRoundRect(RectF(8f, 8f, 20f, 20f), 2f, 2f, stroke)
+                line(16f, 4f, 6f, 4f, 4f, 6f, 4f, 16f)
+            }
+            Ic.DELETE -> {
+                line(4f, 6f, 20f, 6f)
+                line(9f, 6f, 9f, 3f, 15f, 3f, 15f, 6f)
+                line(6f, 6f, 7f, 21f, 17f, 21f, 18f, 6f)
+                line(10f, 10f, 10f, 17f)
+                line(14f, 10f, 14f, 17f)
+            }
+            Ic.JOURNAL -> {
+                line(6f, 3f, 18f, 3f, 18f, 21f, 15f, 19f, 12f, 21f, 9f, 19f, 6f, 21f, 6f, 3f)
+                line(9f, 8f, 15f, 8f)
+                line(9f, 12f, 15f, 12f)
+            }
+            Ic.WEB -> {
+                canvas.drawCircle(12f, 12f, 9f, stroke)
+                canvas.drawOval(RectF(8f, 3f, 16f, 21f), stroke)
+                line(3f, 12f, 21f, 12f)
+            }
+        }
+        canvas.restore()
+    }
+
+    override fun setAlpha(alpha: Int) {
+        stroke.alpha = alpha
+        fill.alpha = alpha
+    }
+
+    override fun setColorFilter(colorFilter: ColorFilter?) {
+        stroke.colorFilter = colorFilter
+        fill.colorFilter = colorFilter
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+}
+
+/** 48dp icon button with a circular state layer; glyphs without an icon are drawn as text. */
+fun iconBtn(ctx: Context, glyph: String, color: Int = Palette.ON_SURFACE, onClick: () -> Unit): View {
+    val ic = glyphIcon(glyph)
+    val v: View = if (ic != null) {
+        ImageView(ctx).apply {
+            setImageDrawable(IconDrawable(ic, color))
+            val p = ctx.dp(12)
+            setPadding(p, p, p, p)
+        }
+    } else {
+        text(ctx, glyph, 22f, color = color).apply { gravity = Gravity.CENTER }
+    }
+    return v.apply {
+        contentDescription = glyphLabel(glyph)
+        background = ripple(ctx, roundBg(0x00000000, 24f, ctx), Palette.ON_SURFACE)
+        setOnClickListener { onClick() }
+    }
 }
 
 enum class BtnStyle { FILLED, TONAL, OUTLINED, TEXT }
@@ -340,6 +516,54 @@ class Col(val ctx: Context, padding: Int = 16) {
         return add(c.root, 12)
     }
 
+    /** Expandable section: a header row with a one-line summary; the body is built only when opened. */
+    fun section(title: String, summary: String, expanded: Boolean, onToggle: (Boolean) -> Unit, build: Col.() -> Unit) {
+        val head = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ctx.dp(56)
+            background = ripple(ctx, roundBg(0x00000000, 12f, ctx), Palette.ON_SURFACE)
+            setPadding(ctx.dp(4), 0, ctx.dp(4), 0)
+            val texts = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(ctx, title, Type.TITLE_M, bold = true))
+                if (!expanded && summary.isNotBlank()) addView(text(ctx, summary, 13f, color = Palette.MUTED))
+            }
+            addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(text(ctx, if (expanded) "▴" else "▾", 18f, color = Palette.MUTED))
+            contentDescription = title + ". " + if (expanded) t("Свернуть", "Collapse") else t("Развернуть", "Expand")
+            setOnClickListener { onToggle(!expanded) }
+        }
+        add(head, 16)
+        if (expanded) build()
+    }
+
+    /** Segmented step indicator (M3 linear progress look). */
+    fun steps(current: Int, total: Int) {
+        val bar = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+        for (i in 0 until total) {
+            val seg = View(ctx).apply { background = roundBg(if (i <= current) Palette.ACCENT else Palette.ACCENT_SOFT, 2f, ctx) }
+            val lp = LinearLayout.LayoutParams(0, ctx.dp(4), 1f)
+            if (i > 0) lp.marginStart = ctx.dp(4)
+            bar.addView(seg, lp)
+        }
+        add(bar, 4)
+    }
+
+    /** Empty state: centred message and an optional call to action. */
+    fun empty(title: String, body: String, action: String? = null, onAction: (() -> Unit)? = null) {
+        val box = Col(ctx, 24)
+        box.root.gravity = Gravity.CENTER_HORIZONTAL
+        box.root.background = roundBg(Palette.CARD, 16f, ctx)
+        box.add(text(ctx, title, Type.TITLE_M, bold = true).apply { gravity = Gravity.CENTER }, 0)
+        box.add(text(ctx, body, Type.BODY, color = Palette.MUTED).apply { gravity = Gravity.CENTER }, 8)
+        if (action != null && onAction != null) {
+            box.add(btn(ctx, action, primary = true, onClick = onAction), 16).layoutParams =
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = ctx.dp(16) }
+        }
+        add(box.root, 16)
+    }
+
     fun divider() = add(View(ctx).apply { setBackgroundColor((Palette.OUTLINE and 0x00FFFFFF) or 0x40000000) }, 16).also {
         it.layoutParams.height = ctx.dp(1)
     }
@@ -347,37 +571,60 @@ class Col(val ctx: Context, padding: Int = 16) {
     fun clear() = root.removeAllViews()
 }
 
-/** Tab bar as M3 filter chips (horizontally scrollable). */
-fun tabBar(ctx: Context, tabs: List<String>, selected: Int, onSelect: (Int) -> Unit): HorizontalScrollView {
+/**
+ * M3 primary tabs (scrollable): label + 3dp active indicator, bottom divider.
+ * The selected tab is scrolled into view, so tabs far to the right are never hidden.
+ */
+fun tabBar(ctx: Context, tabs: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
     val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
-    val views = mutableListOf<TextView>()
-    fun paint(sel: Int) = views.forEachIndexed { i, b ->
-        val on = i == sel
-        val shape = if (on) roundBg(Palette.ACCENT_SOFT, 8f, ctx) else roundBg(0x00000000, 8f, ctx, Palette.OUTLINE)
-        b.background = ripple(ctx, shape, Palette.ON_SURFACE)
-        b.setTextColor(if (on) Palette.ON_SOFT else Palette.MUTED)
+    val labels = mutableListOf<TextView>()
+    val marks = mutableListOf<View>()
+    val scroller = HorizontalScrollView(ctx).apply {
+        isHorizontalScrollBarEnabled = false
+        setPadding(ctx.dp(8), 0, ctx.dp(8), 0)
+        clipToPadding = false
+        addView(row)
+    }
+    fun paint(sel: Int) {
+        labels.forEachIndexed { i, l -> l.setTextColor(if (i == sel) Palette.ACCENT else Palette.MUTED) }
+        marks.forEachIndexed { i, m -> m.background = if (i == sel) roundBg(Palette.ACCENT, 3f, ctx) else null }
+    }
+    fun reveal(i: Int) = scroller.post {
+        val v = row.getChildAt(i) ?: return@post
+        scroller.smoothScrollTo(maxOf(0, v.left - (scroller.width - v.width) / 2), 0)
     }
     tabs.forEachIndexed { i, s ->
-        val b = text(ctx, s, 14f, bold = true).apply {
+        val label = text(ctx, s, 14f, bold = true).apply {
             gravity = Gravity.CENTER
-            minHeight = ctx.dp(32)
-            setPadding(ctx.dp(16), ctx.dp(6), ctx.dp(16), ctx.dp(6))
+            isSingleLine = true
+        }
+        val mark = View(ctx)
+        val cell = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            minimumHeight = ctx.dp(48)
+            setPadding(ctx.dp(16), 0, ctx.dp(16), 0)
+            background = ripple(ctx, roundBg(0x00000000, 0f, ctx), Palette.ON_SURFACE)
+            addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 0, 1f))
+            addView(mark, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(3)))
+            contentDescription = s
             setOnClickListener {
                 paint(i)
+                reveal(i)
                 onSelect(i)
             }
         }
-        views.add(b)
-        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        lp.marginEnd = ctx.dp(8)
-        row.addView(b, lp)
+        labels.add(label)
+        marks.add(mark)
+        row.addView(cell, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ctx.dp(48)))
     }
     paint(selected)
-    return HorizontalScrollView(ctx).apply {
-        isHorizontalScrollBarEnabled = false
-        setPadding(ctx.dp(16), ctx.dp(8), ctx.dp(16), ctx.dp(8))
-        clipToPadding = false
-        addView(row)
+    reveal(selected)
+    return LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(scroller)
+        addView(View(ctx).apply { setBackgroundColor((Palette.OUTLINE and 0x00FFFFFF) or 0x40000000) },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(1)))
     }
 }
 
@@ -452,21 +699,15 @@ abstract class LumenBase : Activity() {
             setPadding(dp(4), 0, dp(4), 0)
             setBackgroundColor(Palette.SURFACE)
         }
-        fun icon(glyph: String, desc: String, onClick: () -> Unit) = text(this, glyph, 22f).apply {
-            gravity = Gravity.CENTER
-            contentDescription = desc
-            background = ripple(this@LumenBase, roundBg(0x00000000, 24f, this@LumenBase), Palette.ON_SURFACE)
-            setOnClickListener { onClick() }
-        }
         val size = dp(48)
-        if (back) bar.addView(icon("←", t("Назад", "Back")) { finish() }, LinearLayout.LayoutParams(size, size))
+        if (back) bar.addView(iconBtn(this, "←") { finish() }, LinearLayout.LayoutParams(size, size))
         val tv = text(this, title, Type.TITLE_L).apply {
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(if (back) dp(4) else dp(12), 0, 0, 0)
         }
         bar.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        actions.forEach { (glyph, cb) -> bar.addView(icon(glyph, glyph, cb), LinearLayout.LayoutParams(size, size)) }
+        actions.forEach { (glyph, cb) -> bar.addView(iconBtn(this, glyph, onClick = cb), LinearLayout.LayoutParams(size, size)) }
         return bar
     }
 

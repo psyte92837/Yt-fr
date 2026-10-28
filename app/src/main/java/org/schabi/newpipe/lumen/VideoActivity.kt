@@ -144,7 +144,7 @@ class VideoActivity : LumenBase() {
             commentsShown += 50
             render()
         }
-        page(t("Видео", "Video"), c.root, actions = listOf("↗" to { shareText(v.title, v.url) }))
+        page(t("Видео", "Video"), c.root, actions = listOf("⤴" to { shareText(v.title, v.url) }))
     }
 
     private fun collectNow() {

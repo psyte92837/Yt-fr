@@ -56,6 +56,32 @@ fun Col.filtersEditor(f: SearchFilters) {
     ) { f.limit = it }
 }
 
+/** One-line summary of non-default search filters, e.g. "Сначала новые · Неделя · без Shorts · до 100". */
+fun filtersSummary(f: SearchFilters): String {
+    val parts = mutableListOf<String>()
+    when (f.sort) {
+        "date" -> parts.add(t("Сначала новые", "Newest first"))
+        "views" -> parts.add(t("По просмотрам", "Most viewed"))
+        "rating" -> parts.add(t("По рейтингу", "By rating"))
+    }
+    when (f.period) {
+        "hour" -> parts.add(t("Последний час", "Last hour"))
+        "today" -> parts.add(t("Сегодня", "Today"))
+        "week" -> parts.add(t("Неделя", "Week"))
+        "month" -> parts.add(t("Месяц", "Month"))
+        "year" -> parts.add(t("Год", "Year"))
+        "custom" -> parts.add(listOf(f.from, f.to).joinToString("…") { it.ifBlank { "?" } })
+    }
+    when (f.duration) {
+        "short" -> parts.add(t("короткие", "short"))
+        "medium" -> parts.add(t("средние", "medium"))
+        "long" -> parts.add(t("длинные", "long"))
+    }
+    if (f.excludeShorts) parts.add(t("без Shorts", "no Shorts"))
+    parts.add(t("до ", "up to ") + f.limit)
+    return parts.joinToString(" · ")
+}
+
 class SimpleWatcher(val on: (String) -> Unit) : android.text.TextWatcher {
     override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
     override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
@@ -95,11 +121,14 @@ class LumenActivity : LumenBase() {
         val c = Col(this)
         c.muted(t("Наблюдайте за темой на YouTube и получайте сводки. Все данные — только на устройстве.",
             "Watch a topic on YouTube and get summaries. All data stays on this device."))
+        val shortcuts = mutableListOf<android.view.View>()
         if (Settings.mode == "player") {
-            c.button(t("▶ Плеер NewPipe", "▶ NewPipe player")) {
+            shortcuts.add(chip(this, t("▶ Плеер NewPipe", "▶ NewPipe player")) {
                 startActivity(Intent().setClassName(packageName, "org.schabi.newpipe.MainActivity"))
-            }
+            })
         }
+        shortcuts.add(chip(this, t("🌐 Браузер", "🌐 Browser")) { BrowserActivity.open(this) })
+        c.chips(shortcuts)
         if (Provider.active() == null) {
             c.card {
                 p(t("AI не подключён — поиск, сбор и локальная аналитика работают. Для сводок подключите API.",
@@ -109,35 +138,55 @@ class LumenActivity : LumenBase() {
         }
         val all = Store.projects()
         val list = all.filter { it.archived == showArchived }
-        c.h2(if (showArchived) t("Архив", "Archive") else t("Проекты", "Projects") + " (${list.size})")
-        if (list.isEmpty()) c.muted(t("Пока пусто. Создайте первый проект: введите слово или фразу.", "Empty. Create your first project: enter a word or phrase."))
+        c.h2(if (showArchived) t("Архив", "Archive") + " (${list.size})" else t("Проекты", "Projects") + " (${list.size})")
+        if (list.isEmpty()) {
+            if (showArchived) c.muted(t("В архиве пусто.", "The archive is empty."))
+            else c.empty(t("Пока нет проектов", "No projects yet"),
+                t("Проект — это тема на YouTube: слово, фраза или ссылка на видео, канал, плейлист.",
+                    "A project is a YouTube topic: a word, a phrase or a link to a video, channel or playlist."),
+                t("Создать проект", "Create project")) { startActivity(Intent(this, NewProjectActivity::class.java)) }
+        }
         for (p in list) {
             val card = c.card {
-                add(text(ctx, p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true), 0)
-                if (p.newCount > 0) {
-                    add(text(ctx, t("новых: ", "new: ") + p.newCount, 12f, bold = true, color = Palette.ON_ACCENT).apply {
-                        setTextColor(Palette.ON_ACCENT)
+                val title = text(ctx, p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }
+                val head = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(title, LinearLayout.LayoutParams(0, -2, 1f))
+                    if (p.newCount > 0) addView(text(ctx, t("новых: ", "new: ") + p.newCount, 12f, bold = true, color = Palette.ON_ACCENT).apply {
                         background = roundBg(Palette.ACCENT, 10f, ctx)
                         setPadding(ctx.dp(8), ctx.dp(2), ctx.dp(8), ctx.dp(2))
-                    }, 4).layoutParams = LinearLayout.LayoutParams(-2, -2)
+                    })
+                    addView(iconBtn(ctx, "⋮", Palette.MUTED) { projectMenu(p) }, LinearLayout.LayoutParams(ctx.dp(40), ctx.dp(40)).apply {
+                        marginEnd = -ctx.dp(8)
+                    })
                 }
+                add(head, 0)
                 muted("«${p.phrase}»" + if (p.domain.isNotBlank()) " · ${p.domain}" else "")
                 muted(t("Видео: ", "Videos: ") + p.videoCount + " · " + t("последний запуск: ", "last run: ") + Fmt.dateTime(p.lastRunAt) +
                     if (p.monitor.enabled && Settings.monitoringAllowed) " · ⏱" else "")
             }
+            card.contentDescription = p.name
             card.setOnClickListener { startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id)) }
             card.setOnLongClickListener {
                 projectMenu(p)
                 true
             }
         }
-        c.button(if (showArchived) t("← К проектам", "← Projects") else t("Архив (${all.count { it.archived }})", "Archive (${all.count { it.archived }})")) {
-            showArchived = !showArchived
-            render()
+        val archived = all.count { it.archived }
+        if (showArchived || archived > 0) {
+            c.button(if (showArchived) t("← К проектам", "← Projects") else t("Архив ($archived)", "Archive ($archived)"), style = BtnStyle.TEXT) {
+                showArchived = !showArchived
+                render()
+            }
         }
         page(
             "Lumen", c.root, back = false,
             actions = listOf(
+                "🌐" to { BrowserActivity.open(this) },
                 "🐞" to { startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true)) },
                 "⚙" to { startActivity(Intent(this, SettingsActivity::class.java)) }
             ),
@@ -195,7 +244,8 @@ class WizardActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        c.muted(t("Настройка ${step + 1} из 6 · можно пропустить", "Setup ${step + 1} of 6 · you can skip"))
+        c.steps(step, 6)
+        c.muted(t("Шаг ${step + 1} из 6 · всё можно изменить позже", "Step ${step + 1} of 6 · everything can be changed later"))
         when (step) {
             0 -> {
                 c.title("Lumen")
@@ -270,7 +320,7 @@ class WizardActivity : LumenBase() {
                 c.button(t("Готово", "Done"), true) { next() }
             }
         }
-        if (step > 0) c.button(t("← Назад", "← Back")) {
+        if (step > 0) c.button(t("← Назад", "← Back"), style = BtnStyle.TEXT) {
             step--
             render()
         }
@@ -295,6 +345,7 @@ class NewProjectActivity : LumenBase() {
     private var extraText = ""
     private var suggestions: List<String> = emptyList()
     private var busy = false
+    private var filtersOpen = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -370,10 +421,14 @@ class NewProjectActivity : LumenBase() {
         c.h2(t("Дополнительные запросы", "Extra queries"))
         val extra = c.edit(t("По одному в строке (необязательно)", "One per line (optional)"), extraText, multiline = true)
         extra.addTextChangedListener(SimpleWatcher { extraText = it })
-        c.h2(t("Фильтры поиска", "Search filters"))
-        c.filtersEditor(filters)
-        c.button(t("Создать и искать", "Create and search"), primary = true) {
-            if (phrase.isBlank()) return@button toast(t("Введите фразу", "Enter a phrase"))
+        c.section(t("Фильтры поиска", "Search filters"), filtersSummary(filters), filtersOpen, { open ->
+            filtersOpen = open
+            render()
+        }) {
+            filtersEditor(filters)
+        }
+        val create: () -> Unit = create@{
+            if (phrase.isBlank()) return@create toast(t("Введите фразу", "Enter a phrase"))
             val qs = (chosen + extra.text.toString().lines().map { it.trim() }.filter { it.isNotEmpty() }).toMutableList()
             if (qs.isEmpty()) qs.add(phrase.trim())
             val p = Project(name = phrase.trim().replaceFirstChar { it.uppercase() }, phrase = phrase.trim(), domain = domain,
@@ -384,6 +439,6 @@ class NewProjectActivity : LumenBase() {
             startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id).putExtra("autoSearch", true))
             finish()
         }
-        page(t("Новый проект", "New project"), c.root)
+        page(t("Новый проект", "New project"), c.root, fab = t("Создать и искать", "Create and search") to create)
     }
 }

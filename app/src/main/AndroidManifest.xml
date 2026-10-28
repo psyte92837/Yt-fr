@@ -134,6 +134,11 @@
             android:name=".lumen.MonitorJob"
             android:exported="false"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <activity
+            android:name=".lumen.TtsActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- ===== /Lumen ===== -->
 
         <receiver

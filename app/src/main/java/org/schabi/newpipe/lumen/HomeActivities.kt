@@ -215,6 +215,7 @@ class LumenActivity : LumenBase() {
             "Lumen", c.root, back = false,
             actions = listOf(
                 "🌐" to { BrowserActivity.open(this) },
+                "🔊" to { TtsActivity.open(this) },
                 "🐞" to { startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true)) },
                 "⚙" to { startActivity(Intent(this, SettingsActivity::class.java)) }
             ),

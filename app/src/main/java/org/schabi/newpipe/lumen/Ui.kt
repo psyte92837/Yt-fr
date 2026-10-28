@@ -180,7 +180,7 @@ fun ripple(ctx: Context, content: Drawable, onColor: Int): RippleDrawable {
 }
 
 /** Line icons for the top app bar, drawn in code on a 24-unit grid (Material Symbols Outlined look). */
-enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB }
+enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER }
 
 /** App-bar actions are passed as short glyphs; this maps them to an icon (null = draw the glyph as text). */
 fun glyphIcon(glyph: String): Ic? = when (glyph) {
@@ -196,6 +196,7 @@ fun glyphIcon(glyph: String): Ic? = when (glyph) {
     "🗑" -> Ic.DELETE
     "🧾" -> Ic.JOURNAL
     "🌐" -> Ic.WEB
+    "🔊" -> Ic.SPEAKER
     else -> null
 }
 
@@ -213,6 +214,7 @@ fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
     Ic.DELETE -> t("Очистить", "Clear")
     Ic.JOURNAL -> t("Ответы AI", "AI answers")
     Ic.WEB -> t("Браузер", "Browser")
+    Ic.SPEAKER -> t("Озвучить текст", "Read text aloud")
     null -> glyph
 }
 
@@ -311,6 +313,11 @@ class IconDrawable(private val ic: Ic, color: Int) : Drawable() {
                 canvas.drawCircle(12f, 12f, 9f, stroke)
                 canvas.drawOval(RectF(8f, 3f, 16f, 21f), stroke)
                 line(3f, 12f, 21f, 12f)
+            }
+            Ic.SPEAKER -> {
+                line(4f, 9f, 8f, 9f, 13f, 4f, 13f, 20f, 8f, 15f, 4f, 15f, 4f, 9f)
+                canvas.drawArc(RectF(11f, 8f, 19f, 16f), -50f, 100f, false, stroke)
+                canvas.drawArc(RectF(9f, 4f, 23f, 20f), -50f, 100f, false, stroke)
             }
         }
         canvas.restore()
@@ -660,6 +667,7 @@ fun Activity.showText(title: String, body: String) {
     AlertDialog.Builder(this).setTitle(title).setView(ScrollView(this).apply { addView(tv) })
         .setPositiveButton("OK", null)
         .setNeutralButton(t("Поделиться", "Share")) { _, _ -> shareText(title, body) }
+        .setNegativeButton(t("🔊 Озвучить", "🔊 Read aloud")) { _, _ -> TtsActivity.open(this, body, title) }
         .show()
 }
 

@@ -370,7 +370,9 @@ class LinkActivity : LumenBase() {
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.dataString ?: ""
         L.i("link", "shared: ${text.take(200)}")
         if (!Settings.wizardDone) Settings.wizardDone = true
-        QuickAnalysis.start(this, text)
+        // plain text without a link: read it aloud
+        if (text.isNotBlank() && YtLink.extractUrl(text) == null) TtsActivity.open(this, text)
+        else QuickAnalysis.start(this, text)
         finish()
     }
 }

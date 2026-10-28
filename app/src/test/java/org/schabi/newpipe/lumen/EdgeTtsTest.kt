@@ -105,4 +105,65 @@ class EdgeTtsTest {
         assertEquals("+0%", EdgeTts.signed(0, "%"))
         assertEquals("-20Hz", EdgeTts.signed(-20, "Hz"))
     }
+
+    private fun zip(vararg files: Pair<String, String>): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(out).use { z ->
+            files.forEach { (n, c) ->
+                z.putNextEntry(java.util.zip.ZipEntry(n))
+                z.write(c.toByteArray())
+                z.closeEntry()
+            }
+        }
+        return out.toByteArray()
+    }
+
+    @Test
+    fun decodeDetectsEncodings() {
+        assertEquals("Привет", TtsText.decode("Привет".toByteArray(charset("windows-1251"))))
+        assertEquals("Привет", TtsText.decode("Привет".toByteArray()))
+        assertEquals("Привет", TtsText.decode(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + "Привет".toByteArray()))
+        assertEquals("Hi ё", TtsText.decode(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + "Hi ё".toByteArray(Charsets.UTF_16LE)))
+    }
+
+    @Test
+    fun fb2AndHtmlBecomeParagraphs() {
+        val fb2 = """<?xml version="1.0"?><FictionBook><description><title-info><book-title>Книга</book-title></title-info></description>
+            <body><section><title><p>Глава 1</p></title><p>Первый&nbsp;абзац &laquo;в кавычках&raquo;.</p><p>Второй &#1103; &#x44F;.</p></section></body>
+            <binary id="c.jpg">QUJDREVGRw==</binary></FictionBook>"""
+        val txt = TtsText.fromFile("book.fb2", null, fb2.toByteArray())
+        assertTrue(txt.contains("Глава 1\n"))
+        assertTrue(txt.contains("\nПервый абзац «в кавычках».\nВторой я я."))
+        assertTrue(!txt.contains("QUJD"))
+        val html = "<html><head><title>x</title><style>p{}</style></head><body><h1>Заголовок</h1><p>Текст<br>строка</p><script>var a=1</script></body></html>"
+        assertEquals("Заголовок\nТекст\nстрока", TtsText.fromFile("a.html", "text/html", html.toByteArray()))
+    }
+
+    @Test
+    fun subtitlesDropTimecodesAndRepeats() {
+        val srt = "1\n00:00:01,000 --> 00:00:02,000\nПривет\n\n2\n00:00:02,000 --> 00:00:03,000\nПривет\nмир <i>тут</i>\n"
+        assertEquals("Привет мир тут", TtsText.fromFile("a.srt", null, srt.toByteArray()))
+        val vtt = "WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n\n01:00:01.000 --> 01:00:02.000 align:start\nworld\n"
+        assertEquals("Hello world", TtsText.fromFile("a.vtt", null, vtt.toByteArray()))
+    }
+
+    @Test
+    fun docxAndEpubAreUnzipped() {
+        val docx = zip("word/document.xml" to "<w:document><w:body><w:p><w:r><w:t>Один</w:t></w:r><w:r><w:tab/><w:t>два</w:t></w:r></w:p><w:p><w:r><w:t>Три &amp; четыре</w:t></w:r></w:p></w:body></w:document>")
+        assertEquals("Один два\nТри & четыре", TtsText.fromFile("a.docx", null, docx))
+        val epub = zip(
+            "mimetype" to "application/epub+zip",
+            "OEBPS/content.opf" to "<package><manifest><item id=\"b\" href=\"ch%202.xhtml\"/><item id=\"a\" href=\"ch1.xhtml\"/></manifest><spine><itemref idref=\"a\"/><itemref idref=\"b\"/></spine></package>",
+            "OEBPS/ch 2.xhtml" to "<html><body><p>Вторая</p></body></html>",
+            "OEBPS/ch1.xhtml" to "<html><body><p>Первая</p></body></html>"
+        )
+        assertEquals("Первая\n\nВторая", TtsText.fromFile("b.epub", null, epub))
+    }
+
+    @Test
+    fun markdownAndPdf() {
+        assertEquals("Заголовок\nжирный и ссылка", TtsText.fromFile("a.md", null, "# Заголовок\n**жирный** и [ссылка](http://x)".toByteArray()))
+        assertTrue(runCatching { TtsText.fromFile("a.pdf", null, ByteArray(3)) }.isFailure)
+        assertEquals("a b\n\nc", TtsText.fromFile("a.txt", "text/plain", "a   b\n\n\n\nc  ".toByteArray()))
+    }
 }

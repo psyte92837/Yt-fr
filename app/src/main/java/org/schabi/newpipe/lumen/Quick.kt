@@ -370,8 +370,12 @@ class LinkActivity : LumenBase() {
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: intent.dataString ?: ""
         L.i("link", "shared: ${text.take(200)}")
         if (!Settings.wizardDone) Settings.wizardDone = true
-        // plain text without a link: read it aloud
-        if (text.isNotBlank() && YtLink.extractUrl(text) == null) TtsActivity.open(this, text)
+        @Suppress("DEPRECATION")
+        val stream = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        // a shared .txt file or plain text without a link: read it aloud
+        if (stream != null) startActivity(Intent(this, TtsActivity::class.java).putExtra(Intent.EXTRA_STREAM, stream)
+            .setClipData(android.content.ClipData.newRawUri("", stream)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        else if (text.isNotBlank() && YtLink.extractUrl(text) == null) TtsActivity.open(this, text)
         else QuickAnalysis.start(this, text)
         finish()
     }

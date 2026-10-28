@@ -23,13 +23,20 @@ import java.util.Locale
 class TtsActivity : LumenBase() {
     companion object {
         private const val REQ_SAVE = 7301
+        private const val REQ_PICK = 7302
+        private const val MAX_FILE = 30 * 1024 * 1024
+        private const val MAX_CHARS = 300_000
+        val pickTypes = arrayOf(
+            "text/*", "application/epub+zip", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/x-fictionbook+xml", "application/x-subrip", "application/json", "application/xml", "application/octet-stream"
+        )
 
         fun open(ctx: Context, text: String = "", title: String = "") {
             // very long texts are kept in a file: intent extras are size-limited
             Lumen.init(ctx)
             val f = File(ctx.cacheDir, "tts_input.txt")
             f.writeText(text)
-            ctx.startActivity(Intent(ctx, TtsActivity::class.java).putExtra("title", title).putExtra("file", f.absolutePath)
+            ctx.startActivity(Intent(ctx, TtsActivity::class.java).putExtra("title", title).putExtra("cached", true)
                 .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
@@ -47,15 +54,25 @@ class TtsActivity : LumenBase() {
     @Volatile private var cancel = false
     private var lastAudio: File? = null
     private var lastKey = ""
+    private var gender = TtsPrefs.gender
+    private var setRate: (Int) -> Unit = {}
+    private var setPitch: (Int) -> Unit = {}
+    private var speedRow: android.view.View? = null
+    private var pitchRow: android.view.View? = null
+    private var playRow: android.view.View? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val initial = intent.getStringExtra("file")?.let { runCatching { File(it).readText() }.getOrNull() }
+        val initial = (if (intent.getBooleanExtra("cached", false)) runCatching { File(cacheDir, "tts_input.txt").readText() }.getOrNull() else null)
             ?: intent.getStringExtra(Intent.EXTRA_TEXT) ?: ""
         locale = voice.split('-').take(2).joinToString("-")
         build(initial)
         if (TtsPrefs.auto && initial.isNotBlank()) autoPick(initial)
         loadVoices(false)
+        // a file shared to Lumen (Share → Lumen) or opened from another app
+        @Suppress("DEPRECATION")
+        val shared = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM) ?: intent.data?.takeIf { intent.action == Intent.ACTION_VIEW }
+        if (shared != null && savedInstanceState == null) loadFile(shared)
     }
 
     private fun build(initial: String) {
@@ -73,26 +90,48 @@ class TtsActivity : LumenBase() {
                 override fun afterTextChanged(s: Editable?) = updateCount()
             })
         }
+        c.row(
+            btn(this, t("📎 Выбрать файл", "📎 Pick a file"), style = BtnStyle.TONAL) { pickFile() },
+            btn(this, t("Очистить", "Clear"), style = BtnStyle.OUTLINED) { input.setText("") }
+        )
+        c.muted(t("TXT, MD, FB2, EPUB, DOCX, HTML, SRT/VTT субтитры. Кодировка определяется сама (UTF-8, UTF-16, Windows-1251).",
+            "TXT, MD, FB2, EPUB, DOCX, HTML, SRT/VTT subtitles. Encoding is detected automatically (UTF-8, UTF-16, Windows-1251)."))
         status = c.muted("")
         c.check(t("Подбирать язык голоса по тексту", "Match the voice language to the text"), TtsPrefs.auto) {
             TtsPrefs.auto = it
             if (it) autoPick(input.text.toString())
         }
+        c.check(t("Читать выделенное или с места курсора", "Read the selection or from the cursor"), TtsPrefs.fromCursor) {
+            TtsPrefs.fromCursor = it
+        }
         c.h2(t("Язык и голос", "Language and voice"))
         langBox = c.add(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL })
         voiceBox = c.add(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL })
-        c.button(t("Обновить список голосов", "Refresh voice list"), style = BtnStyle.TEXT) { loadVoices(true) }
+        c.row(
+            btn(this, t("▷ Прослушать голос", "▷ Preview voice"), style = BtnStyle.TONAL) { preview() },
+            btn(this, t("Обновить список", "Refresh list"), style = BtnStyle.TEXT) { loadVoices(true) }
+        )
 
         c.h2(t("Звучание", "Sound"))
-        slider(c, t("Скорость", "Rate"), -50, 100, 5, TtsPrefs.rate, "%") { TtsPrefs.rate = it }
-        slider(c, t("Тон (высота)", "Pitch"), -50, 50, 2, TtsPrefs.pitch, " Hz") { TtsPrefs.pitch = it }
-        slider(c, t("Громкость", "Volume"), -50, 50, 5, TtsPrefs.volume, "%") { TtsPrefs.volume = it }
+        speedRow = c.add(LinearLayout(this))
+        setRate = slider(c, t("Скорость речи", "Speech rate"), -50, 100, 5, TtsPrefs.rate, "%") { TtsPrefs.rate = it; renderPresets() }
+        pitchRow = c.add(LinearLayout(this))
+        setPitch = slider(c, t("Тон (высота голоса)", "Pitch"), -50, 50, 2, TtsPrefs.pitch, " Hz") { TtsPrefs.pitch = it; renderPresets() }
+        val setVolume = slider(c, t("Громкость", "Volume"), -50, 50, 5, TtsPrefs.volume, "%") { TtsPrefs.volume = it }
         c.button(t("Сбросить звучание", "Reset sound"), style = BtnStyle.TEXT) {
             TtsPrefs.rate = 0
             TtsPrefs.pitch = 0
             TtsPrefs.volume = 0
-            recreate()
+            setRate(0)
+            setPitch(0)
+            setVolume(0)
+            renderPresets()
         }
+        c.h2(t("Воспроизведение", "Playback"))
+        c.muted(t("Меняет скорость уже озвученного звука без нового запроса (в MP3 не сохраняется).",
+            "Changes the speed of already synthesized audio without a new request (not saved to MP3)."))
+        playRow = c.add(LinearLayout(this))
+        renderPresets()
 
         playBtn = c.button(t("▶  Озвучить", "▶  Read aloud"), primary = true) { play() }
         c.row(
@@ -105,13 +144,14 @@ class TtsActivity : LumenBase() {
         page(intent.getStringExtra("title")?.takeIf { it.isNotBlank() } ?: t("Озвучка текста", "Read aloud"), c.root)
     }
 
-    private fun slider(c: Col, label: String, min: Int, max: Int, step: Int, value: Int, unit: String, onSet: (Int) -> Unit) {
+    /** Labeled SeekBar; returns a setter that moves it from code. */
+    private fun slider(c: Col, label: String, min: Int, max: Int, step: Int, value: Int, unit: String, onSet: (Int) -> Unit): (Int) -> Unit {
         val tv = c.p("")
         fun show(v: Int) {
             tv.text = "$label: ${EdgeTts.signed(v, unit)}"
         }
         show(value)
-        c.add(SeekBar(this).apply {
+        val bar = c.add(SeekBar(this).apply {
             this.max = (max - min) / step
             progress = (value.coerceIn(min, max) - min) / step
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -120,6 +160,50 @@ class TtsActivity : LumenBase() {
                 override fun onStopTrackingTouch(sb: SeekBar?) = onSet(min + (sb?.progress ?: 0) * step)
             })
         }, 0)
+        return { v ->
+            bar.progress = (v.coerceIn(min, max) - min) / step
+            show(v)
+        }
+    }
+
+    private fun fillRow(holder: android.view.View?, chips: List<android.view.View>) {
+        val box = holder as? LinearLayout ?: return
+        box.removeAllViews()
+        box.addView(chipRow(this, chips), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    /** Quick presets above the sliders and for playback speed. */
+    private fun renderPresets() {
+        fillRow(speedRow, TtsText.speeds.map { (label, v) ->
+            chip(this, label, TtsPrefs.rate == v) {
+                TtsPrefs.rate = v
+                setRate(v)
+                renderPresets()
+            }
+        })
+        fillRow(pitchRow, listOf(t("Ниже", "Lower") to -20, t("Обычный", "Normal") to 0, t("Выше", "Higher") to 20).map { (label, v) ->
+            chip(this, label, TtsPrefs.pitch == v) {
+                TtsPrefs.pitch = v
+                setPitch(v)
+                renderPresets()
+            }
+        })
+        fillRow(playRow, listOf(1f, 1.25f, 1.5f, 1.75f, 2f).map { v ->
+            chip(this, (if (v == 1f) "1" else v.toString()) + "×", TtsPrefs.playSpeed == v) {
+                TtsPrefs.playSpeed = v
+                applyPlaySpeed()
+                renderPresets()
+            }
+        })
+    }
+
+    private fun applyPlaySpeed() {
+        val p = player ?: return
+        runCatching {
+            val wasPlaying = p.isPlaying
+            p.playbackParams = p.playbackParams.setSpeed(TtsPrefs.playSpeed)
+            if (!wasPlaying) p.pause() // setting params starts playback on some devices
+        }
     }
 
     private fun updateCount() {
@@ -164,9 +248,20 @@ class TtsActivity : LumenBase() {
     }
 
     private fun renderVoices() {
-        val list = voices.filter { it.locale == locale }
-        if (list.none { it.shortName == voice }) list.firstOrNull()?.let { voice = it.shortName }
+        val ofLocale = voices.filter { it.locale == locale }
+        val list = ofLocale.filter { gender == "all" || it.gender == gender }.ifEmpty { ofLocale }
+        if (list.none { it.shortName == voice }) list.firstOrNull()?.let {
+            voice = it.shortName
+            TtsPrefs.voice = voice
+        }
         voiceBox.removeAllViews()
+        voiceBox.addView(chipRow(this, listOf("all" to t("Все", "All"), "Female" to t("Женские", "Female"), "Male" to t("Мужские", "Male")).map { (g, label) ->
+            chip(this, label + " " + ofLocale.count { g == "all" || it.gender == g }, gender == g) {
+                gender = g
+                TtsPrefs.gender = g
+                renderVoices()
+            }
+        }).apply { setPadding(0, dp(8), 0, 0) })
         voiceBox.addView(text(this, t("Голос", "Voice"), 13f, color = Palette.MUTED).apply { setPadding(0, dp(8), 0, 0) })
         voiceBox.addView(spin(this, list.map { it.shortName to voiceLabel(it) }, voice) {
             voice = it
@@ -199,7 +294,7 @@ class TtsActivity : LumenBase() {
 
     private fun play() {
         if (busy) return
-        val text = input.text.toString()
+        val text = textToRead()
         if (text.isBlank()) {
             toast(t("Введите текст", "Enter some text"))
             return
@@ -236,6 +331,83 @@ class TtsActivity : LumenBase() {
         }
     }
 
+    /** Whole text, or the selection / the rest from the cursor when that option is on. */
+    private fun textToRead(): String {
+        val all = input.text.toString()
+        if (!TtsPrefs.fromCursor) return all
+        val a = minOf(input.selectionStart, input.selectionEnd).coerceIn(0, all.length)
+        val b = maxOf(input.selectionStart, input.selectionEnd).coerceIn(0, all.length)
+        return when {
+            b > a -> all.substring(a, b)
+            a in 1 until all.length -> all.substring(a)
+            else -> all
+        }
+    }
+
+    private fun preview() {
+        if (busy) return
+        val lang = voice.substringBefore('-')
+        busy = true
+        status.text = t("Загружаю образец…", "Loading sample…")
+        Lumen.async({
+            File(cacheDir, "tts_sample.mp3").apply { writeBytes(EdgeTts.synthesize(TtsText.sample(lang), options())) }
+        }, { e ->
+            busy = false
+            updateCount()
+            err(e)
+        }) { f ->
+            busy = false
+            if (!isFinishing) startPlayer(f)
+        }
+    }
+
+    private fun pickFile() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, pickTypes)
+        @Suppress("DEPRECATION")
+        startActivityForResult(i, REQ_PICK)
+    }
+
+    private fun fileName(uri: android.net.Uri): String = runCatching {
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    }.getOrNull() ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
+
+    private fun loadFile(uri: android.net.Uri) {
+        status.text = t("Читаю файл…", "Reading file…")
+        Lumen.async({
+            val name = fileName(uri)
+            val bytes = contentResolver.openInputStream(uri)?.use { s ->
+                val out = java.io.ByteArrayOutputStream()
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = s.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    if (out.size() > MAX_FILE) error(t("Файл больше 30 МБ", "File is larger than 30 MB"))
+                }
+                out.toByteArray()
+            } ?: error(t("Не удалось открыть файл", "Could not open the file"))
+            name to TtsText.fromFile(name, contentResolver.getType(uri), bytes)
+        }, { e ->
+            updateCount()
+            err(e)
+        }) { (name, text) ->
+            if (text.isBlank()) {
+                toast(t("В файле нет текста", "No text in the file"))
+                updateCount()
+                return@async
+            }
+            val cut = text.length > MAX_CHARS
+            input.setText(if (cut) text.substring(0, MAX_CHARS) else text)
+            input.setSelection(0)
+            if (cut) toast(t("Файл длинный: загружены первые 300 000 символов", "Long file: the first 300,000 characters were loaded"))
+            if (TtsPrefs.auto) autoPick(text)
+            toast(t("Загружено: $name", "Loaded: $name"))
+        }
+    }
+
     private fun startPlayer(f: File) {
         stopPlayer()
         try {
@@ -245,6 +417,7 @@ class TtsActivity : LumenBase() {
                 setDataSource(f.absolutePath)
                 setOnCompletionListener { status.text = t("Готово", "Done") }
                 prepare()
+                if (TtsPrefs.playSpeed != 1f) runCatching { playbackParams = playbackParams.setSpeed(TtsPrefs.playSpeed) }
                 start()
             }
             status.text = t("Воспроизведение…", "Playing…")
@@ -277,7 +450,7 @@ class TtsActivity : LumenBase() {
 
     private fun save() {
         val f = lastAudio
-        if (f == null || !f.exists() || lastKey != sha1(input.text.toString() + "|" + options())) {
+        if (f == null || !f.exists() || lastKey != sha1(textToRead() + "|" + options())) {
             toast(t("Сначала нажмите «Озвучить»", "Press “Read aloud” first"))
             return
         }
@@ -292,7 +465,12 @@ class TtsActivity : LumenBase() {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data ?: return
-        if (requestCode != REQ_SAVE || resultCode != RESULT_OK) return
+        if (resultCode != RESULT_OK) return
+        if (requestCode == REQ_PICK) {
+            loadFile(uri)
+            return
+        }
+        if (requestCode != REQ_SAVE) return
         val f = lastAudio ?: return
         Lumen.async({
             contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }

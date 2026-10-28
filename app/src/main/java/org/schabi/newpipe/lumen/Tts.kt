@@ -391,6 +391,150 @@ object EdgeTts {
     }
 }
 
+/** Turns a picked file into plain text to read aloud (no extra libraries). */
+object TtsText {
+    /** Speed presets: label → rate percent. */
+    val speeds = listOf("0.5×" to -50, "0.75×" to -25, "1×" to 0, "1.25×" to 25, "1.5×" to 50, "1.75×" to 75, "2×" to 100)
+
+    /** UTF-8 / UTF-16 (BOM) / Windows-1251 fallback for old Russian .txt files. */
+    fun decode(b: ByteArray): String {
+        if (b.size >= 2 && b[0] == 0xFF.toByte() && b[1] == 0xFE.toByte()) return String(b, 2, b.size - 2, Charsets.UTF_16LE)
+        if (b.size >= 2 && b[0] == 0xFE.toByte() && b[1] == 0xFF.toByte()) return String(b, 2, b.size - 2, Charsets.UTF_16BE)
+        val start = if (b.size >= 3 && b[0] == 0xEF.toByte() && b[1] == 0xBB.toByte() && b[2] == 0xBF.toByte()) 3 else 0
+        val dec = Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+        return try {
+            dec.decode(java.nio.ByteBuffer.wrap(b, start, b.size - start)).toString()
+        } catch (e: java.nio.charset.CharacterCodingException) {
+            String(b, charset("windows-1251"))
+        }
+    }
+
+    fun unescape(s: String): String = Regex("&(#x[0-9a-fA-F]+|#[0-9]+|[a-zA-Z]+);").replace(s) { m ->
+        val e = m.groupValues[1]
+        when {
+            e.startsWith("#x") || e.startsWith("#X") -> e.substring(2).toIntOrNull(16)?.let { String(Character.toChars(it)) } ?: m.value
+            e.startsWith("#") -> e.substring(1).toIntOrNull()?.let { String(Character.toChars(it)) } ?: m.value
+            else -> when (e.lowercase()) {
+                "amp" -> "&"
+                "lt" -> "<"
+                "gt" -> ">"
+                "quot" -> "\""
+                "apos" -> "'"
+                "nbsp" -> " "
+                "mdash" -> "—"
+                "ndash" -> "–"
+                "laquo" -> "«"
+                "raquo" -> "»"
+                "hellip" -> "…"
+                else -> m.value
+            }
+        }
+    }
+
+    private fun tidy(s: String): String = s.lines().joinToString("\n") { it.replace(Regex("[ \\t\\u00A0]+"), " ").trim() }
+        .replace(Regex("\n{3,}"), "\n\n").trim()
+
+    /** HTML / XHTML / FB2 markup → text with paragraph breaks. */
+    fun markup(src: String): String {
+        var s = src
+        s = s.replace(Regex("(?is)<(script|style|head|binary)\\b.*?</\\1>"), " ")
+        s = s.replace(Regex("(?is)<!--.*?-->"), " ")
+        s = s.replace(Regex("(?i)<br\\s*/?>"), "\n")
+        s = s.replace(Regex("(?i)</(p|div|h[1-6]|li|tr|title|subtitle|v|stanza|section|blockquote)>"), "\n")
+        s = s.replace(Regex("(?i)<w:tab\\s*/>"), " ")
+        s = s.replace(Regex("(?i)</w:p>"), "\n")
+        s = s.replace(Regex("(?s)<[^>]+>"), "")
+        return tidy(unescape(s))
+    }
+
+    /** SRT / VTT → spoken lines without numbers, timecodes and repeated lines. */
+    fun subtitles(src: String): String {
+        val time = Regex("^\\d{1,2}:\\d{2}(:\\d{2})?[.,]\\d{1,3}\\s*-->.*$|^\\d{1,2}:\\d{2}[.,]\\d{1,3}\\s*-->.*$")
+        val out = mutableListOf<String>()
+        for (raw in src.lines()) {
+            val l = raw.trim()
+            if (l.isEmpty() || l == "WEBVTT" || l.matches(Regex("^\\d+$")) || time.matches(l)) continue
+            if (l.startsWith("NOTE") || l.startsWith("Kind:") || l.startsWith("Language:") || l.startsWith("STYLE")) continue
+            val clean = unescape(l.replace(Regex("<[^>]+>"), "")).trim()
+            if (clean.isNotEmpty() && out.lastOrNull() != clean) out.add(clean)
+        }
+        return out.joinToString(" ")
+    }
+
+    private fun unzip(b: ByteArray): List<Pair<String, ByteArray>> {
+        val out = mutableListOf<Pair<String, ByteArray>>()
+        java.util.zip.ZipInputStream(b.inputStream()).use { z ->
+            while (true) {
+                val e = z.nextEntry ?: break
+                if (!e.isDirectory) out.add(e.name to z.readBytes())
+            }
+        }
+        return out
+    }
+
+    private fun docx(b: ByteArray): String {
+        val doc = unzip(b).firstOrNull { it.first == "word/document.xml" } ?: error("no word/document.xml")
+        return markup(String(doc.second, Charsets.UTF_8))
+    }
+
+    private fun epub(b: ByteArray): String {
+        val files = unzip(b)
+        val byName = files.toMap()
+        val opf = files.firstOrNull { it.first.endsWith(".opf") }
+        val pages: List<ByteArray> = if (opf != null) {
+            // reading order from the spine
+            val x = String(opf.second, Charsets.UTF_8)
+            val dir = opf.first.substringBeforeLast('/', "").let { if (it.isEmpty()) "" else "$it/" }
+            val items = Regex("<item\\b[^>]*>").findAll(x).mapNotNull { m ->
+                val id = Regex("\\bid=\"([^\"]+)\"").find(m.value)?.groupValues?.get(1)
+                val href = Regex("\\bhref=\"([^\"]+)\"").find(m.value)?.groupValues?.get(1)
+                if (id != null && href != null) id to href else null
+            }.toMap()
+            Regex("<itemref\\b[^>]*idref=\"([^\"]+)\"").findAll(x).mapNotNull { m ->
+                items[m.groupValues[1]]?.let { byName[dir + java.net.URLDecoder.decode(it, "UTF-8")] }
+            }.toList()
+        } else {
+            emptyList()
+        }
+        val list = pages.ifEmpty { files.filter { it.first.endsWith(".xhtml") || it.first.endsWith(".html") || it.first.endsWith(".htm") }.map { it.second } }
+        return list.joinToString("\n\n") { markup(String(it, Charsets.UTF_8)) }.trim()
+    }
+
+    /** Extracts readable text from a file by its name / MIME type. */
+    fun fromFile(name: String, mime: String?, b: ByteArray): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val m = mime?.lowercase() ?: ""
+        return when {
+            ext == "docx" || m.contains("wordprocessingml") -> docx(b)
+            ext == "epub" || m.contains("epub") -> epub(b)
+            ext == "fb2" || ext == "html" || ext == "htm" || ext == "xhtml" || ext == "xml" || m.contains("html") || m.contains("fictionbook") -> markup(decode(b))
+            ext == "srt" || ext == "vtt" || m.contains("subrip") || m.contains("vtt") -> subtitles(decode(b))
+            ext == "pdf" || m.contains("pdf") -> error(t("PDF не поддерживается: сохраните его как TXT или DOCX", "PDF is not supported: save it as TXT or DOCX"))
+            ext == "md" || ext == "markdown" -> tidy(decode(b).replace(Regex("(?m)^#{1,6}\\s*"), "").replace(Regex("[*_`]{1,3}"), "")
+                .replace(Regex("!?\\[([^\\]]*)]\\([^)]*\\)"), "$1"))
+            else -> tidy(decode(b))
+        }
+    }
+
+    /** Short phrase to preview a voice. */
+    fun sample(lang: String): String = when (lang) {
+        "ru" -> "Привет! Так звучит этот голос. Скорость и тон можно настроить."
+        "uk" -> "Привіт! Ось так звучить цей голос."
+        "de" -> "Hallo! So klingt diese Stimme."
+        "fr" -> "Bonjour ! Voici à quoi ressemble cette voix."
+        "es" -> "¡Hola! Así suena esta voz."
+        "it" -> "Ciao! Ecco come suona questa voce."
+        "pt" -> "Olá! É assim que esta voz soa."
+        "pl" -> "Cześć! Tak brzmi ten głos."
+        "tr" -> "Merhaba! Bu ses böyle duyuluyor."
+        "zh" -> "你好！这就是这个声音的效果。"
+        "ja" -> "こんにちは。この声はこのように聞こえます。"
+        else -> "Hello! This is how this voice sounds."
+    }
+}
+
 /** Saved speech settings. */
 object TtsPrefs {
     private val p get() = Lumen.prefs
@@ -413,4 +557,14 @@ object TtsPrefs {
     var auto: Boolean
         get() = p.getBoolean("tts_auto", true)
         set(v) = p.edit().putBoolean("tts_auto", v).apply()
+    var fromCursor: Boolean
+        get() = p.getBoolean("tts_from_cursor", false)
+        set(v) = p.edit().putBoolean("tts_from_cursor", v).apply()
+    /** "all", "Female" or "Male". */
+    var gender: String
+        get() = p.getString("tts_gender", "all") ?: "all"
+        set(v) = p.edit().putString("tts_gender", v).apply()
+    var playSpeed: Float
+        get() = p.getFloat("tts_play_speed", 1f)
+        set(v) = p.edit().putFloat("tts_play_speed", v).apply()
 }

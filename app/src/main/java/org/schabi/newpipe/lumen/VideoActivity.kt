@@ -28,6 +28,12 @@ class VideoActivity : LumenBase() {
         render()
     }
 
+    private fun reloadAndRender() {
+        if (isFinishing || isDestroyed) return
+        Store.videos(pid)[video.id]?.let { video = it }
+        render()
+    }
+
     private fun save() = Store.updateVideo(pid, video.id) {
         it.marked = video.marked
         it.labels = video.labels
@@ -103,6 +109,8 @@ class VideoActivity : LumenBase() {
             if (busy) t("AI думает…", "AI is thinking…") else if (summary == null) t("Сделать сводку", "Summarise") else t("Обновить сводку", "Refresh summary"),
             style = BtnStyle.TONAL
         ) { summarise(summary != null) }
+
+        styleCard(c, pid, v, full = true) { reloadAndRender() }
 
         if (v.tags.isNotEmpty()) {
             c.h2(t("Теги", "Tags"))

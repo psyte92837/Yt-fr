@@ -74,6 +74,7 @@ object CollectState {
         kind == "recs" -> t("Рекомендации: ", "Recommendations: ") + current
         kind == "quick" -> t("Быстрый анализ: ", "Instant analysis: ") + current
         kind == "chgraph" -> current
+        kind == "style" -> t("Стиль видео: ", "Video style: ") + current
         else -> "$done / $total · ${t("ошибок", "errors")}: $errors\n$current"
     }
 }
@@ -122,6 +123,11 @@ class CollectService : Service() {
                     CollectState.lastResult = QuickAnalysis.run(pid, CollectState.cancel) { msg ->
                         CollectState.current = msg
                         startFg(msg.substringBefore('\n'), 0, 0)
+                    }
+                } else if (kind == "style") {
+                    CollectState.lastResult = VideoStyle.run(pid, ids.firstOrNull() ?: "") { msg ->
+                        CollectState.current = msg
+                        startFg(msg, 0, 0)
                     }
                 } else if (kind == "chgraph") {
                     val seeds = (Store.readFile(pid, "chgraph_seeds.txt") ?: "").lines().filter { it.isNotBlank() }
@@ -224,6 +230,7 @@ class CollectService : Service() {
                 if (CollectState.kind == "recs") "Lumen: " + t("рекомендации", "recommendations")
                 else if (CollectState.kind == "quick") "Lumen: " + t("быстрый анализ", "instant analysis")
                 else if (CollectState.kind == "chgraph") "Lumen: " + t("граф каналов", "channel graph")
+                else if (CollectState.kind == "style") "Lumen: " + t("стиль видео", "video style")
                 else "Lumen: ${t("сбор", "collecting")} $done/$total"
             )
             .setContentText(text)
@@ -256,6 +263,13 @@ class CollectService : Service() {
 
         fun startKind(ctx: Context, projectId: String, kind: String) {
             val i = Intent(ctx, CollectService::class.java).putExtra("id", projectId).putExtra("kind", kind)
+            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+        }
+
+        /** Video style detection for one video of a project (only on the user's request). */
+        fun startStyle(ctx: Context, projectId: String, videoId: String) {
+            val i = Intent(ctx, CollectService::class.java).putExtra("id", projectId).putExtra("kind", "style")
+                .putStringArrayListExtra("videos", arrayListOf(videoId))
             if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
         }
 

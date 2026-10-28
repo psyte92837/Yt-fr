@@ -279,7 +279,7 @@ private fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
         clipToOutline = true
     }
     row.addView(img, LinearLayout.LayoutParams(dp(96), dp(54)).apply { marginEnd = dp(12) })
-    Thumbs.load(img, n.thumb)
+    Thumbs.load(img, ThumbUrl.mini(n.id, n.thumb))
     val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
     info.addView(text(this, n.title.ifBlank { n.id }, 14f, bold = true).apply {
         maxLines = 2

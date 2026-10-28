@@ -256,3 +256,15 @@ object YtQuery {
         else -> true
     }
 }
+
+/** Small YouTube thumbnails for lists (320×180 "mqdefault" instead of the large image). */
+object ThumbUrl {
+    private val ytThumb = Regex("""https?://i\d?\.ytimg\.com/vi(?:_webp)?/([A-Za-z0-9_-]{11})/""")
+    private val videoId = Regex("""^[A-Za-z0-9_-]{11}$""")
+
+    fun mini(id: String, thumb: String): String {
+        ytThumb.find(thumb)?.let { return "https://i.ytimg.com/vi/${it.groupValues[1]}/mqdefault.jpg" }
+        if (thumb.isBlank() && videoId.matches(id)) return "https://i.ytimg.com/vi/$id/mqdefault.jpg"
+        return thumb
+    }
+}

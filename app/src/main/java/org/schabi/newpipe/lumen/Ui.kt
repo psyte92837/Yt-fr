@@ -793,6 +793,34 @@ abstract class LumenBase : Activity() {
     }
 }
 
+/** List row of a video: small thumbnail, title (2 lines), channel and a metrics line. */
+fun videoListRow(ctx: Context, thumb: String, title: String, sub: String, meta: String, onClick: () -> Unit): LinearLayout {
+    val row = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        background = ripple(ctx, roundBg(Palette.CARD, 12f, ctx), Palette.ON_SURFACE)
+        setPadding(ctx.dp(8), ctx.dp(8), ctx.dp(12), ctx.dp(8))
+        setOnClickListener { onClick() }
+    }
+    val img = ImageView(ctx).apply {
+        scaleType = ImageView.ScaleType.CENTER_CROP
+        background = roundBg(Palette.ACCENT_SOFT, 8f, ctx)
+        clipToOutline = true
+        contentDescription = title
+    }
+    row.addView(img, LinearLayout.LayoutParams(ctx.dp(96), ctx.dp(54)).apply { marginEnd = ctx.dp(12) })
+    Thumbs.load(img, thumb)
+    val info = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+    info.addView(text(ctx, title, 14f, bold = true).apply {
+        maxLines = 2
+        ellipsize = android.text.TextUtils.TruncateAt.END
+    })
+    if (sub.isNotBlank()) info.addView(text(ctx, sub, 12f, color = Palette.MUTED).apply { isSingleLine = true })
+    if (meta.isNotBlank()) info.addView(text(ctx, meta, 12f, color = Palette.MUTED))
+    row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+    return row
+}
+
 /** Minimal async thumbnail loader with a memory cache. */
 object Thumbs {
     private val pool = Executors.newFixedThreadPool(4)
@@ -816,7 +844,7 @@ object Thumbs {
                 val c = URL(url).openConnection() as HttpURLConnection
                 c.connectTimeout = 15000
                 c.readTimeout = 15000
-                val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+                val opts = BitmapFactory.Options().apply { inSampleSize = if (url.contains("mqdefault")) 1 else 2 }
                 val bmp = c.inputStream.use { BitmapFactory.decodeStream(it, null, opts) }
                 if (bmp != null) {
                     cache.put(url, bmp)

@@ -87,7 +87,7 @@ object Llm {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = method
         c.connectTimeout = 30_000
-        c.readTimeout = 180_000
+        c.readTimeout = 300_000
         headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
         if (body != null) {
             c.doOutput = true
@@ -138,12 +138,13 @@ object Llm {
         fileUri: String? = null,
         maxTokens: Int = 4096,
         task: String = "",
-        pid: String = ""
+        pid: String = "",
+        lowMedia: Boolean = false
     ): LlmReply {
         val started = System.currentTimeMillis()
         var raw: String? = null
         try {
-            val r = completeRaw(p, model, system, user, json, fileUri, maxTokens) { raw = it }
+            val r = completeRaw(p, model, system, user, json, fileUri, maxTokens, lowMedia) { raw = it }
             AiJournal.record(pid, task, p.name, r.model, system, user, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started)
             return r
@@ -162,6 +163,7 @@ object Llm {
         json: Boolean,
         fileUri: String?,
         maxTokens: Int,
+        lowMedia: Boolean,
         onRaw: (String) -> Unit
     ): LlmReply {
         val headers = authHeaders(p)
@@ -191,6 +193,8 @@ object Llm {
                 parts.put(JSONObject().put("text", user))
                 val gen = JSONObject().put("maxOutputTokens", maxTokens)
                 if (json) gen.put("responseMimeType", "application/json")
+                // ~3× fewer tokens per video frame
+                if (lowMedia && fileUri != null) gen.put("mediaResolution", "MEDIA_RESOLUTION_LOW")
                 val body = JSONObject()
                     .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
@@ -263,6 +267,19 @@ object Prompts {
                 "Дай: о чём канал и для кого; основные рубрики и форматы; что заходит лучше всего (по просмотрам) и почему — как гипотеза; " +
                 "частота и регулярность выпусков; монетизация и ссылки (по описанию); сильные и слабые стороны; 3–5 идей контента. " +
                 "Не выдумывай цифры, используй только переданные.\n\n{data}"
+            ),
+        "video_style" to (
+            "Определи стиль видеоряда и монтажа YouTube-видео. {mode}\n" +
+                "Ответ на языке {lang}, в Markdown, кратко и конкретно, с таймкодами где можно:\n" +
+                "1. Формат и жанр (говорящая голова, скринкаст, влог, обзор, анимация, нарезка…).\n" +
+                "2. Структура по времени: хук, вступление, основные блоки, призыв к действию, концовка.\n" +
+                "3. Монтаж и видеоряд: планы, частота склеек, перебивки и b-roll, графика и текст на экране, переходы, цвет.\n" +
+                "4. Звук и подача: темп речи, интонация, музыка и эффекты.\n" +
+                "5. Обложка и заголовок: приём и формула.\n" +
+                "6. Приёмы удержания внимания.\n" +
+                "7. Шаблон для повторения: монтажный лист по секундам для видео такой же длины.\n" +
+                "8. Чек-лист из 5–10 пунктов для своего видео.\n" +
+                "Измеренные метрики приблизительны; не выдумывай цифры.\n\n{data}"
             ),
         "chat" to (
             "Ты аналитик. Отвечай на вопрос только на основе данных проекта по теме \"{phrase}\". " +

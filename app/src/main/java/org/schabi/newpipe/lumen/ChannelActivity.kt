@@ -195,13 +195,10 @@ class ChannelActivity : LumenBase() {
         page(d.name.ifBlank { t("Канал", "Channel") }, c.root, actions = listOf("↗" to { openUrl(d.url) }))
     }
 
-    private fun videoLine(v: Video) = text(this, "${v.title}\n" + Fmt.num(v.views) + " · " + (if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText) +
-        " · " + Fmt.duration(v.duration), 13f).apply {
-        background = ripple(this@ChannelActivity, roundBg(Palette.CARD, 12f, this@ChannelActivity), Palette.ON_SURFACE)
-        setPadding(dp(12), dp(8), dp(12), dp(8))
-        setOnClickListener {
-            confirm(v.title, t("Что сделать?", "What to do?"), t("Анализ видео", "Analyse video")) { QuickAnalysis.start(this@ChannelActivity, v.url) }
-        }
+    private fun videoLine(v: Video) = videoListRow(this, ThumbUrl.mini(v.id, v.thumb), v.title, "",
+        Fmt.num(v.views) + " · " + (if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText) + " · " + Fmt.duration(v.duration)) {
+        chooseLinkAction(v.url)
+    }.apply {
         setOnLongClickListener {
             openVideo(v.url)
             true

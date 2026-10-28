@@ -197,6 +197,10 @@ object YouTube {
         return v
     }
 
+    fun applyInfo(v: Video, info: StreamInfo) = applyStreamInfo(v, info)
+
+    fun subtitleFor(subs: List<SubtitlesStream>, lang: String): SubtitlesStream? = pickSubtitle(subs, lang)
+
     private fun applyStreamInfo(v: Video, info: StreamInfo) {
         v.title = info.name ?: v.title
         v.channel = info.uploaderName ?: v.channel

@@ -7,14 +7,14 @@ package org.schabi.newpipe.lumen
 import org.json.JSONArray
 import org.json.JSONObject
 
-private fun JSONArray?.strings(): MutableList<String> {
+internal fun JSONArray?.strings(): MutableList<String> {
     val out = mutableListOf<String>()
     if (this == null) return out
     for (i in 0 until length()) out.add(optString(i))
     return out
 }
 
-private fun List<String>.toJsonArray(): JSONArray = JSONArray().also { a -> forEach { a.put(it) } }
+internal fun List<String>.toJsonArray(): JSONArray = JSONArray().also { a -> forEach { a.put(it) } }
 
 data class SearchFilters(
     var sort: String = "relevance", // relevance | date | views | rating
@@ -202,6 +202,7 @@ data class Project(
     var seo: SeoContext = SeoContext(),
     var source: String = "", // shared link for instant analysis
     var sourceType: String = "", // video | channel | playlist
+    var quickMode: String = "", // "" = instant analysis | "style" = video style only
     var createdAt: Long = System.currentTimeMillis(),
     var lastRunAt: Long = 0,
     var archived: Boolean = false,
@@ -213,7 +214,7 @@ data class Project(
 
     fun toJson(): JSONObject = JSONObject().put("id", id).put("name", name).put("phrase", phrase)
         .put("domain", domain).put("queries", queries.toJsonArray()).put("filters", filters.toJson())
-        .put("collect", collect.toJson()).put("monitor", monitor.toJson()).put("recs", recs.toJson()).put("seo", seo.toJson()).put("source", source).put("sourceType", sourceType).put("createdAt", createdAt)
+        .put("collect", collect.toJson()).put("monitor", monitor.toJson()).put("recs", recs.toJson()).put("seo", seo.toJson()).put("source", source).put("sourceType", sourceType).put("quickMode", quickMode).put("createdAt", createdAt)
         .put("lastRunAt", lastRunAt).put("archived", archived).put("newCount", newCount)
         .put("videoCount", videoCount)
         .put("runs", JSONArray().also { a -> runs.takeLast(100).forEach { a.put(it.toJson()) } })
@@ -232,6 +233,7 @@ data class Project(
             seo = SeoContext.from(o.optJSONObject("seo")),
             source = o.optString("source"),
             sourceType = o.optString("sourceType"),
+            quickMode = o.optString("quickMode"),
             createdAt = o.optLong("createdAt"),
             lastRunAt = o.optLong("lastRunAt"),
             archived = o.optBoolean("archived"),

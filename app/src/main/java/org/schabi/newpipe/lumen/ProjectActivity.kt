@@ -219,7 +219,7 @@ class ProjectActivity : LumenBase() {
         )
         AlertDialog.Builder(this).setTitle(t("Импорт", "Import")).setItems(items) { _, which ->
             if (which == 5) {
-                prompt(t("Ссылка на видео, канал или плейлист", "Video, channel or playlist link"), "https://youtube.com/…") { QuickAnalysis.start(this, it) }
+                prompt(t("Ссылка на видео, канал или плейлист", "Video, channel or playlist link"), "https://youtube.com/…") { chooseLinkAction(it) }
             } else if (which == 3) {
                 importTrending()
             } else if (which == 4) {
@@ -455,7 +455,7 @@ class ProjectActivity : LumenBase() {
             clipToOutline = true
         }
         row.addView(img, LinearLayout.LayoutParams(dp(112), dp(63)).apply { marginEnd = dp(12) })
-        Thumbs.load(img, v.thumb)
+        Thumbs.load(img, ThumbUrl.mini(v.id, v.thumb))
         val info = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         info.addView(text(this, v.title, 14f, bold = true).apply {
             maxLines = 2
@@ -639,10 +639,9 @@ class ProjectActivity : LumenBase() {
                 "velocity" -> Fmt.num(Analytics.velocity(v)) + t("/день", "/day")
                 else -> Fmt.num(v.views)
             }
-            c.add(text(this, "${i + 1}. ${v.title} — $metric", 14f).apply {
-                setOnClickListener { startActivity(Intent(this@ProjectActivity, VideoActivity::class.java).putExtra("pid", project.id).putExtra("vid", v.id)) }
-                minHeight = dp(40)
-            }, 4)
+            c.add(videoListRow(this, ThumbUrl.mini(v.id, v.thumb), "${i + 1}. ${v.title}", v.channel, metric) {
+                startActivity(Intent(this@ProjectActivity, VideoActivity::class.java).putExtra("pid", project.id).putExtra("vid", v.id))
+            }, 6)
         }
 
         c.h2(t("Сравнение", "Comparison"))

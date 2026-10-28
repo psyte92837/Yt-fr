@@ -39,8 +39,20 @@ fun ProjectActivity.overviewTab(c: Col) {
         }
     )
 
-    // ---- AI summaries
     val vids = videos.values.toList()
+    // ---- video style (only when requested: Share/paste → "Video style", or on the video screen)
+    if (project.quickMode == "style" || (vids.size == 1 && StyleMetrics.load(project.id, vids.first().id) != null)) {
+        vids.firstOrNull()?.let { v ->
+            styleCard(c, project.id, v, full = false) {
+                if (!isFinishing) {
+                    reload()
+                    render()
+                }
+            }
+        }
+    }
+
+    // ---- AI summaries
     val summary = Store.latestAi(project.id, "project_summary", "project")
         ?: vids.firstNotNullOfOrNull { Store.latestAi(project.id, "video_summary", it.id) }
     if (summary != null) {
@@ -98,11 +110,7 @@ fun ProjectActivity.overviewTab(c: Col) {
     if (g.nodes.size > 1) {
         c.h2(t("Похожие и рекомендации", "Similar & recommended") + " (${g.nodes.size - 1})")
         RecEngine.ranked(g, "hits").take(8).forEach { n ->
-            c.add(text(this, "×${n.hits}  ${n.title}\n${n.channel} · ${Fmt.num(n.views)}", 13f).apply {
-                background = ripple(this@overviewTab, roundBg(Palette.CARD, 12f, this@overviewTab), Palette.ON_SURFACE)
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                setOnClickListener { openVideo(n.url) }
-            }, 6)
+            c.add(videoListRow(this, ThumbUrl.mini(n.id, n.thumb), n.title.ifBlank { n.id }, n.channel, "×${n.hits} · ${Fmt.num(n.views)}") { openVideo(n.url) }, 6)
         }
         c.row(
             btn(this, t("Граф видео", "Video graph"), style = BtnStyle.TONAL) {

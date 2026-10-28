@@ -129,6 +129,9 @@ class LumenActivity : LumenBase() {
         }
         shortcuts.add(chip(this, t("🌐 Браузер", "🌐 Browser")) { BrowserActivity.open(this) })
         c.chips(shortcuts)
+        c.button(t("Задать домен для наблюдения", "Set a domain to watch"), style = BtnStyle.TONAL) {
+            startActivity(Intent(this, NewProjectActivity::class.java).putExtra("watch", true))
+        }
         if (Provider.active() == null) {
             c.card {
                 p(t("AI не подключён — поиск, сбор и локальная аналитика работают. Для сводок подключите API.",
@@ -347,6 +350,9 @@ class NewProjectActivity : LumenBase() {
     private var busy = false
     private var filtersOpen = false
 
+    /** Started from "Set a domain to watch": the project is created with monitoring switched on. */
+    private val watch by lazy { intent.getBooleanExtra("watch", false) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         render()
@@ -354,8 +360,16 @@ class NewProjectActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        c.title(t("Что исследуем?", "What to research?"))
-        c.card {
+        if (watch) {
+            c.title(t("Домен для наблюдения", "Domain to watch"))
+            c.muted(t("Введите тему и уточните домен через AI. Lumen будет сам проверять новые видео " +
+                "каждые ${Settings.defaultMonitorHours} ч и присылать уведомление" + (if (Provider.active() != null) " со сводкой." else "."),
+                "Enter a topic and refine the domain with AI. Lumen will check for new videos " +
+                    "every ${Settings.defaultMonitorHours} h and notify you" + (if (Provider.active() != null) " with a summary." else ".")))
+        } else {
+            c.title(t("Что исследуем?", "What to research?"))
+        }
+        if (!watch) c.card {
             add(text(ctx, t("Есть ссылка на видео, канал или плейлист? Вставьте — анализ запустится сразу (или поделитесь ей из приложения YouTube → Lumen).",
                 "Have a video, channel or playlist link? Paste it — the analysis starts at once (or share it from the YouTube app → Lumen)."), 13f, color = Palette.MUTED), 0)
             val link = edt(ctx, "https://youtube.com/…")
@@ -435,10 +449,19 @@ class NewProjectActivity : LumenBase() {
                 queries = qs, filters = filters)
             p.monitor.hours = Settings.defaultMonitorHours
             p.collect.aiTranscribe = false
+            if (watch) {
+                Settings.monitoringAllowed = true
+                p.monitor.enabled = true
+                p.monitor.aiSummary = Provider.active() != null
+            }
             Store.save(p)
+            if (watch) Monitoring.apply(this, p)
             startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id).putExtra("autoSearch", true))
             finish()
         }
-        page(t("Новый проект", "New project"), c.root, fab = t("Создать и искать", "Create and search") to create)
+        page(
+            if (watch) t("Наблюдение", "Watch") else t("Новый проект", "New project"), c.root,
+            fab = (if (watch) t("Начать наблюдение", "Start watching") else t("Создать и искать", "Create and search")) to create
+        )
     }
 }

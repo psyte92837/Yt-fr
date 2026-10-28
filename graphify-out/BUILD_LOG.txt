@@ -77,13 +77,15 @@ Graph: 1259 nodes, 4057 edges
 Re-clustering...
 Done - 53 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-total 1976
-drwxr-xr-x 3 runner runner    4096 Oct 28 18:00 .
-drwxr-xr-x 4 runner runner    4096 Oct 28 18:00 ..
--rw-r--r-- 1 runner runner   97119 Oct 28 18:00 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 28 18:00 .graphify_root
--rw-r--r-- 1 runner runner    6098 Oct 28 18:00 BUILD_LOG.txt
--rw-r--r-- 1 runner runner    7862 Oct 28 18:00 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Oct 28 18:00 cache
--rw-r--r-- 1 runner runner 1879626 Oct 28 18:00 graph.json
--rw-r--r-- 1 runner runner   11738 Oct 28 18:00 manifest.json
+graph_map: 53 communities named, 49 files mapped
+map exit=0
+total 2112
+drwxr-xr-x 3 runner runner    4096 Oct 28 18:13 .
+drwxr-xr-x 4 runner runner    4096 Oct 28 18:13 ..
+-rw-r--r-- 1 runner runner   97119 Oct 28 18:13 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 28 18:13 .graphify_root
+-rw-r--r-- 1 runner runner    6158 Oct 28 18:13 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner   16517 Oct 28 18:13 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 28 18:13 cache
+-rw-r--r-- 1 runner runner 2003319 Oct 28 18:13 graph.json
+-rw-r--r-- 1 runner runner   11730 Oct 28 18:13 manifest.json

@@ -13,11 +13,13 @@ import org.junit.Test
 class EdgeTtsTest {
     @Test
     fun gecTokenMatchesEdgeTtsReference() {
-        // reference value from the python edge-tts algorithm
-        val ref = "6B55639D80CE6120432F90F6318EB4344080A5252E5C49A6D119D3B00C225095"
+        // reference values from edge-tts 7.3.1 drm.generate_sec_ms_gec_v2
+        val ref = "AD29DDF1543B8F22-DF1E217CB193890F45AEED1207EF040A73EB71059B437222B79A19131946C063"
         assertEquals(ref, EdgeTts.gecToken(1761652800))
         assertEquals(ref, EdgeTts.gecToken(1761652800 + 299)) // same 5-minute window
         assertTrue(EdgeTts.gecToken(1761652800 + 300) != ref)
+        assertEquals("572D353BA609448C-1CFCFA06664DEF495EEE079DA56F8CFABE3CA43DC8964D4AA70742781BF25FF6", EdgeTts.gecToken(1793232000))
+        assertEquals("99E54519B490BE5C-E162DB0977FBDCB9B86DD8148BF1BCDC3C0303176CE39852A42B415935C20654", EdgeTts.gecToken(1800000123))
     }
 
     @Test

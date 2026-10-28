@@ -13,7 +13,6 @@ import okio.ByteString
 import org.json.JSONArray
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -55,21 +54,15 @@ object EdgeTts {
         "Chrome/$MAJOR.0.0.0 Safari/537.36 Edg/$MAJOR.0.0.0"
     /** Escaped text per request, in UTF-8 bytes (the service limit is 4096 incl. SSML). */
     const val CHUNK_BYTES = 3600
-    private const val WIN_EPOCH = 11644473600L
 
     /** Server clock minus device clock, seconds; learned from a 403 response. */
     @Volatile var skewSec = 0L
 
     // ---------- pure helpers ----------
 
-    /** Sec-MS-GEC: SHA-256 of Windows file time rounded down to 5 minutes + token, upper hex. */
-    fun gecToken(unixSec: Long): String {
-        var ticks = unixSec + WIN_EPOCH
-        ticks -= ticks % 300
-        val s = (ticks * 10_000_000L).toString() + TOKEN
-        return MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.US_ASCII))
-            .joinToString("") { "%02X".format(it) }
-    }
+    /** Sec-MS-GEC v2 (since edge-tts 7.3), see [EdgeGec]. */
+    fun gecToken(unixSec: Long): String = EdgeGec.token(unixSec)
+    private val GEC_VERSION = "2-$CHROMIUM"
 
     fun xmlEscape(s: String): String = buildString(s.length) {
         for (ch in s) when (ch) {
@@ -272,13 +265,16 @@ object EdgeTts {
             runCatching { parseVoices(f.readText()) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
         }
         return try {
-            val url = "https://$BASE/voices/list?trustedclienttoken=$TOKEN&Sec-MS-GEC=${gecToken(now())}&Sec-MS-GEC-Version=1-$CHROMIUM"
+            val url = "https://$BASE/voices/list?trustedclienttoken=$TOKEN&Sec-MS-GEC=${gecToken(now())}&Sec-MS-GEC-Version=$GEC_VERSION"
             val req = Request.Builder().url(url)
                 .header("User-Agent", UA)
                 .header("Accept", "*/*")
                 .header("Accept-Language", "en-US,en;q=0.9")
                 .header("Sec-CH-UA", "\" Not;A Brand\";v=\"99\", \"Microsoft Edge\";v=\"$MAJOR\", \"Chromium\";v=\"$MAJOR\"")
                 .header("Sec-CH-UA-Mobile", "?0")
+                .header("Sec-Fetch-Site", "none")
+                .header("Sec-Fetch-Mode", "cors")
+                .header("Sec-Fetch-Dest", "empty")
                 .header("Cookie", "muid=${muid()};")
                 .build()
             http.newCall(req).execute().use { r ->
@@ -330,11 +326,14 @@ object EdgeTts {
         return out.toByteArray()
     }
 
-    private class Forbidden : Exception("403")
+    private class Forbidden : Exception(t(
+        "Сервис Microsoft отклонил запрос (403). Обновите приложение: Microsoft мог сменить защиту.",
+        "Microsoft's service rejected the request (403). Update the app: Microsoft may have changed its protection."
+    ))
 
     private fun one(escaped: String, o: TtsOptions): ByteArray {
         val url = "wss://$BASE/edge/v1?TrustedClientToken=$TOKEN&Sec-MS-GEC=${gecToken(now())}" +
-            "&Sec-MS-GEC-Version=1-$CHROMIUM&ConnectionId=${UUID.randomUUID().toString().replace("-", "")}"
+            "&Sec-MS-GEC-Version=$GEC_VERSION&ConnectionId=${UUID.randomUUID().toString().replace("-", "")}"
         val req = Request.Builder().url(url)
             .header("Pragma", "no-cache")
             .header("Cache-Control", "no-cache")

@@ -369,6 +369,18 @@ class TruncationTest {
     }
 
     @Test
+    fun salvageSkipsMalformedItem() {
+        // real Gemini reply that broke SEO P1: one element has "statement","…" instead of "statement":"…"
+        val bad = """{"items":[{"type":"pain","statement":"a","quote":"q1"},{"type":"question","statement","_ Стоит ли","quote":"q2"},{"type":"voc","statement":"c","quote":"q3"}]}"""
+        assertEquals(null, runCatching { JSONObject(bad) }.getOrNull())
+        val items = JSONObject(JsonSalvage.array(bad, "items")!!).getJSONArray("items")
+        assertEquals(2, items.length())
+        assertEquals("a", items.getJSONObject(0).getString("statement"))
+        assertEquals("c", items.getJSONObject(1).getString("statement"))
+        assertEquals(null, JsonSalvage.array("""{"items":[{"statement","x"}]}""", "items"))
+    }
+
+    @Test
     fun providersReportTruncation() {
         assertTrue(LlmParse.gemini("""{"candidates":[{"finishReason":"MAX_TOKENS","content":{"parts":[{"text":"{\"items\":["}]}}]}""", "g").truncated)
         assertFalse(LlmParse.gemini("""{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"ok"}]}}]}""", "g").truncated)

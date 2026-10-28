@@ -196,8 +196,12 @@ object Seo {
             L.i("seo", "$key attempt ${attempt + 1}: ${if (ok) "ok" else if (r.truncated) "truncated at limit $limit" else "invalid json: " + r.text.take(200)} in=${r.inTokens} out=${r.outTokens}")
             if (ok) return o!! to meta(key, r)
             // keep the complete part of a cut-off answer as a fallback
-            if (o == null) JsonSalvage.array(r.text, required)?.let { s -> salvaged = JSONObject(s).put("_partial", true) to meta(key, r) }
-            else if (salvaged == null) salvaged = o.put("_partial", true) to meta(key, r)
+            if (o == null) {
+                JsonSalvage.array(r.text, required)?.let { s -> runCatching { JSONObject(s) }.getOrNull() }
+                    ?.let { s -> salvaged = s.put("_partial", true) to meta(key, r) }
+            } else if (salvaged == null) {
+                salvaged = o.put("_partial", true) to meta(key, r)
+            }
             last = r.text.take(200)
             if (r.truncated || o == null && looksCut(r.text)) {
                 limit = minOf(limit * 2, 32000)

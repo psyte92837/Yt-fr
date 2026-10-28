@@ -40,7 +40,10 @@ object JsonText {
 
 /** Recovers the complete objects of an array from a JSON reply cut off by the token limit. */
 object JsonSalvage {
-    /** Returns {"<key>": [complete objects…]} or null when nothing complete was found. */
+    /**
+     * Returns {"<key>": [complete objects…]} or null when nothing valid was found.
+     * Malformed elements (e.g. `{"statement","x"}`) are skipped, so the result always parses.
+     */
     fun array(text: String, key: String): String? {
         val k = text.indexOf("\"$key\"")
         if (k < 0) return null
@@ -52,7 +55,7 @@ object JsonSalvage {
             val start = text.indexOf('{', i)
             if (start < 0) break
             val obj = JsonText.firstObject(text.substring(start)) ?: break
-            items.add(obj)
+            if (runCatching { org.json.JSONObject(obj) }.isSuccess) items.add(obj)
             i = start + obj.length
         }
         if (items.isEmpty()) return null

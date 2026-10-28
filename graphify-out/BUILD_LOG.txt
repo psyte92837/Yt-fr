@@ -68,22 +68,22 @@ Commands:
 [graphify extract] AST extraction on 39 code files...
   AST cache: 0/39 files served from cache (0%); 39 to extract
   warning: 1 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 1, 3 symbol(s) extracted)
-[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 995 nodes, 3223 edges, 34 communities
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 995 nodes, 3233 edges, 43 communities
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
 Loading existing graph...
-Graph: 995 nodes, 3223 edges
+Graph: 995 nodes, 3233 edges
 Re-clustering...
-Done - 34 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+Done - 43 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-total 1576
-drwxr-xr-x 3 runner runner    4096 Oct 28 14:54 .
-drwxr-xr-x 4 runner runner    4096 Oct 28 14:54 ..
--rw-r--r-- 1 runner runner   75755 Oct 28 14:54 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 28 14:54 .graphify_root
--rw-r--r-- 1 runner runner    6095 Oct 28 14:54 BUILD_LOG.txt
--rw-r--r-- 1 runner runner    7279 Oct 28 14:54 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Oct 28 14:54 cache
--rw-r--r-- 1 runner runner 1488682 Oct 28 14:54 graph.json
--rw-r--r-- 1 runner runner    9347 Oct 28 14:54 manifest.json
+total 1580
+drwxr-xr-x 3 runner runner    4096 Oct 28 15:02 .
+drwxr-xr-x 4 runner runner    4096 Oct 28 15:02 ..
+-rw-r--r-- 1 runner runner   76505 Oct 28 15:02 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 28 15:02 .graphify_root
+-rw-r--r-- 1 runner runner    6095 Oct 28 15:02 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner    7689 Oct 28 15:02 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 28 15:02 cache
+-rw-r--r-- 1 runner runner 1491198 Oct 28 15:02 graph.json
+-rw-r--r-- 1 runner runner    9345 Oct 28 15:02 manifest.json

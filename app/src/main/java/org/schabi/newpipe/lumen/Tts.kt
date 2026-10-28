@@ -313,26 +313,82 @@ object EdgeTts {
      * Synthesises [text] to MP3 bytes. Long text is sent in pieces (one connection each);
      * [onProgress] gets (done, total). [cancelled] is polled between pieces.
      */
+    // Parts already synthesised for the last text: after a network failure a new tap continues from there.
+    private var partsKey = ""
+    private val parts = mutableListOf<ByteArray>()
+
     fun synthesize(text: String, o: TtsOptions, cancelled: () -> Boolean = { false }, onProgress: (Int, Int) -> Unit = { _, _ -> }): ByteArray {
         val chunks = split(text)
         if (chunks.isEmpty()) throw TtsException(t("Нет текста для озвучки", "No text to speak"))
-        val out = ByteArrayOutputStream()
-        chunks.forEachIndexed { i, c ->
-            if (cancelled()) return out.toByteArray()
-            onProgress(i, chunks.size)
-            val audio = try {
-                one(c, o)
-            } catch (e: Forbidden) {
-                one(c, o) // retried once with the corrected clock
-            } catch (e: java.io.IOException) {
-                L.w("tts", "retry after ${e.javaClass.simpleName}: ${e.message}")
-                Thread.sleep(1000)
-                one(c, o)
+        val key = sha1(chunks.joinToString("\u0000") + "|" + o)
+        synchronized(parts) {
+            if (key != partsKey) {
+                parts.clear()
+                partsKey = key
+            } else if (parts.isNotEmpty()) {
+                L.i("tts", "resume from part ${parts.size + 1}/${chunks.size}")
             }
-            out.write(audio)
         }
-        onProgress(chunks.size, chunks.size)
+        for (i in parts.size until chunks.size) {
+            if (cancelled()) break
+            onProgress(i, chunks.size)
+            val audio = withRetry(i, chunks.size, cancelled) { one(chunks[i], o) } ?: break
+            synchronized(parts) { if (partsKey == key) parts.add(audio) }
+        }
+        val out = ByteArrayOutputStream()
+        synchronized(parts) { parts.forEach { out.write(it) } }
+        if (!cancelled()) {
+            onProgress(chunks.size, chunks.size)
+            synchronized(parts) {
+                parts.clear()
+                partsKey = ""
+            }
+        }
         return out.toByteArray()
+    }
+
+    /** Runs [block]; on network errors waits for the network and retries with growing pauses. null = cancelled. */
+    private fun withRetry(i: Int, total: Int, cancelled: () -> Boolean, block: () -> ByteArray): ByteArray? {
+        var attempt = 0
+        var forbiddenRetried = false
+        while (true) {
+            try {
+                return block()
+            } catch (e: Forbidden) {
+                if (forbiddenRetried) throw e
+                forbiddenRetried = true // retried once with the corrected clock
+            } catch (e: java.io.IOException) {
+                val delay = TtsRetry.delayMs(attempt)
+                L.w("tts", "part ${i + 1}/$total attempt ${attempt + 1}: ${e.javaClass.simpleName}: ${e.message}")
+                if (delay == null) throw TtsException(TtsRetry.message(e, i, total))
+                attempt++
+                if (!sleepUntil(delay, cancelled)) return null
+                // no network (phone sleeping, Wi-Fi ↔ mobile): wait for it up to a minute
+                var waited = 0L
+                while (!online() && waited < 60_000) {
+                    if (!sleepUntil(1000, cancelled)) return null
+                    waited += 1000
+                }
+            }
+        }
+    }
+
+    private fun sleepUntil(ms: Long, cancelled: () -> Boolean): Boolean {
+        var left = ms
+        while (left > 0) {
+            if (cancelled()) return false
+            Thread.sleep(minOf(250L, left))
+            left -= 250
+        }
+        return !cancelled()
+    }
+
+    private fun online(): Boolean = try {
+        val cm = Lumen.app.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    } catch (e: Exception) {
+        true
     }
 
     private class Forbidden : Exception(t(
@@ -586,4 +642,24 @@ object TtsPrefs {
     var playSpeed: Float
         get() = p.getFloat("tts_play_speed", 1f)
         set(v) = p.edit().putFloat("tts_play_speed", v).apply()
+}
+
+/** Retry policy and readable network errors for the online voice (pure, unit-tested). */
+object TtsRetry {
+    private val delays = listOf(2000L, 4000L, 8000L, 15000L)
+
+    /** Pause before retry number [attempt] (0-based), null = give up. */
+    fun delayMs(attempt: Int): Long? = delays.getOrNull(attempt)
+
+    fun message(e: Throwable, done: Int, total: Int): String {
+        val why = when (e) {
+            is java.net.UnknownHostException -> t("нет интернета (не удалось найти сервер Microsoft)", "no internet (Microsoft's server can't be found)")
+            is java.net.SocketTimeoutException -> t("сервер Microsoft не отвечает", "Microsoft's server does not respond")
+            else -> t("связь оборвалась", "the connection dropped")
+        }
+        val where = if (total > 1) t(" Готово частей: $done из $total — нажмите «Озвучить» ещё раз, продолжится с этого места.",
+            " Parts done: $done of $total — tap Read aloud again to continue from there.") else
+            t(" Нажмите «Озвучить» ещё раз.", " Tap Read aloud again.")
+        return t("Озвучка прервалась: ", "Reading stopped: ") + why + "." + where
+    }
 }

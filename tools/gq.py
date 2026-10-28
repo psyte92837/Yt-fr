@@ -5,6 +5,7 @@
   gq.py file <name>    all symbols of a file (substring of the path) with lines
   gq.py near <symbol>  callers/callees/references of a symbol, with file:line
   gq.py top [N]        most connected symbols (the "god nodes")
+Обзор: graphify-out/GRAPH_REPORT.md (имена сообществ и карта файлов, строит tools/graph_map.py).
 Run from the repo root. Read the printed file:line with `Read offset/limit`.
 """
 import json, os, sys, collections

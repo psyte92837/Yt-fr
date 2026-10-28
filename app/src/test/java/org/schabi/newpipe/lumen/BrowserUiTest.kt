@@ -40,10 +40,19 @@ class BrowserUiTest {
         val at = 1_790_000_000_000L
         val n = BrowserText.fileName("A/B: \"C\"?*\n" + "x".repeat(100), at)
         assertTrue(n.startsWith("Lumen 20"))
-        assertTrue(n.endsWith(".m4a"))
-        assertFalse(Regex("[\\\\/:*?\"<>|\n]").containsMatchIn(n.removeSuffix(".m4a").substringAfter(" ").substringAfter(" ").substringAfter(" ")))
-        assertTrue(n.length <= "Lumen 2026-10-28 14-05 ".length + 60 + 4)
-        assertTrue(BrowserText.fileName("   ", at).matches(Regex("Lumen \\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}\\.m4a")))
+        assertTrue(n.endsWith(".webm"))
+        assertFalse(Regex("[\\\\/:*?\"<>|\n]").containsMatchIn(n.removeSuffix(".webm").substringAfter(" ").substringAfter(" ").substringAfter(" ")))
+        assertTrue(n.length <= "Lumen 2026-10-28 14-05 ".length + 60 + 5)
+        assertTrue(BrowserText.fileName("   ", at).matches(Regex("Lumen \\d{4}-\\d{2}-\\d{2} \\d{2}-\\d{2}\\.webm")))
+        assertTrue(BrowserText.fileName("x", at, "m4a").endsWith(" x.m4a"))
+    }
+
+    @Test
+    fun pageScriptResultIsUnquoted() {
+        assertEquals("ok", TabRecJs.result("\"ok\""))
+        assertEquals("none", TabRecJs.result(" \"none\" "))
+        assertEquals("", TabRecJs.result(null))
+        assertTrue(TabRecJs.START.contains("captureStream") && TabRecJs.START.contains("LumenRec.chunk"))
     }
 
     @Test

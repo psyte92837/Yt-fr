@@ -12,9 +12,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- Lumen: recording the built-in browser's sound (AudioPlaybackCapture; the microphone is not used) -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Lumen: persisted monitoring jobs survive reboots -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -130,9 +127,9 @@
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <service
-            android:name=".lumen.TabAudioService"
+            android:name=".lumen.RecKeepAlive"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:foregroundServiceType="mediaPlayback" />
         <service
             android:name=".lumen.MonitorJob"
             android:exported="false"

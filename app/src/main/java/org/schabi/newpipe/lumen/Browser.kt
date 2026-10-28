@@ -14,18 +14,8 @@ import android.app.Service
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
-import android.media.AudioFormat
-import android.media.AudioPlaybackCaptureConfiguration
-import android.media.AudioRecord
-import android.media.MediaCodec
-import android.media.MediaCodecInfo
-import android.media.MediaFormat
-import android.media.MediaMuxer
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -33,14 +23,15 @@ import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.Process
 import android.provider.MediaStore
+import android.util.Base64
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -49,6 +40,9 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -75,11 +69,11 @@ object BrowserText {
         return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s) else String.format(Locale.US, "%02d:%02d", m, s)
     }
 
-    /** Safe file name from the page title: "Lumen 2026-10-28 14-05 <title>.m4a". */
-    fun fileName(title: String, at: Long): String {
+    /** Safe file name from the page title: "Lumen 2026-10-28 14-05 <title>.webm". */
+    fun fileName(title: String, at: Long, ext: String = "webm"): String {
         val stamp = SimpleDateFormat("yyyy-MM-dd HH-mm", Locale.US).format(Date(at))
         val clean = title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), " ").replace(Regex("\\s+"), " ").trim().take(60).trim()
-        return "Lumen $stamp" + (if (clean.isNotEmpty()) " $clean" else "") + ".m4a"
+        return "Lumen $stamp" + (if (clean.isNotEmpty()) " $clean" else "") + ".$ext"
     }
 }
 
@@ -91,11 +85,125 @@ object TabRec {
     @Volatile var lastName = ""
     @Volatile var lastUri: Uri? = null
     @Volatile var lastError = ""
-
-    val supported get() = Build.VERSION.SDK_INT >= 29
+    @Volatile var lastPath = ""
 }
 
-/** Built-in web browser (WebView) with recording of the tab's sound. */
+/**
+ * Page script: records the sound of the page's playing <video>/<audio> element via captureStream() +
+ * MediaRecorder (WebM/Opus) and streams 1-second chunks to the app (LumenRec bridge). No system dialogs,
+ * no microphone: only what the tab itself plays is recorded.
+ */
+object TabRecJs {
+    const val START = """(function(){
+  var old = window.__lumenRec;
+  if (old && old.state !== 'inactive') return 'busy';
+  var els = Array.prototype.slice.call(document.querySelectorAll('video,audio'));
+  if (!els.length) return 'none';
+  var el = els.filter(function(e){ return !e.paused && !e.ended && e.readyState > 2; })[0] || els[0];
+  var cap = el.captureStream ? el.captureStream() : null;
+  if (!cap) return 'unsupported';
+  var tracks = cap.getAudioTracks();
+  if (!tracks.length) return 'noaudio';
+  var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+  var r;
+  try { r = new MediaRecorder(new MediaStream(tracks), {mimeType: mime, audioBitsPerSecond: 128000}); }
+  catch (e) { return 'error:' + e; }
+  var q = Promise.resolve();
+  r.ondataavailable = function(ev){
+    if (!ev.data || !ev.data.size) return;
+    var b = ev.data;
+    q = q.then(function(){ return new Promise(function(done){
+      var fr = new FileReader();
+      fr.onload = function(){ var s = fr.result; LumenRec.chunk(s.substring(s.indexOf(',') + 1)); done(); };
+      fr.onerror = function(){ done(); };
+      fr.readAsDataURL(b);
+    }); });
+  };
+  r.onstop = function(){ q.then(function(){ LumenRec.end(); }); };
+  r.onerror = function(e){ LumenRec.fail(String(e.error || e)); };
+  window.__lumenRec = r;
+  r.start(1000);
+  return 'ok';
+})()"""
+
+    const val STOP = """(function(){
+  var r = window.__lumenRec;
+  if (r && r.state !== 'inactive') { r.stop(); return 'stopping'; }
+  return 'idle';
+})()"""
+
+    /** evaluateJavascript returns a JSON string literal: "\"ok\"" → ok. */
+    fun result(raw: String?): String = raw.orEmpty().trim().removeSurrounding("\"")
+}
+
+/** Writes the chunks streamed by the page into Music/Lumen (MediaStore on Android 10+, app folder before). */
+object TabWriter {
+    private var out: OutputStream? = null
+    private var uri: Uri? = null
+    private var file: File? = null
+    private var name = ""
+    private var bytes = 0L
+
+    @Synchronized
+    fun open(ctx: Context, title: String, at: Long) {
+        name = BrowserText.fileName(title, at)
+        bytes = 0
+        if (Build.VERSION.SDK_INT >= 29) {
+            val values = ContentValues().apply {
+                put(MediaStore.Audio.Media.DISPLAY_NAME, name)
+                put(MediaStore.Audio.Media.MIME_TYPE, "audio/webm")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/Lumen")
+                put(MediaStore.Audio.Media.IS_PENDING, 1)
+            }
+            val u = ctx.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw IllegalStateException("MediaStore insert failed")
+            uri = u
+            out = ctx.contentResolver.openOutputStream(u) ?: throw IllegalStateException("cannot open file")
+        } else {
+            val dir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_MUSIC), "Lumen").apply { mkdirs() }
+            val f = File(dir, name)
+            file = f
+            out = FileOutputStream(f)
+        }
+    }
+
+    @Synchronized
+    fun write(data: ByteArray) {
+        out?.write(data)
+        bytes += data.size
+    }
+
+    /** Closes the file; an empty recording is deleted. Returns true if something was saved. */
+    @Synchronized
+    fun close(ctx: Context): Boolean {
+        try { out?.close() } catch (e: Exception) { }
+        out = null
+        val saved = bytes > 0
+        uri?.let { u ->
+            if (saved) {
+                ctx.contentResolver.update(u, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
+                TabRec.lastUri = u
+                TabRec.lastPath = ""
+            } else {
+                ctx.contentResolver.delete(u, null, null)
+            }
+        }
+        file?.let { f ->
+            if (saved) {
+                TabRec.lastUri = null
+                TabRec.lastPath = f.absolutePath
+            } else {
+                f.delete()
+            }
+        }
+        if (saved) TabRec.lastName = name
+        uri = null
+        file = null
+        return saved
+    }
+}
+
+/** Built-in web browser (WebView) with recording of the tab's sound (see [TabRecJs]). */
 class BrowserActivity : LumenBase() {
     private lateinit var web: WebView
     private lateinit var address: TextView
@@ -139,6 +247,8 @@ class BrowserActivity : LumenBase() {
 
                 override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
                     address.text = url
+                    // a full page load kills the page recorder: keep what was recorded so far
+                    if (TabRec.running) finishRec("")
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
@@ -156,6 +266,7 @@ class BrowserActivity : LumenBase() {
                 override fun onHideCustomView() = exitFullscreen()
             }
             setDownloadListener { url, _, _, _, _ -> openUrl(url) }
+            addJavascriptInterface(RecBridge(), "LumenRec")
         }
 
         address = edt(this, t("Адрес или запрос", "Address or search")).apply {
@@ -188,7 +299,7 @@ class BrowserActivity : LumenBase() {
         recBtn = btn(this, "", primary = true) { toggleRec() } as TextView
         recInfo = text(this, "", 13f, color = Palette.MUTED).apply {
             setPadding(dp(16), 0, dp(16), dp(4))
-            setOnClickListener { TabRec.lastUri?.let { openRecording(it) } }
+            setOnClickListener { if (!TabRec.running) openRecording() }
         }
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -234,6 +345,7 @@ class BrowserActivity : LumenBase() {
     }
 
     override fun onDestroy() {
+        if (TabRec.running) finishRec("")
         web.destroy()
         super.onDestroy()
     }
@@ -260,9 +372,7 @@ class BrowserActivity : LumenBase() {
             t("Анализировать в Lumen", "Analyse in Lumen") to { QuickAnalysis.start(this, url) },
             t("Поделиться ссылкой", "Share link") to { shareText(web.title.orEmpty(), url) },
             t("Открыть во внешнем браузере", "Open in external browser") to { openUrl(url) },
-            t("Последняя запись", "Last recording") to {
-                TabRec.lastUri?.let { openRecording(it) } ?: toast(t("Записей пока нет", "No recordings yet"))
-            }
+            t("Последняя запись", "Last recording") to { openRecording() }
         )
         AlertDialog.Builder(this).setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()
     }
@@ -293,6 +403,31 @@ class BrowserActivity : LumenBase() {
     }
 
     // ------------------------------------------------------------------ recording
+    private var stopAsked = false
+
+    /** Called by the page script (JavaBridge thread). Only accepted while a recording is running. */
+    private inner class RecBridge {
+        @JavascriptInterface
+        fun chunk(b64: String) {
+            if (!TabRec.running) return
+            try {
+                TabWriter.write(Base64.decode(b64, Base64.DEFAULT))
+            } catch (e: Exception) {
+                Lumen.ui { finishRec(e.message ?: e.javaClass.simpleName) }
+            }
+        }
+
+        @JavascriptInterface
+        fun end() {
+            if (TabRec.running) Lumen.ui { finishRec("") }
+        }
+
+        @JavascriptInterface
+        fun fail(msg: String) {
+            if (TabRec.running) Lumen.ui { finishRec(msg.take(200)) }
+        }
+    }
+
     private fun paintRec() {
         recBtn.text = if (TabRec.running) "■ " + BrowserText.duration(System.currentTimeMillis() - TabRec.startedAt) else "● " + t("Звук", "Audio")
         recBtn.contentDescription = if (TabRec.running) t("Остановить запись", "Stop recording") else t("Записать звук вкладки", "Record tab audio")
@@ -301,73 +436,92 @@ class BrowserActivity : LumenBase() {
         recBtn.setTextColor(fg)
         recInfo.text = when {
             TabRec.running -> t("Идёт запись звука вкладки…", "Recording the tab's sound…")
-            TabRec.lastError.isNotEmpty() -> t("Ошибка записи: ", "Recording error: ") + TabRec.lastError
+            TabRec.lastError.isNotEmpty() -> t("Запись: ", "Recording: ") + TabRec.lastError
             TabRec.lastName.isNotEmpty() -> t("Сохранено в Музыка/Lumen: ", "Saved to Music/Lumen: ") + TabRec.lastName + " ▸"
             else -> ""
         }
         recInfo.visibility = if (recInfo.text.isNullOrEmpty()) View.GONE else View.VISIBLE
     }
 
-    private fun toggleRec() {
-        if (TabRec.running) {
-            TabAudioService.stop(this)
-            return
-        }
-        if (!TabRec.supported) {
-            confirm(t("Запись недоступна", "Recording unavailable"),
-                t("Запись звука вкладки работает на Android 10 и новее.", "Tab audio recording needs Android 10 or newer."), "OK") {}
-            return
-        }
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_MIC)
-            return
-        }
-        askProjection()
-    }
+    private fun toggleRec() = if (TabRec.running) stopRec() else startRec()
 
-    private fun askProjection() {
-        if (Build.VERSION.SDK_INT >= 33) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), REQ_NOTIFY)
-        val mpm = getSystemService(MediaProjectionManager::class.java)
-        @Suppress("DEPRECATION")
-        startActivityForResult(mpm.createScreenCaptureIntent(), REQ_PROJECTION)
-    }
-
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQ_MIC) return
-        if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) {
-            askProjection()
-        } else {
-            toast(t("Без разрешения «Микрофон» Android не даёт записывать звук приложения. Микрофон при этом не используется.",
-                "Android requires the Microphone permission to capture app sound. The microphone itself is not used."))
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        @Suppress("DEPRECATION")
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQ_PROJECTION) return
-        if (resultCode != RESULT_OK || data == null) {
-            toast(t("Запись отменена", "Recording cancelled"))
-            return
-        }
-        TabAudioService.start(this, resultCode, data, web.title.orEmpty())
-        web.onResume()
-    }
-
-    private fun openRecording(uri: Uri) {
+    private fun startRec() {
+        val at = System.currentTimeMillis()
         try {
-            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "audio/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            TabWriter.open(this, web.title.orEmpty(), at)
+        } catch (e: Exception) {
+            TabRec.lastError = e.message ?: e.javaClass.simpleName
+            paintRec()
+            return
+        }
+        TabRec.lastError = ""
+        TabRec.startedAt = at
+        TabRec.running = true
+        stopAsked = false
+        paintRec()
+        web.evaluateJavascript(TabRecJs.START) { raw ->
+            val r = TabRecJs.result(raw)
+            if (r == "ok") {
+                RecKeepAlive.start(this)
+                return@evaluateJavascript
+            }
+            TabRec.running = false
+            TabWriter.close(this)
+            TabRec.lastError = when {
+                r == "none" -> t("на странице нет видео или аудио — откройте видео", "no video or audio on the page — open a video")
+                r == "noaudio" -> t("у видео пока нет звука — запустите воспроизведение и нажмите ещё раз", "no sound yet — start playback and tap again")
+                r == "busy" -> t("запись уже идёт", "already recording")
+                r == "unsupported" -> t("этот WebView не умеет записывать звук страницы", "this WebView cannot capture page audio")
+                else -> r.removePrefix("error:").ifBlank { t("не удалось начать запись", "could not start recording") }
+            }
+            paintRec()
+        }
+    }
+
+    private fun stopRec() {
+        if (!TabRec.running) return
+        stopAsked = true
+        web.evaluateJavascript(TabRecJs.STOP) { raw -> if (TabRecJs.result(raw) != "stopping") finishRec("") }
+        // the page flushes the last chunk and calls end(); don't wait forever if it never does
+        handler.postDelayed({ if (TabRec.running && stopAsked) finishRec("") }, 5000)
+    }
+
+    /** Closes the file and resets the state; [error] is shown if nothing could be saved or the page failed. */
+    private fun finishRec(error: String) {
+        if (!TabRec.running) return
+        TabRec.running = false
+        stopAsked = false
+        val saved = TabWriter.close(this)
+        RecKeepAlive.stop(this)
+        TabRec.lastError = when {
+            error.isNotEmpty() && !saved -> error
+            !saved -> t("звука не было — запустите воспроизведение во вкладке", "no sound — start playback in the tab")
+            else -> ""
+        }
+        if (saved) toast(t("Запись сохранена: Музыка/Lumen", "Recording saved: Music/Lumen"))
+        paintRec()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (intent.action == ACTION_STOP_REC) stopRec()
+    }
+
+    private fun openRecording() {
+        val uri = TabRec.lastUri
+        if (uri == null) {
+            if (TabRec.lastPath.isNotEmpty()) toast(TabRec.lastPath) else toast(t("Записей пока нет", "No recordings yet"))
+            return
+        }
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "audio/webm").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         } catch (e: Exception) {
             toast(t("Нет приложения для аудио", "No audio app"))
         }
     }
 
     companion object {
-        private const val REQ_MIC = 41
-        private const val REQ_PROJECTION = 42
-        private const val REQ_NOTIFY = 43
+        const val ACTION_STOP_REC = "org.schabi.newpipe.lumen.STOP_REC"
 
         fun open(ctx: Context, url: String? = null) {
             ctx.startActivity(Intent(ctx, BrowserActivity::class.java).apply { if (url != null) putExtra("url", url) })
@@ -375,180 +529,19 @@ class BrowserActivity : LumenBase() {
     }
 }
 
-/**
- * Foreground service that captures the app's own playback (the WebView tab) via AudioPlaybackCapture
- * and encodes it to AAC/M4A in Music/Lumen. The microphone is never recorded.
- */
-class TabAudioService : Service() {
-    @Volatile private var stopFlag = false
-    private var projection: MediaProjection? = null
-    private var worker: Thread? = null
-
+/** Keeps the app alive with a notification (and a Stop button) while the tab is being recorded. */
+class RecKeepAlive : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopFlag = true
-            return START_NOT_STICKY
-        }
-        // startForeground (type mediaProjection) must come before getMediaProjection on Android 14+
-        startFg()
-        if (TabRec.running || Build.VERSION.SDK_INT < 29) return START_NOT_STICKY
-        val code = intent?.getIntExtra("code", 0) ?: 0
-        @Suppress("DEPRECATION")
-        val data = intent?.getParcelableExtra<Intent>("data")
-        val mp = data?.let { getSystemService(MediaProjectionManager::class.java).getMediaProjection(code, it) }
-        if (mp == null) {
-            TabRec.lastError = t("нет доступа к захвату", "no capture access")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        projection = mp
-        mp.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                stopFlag = true
-            }
-        }, Handler(Looper.getMainLooper()))
-        TabRec.title = intent?.getStringExtra("title").orEmpty()
-        TabRec.lastError = ""
-        TabRec.startedAt = System.currentTimeMillis()
-        TabRec.running = true
-        stopFlag = false
-        worker = Thread({ record(mp) }, "lumen-tab-audio").also { it.start() }
-        return START_NOT_STICKY
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun record(mp: MediaProjection) {
-        if (Build.VERSION.SDK_INT < 29) return
-        val rate = 44100
-        val channels = 2
-        var uri: Uri? = null
-        var rec: AudioRecord? = null
-        var codec: MediaCodec? = null
-        var muxer: MediaMuxer? = null
-        var pfd: android.os.ParcelFileDescriptor? = null
-        var wroteSamples = false
-        val name = BrowserText.fileName(TabRec.title, TabRec.startedAt)
-        try {
-            val cfg = AudioPlaybackCaptureConfiguration.Builder(mp).addMatchingUid(Process.myUid()).build()
-            val fmt = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(rate)
-                .setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build()
-            val minBuf = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
-            val bufSize = maxOf(minBuf, 8192) * 2
-            rec = AudioRecord.Builder().setAudioFormat(fmt).setBufferSizeInBytes(bufSize).setAudioPlaybackCaptureConfig(cfg).build()
-
-            val mf = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, channels).apply {
-                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                setInteger(MediaFormat.KEY_BIT_RATE, 160_000)
-                setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, bufSize)
-            }
-            codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC).apply {
-                configure(mf, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                start()
-            }
-            val values = ContentValues().apply {
-                put(MediaStore.Audio.Media.DISPLAY_NAME, name)
-                put(MediaStore.Audio.Media.MIME_TYPE, "audio/mp4")
-                put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/Lumen")
-                put(MediaStore.Audio.Media.IS_PENDING, 1)
-            }
-            uri = contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values)
-                ?: throw IllegalStateException("MediaStore insert failed")
-            pfd = contentResolver.openFileDescriptor(uri, "rw") ?: throw IllegalStateException("cannot open file")
-            muxer = MediaMuxer(pfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-
-            rec.startRecording()
-            val pcm = ByteArray(bufSize / 2)
-            val info = MediaCodec.BufferInfo()
-            var track = -1
-            var frames = 0L
-            var eos = false
-            var inputDone = false
-            while (!eos) {
-                if (!inputDone) {
-                    val inIdx = codec.dequeueInputBuffer(10_000)
-                    if (inIdx >= 0) {
-                        val buf = codec.getInputBuffer(inIdx)!!
-                        buf.clear()
-                        val n = if (stopFlag) 0 else rec.read(pcm, 0, minOf(pcm.size, buf.remaining()))
-                        val pts = frames * 1_000_000L / rate
-                        if (n <= 0 && stopFlag) {
-                            codec.queueInputBuffer(inIdx, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inputDone = true
-                        } else if (n > 0) {
-                            buf.put(pcm, 0, n)
-                            codec.queueInputBuffer(inIdx, 0, n, pts, 0)
-                            frames += n / (2 * channels)
-                        } else {
-                            codec.queueInputBuffer(inIdx, 0, 0, pts, 0)
-                        }
-                    }
-                }
-                var outIdx = codec.dequeueOutputBuffer(info, 10_000)
-                while (outIdx >= 0 || outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    if (outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                        track = muxer.addTrack(codec.outputFormat)
-                        muxer.start()
-                    } else {
-                        val out = codec.getOutputBuffer(outIdx)!!
-                        val config = info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0
-                        if (!config && info.size > 0 && track >= 0) {
-                            out.position(info.offset)
-                            out.limit(info.offset + info.size)
-                            muxer.writeSampleData(track, out, info)
-                            wroteSamples = true
-                        }
-                        codec.releaseOutputBuffer(outIdx, false)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
-                            eos = true
-                            break
-                        }
-                    }
-                    outIdx = codec.dequeueOutputBuffer(info, 0)
-                }
-            }
-        } catch (e: Throwable) {
-            L.e("browser", "tab audio: ${e.message}", e)
-            TabRec.lastError = (e.message ?: e.javaClass.simpleName).take(200)
-        } finally {
-            try { rec?.stop() } catch (e: Exception) { }
-            rec?.release()
-            try { codec?.stop() } catch (e: Exception) { }
-            codec?.release()
-            try { if (wroteSamples) muxer?.stop() } catch (e: Exception) { wroteSamples = false }
-            try { muxer?.release() } catch (e: Exception) { }
-            pfd?.close()
-            uri?.let {
-                if (wroteSamples) {
-                    contentResolver.update(it, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
-                    TabRec.lastUri = it
-                    TabRec.lastName = name
-                } else {
-                    contentResolver.delete(it, null, null)
-                    if (TabRec.lastError.isEmpty()) TabRec.lastError = t("звука не было — включите воспроизведение во вкладке", "no sound — start playback in the tab")
-                }
-            }
-            TabRec.running = false
-            Lumen.ui {
-                projection?.stop()
-                projection = null
-                if (wroteSamples) toast(t("Запись сохранена: Музыка/Lumen", "Recording saved: Music/Lumen"))
-                stopForeground(true)
-                stopSelf()
-            }
-        }
-    }
-
-    private fun startFg() {
         if (Build.VERSION.SDK_INT >= 26) {
             getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(NotificationChannel(CH, "Lumen: запись звука / audio recording", NotificationManager.IMPORTANCE_LOW))
         }
-        val stop = PendingIntent.getService(this, 1, Intent(this, TabAudioService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val open = PendingIntent.getActivity(this, 2, Intent(this, BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val flagsPi = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val open = PendingIntent.getActivity(this, 2, Intent(this, BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), flagsPi)
+        val stop = PendingIntent.getActivity(this, 3, Intent(this, BrowserActivity::class.java)
+            .setAction(BrowserActivity.ACTION_STOP_REC).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), flagsPi)
         @Suppress("DEPRECATION")
         val n: Notification = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CH) else Notification.Builder(this))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
@@ -557,27 +550,24 @@ class TabAudioService : Service() {
             .setOngoing(true).setContentIntent(open)
             .addAction(Notification.Action.Builder(null, t("Стоп", "Stop"), stop).build())
             .build()
-        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+        if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         else startForeground(NOTIF_ID, n)
-    }
-
-    override fun onDestroy() {
-        stopFlag = true
-        super.onDestroy()
+        return START_NOT_STICKY
     }
 
     companion object {
         private const val CH = "lumen_tab_audio"
         private const val NOTIF_ID = 7342
-        private const val ACTION_STOP = "stop"
 
-        fun start(ctx: Context, code: Int, data: Intent, title: String) {
-            val i = Intent(ctx, TabAudioService::class.java).putExtra("code", code).putExtra("data", data).putExtra("title", title)
-            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+        fun start(ctx: Context) {
+            val i = Intent(ctx, RecKeepAlive::class.java)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            } catch (e: Exception) {
+                // the notification is a convenience; recording works without it while the screen is open
+            }
         }
 
-        fun stop(ctx: Context) {
-            ctx.startService(Intent(ctx, TabAudioService::class.java).setAction(ACTION_STOP))
-        }
+        fun stop(ctx: Context) = ctx.stopService(Intent(ctx, RecKeepAlive::class.java))
     }
 }

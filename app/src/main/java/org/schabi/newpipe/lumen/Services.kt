@@ -306,7 +306,15 @@ object Monitoring {
         f.sort = "date"
         f.limit = minOf(60, maxOf(20, p.filters.limit))
         val existing = Store.videos(pid).keys
-        val found = YouTube.search(p.effectiveQueries(), f).filter { it.id !in existing }.toMutableList()
+        val rejected = WatchFilter.rejected(pid)
+        val found = YouTube.search(p.effectiveQueries(), f).filter { it.id !in existing && it.id !in rejected }.toMutableList()
+        var dropped = 0
+        if (p.monitor.aiFilter && found.isNotEmpty()) {
+            val (keep, drop) = WatchFilter.apply(p, found)
+            dropped = drop.size
+            found.retainAll(keep.toSet())
+            L.i("monitor", "project $pid: filter kept ${keep.size}, rejected $dropped")
+        }
         var added = Store.mergeVideos(pid, found)
         if (p.monitor.recDrip > 0) {
             try {
@@ -351,7 +359,8 @@ object Monitoring {
             Store.save(it)
         }
         if (added > 0) {
-            val body = if (summary.isNotBlank()) summary.take(600) else found.take(5).joinToString("\n") { "• " + it.title }
+            val body = (if (summary.isNotBlank()) summary.take(600) else found.take(5).joinToString("\n") { "• " + it.title }) +
+                if (dropped > 0) t("\n\nОтсеяно как не по теме: $dropped", "\n\nFiltered out as off-topic: $dropped") else ""
             Notify.post(ctx, jobId(pid), t("«${p.name}»: новых видео — $added", "\"${p.name}\": $added new videos"), body, pid)
         }
         return added

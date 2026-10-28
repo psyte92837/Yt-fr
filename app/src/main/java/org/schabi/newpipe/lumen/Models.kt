@@ -23,10 +23,13 @@ data class SearchFilters(
     var to: String = "",
     var duration: String = "any", // any | short | medium | long
     var excludeShorts: Boolean = false,
-    var limit: Int = 50
+    var limit: Int = 50,
+    var country: String = "", // ISO 3166 region of YouTube search ("" = app default)
+    var origLang: String = "" // ISO 639-1 language of the video itself ("" = any)
 ) {
     fun toJson() = JSONObject().put("sort", sort).put("period", period).put("from", from).put("to", to)
         .put("duration", duration).put("excludeShorts", excludeShorts).put("limit", limit)
+        .put("country", country).put("origLang", origLang)
 
     companion object {
         fun from(o: JSONObject?) = SearchFilters().apply {
@@ -38,6 +41,8 @@ data class SearchFilters(
             duration = o.optString("duration", duration)
             excludeShorts = o.optBoolean("excludeShorts", false)
             limit = o.optInt("limit", 50)
+            country = o.optString("country", "")
+            origLang = o.optString("origLang", "")
         }
     }
 }
@@ -79,10 +84,11 @@ data class MonitorConfig(
     var wifiOnly: Boolean = true,
     var charging: Boolean = false,
     var aiSummary: Boolean = false,
+    var aiFilter: Boolean = false, // judge new videos against the topic before adding them (WatchFilter)
     var recDrip: Int = 0 // recommended videos added to the project per monitoring run
 ) {
     fun toJson() = JSONObject().put("enabled", enabled).put("hours", hours).put("wifiOnly", wifiOnly)
-        .put("charging", charging).put("aiSummary", aiSummary).put("recDrip", recDrip)
+        .put("charging", charging).put("aiSummary", aiSummary).put("aiFilter", aiFilter).put("recDrip", recDrip)
 
     companion object {
         fun from(o: JSONObject?) = MonitorConfig().apply {
@@ -92,6 +98,7 @@ data class MonitorConfig(
             wifiOnly = o.optBoolean("wifiOnly", true)
             charging = o.optBoolean("charging", false)
             aiSummary = o.optBoolean("aiSummary", false)
+            aiFilter = o.optBoolean("aiFilter", false)
             recDrip = o.optInt("recDrip", 0)
         }
     }

@@ -15,7 +15,7 @@ import org.schabi.newpipe.extractor.channel.tabs.ChannelTabs
 import org.schabi.newpipe.extractor.comments.CommentsInfo
 import org.schabi.newpipe.extractor.comments.CommentsInfoItem
 import org.schabi.newpipe.extractor.playlist.PlaylistInfo
-import org.schabi.newpipe.extractor.search.SearchInfo
+import org.schabi.newpipe.extractor.localization.ContentCountry
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import org.schabi.newpipe.extractor.stream.SubtitlesStream
@@ -45,7 +45,8 @@ object YouTube {
             duration = it.duration,
             thumb = thumb,
             isShort = it.isShortFormContent || it.url.contains("/shorts/"),
-            query = query
+            query = query,
+            description = it.shortDescription ?: ""
         )
     }
 
@@ -56,6 +57,7 @@ object YouTube {
         val end = if (f.period == "custom" && f.to.isNotBlank()) Fmt.parseIsoDay(f.to) + 86_400_000L else -1L
         if (start > 0 && v.uploadMs > 0 && v.uploadMs < start) return false
         if (end > 0 && v.uploadMs > 0 && v.uploadMs > end) return false
+        if (!Regions.languageOk(f.origLang, v.title + " " + v.description)) return false
         return true
     }
 
@@ -98,9 +100,14 @@ object YouTube {
         for (q in queries) {
             if (cancel.get()) break
             val handler = yt.searchQHFactory.fromQuery(queryWithPeriod(q, f, now), listOf("videos"), "")
-            val info = SearchInfo.getInfo(yt, handler)
-            var items: List<InfoItem> = info.relatedItems
-            var next: Page? = info.nextPage
+            // one extractor per query: the forced region stays with it for every page (gl=). The interface language (hl=)
+            // is left alone: NewPipe parses "2 days ago" in that language, and rare ones would lose upload dates.
+            val ex = yt.getSearchExtractor(handler)
+            if (f.country.isNotBlank()) ex.forceContentCountry(ContentCountry(f.country))
+            ex.fetchPage()
+            val first = ex.initialPage
+            var items: List<InfoItem> = first.items
+            var next: Page? = if (first.hasNextPage()) first.nextPage else null
             var taken = 0
             var pages = 0
             while (true) {
@@ -114,7 +121,7 @@ object YouTube {
                 onProgress(result.size, q)
                 if (cancel.get() || taken >= perQuery || result.size >= f.limit || next == null || pages >= 15) break
                 pause()
-                val more = SearchInfo.getMoreItems(yt, handler, next)
+                val more = ex.getPage(next)
                 items = more.items
                 next = if (more.hasNextPage()) more.nextPage else null
                 pages++
@@ -122,7 +129,7 @@ object YouTube {
             if (result.size >= f.limit) break
             pause()
         }
-        L.i("yt", "search ${queries.size} queries period=${f.period} sort=${f.sort} → ${result.size} videos")
+        L.i("yt", "search ${queries.size} queries period=${f.period} sort=${f.sort} gl=${f.country} lang=${f.origLang} → ${result.size} videos")
         return sort(result.values.toList(), f.sort).take(f.limit)
     }
 

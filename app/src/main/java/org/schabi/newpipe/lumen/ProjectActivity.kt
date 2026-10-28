@@ -894,6 +894,9 @@ class ProjectActivity : LumenBase() {
             c.check(t("Только по Wi-Fi", "Wi-Fi only"), m.wifiOnly) { m.wifiOnly = it }
             c.check(t("Только при зарядке", "Only while charging"), m.charging) { m.charging = it }
             c.check(t("AI-сводка новых видео в уведомлении", "AI summary of new videos in notification"), m.aiSummary) { m.aiSummary = it }
+            c.check(t("AI-отсев: добавлять только видео по теме", "AI filter: add only on-topic videos"), m.aiFilter) { m.aiFilter = it }
+            c.muted(t("Без AI-ключа отсев идёт по ключевым словам темы. Отсеянные видео не проверяются повторно.",
+                "Without an AI key the filter uses the topic's keywords. Rejected videos are not checked again."))
             c.spinner(t("Капельный режим: добавлять рекомендованных за запуск", "Drip mode: recommended videos added per run"),
                 listOf(0 to t("выкл", "off"), 1 to "1", 3 to "3", 5 to "5", 10 to "10"), m.recDrip) { m.recDrip = it }
             c.muted(t("Берёт лучшие видео из графа рекомендаций, которых ещё нет в проекте, и расширяет граф от них.",

@@ -12,7 +12,7 @@ import android.view.Gravity
 import android.widget.LinearLayout
 
 /** Shared editor for search filters (used on project creation and in project settings). */
-fun Col.filtersEditor(f: SearchFilters) {
+fun Col.filtersEditor(f: SearchFilters, regions: Boolean = true) {
     spinner(
         t("Сортировка", "Sort"),
         listOf(
@@ -49,6 +49,12 @@ fun Col.filtersEditor(f: SearchFilters) {
         f.duration
     ) { f.duration = it }
     check(t("Исключить Shorts", "Exclude Shorts"), f.excludeShorts) { f.excludeShorts = it }
+    if (regions) {
+        spinner(t("Страна поиска (необязательно)", "Search country (optional)"), Regions.countries, f.country) { f.country = it }
+        spinner(t("Язык оригинала видео (необязательно)", "Original language of videos (optional)"), Regions.languages, f.origLang) { f.origLang = it }
+        muted(t("Страна меняет выдачу YouTube как для зрителя из неё. Язык определяется по названию и описанию; если язык не ясен, видео остаётся.",
+            "The country changes YouTube results as for a viewer there. The language is guessed from the title and description; unclear videos are kept."))
+    }
     spinner(
         t("Лимит результатов", "Result limit"),
         listOf(20, 50, 100, 200, 500).map { it to it.toString() },
@@ -78,6 +84,8 @@ fun filtersSummary(f: SearchFilters): String {
         "long" -> parts.add(t("длинные", "long"))
     }
     if (f.excludeShorts) parts.add(t("без Shorts", "no Shorts"))
+    if (f.country.isNotBlank()) parts.add(Regions.countryName(f.country))
+    if (f.origLang.isNotBlank()) parts.add(Regions.languageName(f.origLang))
     parts.add(t("до ", "up to ") + f.limit)
     return parts.joinToString(" · ")
 }
@@ -352,6 +360,7 @@ class NewProjectActivity : LumenBase() {
 
     /** Started from "Set a domain to watch": the project is created with monitoring switched on. */
     private val watch by lazy { intent.getBooleanExtra("watch", false) }
+    private var aiFilter = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -435,11 +444,22 @@ class NewProjectActivity : LumenBase() {
         c.h2(t("Дополнительные запросы", "Extra queries"))
         val extra = c.edit(t("По одному в строке (необязательно)", "One per line (optional)"), extraText, multiline = true)
         extra.addTextChangedListener(SimpleWatcher { extraText = it })
+        if (watch) {
+            c.h2(t("Наблюдение", "Watching"))
+            c.check(t("AI-отсев: добавлять только видео по теме", "AI filter: add only on-topic videos"), aiFilter) { aiFilter = it }
+            c.muted(if (Provider.active() != null) t("Новые видео проверяются AI на соответствие теме и домену, остальные отбрасываются.",
+                "New videos are checked by AI against the topic and domain; the rest are dropped.")
+                else t("AI не подключён — отсев будет по ключевым словам темы.", "AI is not connected — the filter will use the topic's keywords."))
+            c.spinner(t("Страна поиска (необязательно)", "Search country (optional)"), Regions.countries, filters.country) { filters.country = it }
+            c.spinner(t("Язык оригинала видео (необязательно)", "Original language of videos (optional)"), Regions.languages, filters.origLang) {
+                filters.origLang = it
+            }
+        }
         c.section(t("Фильтры поиска", "Search filters"), filtersSummary(filters), filtersOpen, { open ->
             filtersOpen = open
             render()
         }) {
-            filtersEditor(filters)
+            filtersEditor(filters, regions = !watch)
         }
         val create: () -> Unit = create@{
             if (phrase.isBlank()) return@create toast(t("Введите фразу", "Enter a phrase"))
@@ -453,6 +473,7 @@ class NewProjectActivity : LumenBase() {
                 Settings.monitoringAllowed = true
                 p.monitor.enabled = true
                 p.monitor.aiSummary = Provider.active() != null
+                p.monitor.aiFilter = aiFilter
             }
             Store.save(p)
             if (watch) Monitoring.apply(this, p)

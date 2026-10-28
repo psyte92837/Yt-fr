@@ -27,3 +27,13 @@ class TtsRetryTest {
         assertTrue(TtsRetry.message(java.net.SocketTimeoutException(), 0, 1).contains("не отвечает"))
     }
 }
+
+class TtsStallTest {
+    @Test
+    fun slowStreamIsNotAStall() {
+        // audio keeps coming for 2 minutes: not stalled (the old fixed 90 s limit failed here)
+        assertTrue(!TtsRetry.stalled(idleMs = 500, totalMs = 120_000))
+        assertTrue(TtsRetry.stalled(idleMs = 31_000, totalMs = 40_000))
+        assertTrue(TtsRetry.stalled(idleMs = 0, totalMs = 11 * 60_000))
+    }
+}

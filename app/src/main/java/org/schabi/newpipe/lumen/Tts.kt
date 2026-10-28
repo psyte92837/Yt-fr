@@ -410,6 +410,7 @@ object EdgeTts {
             .build()
         val audio = ByteArrayOutputStream()
         val done = CountDownLatch(1)
+        val lastData = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
         var error: Throwable? = null
         var finished = false
         val ws = http.newWebSocket(req, object : WebSocketListener() {
@@ -420,6 +421,7 @@ object EdgeTts {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                lastData.set(System.currentTimeMillis())
                 if (path(text.substringBefore("\r\n\r\n")) == "turn.end") {
                     finished = true
                     webSocket.close(1000, null)
@@ -428,6 +430,7 @@ object EdgeTts {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                lastData.set(System.currentTimeMillis())
                 audioPayload(bytes.toByteArray())?.let { synchronized(audio) { audio.write(it) } }
             }
 
@@ -455,9 +458,15 @@ object EdgeTts {
                 done.countDown()
             }
         })
-        if (!done.await(90, TimeUnit.SECONDS)) {
-            ws.cancel()
-            throw TtsException(t("Сервис озвучки не ответил", "The speech service did not respond"))
+        // a long part at a slow rate streams for minutes: fail only when nothing arrives for IDLE_MS
+        val started = System.currentTimeMillis()
+        while (!done.await(1, TimeUnit.SECONDS)) {
+            val now = System.currentTimeMillis()
+            if (TtsRetry.stalled(now - lastData.get(), now - started)) {
+                ws.cancel()
+                L.w("tts", "stalled: idle ${now - lastData.get()} ms, total ${now - started} ms, audio=${audio.size()}")
+                throw java.net.SocketTimeoutException(t("Сервис озвучки не ответил", "The speech service did not respond"))
+            }
         }
         error?.let { if (!finished) throw it }
         val bytes = synchronized(audio) { audio.toByteArray() }
@@ -650,6 +659,12 @@ object TtsRetry {
 
     /** Pause before retry number [attempt] (0-based), null = give up. */
     fun delayMs(attempt: Int): Long? = delays.getOrNull(attempt)
+
+    const val IDLE_MS = 30_000L
+    const val MAX_MS = 10 * 60_000L
+
+    /** A part is stuck when no data came for [IDLE_MS] or it runs longer than [MAX_MS]. */
+    fun stalled(idleMs: Long, totalMs: Long): Boolean = idleMs > IDLE_MS || totalMs > MAX_MS
 
     fun message(e: Throwable, done: Int, total: Int): String {
         val why = when (e) {

@@ -363,6 +363,7 @@ object Monitoring {
                 if (dropped > 0) t("\n\nОтсеяно как не по теме: $dropped", "\n\nFiltered out as off-topic: $dropped") else ""
             Notify.post(ctx, jobId(pid), t("«${p.name}»: новых видео — $added", "\"${p.name}\": $added new videos"), body, pid)
         }
+        if (added > 0) AutoBackup.maybe(ctx)
         return added
     }
 }

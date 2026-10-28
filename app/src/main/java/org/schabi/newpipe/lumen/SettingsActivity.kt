@@ -226,6 +226,19 @@ class SettingsActivity : LumenBase() {
     private fun backup(c: Col) {
         c.muted(t("Копия содержит проекты, видео, расшифровки, комментарии и AI-результаты. API-ключи не копируются.",
             "A backup contains projects, videos, transcripts, comments and AI results. API keys are not included."))
+        c.card {
+            add(chk(ctx, t("Автокопия каждые 3 ч (переживает удаление приложения)", "Auto backup every 3 h (survives uninstalling)"), AutoBackup.enabled) {
+                AutoBackup.enabled = it
+            }, 0)
+            muted(if (AutoBackup.lastAt > 0) t("Последняя: ", "Last: ") + Fmt.dateTime(AutoBackup.lastAt) + " → " + AutoBackup.lastPlace
+                else t("Ещё не делалась. Место: папка копий ниже или «Загрузки/Lumen».", "Not made yet. Place: the backup folder below or Downloads/Lumen."))
+            add(btn(ctx, t("Сделать автокопию сейчас", "Auto backup now"), style = BtnStyle.TEXT) {
+                Lumen.async({ AutoBackup.runNow(this@SettingsActivity) }, ::err) {
+                    toast(t("Сохранено: ", "Saved: ") + AutoBackup.lastPlace)
+                    render()
+                }
+            }, 4)
+        }
         val folder = Settings.backupTreeUri
         c.card {
             p(t("Папка для копий: ", "Backup folder: ") + (folder?.let { Uri.parse(it).lastPathSegment } ?: t("не выбрана", "not chosen")))
@@ -285,8 +298,7 @@ class SettingsActivity : LumenBase() {
             REQ_BACKUP_FILE -> Lumen.async({ contentResolver.openOutputStream(uri)?.use { Store.backup(it) } }, ::err) {
                 toast(t("Копия сохранена", "Backup saved"))
             }
-            REQ_RESTORE -> Lumen.async({ contentResolver.openInputStream(uri)?.use { Store.restore(it) } }, ::err) {
-                Monitoring.reapplyAll(this)
+            REQ_RESTORE -> Lumen.async({ AutoBackup.restore(this, uri) }, ::err) {
                 toast(t("Восстановлено", "Restored"))
             }
         }

@@ -61,6 +61,14 @@ configure<ApplicationExtension> {
     // Lumen: release signing from environment (set by .github/workflows/release.yml from repo secrets)
     val lumenKeystore = System.getenv("LUMEN_KEYSTORE_FILE")
     signingConfigs {
+        // Lumen: one fixed debug key for every CI run, so a newer debug/continuous APK installs over the old one.
+        // (The default debug key is generated per machine, so each CI build had a new signature and updates failed.)
+        getByName("debug") {
+            storeFile = file("lumen-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
         if (lumenKeystore != null) {
             create("lumenRelease") {
                 storeFile = file(lumenKeystore)

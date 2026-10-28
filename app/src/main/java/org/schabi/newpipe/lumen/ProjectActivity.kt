@@ -99,6 +99,7 @@ class ProjectActivity : LumenBase() {
     override fun onPause() {
         super.onPause()
         handler.removeCallbacks(ticker)
+        AutoBackup.maybe(this)
     }
 
     override fun onDestroy() {

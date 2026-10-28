@@ -123,6 +123,15 @@ class LumenActivity : LumenBase() {
     override fun onResume() {
         super.onResume()
         render()
+        AutoBackup.maybe(this)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (requestCode == REQ_RESTORE && resultCode == RESULT_OK && uri != null) restoreFrom(uri) { render() }
     }
 
     private fun render() {
@@ -156,6 +165,14 @@ class LumenActivity : LumenBase() {
                 t("Проект — это тема на YouTube: слово, фраза или ссылка на видео, канал, плейлист.",
                     "A project is a YouTube topic: a word, a phrase or a link to a video, channel or playlist."),
                 t("Создать проект", "Create project")) { startActivity(Intent(this, NewProjectActivity::class.java)) }
+            if (!showArchived) {
+                c.button(t("Восстановить из резервной копии…", "Restore from a backup…"), style = BtnStyle.TEXT) {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
+                }
+                c.muted(t("Lumen сам сохраняет копию в «Загрузки/Lumen/${AutoBackup.FILE_NAME}». После переустановки выберите этот файл.",
+                    "Lumen keeps a copy in Downloads/Lumen/${AutoBackup.FILE_NAME}. After reinstalling, pick that file."))
+            }
         }
         for (p in list) {
             val card = c.card {
@@ -234,6 +251,16 @@ class LumenActivity : LumenBase() {
     }
 }
 
+const val REQ_RESTORE = 61
+
+/** Restores a picked backup, then reports and calls [done]. API keys are not in backups. */
+fun LumenBase.restoreFrom(uri: android.net.Uri, done: () -> Unit) {
+    Lumen.async({ AutoBackup.restore(this, uri); Store.projects().size }, ::err) { n ->
+        toast(t("Восстановлено проектов: $n. API-ключ AI нужно ввести заново.", "Projects restored: $n. Re-enter the AI API key."))
+        done()
+    }
+}
+
 /** First-run wizard. Every step is optional and can be changed later in settings. */
 class WizardActivity : LumenBase() {
     private var step = 0
@@ -269,6 +296,13 @@ class WizardActivity : LumenBase() {
                     Settings.lang = "en"
                     next()
                 }
+                c.h2(t("Уже пользовались Lumen?", "Used Lumen before?"))
+                c.button(t("Восстановить из резервной копии…", "Restore from a backup…"), style = BtnStyle.OUTLINED) {
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
+                }
+                c.muted(t("Файл ${AutoBackup.FILE_NAME} лежит в «Загрузки/Lumen» (или в папке копий, выбранной в настройках).",
+                    "The file ${AutoBackup.FILE_NAME} is in Downloads/Lumen (or in the backup folder chosen in settings)."))
             }
             1 -> {
                 c.title(t("Режим", "Mode"))
@@ -336,6 +370,14 @@ class WizardActivity : LumenBase() {
             render()
         }
         page("Lumen", c.root, back = false)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data
+        if (requestCode == REQ_RESTORE && resultCode == RESULT_OK && uri != null) restoreFrom(uri) { next() }
     }
 
     @Deprecated("Deprecated in Java")

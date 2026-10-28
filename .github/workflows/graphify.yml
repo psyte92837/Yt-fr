@@ -6,7 +6,7 @@ name: Graphify
 on:
   push:
     branches: [main]
-    paths: ['app/src/main/java/org/schabi/newpipe/lumen/**', 'app/src/test/java/org/schabi/newpipe/lumen/**', '.github/workflows/graphify.yml']
+    paths: ['tools/graph_map.py', 'app/src/main/java/org/schabi/newpipe/lumen/**', 'app/src/test/java/org/schabi/newpipe/lumen/**', '.github/workflows/graphify.yml']
   workflow_dispatch:
 
 concurrency:
@@ -47,6 +47,8 @@ jobs:
           echo "exit=$?" >> graphify-out/BUILD_LOG.txt
           graphify cluster-only . --no-viz --no-label >> graphify-out/BUILD_LOG.txt 2>&1
           echo "cluster exit=$?" >> graphify-out/BUILD_LOG.txt
+          python3 "$GITHUB_WORKSPACE/tools/graph_map.py" graphify-out >> graphify-out/BUILD_LOG.txt 2>&1
+          echo "map exit=$?" >> graphify-out/BUILD_LOG.txt
           ls -la graphify-out >> graphify-out/BUILD_LOG.txt
           test -s graphify-out/graph.json
 

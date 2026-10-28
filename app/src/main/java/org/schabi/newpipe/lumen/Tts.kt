@@ -86,11 +86,16 @@ object EdgeTts {
     /** "ru-RU-SvetlanaNeural" → "Microsoft Server Speech Text to Speech Voice (ru-RU, SvetlanaNeural)". */
     fun fullVoiceName(shortName: String): String {
         if (shortName.startsWith("Microsoft Server")) return shortName
-        val parts = shortName.split('-')
-        if (parts.size < 3) return shortName
-        val locale = parts[0] + "-" + parts[1]
-        val rest = parts.drop(2).joinToString("-")
-        return "Microsoft Server Speech Text to Speech Voice ($locale, $rest)"
+        // same as edge-tts: "zh-CN-liaoning-XiaobeiNeural" → "(zh-CN-liaoning, XiaobeiNeural)"
+        val m = Regex("^([a-z]{2,})-([A-Z]{2,})-(.+Neural)$").find(shortName) ?: return shortName
+        var region = m.groupValues[2]
+        var name = m.groupValues[3]
+        val dash = name.indexOf('-')
+        if (dash != -1) {
+            region += "-" + name.substring(0, dash)
+            name = name.substring(dash + 1)
+        }
+        return "Microsoft Server Speech Text to Speech Voice (${m.groupValues[1]}-$region, $name)"
     }
 
     fun ssml(escapedText: String, o: TtsOptions): String =
@@ -146,7 +151,7 @@ object EdgeTts {
 
     fun configMessage(ts: String): String =
         "X-Timestamp:$ts\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" +
-            "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\"," +
+            "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"true\"," +
             "\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"$FORMAT\"}}}}\r\n"
 
     fun ssmlMessage(requestId: String, ts: String, ssml: String): String =
@@ -319,6 +324,10 @@ object EdgeTts {
                 one(c, o)
             } catch (e: Forbidden) {
                 one(c, o) // retried once with the corrected clock
+            } catch (e: java.io.IOException) {
+                L.w("tts", "retry after ${e.javaClass.simpleName}: ${e.message}")
+                Thread.sleep(1000)
+                one(c, o)
             }
             out.write(audio)
         }
@@ -340,6 +349,7 @@ object EdgeTts {
             .header("Origin", ORIGIN)
             .header("User-Agent", UA)
             .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Accept-Encoding", "gzip, deflate, br, zstd")
             .header("Cookie", "muid=${muid()};")
             .build()
         val audio = ByteArrayOutputStream()
@@ -366,12 +376,22 @@ object EdgeTts {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                L.w("tts", "ws failure: ${t.javaClass.simpleName} ${t.message} http=${response?.code} audio=${audio.size()}")
                 if (response?.code == 403) {
                     learnSkew(response)
                     error = Forbidden()
                 } else {
                     error = t
                 }
+                done.countDown()
+            }
+
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                if (!finished) {
+                    L.w("tts", "server closed: $code $reason")
+                    error = TtsException(t("Сервис закрыл соединение: $code $reason", "The service closed the connection: $code $reason"))
+                }
+                webSocket.close(1000, null)
                 done.countDown()
             }
 

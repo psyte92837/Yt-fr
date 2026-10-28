@@ -34,6 +34,8 @@ class EdgeTtsTest {
     fun fullVoiceNameHandlesMultiPartNames() {
         assertEquals("Microsoft Server Speech Text to Speech Voice (en-US, AvaMultilingualNeural)", EdgeTts.fullVoiceName("en-US-AvaMultilingualNeural"))
         assertEquals("x", EdgeTts.fullVoiceName("x"))
+        assertEquals("Microsoft Server Speech Text to Speech Voice (zh-CN-liaoning, XiaobeiNeural)", EdgeTts.fullVoiceName("zh-CN-liaoning-XiaobeiNeural"))
+        assertEquals("Microsoft Server Speech Text to Speech Voice (ru-RU, SvetlanaNeural)", EdgeTts.fullVoiceName("ru-RU-SvetlanaNeural"))
     }
 
     @Test
@@ -101,6 +103,7 @@ class EdgeTtsTest {
         assertEquals("Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)", ts)
         assertTrue(EdgeTts.configMessage(ts).contains("Path:speech.config\r\n\r\n"))
         assertTrue(EdgeTts.configMessage(ts).contains(EdgeTts.FORMAT))
+        assertTrue(EdgeTts.configMessage(ts).contains("\"sentenceBoundaryEnabled\":\"true\",\"wordBoundaryEnabled\":\"false\""))
         val m = EdgeTts.ssmlMessage("id1", ts, "<speak/>")
         assertTrue(m.startsWith("X-RequestId:id1\r\n"))
         assertTrue(m.endsWith("Path:ssml\r\n\r\n<speak/>"))

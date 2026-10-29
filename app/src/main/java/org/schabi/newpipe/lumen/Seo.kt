@@ -12,7 +12,7 @@ import java.net.URLEncoder
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Audience-to-SEO pipeline (see doc/lumen/seo/):
+ * Audience-to-SEO pipeline:
  * transcripts + comments → Voice of Customer insights with quotes → topic clusters →
  * keyword evidence (autocomplete) → qualification → SEO brief → Markdown draft → QA → checklist → editor approval.
  * Rules: never invent quotes, volumes or sources; unverified demand is a hypothesis; nothing is published automatically.

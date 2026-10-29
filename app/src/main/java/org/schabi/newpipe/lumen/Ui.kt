@@ -776,6 +776,8 @@ abstract class LumenBase : Activity() {
     fun err(t: Throwable) {
         val msg = (t.message ?: t.javaClass.simpleName).take(500)
         L.e("ui", "${javaClass.simpleName}: $msg", t)
+        // the screen may be gone by the time a background job fails: no window to attach a dialog to
+        if (isFinishing || isDestroyed) return
         AlertDialog.Builder(this).setTitle(t("Ошибка", "Error")).setMessage(msg).setPositiveButton("OK", null)
             .setNeutralButton(t("Отчёт", "Report")) { _, _ ->
                 shareText("Lumen report", L.report(this, t, "screen: ${javaClass.simpleName}", errorsOnly = true, maxLines = 150))

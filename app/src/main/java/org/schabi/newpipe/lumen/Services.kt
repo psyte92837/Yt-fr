@@ -211,6 +211,7 @@ class CollectService : Service() {
                         "style" -> t("Стиль видео", "Video style")
                         "chgraph" -> t("Граф каналов", "Channel graph")
                         "dossier" -> t("AI-досье", "AI dossier")
+                        "audit" -> t("Аудит алгоритма", "Algorithm audit")
                         "recs" -> t("Рекомендации", "Recommendations")
                         else -> t("Сбор", "Collection")
                     }

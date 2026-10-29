@@ -61,6 +61,21 @@ object Settings {
         get() = p.getString("lang", "ru") ?: "ru"
         set(v) = p.edit().putString("lang", v).apply()
 
+    /** "system", "light", "dark" or "black" (AMOLED). */
+    var theme: String
+        get() = p.getString("theme", "system") ?: "system"
+        set(v) = p.edit().putString("theme", v).apply()
+
+    /** "dynamic" (Material You) or a fixed accent preset name. */
+    var accent: String
+        get() = p.getString("accent", "dynamic") ?: "dynamic"
+        set(v) = p.edit().putString("accent", v).apply()
+
+    /** Text scale in percent. */
+    var textScale: Int
+        get() = p.getInt("text_scale", 100)
+        set(v) = p.edit().putInt("text_scale", v).apply()
+
     var wizardDone: Boolean
         get() = p.getBoolean("wizard_done", false)
         set(v) = p.edit().putBoolean("wizard_done", v).apply()

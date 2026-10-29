@@ -51,6 +51,27 @@ class SettingsActivity : LumenBase() {
                 render()
             }
         }
+        c.h2(t("Оформление", "Appearance"))
+        c.spinner(t("Тема", "Theme"), listOf("system" to t("Как в системе", "Follow system"), "light" to t("Светлая", "Light"),
+            "dark" to t("Тёмная", "Dark"), "black" to t("Чёрная (AMOLED)", "Black (AMOLED)")), Settings.theme) {
+            if (it != Settings.theme) {
+                Settings.theme = it
+                recreate()
+            }
+        }
+        c.spinner(t("Цвет акцента", "Accent colour"), Palette.accentNames, Settings.accent) {
+            if (it != Settings.accent) {
+                Settings.accent = it
+                recreate()
+            }
+        }
+        c.spinner(t("Размер текста", "Text size"), listOf(85 to "85%", 100 to "100%", 115 to "115%", 130 to "130%"), Settings.textScale) {
+            if (it != Settings.textScale) {
+                Settings.textScale = it
+                recreate()
+            }
+        }
+        c.h2(t("Работа", "Behaviour"))
         c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер NewPipe", "Analytics + NewPipe player")), Settings.mode) {
             Settings.mode = it
         }

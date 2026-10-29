@@ -68,9 +68,36 @@ object Palette {
     var OK = 0xFF2E7D32.toInt()
     var WARN = 0xFFB26A00.toInt()
 
+    /** Fixed accent presets: light (primary, onPrimary, container, onContainer), dark (same). */
+    private val accents = mapOf(
+        "purple" to listOf(0xFF6750A4, 0xFFFFFFFF, 0xFFEADDFF, 0xFF21005D, 0xFFD0BCFF, 0xFF381E72, 0xFF4F378B, 0xFFEADDFF),
+        "blue" to listOf(0xFF0B57D0, 0xFFFFFFFF, 0xFFD3E3FD, 0xFF041E49, 0xFFA8C7FA, 0xFF062E6F, 0xFF0842A0, 0xFFD3E3FD),
+        "green" to listOf(0xFF1B6C2F, 0xFFFFFFFF, 0xFFA6F5B0, 0xFF002108, 0xFF8AD896, 0xFF00391A, 0xFF005226, 0xFFA6F5B0),
+        "red" to listOf(0xFFB3261E, 0xFFFFFFFF, 0xFFFFDAD6, 0xFF410002, 0xFFFFB4AB, 0xFF690005, 0xFF93000A, 0xFFFFDAD6),
+        "orange" to listOf(0xFF9A4600, 0xFFFFFFFF, 0xFFFFDBC8, 0xFF321300, 0xFFFFB68A, 0xFF512400, 0xFF743400, 0xFFFFDBC8),
+        "teal" to listOf(0xFF006B5E, 0xFFFFFFFF, 0xFF9EF2E0, 0xFF00201B, 0xFF82D5C4, 0xFF00382F, 0xFF005046, 0xFF9EF2E0)
+    )
+    val accentNames get() = listOf("dynamic" to t("Динамический (Android 12+)", "Dynamic (Android 12+)"), "purple" to t("Фиолетовый", "Purple"),
+        "blue" to t("Синий", "Blue"), "green" to t("Зелёный", "Green"), "red" to t("Красный", "Red"),
+        "orange" to t("Оранжевый", "Orange"), "teal" to t("Бирюзовый", "Teal"))
+
     fun init(ctx: Context) {
         val night = ctx.isNight()
-        if (Build.VERSION.SDK_INT >= 31) {
+        initBase(ctx, night)
+        accents[Settings.accent]?.let { a ->
+            val o = if (night) 4 else 0
+            ACCENT = a[o].toInt(); ON_ACCENT = a[o + 1].toInt()
+            FAB = if (night) a[6].toInt() else a[2].toInt(); ON_FAB = if (night) a[7].toInt() else a[3].toInt()
+            ACCENT_SOFT = FAB; ON_SOFT = ON_FAB
+        }
+        if (night && Settings.theme == "black") {
+            SURFACE = 0xFF000000.toInt()
+            CARD = 0xFF121212.toInt()
+        }
+    }
+
+    private fun initBase(ctx: Context, night: Boolean) {
+        if (Build.VERSION.SDK_INT >= 31 && Settings.accent == "dynamic") {
             fun c(id: Int) = ctx.resources.getColor(id, ctx.theme)
             if (night) {
                 ACCENT = c(android.R.color.system_accent1_200)
@@ -140,8 +167,11 @@ object Type {
 
 fun Context.dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
-fun Context.isNight(): Boolean =
-    (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+fun Context.isNight(): Boolean = when (if (LumenEnv.ready) Settings.theme else "system") {
+    "light" -> false
+    "dark", "black" -> true
+    else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+}
 
 fun Context.toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
@@ -360,7 +390,7 @@ enum class BtnStyle { FILLED, TONAL, OUTLINED, TEXT }
 
 fun text(ctx: Context, s: String, size: Float = Type.BODY, bold: Boolean = false, color: Int = Palette.ON_SURFACE) = TextView(ctx).apply {
     text = s
-    textSize = size
+    textSize = size * (if (LumenEnv.ready) Settings.textScale / 100f else 1f)
     setTextColor(color)
     setLineSpacing(0f, 1.15f)
     if (bold) typeface = Type.medium

@@ -199,6 +199,11 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".lumen.AuditActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- ===== /Lumen ===== -->
 
         <receiver

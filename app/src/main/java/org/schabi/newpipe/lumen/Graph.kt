@@ -246,16 +246,20 @@ class GraphActivity : LumenBase() {
     private fun build() {
         val chips = listOf("depth" to t("Глубина", "Depth"), "relevance" to t("Релевантность", "Relevance"), "channel" to t("Каналы", "Channels"))
         val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val row = chips.map { (k, l) ->
-            chip(this, l, colorBy == k) {
-                colorBy = k
-                build()
-            }
-        } + chip(this, t("Только по теме", "On topic only"), onlyOnTopic) {
-            onlyOnTopic = !onlyOnTopic
-            build()
-        }
-        header.addView(chipRow(this, row).apply { setPadding(dp(16), dp(4), dp(16), dp(4)) })
+        val viewLabel = t("Вид: ", "View: ") + chips.first { it.first == colorBy }.second +
+            (if (onlyOnTopic) " · " + t("по теме", "on topic") else "") + " ▾"
+        header.addView(
+            chip(this, viewLabel, true) {
+                bottomSheet(t("Вид графа", "Graph view"), onDismiss = { build() }) { dismiss ->
+                    add(text(ctx, t("Цвет узлов по", "Colour nodes by"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+                    add(choiceChips(ctx, chips, colorBy) { colorBy = it }, 8)
+                    check(t("Только по теме", "On topic only"), onlyOnTopic) { onlyOnTopic = it }
+                    button(t("Готово", "Done"), primary = true) { dismiss() }
+                }
+            },
+            LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+                .apply { setMargins(dp(16), dp(4), dp(16), dp(4)) }
+        )
         val legend = text(this, t("Загрузка раскладки…", "Computing layout…"), 12f, color = Palette.MUTED).apply {
             setPadding(dp(16), 0, dp(16), dp(8))
         }

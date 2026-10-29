@@ -250,7 +250,7 @@ fun ripple(ctx: Context, content: Drawable, onColor: Int): RippleDrawable {
 }
 
 /** Line icons for the top app bar, drawn in code on a 24-unit grid (Material Symbols Outlined look). */
-enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER }
+enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER, HOME, LIST, CHART, SPARK, SEARCH }
 
 /** App-bar actions are passed as short glyphs; this maps them to an icon (null = draw the glyph as text). */
 fun glyphIcon(glyph: String): Ic? = when (glyph) {
@@ -285,6 +285,7 @@ fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
     Ic.JOURNAL -> t("Ответы AI", "AI answers")
     Ic.WEB -> t("Браузер", "Browser")
     Ic.SPEAKER -> t("Озвучить текст", "Read text aloud")
+    Ic.HOME, Ic.LIST, Ic.CHART, Ic.SPARK, Ic.SEARCH -> glyph
     null -> glyph
 }
 
@@ -388,6 +389,27 @@ class IconDrawable(private val ic: Ic, color: Int) : Drawable() {
                 line(4f, 9f, 8f, 9f, 13f, 4f, 13f, 20f, 8f, 15f, 4f, 15f, 4f, 9f)
                 canvas.drawArc(RectF(11f, 8f, 19f, 16f), -50f, 100f, false, stroke)
                 canvas.drawArc(RectF(9f, 4f, 23f, 20f), -50f, 100f, false, stroke)
+            }
+            Ic.HOME -> {
+                line(3f, 11f, 12f, 4f, 21f, 11f)
+                line(6f, 9f, 6f, 20f, 18f, 20f, 18f, 9f)
+            }
+            Ic.LIST -> {
+                floatArrayOf(6f, 12f, 18f).forEach {
+                    canvas.drawCircle(4.5f, it, 1.3f, fill)
+                    line(9f, it, 20f, it)
+                }
+            }
+            Ic.CHART -> {
+                line(4f, 20f, 20f, 20f)
+                line(7f, 17f, 7f, 11f)
+                line(12f, 17f, 12f, 5f)
+                line(17f, 17f, 17f, 13f)
+            }
+            Ic.SPARK -> line(12f, 3f, 14f, 10f, 21f, 12f, 14f, 14f, 12f, 21f, 10f, 14f, 3f, 12f, 10f, 10f, 12f, 3f)
+            Ic.SEARCH -> {
+                canvas.drawCircle(11f, 11f, 6f, stroke)
+                line(15.5f, 15.5f, 20f, 20f)
             }
         }
         canvas.restore()
@@ -539,8 +561,68 @@ fun rowOf(ctx: Context, vararg views: View): LinearLayout = LinearLayout(ctx).ap
     }
 }
 
-/** Wrapping-free horizontal chip row (scrollable). */
-fun chipRow(ctx: Context, chips: List<View>): HorizontalScrollView {
+/** Lays children out left to right and wraps to the next line when the row is full. */
+class FlowLayout(ctx: Context, private val hGap: Int, private val vGap: Int) : ViewGroup(ctx) {
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        val maxW = (MeasureSpec.getSize(widthSpec) - paddingLeft - paddingRight).coerceAtLeast(0)
+        var x = 0
+        var y = 0
+        var rowH = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == GONE) continue
+            c.measure(MeasureSpec.makeMeasureSpec(maxW, MeasureSpec.AT_MOST), MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED))
+            if (x > 0 && x + c.measuredWidth > maxW) {
+                y += rowH + vGap
+                x = 0
+                rowH = 0
+            }
+            x += c.measuredWidth + hGap
+            rowH = maxOf(rowH, c.measuredHeight)
+        }
+        setMeasuredDimension(resolveSize(maxW + paddingLeft + paddingRight, widthSpec), resolveSize(y + rowH + paddingTop + paddingBottom, heightSpec))
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        val maxW = r - l - paddingLeft - paddingRight
+        var x = 0
+        var y = 0
+        var rowH = 0
+        for (i in 0 until childCount) {
+            val c = getChildAt(i)
+            if (c.visibility == GONE) continue
+            if (x > 0 && x + c.measuredWidth > maxW) {
+                y += rowH + vGap
+                x = 0
+                rowH = 0
+            }
+            c.layout(paddingLeft + x, paddingTop + y, paddingLeft + x + c.measuredWidth, paddingTop + y + c.measuredHeight)
+            x += c.measuredWidth + hGap
+            rowH = maxOf(rowH, c.measuredHeight)
+        }
+    }
+}
+
+/** Chips that wrap onto several lines; past [collapseAfter] chips the rest hides behind a "+ N more" chip. */
+fun chipRow(ctx: Context, chips: List<View>, collapseAfter: Int = 9): ViewGroup {
+    val flow = FlowLayout(ctx, ctx.dp(8), ctx.dp(8))
+    if (chips.size <= collapseAfter + 1) {
+        chips.forEach { flow.addView(it) }
+        return flow
+    }
+    chips.take(collapseAfter).forEach { flow.addView(it) }
+    val rest = chips.drop(collapseAfter)
+    lateinit var more: View
+    more = chip(ctx, t("+ ещё ${rest.size}", "+ ${rest.size} more"), true) {
+        flow.removeView(more)
+        rest.forEach { flow.addView(it) }
+    }
+    flow.addView(more)
+    return flow
+}
+
+/** One horizontal scrolling line of chips, for a fixed header that must stay a single row. */
+fun chipScroller(ctx: Context, chips: List<View>): HorizontalScrollView {
     val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
     chips.forEach {
         val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -551,6 +633,76 @@ fun chipRow(ctx: Context, chips: List<View>): HorizontalScrollView {
         isHorizontalScrollBarEnabled = false
         addView(row)
     }
+}
+
+/** Single-choice group as wrapping chips: one tap, every option visible. */
+fun <T> choiceChips(ctx: Context, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit): ViewGroup {
+    val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+    fun fill(sel: T) {
+        box.removeAllViews()
+        box.addView(chipRow(ctx, options.map { (v, label) ->
+            chip(ctx, label, v == sel) {
+                if (v != sel) {
+                    fill(v)
+                    onSelect(v)
+                }
+            }
+        }, collapseAfter = 99))
+    }
+    fill(selected)
+    return box
+}
+
+/** M3 segmented button: 2-4 short options in one row, no scrolling. */
+fun segBar(ctx: Context, labels: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
+    val row = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = roundBg(0x00000000, 20f, ctx, Palette.OUTLINE)
+    }
+    labels.forEachIndexed { i, s ->
+        val on = i == selected
+        val tv = text(ctx, s, if (s.length > 10) 12f else 14f, bold = true, color = if (on) Palette.ON_SOFT else Palette.MUTED).apply {
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(ctx.dp(4), 0, ctx.dp(4), 0)
+            background = ripple(ctx, roundBg(if (on) Palette.ACCENT_SOFT else 0x00000000, 20f, ctx), Palette.ON_SURFACE)
+            contentDescription = s
+            setOnClickListener { if (!on) onSelect(i) }
+        }
+        row.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(40), 1f))
+    }
+    return row
+}
+
+/** M3 navigation bar: icon in a pill, label under it; the active destination is bold. */
+fun bottomNav(ctx: Context, items: List<Pair<Ic, String>>, selected: Int, onSelect: (Int) -> Unit): View {
+    val bar = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        setBackgroundColor(Palette.CARD)
+        setPadding(ctx.dp(4), ctx.dp(8), ctx.dp(4), ctx.dp(8))
+    }
+    items.forEachIndexed { i, (ic, label) ->
+        val on = i == selected
+        val color = if (on) Palette.ON_SURFACE else Palette.MUTED
+        val pill = ImageView(ctx).apply {
+            setImageDrawable(IconDrawable(ic, if (on) Palette.ON_SOFT else color))
+            background = roundBg(if (on) Palette.ACCENT_SOFT else 0x00000000, 16f, ctx)
+            val p = ctx.dp(4)
+            setPadding(ctx.dp(20), p, ctx.dp(20), p)
+        }
+        val cell = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            minimumHeight = ctx.dp(56)
+            contentDescription = label
+            addView(pill, LinearLayout.LayoutParams(ctx.dp(64), ctx.dp(32)))
+            addView(text(ctx, label, 12f, bold = on, color = color).apply { maxLines = 1 })
+            setOnClickListener { onSelect(i) }
+        }
+        bar.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    }
+    return bar
 }
 
 /** Tiny view DSL so screens can be built in code without XML or extra libraries (8dp grid). */
@@ -586,12 +738,16 @@ class Col(val ctx: Context, padding: Int = 16) {
     fun edit(hint: String, value: String = "", multiline: Boolean = false, number: Boolean = false) =
         add(edt(ctx, hint, value, multiline, number))
 
-    fun <T> spinner(label: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit): Spinner {
+    /** Up to 7 short options show as chips (one tap); long or numeric lists stay a dropdown. */
+    fun <T> spinner(label: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit): View {
         add(text(ctx, label, Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        if (options.size in 2..7 && options.all { it.second.length <= 26 } && options.any { it.first == selected }) {
+            return add(choiceChips(ctx, options, selected, onSelect), 4)
+        }
         return add(spin(ctx, options, selected, onSelect), 4)
     }
 
-    fun chips(chips: List<View>) = add(chipRow(ctx, chips), 8)
+    fun chips(chips: List<View>, collapseAfter: Int = 9) = add(chipRow(ctx, chips, collapseAfter), 8)
     fun row(vararg views: View): LinearLayout = add(rowOf(ctx, *views), 4)
 
     /** M3 filled card, 12dp corners, 16dp inner padding. */
@@ -778,6 +934,11 @@ abstract class LumenBase : Activity() {
         }
     }
 
+    private var pageScroll: ScrollView? = null
+
+    /** The app-bar arrow; screens with inner levels override it. */
+    open fun navigateUp() = finish()
+
     /** M3 small top app bar: navigation icon, title, trailing action icons. */
     private fun appBar(title: String, back: Boolean, actions: List<Pair<String, () -> Unit>>): LinearLayout {
         val bar = LinearLayout(this).apply {
@@ -788,7 +949,7 @@ abstract class LumenBase : Activity() {
             if (Palette.gradient == null) setBackgroundColor(Palette.SURFACE)
         }
         val size = dp(48)
-        if (back) bar.addView(iconBtn(this, "←") { finish() }, LinearLayout.LayoutParams(size, size))
+        if (back) bar.addView(iconBtn(this, "←") { navigateUp() }, LinearLayout.LayoutParams(size, size))
         val tv = text(this, title, Type.TITLE_L).apply {
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.END
@@ -809,22 +970,29 @@ abstract class LumenBase : Activity() {
         actions: List<Pair<String, () -> Unit>> = emptyList(),
         header: View? = null,
         fab: Pair<String, () -> Unit>? = null,
-        scroll: Boolean = true
+        scroll: Boolean = true,
+        footer: View? = null,
+        keepScroll: Boolean = false
     ) {
         // views may be reused between re-renders (e.g. the graph view): detach them from the old layout first
         (content.parent as? ViewGroup)?.removeView(content)
         header?.let { h -> (h.parent as? ViewGroup)?.removeView(h) }
+        footer?.let { f -> (f.parent as? ViewGroup)?.removeView(f) }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             if (Palette.gradient == null) setBackgroundColor(Palette.SURFACE)
         }
         column.addView(appBar(title, back, actions))
         header?.let { column.addView(it) }
+        val prevY = if (keepScroll) pageScroll?.scrollY ?: 0 else 0
         val body = if (!scroll || content is ScrollView) content else ScrollView(this).apply {
             isFillViewport = true
             addView(content)
         }
+        pageScroll = body as? ScrollView
+        if (prevY > 0) pageScroll?.let { sv -> sv.post { sv.scrollTo(0, prevY) } }
         column.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        footer?.let { column.addView(it) }
         val frame = FrameLayout(this).apply { background = Palette.background() }
         frame.addView(column)
         if (fab != null) {
@@ -837,7 +1005,7 @@ abstract class LumenBase : Activity() {
                 setOnClickListener { fab.second() }
             }
             val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.BOTTOM or Gravity.END)
-            lp.setMargins(dp(16), dp(16), dp(16), dp(16))
+            lp.setMargins(dp(16), dp(16), dp(16), dp(16) + if (footer != null) dp(80) else 0)
             frame.addView(f, lp)
             // leave room so the FAB never covers the last item
             if (scroll) (content as? ViewGroup)?.let { it.setPadding(it.paddingLeft, it.paddingTop, it.paddingRight, it.paddingBottom + dp(88)) }
@@ -850,6 +1018,26 @@ abstract class LumenBase : Activity() {
         }
         setContentView(frame)
         frame.requestApplyInsets()
+    }
+
+    /** M3 bottom sheet: a titled panel pinned to the bottom edge; [build] fills it and gets a dismiss callback. */
+    fun bottomSheet(title: String, onDismiss: () -> Unit = {}, build: Col.(dismiss: () -> Unit) -> Unit) {
+        val dialog = android.app.Dialog(this)
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
+        val c = Col(this, 20)
+        c.root.background = roundBg(Palette.SURFACE, 28f, this)
+        c.add(text(this, title, Type.TITLE_L), 0)
+        c.build { dialog.dismiss() }
+        val scroll = ScrollView(this).apply { addView(c.root) }
+        dialog.setContentView(scroll)
+        dialog.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
+            setGravity(Gravity.BOTTOM)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        dialog.setOnDismissListener { onDismiss() }
+        dialog.show()
     }
 
     /** Shows an error, logs it, and offers to share a developer report. */

@@ -14,35 +14,76 @@ import android.widget.LinearLayout
 
 /** Global settings: language, mode, AI providers, prompts, monitoring, backups. */
 class SettingsActivity : LumenBase() {
-    private var section = 0
+    private var section = -1 // -1 = list of sections
+    private var direct = false // opened straight into a section (AI banner, logs): back leaves the screen
     private var testing = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("ai", false)) section = 1
-        if (intent.getBooleanExtra("logs", false)) section = 4
-        if (intent.getBooleanExtra("quick", false)) section = 6
+        if (intent.getBooleanExtra("logs", false)) section = 2
+        if (intent.getBooleanExtra("quick", false)) section = 3
+        direct = section >= 0
         render()
     }
 
-    private val sections get() = listOf(t("Общие", "General"), "AI", t("Промпты", "Prompts"), t("Резервная копия", "Backup"), t("Логи", "Logs"), t("О приложении", "About"), t("Быстрый анализ", "Instant analysis"), t("Статистика", "Usage"))
+    override fun navigateUp() {
+        if (section >= 0 && !direct) {
+            section = -1
+            render()
+        } else {
+            finish()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() = navigateUp()
+
+    private val sections get() = listOf(
+        Triple(t("Общие", "General"), t("язык, режим, мониторинг, сбор", "language, mode, monitoring, collection"), 0),
+        Triple(t("AI и промпты", "AI and prompts"), t("провайдер, ключи, шаблоны запросов", "provider, keys, prompt templates"), 1),
+        Triple(t("Данные", "Data"), t("резервная копия, журнал, статистика AI", "backup, logs, AI usage"), 2),
+        Triple(t("О приложении", "About"), t("версия, быстрый анализ", "version, instant analysis"), 3)
+    )
 
     private fun render() {
         val c = Col(this)
+        if (section < 0) {
+            for ((name, summary, id) in sections) {
+                val card = c.card {
+                    add(text(ctx, name, Type.TITLE_M, bold = true), 0)
+                    muted(summary)
+                }
+                card.contentDescription = name
+                card.setOnClickListener {
+                    section = id
+                    render()
+                }
+            }
+            page(t("Настройки", "Settings"), c.root)
+            return
+        }
         when (section) {
             0 -> general(c)
-            1 -> ai(c)
-            2 -> prompts(c)
-            3 -> backup(c)
-            4 -> logs(c)
-            5 -> about(c)
-            6 -> quick(c)
-            else -> usage(c)
+            1 -> {
+                ai(c)
+                c.h2(t("Промпты", "Prompts"))
+                prompts(c)
+            }
+            2 -> {
+                backup(c)
+                c.h2(t("Статистика AI", "AI usage"))
+                usage(c)
+                c.h2(t("Журнал", "Logs"))
+                logs(c)
+            }
+            else -> {
+                about(c)
+                c.h2(t("Быстрый анализ", "Instant analysis"))
+                quick(c)
+            }
         }
-        page(t("Настройки", "Settings"), c.root, header = tabBar(this, sections, section) {
-            section = it
-            render()
-        })
+        page(sections[section].first, c.root)
     }
 
     private var usageGroup = AiStats.Group.PROJECT
@@ -294,7 +335,10 @@ class SettingsActivity : LumenBase() {
             "p6_quality" to t("P6 · Контроль качества", "P6 · Quality check"),
             "p7_ideas" to t("P7 · Идеи контента", "P7 · Content ideas"),
             "dossier_channel" to t("Досье · канал и его видео", "Dossier · channel and its videos"),
-            "dossier_overview" to t("Досье · общая картина", "Dossier · overview")
+            "dossier_overview" to t("Досье · общая картина", "Dossier · overview"),
+            "diagram_flow" to t("Схема · блок-схема процесса", "Diagram · process flowchart"),
+            "diagram_mind" to t("Схема · карта идей", "Diagram · mind map"),
+            "diagram_video" to t("Схема · структура видео", "Diagram · video structure")
         )
         for ((k, label) in names) {
             val card = c.card {

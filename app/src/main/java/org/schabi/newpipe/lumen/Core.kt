@@ -64,6 +64,16 @@ object Settings {
         get() = p.getString("lang", "ru") ?: "ru"
         set(v) = p.edit().putString("lang", v).apply()
 
+    /** Heads-up notification when a long task finishes. */
+    var notifyDone: Boolean
+        get() = p.getBoolean("notify_done", true)
+        set(v) = p.edit().putBoolean("notify_done", v).apply()
+
+    /** Vibrate with that notification. */
+    var vibrateDone: Boolean
+        get() = p.getBoolean("vibrate_done", true)
+        set(v) = p.edit().putBoolean("vibrate_done", v).apply()
+
     var wizardDone: Boolean
         get() = p.getBoolean("wizard_done", false)
         set(v) = p.edit().putBoolean("wizard_done", v).apply()

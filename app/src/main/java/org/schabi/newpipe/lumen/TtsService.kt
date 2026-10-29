@@ -570,7 +570,7 @@ class TtsService : Service() {
     }
 
     private fun notifyResult(title: String, body: String) {
-        val n = Notify.builder(this, Notify.CH_MONITOR).setSmallIcon(android.R.drawable.stat_sys_download_done)
+        val n = Notify.builder(this, Notify.doneChannel()).setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("Lumen: $title").setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(open()).setAutoCancel(true).build()

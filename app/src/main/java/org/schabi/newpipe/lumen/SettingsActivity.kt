@@ -54,6 +54,17 @@ class SettingsActivity : LumenBase() {
         c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер NewPipe", "Analytics + NewPipe player")), Settings.mode) {
             Settings.mode = it
         }
+        c.h2(t("Уведомления", "Notifications"))
+        c.check(t("Уведомлять о завершении задач (сбор, анализ, граф, озвучка)", "Notify when tasks finish (collection, analysis, graph, speech)"), Settings.notifyDone) {
+            Settings.notifyDone = it
+        }
+        c.check(t("Вибрация при завершении", "Vibrate when finished"), Settings.vibrateDone) {
+            Settings.vibrateDone = it
+            if (it) getSystemService(android.os.Vibrator::class.java)?.let { v ->
+                if (android.os.Build.VERSION.SDK_INT >= 26) v.vibrate(android.os.VibrationEffect.createWaveform(Notify.VIBRATION, -1))
+                else @Suppress("DEPRECATION") v.vibrate(Notify.VIBRATION, -1)
+            }
+        }
         c.h2(t("Мониторинг", "Monitoring"))
         c.check(t("Разрешить мониторинг тем по расписанию", "Allow scheduled topic monitoring"), Settings.monitoringAllowed) {
             Settings.monitoringAllowed = it

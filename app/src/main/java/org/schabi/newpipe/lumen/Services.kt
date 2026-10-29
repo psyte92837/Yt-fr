@@ -25,12 +25,25 @@ import java.util.concurrent.atomic.AtomicBoolean
 object Notify {
     const val CH_PROGRESS = "lumen_progress"
     const val CH_MONITOR = "lumen_monitor"
+    const val CH_DONE = "lumen_done"
+    const val CH_DONE_QUIET = "lumen_done_quiet"
+    val VIBRATION = longArrayOf(0, 180, 90, 180, 90, 320)
+
+    /** Channel for "task finished" alerts, with or without vibration (channel settings cannot change later). */
+    fun doneChannel() = if (Settings.vibrateDone) CH_DONE else CH_DONE_QUIET
 
     fun channels(ctx: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_PROGRESS, "Lumen: сбор / collection", NotificationManager.IMPORTANCE_LOW))
         nm.createNotificationChannel(NotificationChannel(CH_MONITOR, "Lumen: мониторинг / monitoring", NotificationManager.IMPORTANCE_DEFAULT))
+        nm.createNotificationChannel(NotificationChannel(CH_DONE, "Lumen: готово (вибро) / done (vibrate)", NotificationManager.IMPORTANCE_HIGH).apply {
+            enableVibration(true)
+            vibrationPattern = VIBRATION
+        })
+        nm.createNotificationChannel(NotificationChannel(CH_DONE_QUIET, "Lumen: готово (тихо) / done (quiet)", NotificationManager.IMPORTANCE_HIGH).apply {
+            enableVibration(false)
+        })
     }
 
     @Suppress("DEPRECATION")
@@ -40,6 +53,26 @@ object Notify {
     fun openProject(ctx: Context, projectId: String): PendingIntent {
         val i = Intent(ctx, ProjectActivity::class.java).putExtra("id", projectId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return PendingIntent.getActivity(ctx, projectId.hashCode(), i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
+
+    /** "Task finished" alert with vibration (unless turned off in settings). */
+    fun done(ctx: Context, id: Int, title: String, body: String, projectId: String, ok: Boolean = true) {
+        if (!Settings.notifyDone) return
+        channels(ctx)
+        val b = builder(ctx, doneChannel())
+            .setSmallIcon(if (ok) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
+            .setContentTitle(title).setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setContentIntent(openProject(ctx, projectId)).setAutoCancel(true)
+        if (Build.VERSION.SDK_INT < 26) {
+            b.setPriority(Notification.PRIORITY_HIGH)
+            if (Settings.vibrateDone) b.setVibrate(VIBRATION)
+        }
+        try {
+            ctx.getSystemService(NotificationManager::class.java).notify(id, b.build())
+        } catch (e: SecurityException) {
+            // notifications permission not granted
+        }
     }
 
     fun post(ctx: Context, id: Int, title: String, body: String, projectId: String) {
@@ -158,6 +191,22 @@ class CollectService : Service() {
                 L.i("task", "$kind finished: done=${CollectState.done}/${CollectState.total} errors=${CollectState.errors} " +
                     "cancelled=${CollectState.cancel.get()} ${CollectState.lastResult.take(200)}")
                 CollectState.running = false
+                if (!CollectState.cancel.get()) {
+                    val failed = CollectState.lastError.isNotEmpty()
+                    val label = when (kind) {
+                        "quick" -> t("Быстрый анализ", "Instant analysis")
+                        "style" -> t("Стиль видео", "Video style")
+                        "chgraph" -> t("Граф каналов", "Channel graph")
+                        "dossier" -> t("AI-досье", "AI dossier")
+                        "recs" -> t("Рекомендации", "Recommendations")
+                        else -> t("Сбор", "Collection")
+                    }
+                    val name = Store.project(pid)?.name.orEmpty()
+                    val body = if (failed) CollectState.lastError else CollectState.lastResult.ifBlank {
+                        t("Готово: ${CollectState.done}/${CollectState.total}, ошибок ${CollectState.errors}", "Done: ${CollectState.done}/${CollectState.total}, errors ${CollectState.errors}")
+                    }
+                    Notify.done(this, NOTIF_ID + 10, (if (failed) "⚠️ " else "✅ ") + label + if (name.isNotBlank()) " · $name" else "", body.take(300), pid, !failed)
+                }
                 stopForegroundCompat()
                 stopSelf()
             }

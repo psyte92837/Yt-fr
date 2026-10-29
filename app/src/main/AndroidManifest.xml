@@ -89,6 +89,11 @@
             android:name=".lumen.GraphActivity"
             android:exported="false"
             android:theme="@style/LumenTheme" />
+        <activity
+            android:name=".lumen.DiagramActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- Share a YouTube link → instant analysis -->
         <activity
             android:name=".lumen.LinkActivity"

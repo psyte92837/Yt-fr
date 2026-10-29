@@ -244,7 +244,10 @@ class SettingsActivity : LumenBase() {
             "p6_quality" to t("P6 · Контроль качества", "P6 · Quality check"),
             "p7_ideas" to t("P7 · Идеи контента", "P7 · Content ideas"),
             "dossier_channel" to t("Досье · канал и его видео", "Dossier · channel and its videos"),
-            "dossier_overview" to t("Досье · общая картина", "Dossier · overview")
+            "dossier_overview" to t("Досье · общая картина", "Dossier · overview"),
+            "diagram_flow" to t("Схема · блок-схема процесса", "Diagram · process flowchart"),
+            "diagram_mind" to t("Схема · карта идей", "Diagram · mind map"),
+            "diagram_video" to t("Схема · структура видео", "Diagram · video structure")
         )
         for ((k, label) in names) {
             val card = c.card {

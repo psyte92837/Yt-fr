@@ -85,6 +85,11 @@ class ProjectActivity : LumenBase() {
             project.newCount = 0
             Store.save(project)
         }
+        Lumen.prefs.getString("vl_" + project.id, null)?.split("|", limit = 3)?.takeIf { it.size == 3 }?.let {
+            listMode = it[0].ifBlank { "all" }
+            listSort = it[1].ifBlank { "added" }
+            labelFilter = it[2]
+        }
         reload()
         render()
         if (intent.getBooleanExtra("autoSearch", false) && savedInstanceState == null) runSearch()
@@ -121,7 +126,7 @@ class ProjectActivity : LumenBase() {
         "overview" to t("Обзор", "Overview"), "videos" to t("Видео", "Videos"), "collect" to t("Сбор", "Collect"),
         "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"), "recs" to t("Рекомендации", "Recommendations"),
         "audience" to t("Аудитория", "Audience"), "seo" to "SEO", "ai" to "AI",
-        "export" to t("Экспорт", "Export"), "settings" to t("Настройки", "Settings")
+        "export" to t("Экспорт", "Export"), "schemes" to t("Схемы", "Diagrams"), "settings" to t("Настройки", "Settings")
     )
 
     /** Bottom navigation: related sections share one destination and switch with a segmented bar. */
@@ -130,11 +135,12 @@ class ProjectActivity : LumenBase() {
         NavGroup(Ic.LIST, t("Данные", "Data"), listOf("videos", "collect", "channels")),
         NavGroup(Ic.CHART, t("Анализ", "Analysis"), listOf("analytics", "recs", "audience", "seo")),
         NavGroup(Ic.SPARK, "AI", listOf("ai")),
-        NavGroup(Ic.MORE, t("Ещё", "More"), listOf("export", "settings"))
+        NavGroup(Ic.MORE, t("Ещё", "More"), listOf("export", "schemes", "settings"))
     )
     private val groupTab = HashMap<Int, String>()
 
     fun render() {
+        Lumen.prefs.edit().putString("vl_" + project.id, "$listMode|$listSort|$labelFilter").apply()
         val c = Col(this)
         progressView = null
         if (busy.isNotEmpty() || (CollectState.running && CollectState.projectId == project.id)) {
@@ -155,6 +161,7 @@ class ProjectActivity : LumenBase() {
             "seo" -> seoTab(c)
             "ai" -> aiTab(c)
             "export" -> exportTab(c)
+            "schemes" -> schemesTab(c)
             else -> settingsTab(c)
         }
         val running = busy.isNotEmpty() || (CollectState.running && CollectState.projectId == project.id)
@@ -473,6 +480,7 @@ class ProjectActivity : LumenBase() {
         fun refreshSel() {
             val m = videos.values.count { it.marked }
             selText.text = t("Выбрано: $m", "Selected: $m")
+            markedChip?.text = t("Отмеченные $m", "Marked $m")
             selBar.visibility = if (m > 0) View.VISIBLE else View.GONE
         }
         refreshSel()
@@ -498,6 +506,7 @@ class ProjectActivity : LumenBase() {
         }
         c.add(bar, 8)
 
+        var markedChip: TextView? = null
         c.chips(
             listOf(
                 "all" to t("Все $total", "All $total"), "marked" to t("Отмеченные $marked", "Marked $marked"),
@@ -507,7 +516,7 @@ class ProjectActivity : LumenBase() {
                     listMode = k
                     shown = 50
                     render()
-                }
+                }.also { if (k == "marked") markedChip = it }
             }
         )
         val summary = text(this, "", 13f, bold = true, color = Palette.MUTED).apply {
@@ -524,8 +533,15 @@ class ProjectActivity : LumenBase() {
             val list = filteredVideos()
             summary.text = t("Сначала: ${sortName()} ▾ · ${list.size} видео", "Sorted by ${sortName()} ▾ · ${list.size} videos")
             if (list.isEmpty()) {
-                box.addView(text(this, if (total == 0) t("Пока нет видео. Нажмите «Найти» или импортируйте канал/плейлист через ⋮.", "No videos yet. Tap Search or import a channel/playlist via ⋮.")
-                else t("Нет видео под выбранный фильтр.", "No videos match the filter."), 13f, color = Palette.MUTED))
+                if (total == 0) {
+                    val e = Col(this, 0)
+                    e.empty(t("Пока нет видео", "No videos yet"),
+                        t("Нажмите «Найти» или импортируйте канал или плейлист через ⋮.", "Tap Search or import a channel or playlist via ⋮."),
+                        t("Найти видео", "Search videos")) { runSearch() }
+                    box.addView(e.root)
+                } else {
+                    box.addView(text(this, t("Нет видео под выбранный фильтр.", "No videos match the filter."), 13f, color = Palette.MUTED))
+                }
             }
             for (v in list.take(shown)) {
                 box.addView(videoRow(v), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })

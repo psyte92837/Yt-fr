@@ -28,6 +28,15 @@ class VideoActivity : LumenBase() {
         render()
     }
 
+    private val folds = HashMap<String, Boolean>()
+
+    private fun folded(key: String, default: Boolean) = folds[key] ?: default
+
+    private fun fold(key: String, open: Boolean) {
+        folds[key] = open
+        render()
+    }
+
     private fun reloadAndRender() {
         if (isFinishing || isDestroyed) return
         Store.videos(pid)[video.id]?.let { video = it }
@@ -112,45 +121,49 @@ class VideoActivity : LumenBase() {
 
         styleCard(c, pid, v, full = true) { reloadAndRender() }
 
-        if (v.tags.isNotEmpty()) {
-            c.h2(t("Теги", "Tags"))
-            c.chips(v.tags.take(30).map { chip(this, it) })
-        }
-        if (v.description.isNotBlank()) {
-            c.h2(t("Описание", "Description"))
-            c.add(text(this, v.description, 14f).apply { setTextIsSelectable(true) }, 8)
+        if (v.tags.isNotEmpty() || v.description.isNotBlank()) {
+            c.section(t("Описание и теги", "Description and tags"), v.description.take(90).replace('\n', ' '), folded("desc", false), { fold("desc", it) }) {
+                if (v.tags.isNotEmpty()) c.chips(v.tags.take(30).map { chip(this@VideoActivity, it) })
+                if (v.description.isNotBlank()) c.add(text(this@VideoActivity, v.description, 14f).apply { setTextIsSelectable(true) }, 8)
+            }
         }
 
-        c.h2(t("Расшифровка", "Transcript") + if (v.transcriptSource.isNotEmpty()) " · ${v.transcriptSource}" else "")
         val tr = Store.transcript(pid, v.id)
-        if (tr.isNullOrBlank()) {
-            c.muted(t("Нет. Включите «Расшифровка» на вкладке «Сбор» и нажмите «Собрать».", "None. Enable Transcript on the Collect tab and tap Collect."))
-        } else {
-            val shown = if (fullTranscript || tr.length <= 3000) tr else tr.take(3000) + "…"
-            c.card { add(text(ctx, shown, 13f).apply { setTextIsSelectable(true) }, 0) }
-            c.row(
-                btn(this, if (fullTranscript) t("Свернуть", "Collapse") else t("Показать всё", "Show all"), style = BtnStyle.TEXT) {
-                    fullTranscript = !fullTranscript
-                    render()
-                },
-                btn(this, t("Поделиться", "Share"), style = BtnStyle.TEXT) { shareText(v.title, tr) }
-            )
+        c.section(
+            t("Расшифровка", "Transcript") + if (v.transcriptSource.isNotEmpty()) " · ${v.transcriptSource}" else "",
+            if (tr.isNullOrBlank()) t("нет", "none") else t("${tr.length} симв.", "${tr.length} chars"),
+            folded("tr", false), { fold("tr", it) }
+        ) {
+            if (tr.isNullOrBlank()) {
+                c.muted(t("Нет. Включите «Расшифровка» на вкладке «Сбор» и нажмите «Собрать».", "None. Enable Transcript on the Collect tab and tap Collect."))
+            } else {
+                val shown = if (fullTranscript || tr.length <= 3000) tr else tr.take(3000) + "…"
+                c.card { add(text(ctx, shown, 13f).apply { setTextIsSelectable(true) }, 0) }
+                c.row(
+                    btn(this@VideoActivity, if (fullTranscript) t("Свернуть", "Collapse") else t("Показать всё", "Show all"), style = BtnStyle.TEXT) {
+                        fullTranscript = !fullTranscript
+                        render()
+                    },
+                    btn(this@VideoActivity, t("Поделиться", "Share"), style = BtnStyle.TEXT) { shareText(v.title, tr) }
+                )
+            }
         }
 
         val comments = Store.comments(pid, v.id)
-        c.h2(t("Комментарии", "Comments") + " (${comments.size})")
-        if (comments.isEmpty()) c.muted("—")
-        comments.take(commentsShown).forEach { cm ->
-            c.card {
-                add(text(ctx, (if (cm.isReply) "↳ " else "") + cm.author, 13f, bold = true), 0)
-                add(text(ctx, cm.text, 14f).apply { setTextIsSelectable(true) }, 4)
-                muted("♥ ${cm.likes} · ${if (cm.dateMs > 0) Fmt.date(cm.dateMs) else cm.dateText}" +
-                    if (cm.replyCount > 0) " · " + t("ответов: ", "replies: ") + cm.replyCount else "")
+        c.section(t("Комментарии", "Comments"), if (comments.isEmpty()) "—" else comments.size.toString(), folded("cm", false), { fold("cm", it) }) {
+            if (comments.isEmpty()) c.muted("—")
+            comments.take(commentsShown).forEach { cm ->
+                c.card {
+                    add(text(ctx, (if (cm.isReply) "↳ " else "") + cm.author, 13f, bold = true), 0)
+                    add(text(ctx, cm.text, 14f).apply { setTextIsSelectable(true) }, 4)
+                    muted("♥ ${cm.likes} · ${if (cm.dateMs > 0) Fmt.date(cm.dateMs) else cm.dateText}" +
+                        if (cm.replyCount > 0) " · " + t("ответов: ", "replies: ") + cm.replyCount else "")
+                }
             }
-        }
-        if (comments.size > commentsShown) c.button(t("Ещё комментарии", "More comments"), style = BtnStyle.TEXT) {
-            commentsShown += 50
-            render()
+            if (comments.size > commentsShown) c.button(t("Ещё комментарии", "More comments"), style = BtnStyle.TEXT) {
+                commentsShown += 50
+                render()
+            }
         }
         page(t("Видео", "Video"), c.root, actions = listOf("⤴" to { shareText(v.title, v.url) }))
     }

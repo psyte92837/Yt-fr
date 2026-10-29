@@ -28,6 +28,15 @@ class ChannelActivity : LumenBase() {
         if (data == null || data!!.recent.isEmpty()) load(false) else render()
     }
 
+    private val folds = HashMap<String, Boolean>()
+
+    private fun folded(key: String, default: Boolean) = folds[key] ?: default
+
+    private fun fold(key: String, open: Boolean) {
+        folds[key] = open
+        render()
+    }
+
     private fun load(force: Boolean) {
         busy = t("Загрузка канала…", "Loading channel…")
         render()
@@ -133,37 +142,42 @@ class ChannelActivity : LumenBase() {
         )
 
         // ---- links & description
-        if (d.links.isNotEmpty()) {
-            c.h2(t("Ссылки", "Links") + " (${d.links.size})")
-            d.links.forEach { l -> c.add(text(this, "🔗 $l", 14f, color = Palette.ACCENT).apply {
-                minHeight = dp(40)
-                setOnClickListener { openUrl(l) }
-            }, 0) }
-        }
-        if (d.tags.isNotEmpty()) c.chips(d.tags.take(30).map { chip(this, it) })
-        if (d.description.isNotBlank()) {
-            c.h2(t("Описание", "Description"))
-            c.add(text(this, if (fullDesc || d.description.length < 400) d.description else d.description.take(400) + "…", 14f).apply {
-                setTextIsSelectable(true)
-                setOnClickListener {
-                    fullDesc = !fullDesc
-                    render()
+        if (d.links.isNotEmpty() || d.tags.isNotEmpty() || d.description.isNotBlank()) {
+            val summary = listOfNotNull(
+                if (d.links.isNotEmpty()) t("ссылок: ${d.links.size}", "links: ${d.links.size}") else null,
+                d.description.take(70).replace('\n', ' ').takeIf { it.isNotBlank() }
+            ).joinToString(" · ")
+            c.section(t("Описание и ссылки", "Description and links"), summary, folded("about", false), { fold("about", it) }) {
+                d.links.forEach { l -> c.add(text(this@ChannelActivity, "🔗 $l", 14f, color = Palette.ACCENT).apply {
+                    minHeight = dp(40)
+                    setOnClickListener { openUrl(l) }
+                }, 0) }
+                if (d.tags.isNotEmpty()) c.chips(d.tags.take(30).map { chip(this@ChannelActivity, it) })
+                if (d.description.isNotBlank()) {
+                    c.add(text(this@ChannelActivity, if (fullDesc || d.description.length < 400) d.description else d.description.take(400) + "…", 14f).apply {
+                        setTextIsSelectable(true)
+                        setOnClickListener {
+                            fullDesc = !fullDesc
+                            render()
+                        }
+                    }, 8)
                 }
-            }, 8)
+            }
         }
 
         // ---- playlists
         if (d.playlists.isNotEmpty()) {
-            c.h2(t("Плейлисты", "Playlists") + " (${d.playlists.size})")
-            c.muted(t("Нажмите на плейлист — будет запущен полный анализ: видео, статистика, похожие, граф каналов.",
-                "Tap a playlist to run the full analysis: videos, stats, similar, channel graph."))
-            d.playlists.forEach { pl ->
-                val card = c.card {
-                    add(text(ctx, "▤ " + pl.name, 14f, bold = true), 0)
-                    if (pl.count >= 0) muted(t("видео: ", "videos: ") + pl.count)
-                }
-                card.setOnClickListener {
-                    confirm(pl.name, t("Запустить анализ плейлиста?", "Analyse this playlist?"), t("Запустить", "Start")) { QuickAnalysis.start(this, pl.url) }
+            c.section(t("Плейлисты", "Playlists"), d.playlists.size.toString(), folded("pl", false), { fold("pl", it) }) {
+                c.muted(t("Нажмите на плейлист — будет запущен полный анализ: видео, статистика, похожие, граф каналов.",
+                    "Tap a playlist to run the full analysis: videos, stats, similar, channel graph."))
+                d.playlists.forEach { pl ->
+                    val card = c.card {
+                        add(text(ctx, "▤ " + pl.name, 14f, bold = true), 0)
+                        if (pl.count >= 0) muted(t("видео: ", "videos: ") + pl.count)
+                    }
+                    card.setOnClickListener {
+                        confirm(pl.name, t("Запустить анализ плейлиста?", "Analyse this playlist?"), t("Запустить", "Start")) { QuickAnalysis.start(this@ChannelActivity, pl.url) }
+                    }
                 }
             }
         }
@@ -182,14 +196,15 @@ class ChannelActivity : LumenBase() {
 
         // ---- featured channels
         if (d.featured.isNotEmpty()) {
-            c.h2(t("Рекомендуемые каналы автора", "Featured channels") + " (${d.featured.size})")
-            d.featured.forEach { u ->
-                val known = ChannelStore.get(pid, u)
-                val card = c.card {
-                    add(text(ctx, known?.name?.ifBlank { null } ?: u.substringAfterLast('/'), 14f, bold = true), 0)
-                    if (known != null) muted(ChannelStats.line(known))
+            c.section(t("Рекомендуемые каналы автора", "Featured channels"), d.featured.size.toString(), folded("feat", false), { fold("feat", it) }) {
+                d.featured.forEach { u ->
+                    val known = ChannelStore.get(pid, u)
+                    val card = c.card {
+                        add(text(ctx, known?.name?.ifBlank { null } ?: u.substringAfterLast('/'), 14f, bold = true), 0)
+                        if (known != null) muted(ChannelStats.line(known))
+                    }
+                    card.setOnClickListener { open(this@ChannelActivity, pid, u) }
                 }
-                card.setOnClickListener { open(this, pid, u) }
             }
         }
         page(d.name.ifBlank { t("Канал", "Channel") }, c.root, actions = listOf("↗" to { openUrl(d.url) }))

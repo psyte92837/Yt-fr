@@ -954,6 +954,7 @@ abstract class LumenBase : Activity() {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(0x00000000))
             setGravity(Gravity.BOTTOM)
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
         dialog.setOnDismissListener { onDismiss() }
         dialog.show()

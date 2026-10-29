@@ -74,6 +74,26 @@ object Settings {
         get() = p.getBoolean("vibrate_done", true)
         set(v) = p.edit().putBoolean("vibrate_done", v).apply()
 
+    /** "system", "light", "dark" or "black" (AMOLED). */
+    var theme: String
+        get() = p.getString("theme", "system") ?: "system"
+        set(v) = p.edit().putString("theme", v).apply()
+
+    /** "dynamic" (Material You) or a fixed accent preset name. */
+    var accent: String
+        get() = p.getString("accent", "dynamic") ?: "dynamic"
+        set(v) = p.edit().putString("accent", v).apply()
+
+    /** "none" or a gradient theme name (overrides theme and accent). */
+    var style: String
+        get() = p.getString("style", "none") ?: "none"
+        set(v) = p.edit().putString("style", v).apply()
+
+    /** Text scale in percent. */
+    var textScale: Int
+        get() = p.getInt("text_scale", 100)
+        set(v) = p.edit().putInt("text_scale", v).apply()
+
     var wizardDone: Boolean
         get() = p.getBoolean("wizard_done", false)
         set(v) = p.edit().putBoolean("wizard_done", v).apply()

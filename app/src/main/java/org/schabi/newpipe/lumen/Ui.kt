@@ -69,9 +69,75 @@ object Palette {
     var OK = 0xFF2E7D32.toInt()
     var WARN = 0xFFB26A00.toInt()
 
+    /** Fixed accent presets: light (primary, onPrimary, container, onContainer), dark (same). */
+    private val accents = mapOf(
+        "purple" to listOf(0xFF6750A4, 0xFFFFFFFF, 0xFFEADDFF, 0xFF21005D, 0xFFD0BCFF, 0xFF381E72, 0xFF4F378B, 0xFFEADDFF),
+        "blue" to listOf(0xFF0B57D0, 0xFFFFFFFF, 0xFFD3E3FD, 0xFF041E49, 0xFFA8C7FA, 0xFF062E6F, 0xFF0842A0, 0xFFD3E3FD),
+        "green" to listOf(0xFF1B6C2F, 0xFFFFFFFF, 0xFFA6F5B0, 0xFF002108, 0xFF8AD896, 0xFF00391A, 0xFF005226, 0xFFA6F5B0),
+        "red" to listOf(0xFFB3261E, 0xFFFFFFFF, 0xFFFFDAD6, 0xFF410002, 0xFFFFB4AB, 0xFF690005, 0xFF93000A, 0xFFFFDAD6),
+        "orange" to listOf(0xFF9A4600, 0xFFFFFFFF, 0xFFFFDBC8, 0xFF321300, 0xFFFFB68A, 0xFF512400, 0xFF743400, 0xFFFFDBC8),
+        "teal" to listOf(0xFF006B5E, 0xFFFFFFFF, 0xFF9EF2E0, 0xFF00201B, 0xFF82D5C4, 0xFF00382F, 0xFF005046, 0xFF9EF2E0)
+    )
+    val accentNames get() = listOf("dynamic" to t("Динамический (Android 12+)", "Dynamic (Android 12+)"), "purple" to t("Фиолетовый", "Purple"),
+        "blue" to t("Синий", "Blue"), "green" to t("Зелёный", "Green"), "red" to t("Красный", "Red"),
+        "orange" to t("Оранжевый", "Orange"), "teal" to t("Бирюзовый", "Teal"))
+
+    /** Ready-made gradient themes: (dark?, gradient colours, accent, onAccent, container, onContainer). */
+    private class Grad(val dark: Boolean, val bg: IntArray, val accent: Long, val onAccent: Long, val cont: Long, val onCont: Long)
+    private val gradients = mapOf(
+        "aurora" to Grad(true, intArrayOf(0xFF0B1026.toInt(), 0xFF1B2A6B.toInt(), 0xFF0E7C86.toInt()), 0xFF5EEAD4, 0xFF00201B, 0xFF134E4A, 0xFFCCFBF1),
+        "sunset" to Grad(true, intArrayOf(0xFF2B0B3F.toInt(), 0xFF8E1A8C.toInt(), 0xFFE8603C.toInt()), 0xFFFFB38A, 0xFF4A1500, 0xFF7A2A55, 0xFFFFD9E6),
+        "neon" to Grad(true, intArrayOf(0xFF0F0C29.toInt(), 0xFF302B63.toInt(), 0xFF5B1F7A.toInt()), 0xFFFF6AD5, 0xFF3A0030, 0xFF4B2C8C, 0xFFE6DAFF),
+        "ocean" to Grad(true, intArrayOf(0xFF001B3A.toInt(), 0xFF05508F.toInt(), 0xFF1291B8.toInt()), 0xFF7FDBFF, 0xFF00263B, 0xFF0B4A73, 0xFFD2EFFF),
+        "candy" to Grad(false, intArrayOf(0xFFFFE3F1.toInt(), 0xFFE6DDFF.toInt(), 0xFFD0F0FF.toInt()), 0xFF8A3FFC, 0xFFFFFFFF, 0xFFEADCFF, 0xFF2A0A5E),
+        "peach" to Grad(false, intArrayOf(0xFFFFF1E0.toInt(), 0xFFFFD9C2.toInt(), 0xFFFFC6D3.toInt()), 0xFFC2410C, 0xFFFFFFFF, 0xFFFFDCC8, 0xFF431407)
+    )
+    val gradientNames get() = listOf("none" to t("Без градиента", "None"), "aurora" to t("Аврора", "Aurora"), "sunset" to t("Закат", "Sunset"),
+        "neon" to t("Неон", "Neon"), "ocean" to t("Океан", "Ocean"), "candy" to t("Конфетти (светлая)", "Candy (light)"), "peach" to t("Персик (светлая)", "Peach (light)"))
+
+    /** Active gradient colours or null; windows and pages paint this behind transparent content. */
+    val gradient: IntArray? get() = if (LumenEnv.ready) gradients[Settings.style]?.bg else null
+
+    val gradientDark: Boolean? get() = if (LumenEnv.ready) gradients[Settings.style]?.dark else null
+
+    fun background(): android.graphics.drawable.Drawable =
+        gradient?.let { android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, it) }
+            ?: android.graphics.drawable.ColorDrawable(SURFACE)
+
     fun init(ctx: Context) {
         val night = ctx.isNight()
-        if (Build.VERSION.SDK_INT >= 31) {
+        initBase(ctx, night)
+        gradients[Settings.style]?.let { g ->
+            val a = g.accent.toInt()
+            ACCENT = a; ON_ACCENT = g.onAccent.toInt(); FAB = g.cont.toInt(); ON_FAB = g.onCont.toInt()
+            ACCENT_SOFT = FAB; ON_SOFT = ON_FAB
+            if (g.dark) {
+                SURFACE = g.bg[0]
+                CARD = 0x33FFFFFF // translucent glass over the gradient
+                ON_SURFACE = 0xFFF4F1FA.toInt(); MUTED = 0xFFD0CBDD.toInt(); OUTLINE = 0xFFA9A3B8.toInt()
+                BAD = 0xFFFFB4AB.toInt(); OK = 0xFF81C995.toInt(); WARN = 0xFFFFCC80.toInt()
+            } else {
+                SURFACE = g.bg[0]
+                CARD = 0x80FFFFFF.toInt()
+                ON_SURFACE = 0xFF1D1B20.toInt(); MUTED = 0xFF49454F.toInt(); OUTLINE = 0xFF79747E.toInt()
+                BAD = 0xFFB3261E.toInt(); OK = 0xFF2E7D32.toInt(); WARN = 0xFFB26A00.toInt()
+            }
+            return
+        }
+        accents[Settings.accent]?.let { a ->
+            val o = if (night) 4 else 0
+            ACCENT = a[o].toInt(); ON_ACCENT = a[o + 1].toInt()
+            FAB = if (night) a[6].toInt() else a[2].toInt(); ON_FAB = if (night) a[7].toInt() else a[3].toInt()
+            ACCENT_SOFT = FAB; ON_SOFT = ON_FAB
+        }
+        if (night && Settings.theme == "black") {
+            SURFACE = 0xFF000000.toInt()
+            CARD = 0xFF121212.toInt()
+        }
+    }
+
+    private fun initBase(ctx: Context, night: Boolean) {
+        if (Build.VERSION.SDK_INT >= 31 && Settings.accent == "dynamic") {
             fun c(id: Int) = ctx.resources.getColor(id, ctx.theme)
             if (night) {
                 ACCENT = c(android.R.color.system_accent1_200)
@@ -141,8 +207,11 @@ object Type {
 
 fun Context.dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
 
-fun Context.isNight(): Boolean =
-    (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+fun Context.isNight(): Boolean = if (LumenEnv.ready && Palette.gradientDark != null) Palette.gradientDark == true else when (if (LumenEnv.ready) Settings.theme else "system") {
+    "light" -> false
+    "dark", "black" -> true
+    else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+}
 
 fun Context.toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
@@ -361,7 +430,7 @@ enum class BtnStyle { FILLED, TONAL, OUTLINED, TEXT }
 
 fun text(ctx: Context, s: String, size: Float = Type.BODY, bold: Boolean = false, color: Int = Palette.ON_SURFACE) = TextView(ctx).apply {
     text = s
-    textSize = size
+    textSize = size * (if (LumenEnv.ready) Settings.textScale / 100f else 1f)
     setTextColor(color)
     setLineSpacing(0f, 1.15f)
     if (bold) typeface = Type.medium
@@ -698,9 +767,10 @@ abstract class LumenBase : Activity() {
         super.onCreate(savedInstanceState)
         actionBar?.hide()
         @Suppress("DEPRECATION")
-        window.statusBarColor = Palette.SURFACE
+        window.statusBarColor = android.graphics.Color.TRANSPARENT
         @Suppress("DEPRECATION")
         window.navigationBarColor = Palette.SURFACE
+        window.setBackgroundDrawable(Palette.background())
         if (!isNight()) {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
@@ -715,7 +785,7 @@ abstract class LumenBase : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(64)
             setPadding(dp(4), 0, dp(4), 0)
-            setBackgroundColor(Palette.SURFACE)
+            if (Palette.gradient == null) setBackgroundColor(Palette.SURFACE)
         }
         val size = dp(48)
         if (back) bar.addView(iconBtn(this, "←") { finish() }, LinearLayout.LayoutParams(size, size))
@@ -746,7 +816,7 @@ abstract class LumenBase : Activity() {
         header?.let { h -> (h.parent as? ViewGroup)?.removeView(h) }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Palette.SURFACE)
+            if (Palette.gradient == null) setBackgroundColor(Palette.SURFACE)
         }
         column.addView(appBar(title, back, actions))
         header?.let { column.addView(it) }
@@ -755,7 +825,7 @@ abstract class LumenBase : Activity() {
             addView(content)
         }
         column.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        val frame = FrameLayout(this).apply { setBackgroundColor(Palette.SURFACE) }
+        val frame = FrameLayout(this).apply { background = Palette.background() }
         frame.addView(column)
         if (fab != null) {
             val f = text(this, fab.first, 16f, bold = true, color = Palette.ON_FAB).apply {

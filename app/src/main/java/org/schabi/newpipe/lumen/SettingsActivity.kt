@@ -25,7 +25,7 @@ class SettingsActivity : LumenBase() {
         render()
     }
 
-    private val sections get() = listOf(t("Общие", "General"), "AI", t("Промпты", "Prompts"), t("Резервная копия", "Backup"), t("Логи", "Logs"), t("О приложении", "About"), t("Быстрый анализ", "Instant analysis"))
+    private val sections get() = listOf(t("Общие", "General"), "AI", t("Промпты", "Prompts"), t("Резервная копия", "Backup"), t("Логи", "Logs"), t("О приложении", "About"), t("Быстрый анализ", "Instant analysis"), t("Статистика", "Usage"))
 
     private fun render() {
         val c = Col(this)
@@ -36,12 +36,58 @@ class SettingsActivity : LumenBase() {
             3 -> backup(c)
             4 -> logs(c)
             5 -> about(c)
-            else -> quick(c)
+            6 -> quick(c)
+            else -> usage(c)
         }
         page(t("Настройки", "Settings"), c.root, header = tabBar(this, sections, section) {
             section = it
             render()
         })
+    }
+
+    private var usageGroup = AiStats.Group.PROJECT
+    private var usageDays = 30
+
+    private fun usage(c: Col) {
+        val recs = AiStats.all()
+        c.muted(t("Все вызовы AI с самого начала: токены, запросы, время, ошибки. Только на устройстве; токены берутся из ответа провайдера.",
+            "Every AI call since the beginning: tokens, requests, time, errors. On this device only; tokens come from the provider's reply."))
+        c.chips(listOf(1 to t("сутки", "24 h"), 7 to t("7 дней", "7 days"), 30 to t("30 дней", "30 days"), 0 to t("всё время", "all time")).map { (d, l) ->
+            chip(this, l, usageDays == d) { usageDays = d; render() }
+        })
+        c.chips(listOf(AiStats.Group.PROJECT to t("по проектам", "by project"), AiStats.Group.PROVIDER to t("по провайдерам", "by provider"),
+            AiStats.Group.MODEL to t("по моделям", "by model"), AiStats.Group.TASK to t("по задачам", "by task"), AiStats.Group.DAY to t("по дням", "by day")).map { (g, l) ->
+            chip(this, l, usageGroup == g) { usageGroup = g; render() }
+        })
+        val since = if (usageDays > 0) System.currentTimeMillis() - usageDays * 86_400_000L else 0L
+        val names = Store.projects().associate { it.id to it.name.ifBlank { it.phrase } }
+        val rows = AiStats.aggregate(recs, usageGroup, since, name = { names[it] ?: t("(удалён) ", "(deleted) ") + it.take(6) })
+        val sum = AiStats.total(rows)
+        fun cost(r: AiStats.Row) = Llm.estimateCost(r.inTokens.toInt(), r.outTokens.toInt())
+        fun line(r: AiStats.Row) = t("запросов ", "calls ") + r.calls + " · in " + AiStats.fmtTokens(r.inTokens) + " / out " + AiStats.fmtTokens(r.outTokens) +
+            (if (Settings.priceInPerM > 0 || Settings.priceOutPerM > 0) " · ≈$" + String.format(java.util.Locale.US, "%.3f", cost(r)) else "")
+        c.card {
+            add(text(ctx, t("Итого", "Total") + ": " + AiStats.fmtTokens(sum.tokens) + " " + t("токенов", "tokens"), Type.TITLE_M, bold = true), 0)
+            muted(line(sum))
+            muted("✓ ${sum.ok} · ✂ ${sum.truncated} · ✗ ${sum.errors} · " + t("среднее время ", "avg time ") + sum.avgMs + " ms")
+        }
+        if (rows.isEmpty()) c.muted(t("За этот период вызовов не было.", "No calls in this period."))
+        val top = rows.maxOfOrNull { it.tokens }?.coerceAtLeast(1L) ?: 1L
+        for (r in rows) c.card {
+            add(rowOf(ctx, text(ctx, r.key, Type.BODY, bold = true).apply { layoutParams = LinearLayout.LayoutParams(0, -2, 1f) },
+                text(ctx, AiStats.fmtTokens(r.tokens), Type.BODY, bold = true, color = Palette.ACCENT)), 0)
+            add(android.widget.ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
+                max = 1000; progress = (r.tokens * 1000 / top).toInt()
+                progressTintList = android.content.res.ColorStateList.valueOf(Palette.ACCENT)
+            }, 4)
+            muted(line(r) + (if (r.errors + r.truncated > 0) " · ✂${r.truncated} ✗${r.errors}" else ""))
+        }
+        c.button(t("Журнал всех ответов AI", "Journal of all AI answers"), style = BtnStyle.OUTLINED) { AiJournalActivity.open(this) }
+        c.button(t("Сбросить статистику", "Reset statistics"), style = BtnStyle.TEXT) {
+            AlertDialog.Builder(this).setMessage(t("Удалить всю статистику использования?", "Delete all usage statistics?"))
+                .setPositiveButton(t("Удалить", "Delete")) { _, _ -> AiStats.clear(); render() }
+                .setNegativeButton(t("Отмена", "Cancel"), null).show()
+        }
     }
 
     private fun general(c: Col) {
@@ -51,6 +97,33 @@ class SettingsActivity : LumenBase() {
                 render()
             }
         }
+        c.h2(t("Оформление", "Appearance"))
+        c.spinner(t("Тема", "Theme"), listOf("system" to t("Как в системе", "Follow system"), "light" to t("Светлая", "Light"),
+            "dark" to t("Тёмная", "Dark"), "black" to t("Чёрная (AMOLED)", "Black (AMOLED)")), Settings.theme) {
+            if (it != Settings.theme) {
+                Settings.theme = it
+                recreate()
+            }
+        }
+        c.spinner(t("Готовая градиентная тема", "Gradient theme"), Palette.gradientNames, Settings.style) {
+            if (it != Settings.style) {
+                Settings.style = it
+                recreate()
+            }
+        }
+        c.spinner(t("Цвет акцента", "Accent colour"), Palette.accentNames, Settings.accent) {
+            if (it != Settings.accent) {
+                Settings.accent = it
+                recreate()
+            }
+        }
+        c.spinner(t("Размер текста", "Text size"), listOf(85 to "85%", 100 to "100%", 115 to "115%", 130 to "130%"), Settings.textScale) {
+            if (it != Settings.textScale) {
+                Settings.textScale = it
+                recreate()
+            }
+        }
+        c.h2(t("Работа", "Behaviour"))
         c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер NewPipe", "Analytics + NewPipe player")), Settings.mode) {
             Settings.mode = it
         }

@@ -67,6 +67,7 @@ object AiJournal {
                 val files = d.listFiles()?.sortedBy { it.name } ?: return
                 if (files.size > KEEP) files.take(files.size - KEEP).forEach { it.delete() }
             }
+            AiStats.record(AiStats.Rec(at, pid, e.task, provider, model, status, inTokens, outTokens, ms))
             L.i("ai", "$task ${provider}/$model → $status in=$inTokens out=$outTokens ${ms}ms" + (error?.let { " · ${it.take(200)}" } ?: ""))
         } catch (ex: Exception) {
             // journal must never break an AI call

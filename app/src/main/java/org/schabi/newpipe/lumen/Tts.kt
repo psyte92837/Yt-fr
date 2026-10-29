@@ -365,7 +365,8 @@ object EdgeTts {
                 if (forbiddenRetried) throw e
                 forbiddenRetried = true // retried once with the corrected clock
             } catch (e: java.io.IOException) {
-                val delay = TtsRetry.delayMs(attempt)
+                serialUntil = System.currentTimeMillis() + TtsRetry.SERIAL_MS
+                val delay = TtsRetry.delayMs(attempt)?.let { TtsRetry.jitter(it, Math.random()) }
                 L.w("tts", "part ${i + 1}/$total attempt ${attempt + 1}: ${e.javaClass.simpleName}: ${e.message}")
                 if (delay == null) throw TtsException(TtsRetry.message(e, ready(), total))
                 attempt++
@@ -403,7 +404,16 @@ object EdgeTts {
         "Microsoft's service rejected the request (403). Update the app: Microsoft may have changed its protection."
     ))
 
+    @Volatile private var serialUntil = 0L
+    private val serialLock = java.util.concurrent.locks.ReentrantLock()
+
     private fun one(escaped: String, o: TtsOptions, cancelled: () -> Boolean): ByteArray {
+        if (System.currentTimeMillis() >= serialUntil) return connect(escaped, o, cancelled)
+        serialLock.lock()
+        try { return connect(escaped, o, cancelled) } finally { serialLock.unlock() }
+    }
+
+    private fun connect(escaped: String, o: TtsOptions, cancelled: () -> Boolean): ByteArray {
         val url = "wss://$BASE/edge/v1?TrustedClientToken=$TOKEN&Sec-MS-GEC=${gecToken(now())}" +
             "&Sec-MS-GEC-Version=$GEC_VERSION&ConnectionId=${UUID.randomUUID().toString().replace("-", "")}"
         val req = Request.Builder().url(url)
@@ -481,7 +491,8 @@ object EdgeTts {
         }
         error?.let { if (!finished) throw it }
         val bytes = synchronized(audio) { audio.toByteArray() }
-        if (bytes.isEmpty()) throw TtsException(t("Сервис не вернул звук. Проверьте голос и интернет.", "No audio received. Check the voice and the connection."))
+        // an empty answer is the server dropping us (edge-tts #473): worth a retry like a network error
+        if (bytes.isEmpty()) throw java.io.IOException(t("Сервис не вернул звук. Проверьте голос и интернет.", "No audio received. Check the voice and the connection."))
         return bytes
     }
 }
@@ -689,10 +700,16 @@ object TtsPrefs {
 
 /** Retry policy and readable network errors for the online voice (pure, unit-tested). */
 object TtsRetry {
-    private val delays = listOf(2000L, 4000L, 8000L, 15000L)
+    private val delays = listOf(2000L, 4000L, 8000L, 15000L, 30000L, 60000L)
 
     /** Pause before retry number [attempt] (0-based), null = give up. */
     fun delayMs(attempt: Int): Long? = delays.getOrNull(attempt)
+
+    /** [ms] ±25 %: parallel parts must not hit the server in lockstep. [r] is 0.0..1.0. */
+    fun jitter(ms: Long, r: Double): Long = (ms * (0.75 + 0.5 * r)).toLong()
+
+    /** After a connection error parts go one at a time for this long (server-side throttling, edge-tts #473/#512). */
+    const val SERIAL_MS = 5 * 60_000L
 
     const val IDLE_MS = 30_000L
     const val MAX_MS = 10 * 60_000L

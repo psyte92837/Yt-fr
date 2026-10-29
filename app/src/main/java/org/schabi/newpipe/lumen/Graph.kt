@@ -255,7 +255,7 @@ class GraphActivity : LumenBase() {
             onlyOnTopic = !onlyOnTopic
             build()
         }
-        header.addView(chipRow(this, row).apply { setPadding(dp(16), dp(4), dp(16), dp(4)) })
+        header.addView(chipScroller(this, row).apply { setPadding(dp(16), dp(4), dp(16), dp(4)) })
         val legend = text(this, t("Загрузка раскладки…", "Computing layout…"), 12f, color = Palette.MUTED).apply {
             setPadding(dp(16), 0, dp(16), dp(8))
         }

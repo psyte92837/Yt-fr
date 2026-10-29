@@ -14,34 +14,74 @@ import android.widget.LinearLayout
 
 /** Global settings: language, mode, AI providers, prompts, monitoring, backups. */
 class SettingsActivity : LumenBase() {
-    private var section = 0
+    private var section = -1 // -1 = list of sections
+    private var direct = false // opened straight into a section (AI banner, logs): back leaves the screen
     private var testing = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("ai", false)) section = 1
-        if (intent.getBooleanExtra("logs", false)) section = 4
-        if (intent.getBooleanExtra("quick", false)) section = 6
+        if (intent.getBooleanExtra("logs", false)) section = 2
+        if (intent.getBooleanExtra("quick", false)) section = 3
+        direct = section >= 0
         render()
     }
 
-    private val sections get() = listOf(t("Общие", "General"), "AI", t("Промпты", "Prompts"), t("Резервная копия", "Backup"), t("Логи", "Logs"), t("О приложении", "About"), t("Быстрый анализ", "Instant analysis"))
+    override fun navigateUp() {
+        if (section >= 0 && !direct) {
+            section = -1
+            render()
+        } else {
+            finish()
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() = navigateUp()
+
+    private val sections get() = listOf(
+        Triple(t("Общие", "General"), t("язык, режим, мониторинг, сбор", "language, mode, monitoring, collection"), 0),
+        Triple(t("AI и промпты", "AI and prompts"), t("провайдер, ключи, шаблоны запросов", "provider, keys, prompt templates"), 1),
+        Triple(t("Данные", "Data"), t("резервная копия, журнал", "backup, logs"), 2),
+        Triple(t("О приложении", "About"), t("версия, быстрый анализ", "version, instant analysis"), 3)
+    )
 
     private fun render() {
         val c = Col(this)
+        if (section < 0) {
+            for ((name, summary, id) in sections) {
+                val card = c.card {
+                    add(text(ctx, name, Type.TITLE_M, bold = true), 0)
+                    muted(summary)
+                }
+                card.contentDescription = name
+                card.setOnClickListener {
+                    section = id
+                    render()
+                }
+            }
+            page(t("Настройки", "Settings"), c.root)
+            return
+        }
         when (section) {
             0 -> general(c)
-            1 -> ai(c)
-            2 -> prompts(c)
-            3 -> backup(c)
-            4 -> logs(c)
-            5 -> about(c)
-            else -> quick(c)
+            1 -> {
+                ai(c)
+                c.h2(t("Промпты", "Prompts"))
+                prompts(c)
+            }
+            2 -> {
+                backup(c)
+                c.h2(t("Журнал", "Logs"))
+                logs(c)
+            }
+            else -> {
+                about(c)
+                c.h2(t("Быстрый анализ", "Instant analysis"))
+                quick(c)
+            }
         }
-        page(t("Настройки", "Settings"), c.root, header = tabBar(this, sections, section) {
-            section = it
-            render()
-        })
+        page(sections[section].first, c.root)
     }
 
     private fun general(c: Col) {

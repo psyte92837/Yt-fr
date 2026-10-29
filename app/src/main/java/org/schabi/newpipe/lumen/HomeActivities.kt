@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
+import android.view.ViewGroup
 import android.widget.LinearLayout
 
 /** Shared editor for search filters (used on project creation and in project settings). */
@@ -136,24 +137,22 @@ class LumenActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        c.muted(t("Наблюдайте за темой на YouTube и получайте сводки. Все данные — только на устройстве.",
-            "Watch a topic on YouTube and get summaries. All data stays on this device."))
-        val shortcuts = mutableListOf<android.view.View>()
-        if (Settings.mode == "player") {
-            shortcuts.add(chip(this, t("▶ Плеер NewPipe", "▶ NewPipe player")) {
-                startActivity(Intent().setClassName(packageName, "org.schabi.newpipe.MainActivity"))
-            })
-        }
-        shortcuts.add(chip(this, t("🌐 Браузер", "🌐 Browser")) { BrowserActivity.open(this) })
-        c.chips(shortcuts)
-        c.button(t("Задать домен для наблюдения", "Set a domain to watch"), style = BtnStyle.TONAL) {
-            startActivity(Intent(this, NewProjectActivity::class.java).putExtra("watch", true))
-        }
         if (Provider.active() == null) {
             c.card {
-                p(t("AI не подключён — поиск, сбор и локальная аналитика работают. Для сводок подключите API.",
-                    "AI is not connected — search, collection and local analytics work. Connect an API for summaries."), 13f)
-                button(t("Подключить AI", "Connect AI")) { startActivity(Intent(ctx, SettingsActivity::class.java).putExtra("ai", true)) }
+                val row = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                val msg = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(text(ctx, t("AI не подключён", "AI is not connected"), Type.TITLE_M, bold = true))
+                    addView(text(ctx, t("Поиск, сбор и аналитика работают. Сводки нужен API.", "Search, collection and analytics work. Summaries need an API."), 13f, color = Palette.MUTED))
+                }
+                row.addView(msg, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(btn(ctx, t("Подключить", "Connect"), style = BtnStyle.TONAL) {
+                    startActivity(Intent(ctx, SettingsActivity::class.java).putExtra("ai", true))
+                })
+                add(row, 0)
             }
         }
         val all = Store.projects()
@@ -196,6 +195,8 @@ class LumenActivity : LumenBase() {
                 muted("«${p.phrase}»" + if (p.domain.isNotBlank()) " · ${p.domain}" else "")
                 muted(t("Видео: ", "Videos: ") + p.videoCount + " · " + t("последний запуск: ", "last run: ") + Fmt.dateTime(p.lastRunAt) +
                     if (p.monitor.enabled && Settings.monitoringAllowed) " · ⏱" else "")
+                val added = p.runs.lastOrNull()?.added ?: 0
+                if (added > 0) add(text(ctx, t("В последнем запуске добавлено: +$added", "Added in the last run: +$added"), 13f, bold = true, color = Palette.ACCENT), 4)
             }
             card.contentDescription = p.name
             card.setOnClickListener { startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id)) }
@@ -205,22 +206,48 @@ class LumenActivity : LumenBase() {
             }
         }
         val archived = all.count { it.archived }
-        if (showArchived || archived > 0) {
-            c.button(if (showArchived) t("← К проектам", "← Projects") else t("Архив ($archived)", "Archive ($archived)"), style = BtnStyle.TEXT) {
-                showArchived = !showArchived
-                render()
-            }
-        }
         page(
             "Lumen", c.root, back = false,
-            actions = listOf(
-                "🌐" to { BrowserActivity.open(this) },
-                "🔊" to { TtsActivity.open(this) },
-                "🐞" to { startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true)) },
-                "⚙" to { startActivity(Intent(this, SettingsActivity::class.java)) }
-            ),
-            fab = t("＋  Новый проект", "＋  New project") to { startActivity(Intent(this, NewProjectActivity::class.java)) }
+            actions = listOf("⋮" to { homeMenu(archived) }),
+            fab = t("＋  Новый проект", "＋  New project") to { startActivity(Intent(this, NewProjectActivity::class.java)) },
+            footer = bottomNav(this, listOf(
+                Ic.HOME to t("Проекты", "Projects"), Ic.WEB to t("Браузер", "Browser"),
+                Ic.SPEAKER to t("Озвучка", "Read aloud"), Ic.SETTINGS to t("Настройки", "Settings")
+            ), 0) {
+                when (it) {
+                    1 -> BrowserActivity.open(this)
+                    2 -> TtsActivity.open(this)
+                    3 -> startActivity(Intent(this, SettingsActivity::class.java))
+                    else -> Unit
+                }
+            }
         )
+    }
+
+    private fun homeMenu(archived: Int) {
+        val items = mutableListOf<Pair<String, () -> Unit>>()
+        items.add(t("Задать домен для наблюдения", "Set a domain to watch") to {
+            startActivity(Intent(this, NewProjectActivity::class.java).putExtra("watch", true))
+        })
+        if (Settings.mode == "player") {
+            items.add(t("Плеер NewPipe", "NewPipe player") to {
+                startActivity(Intent().setClassName(packageName, "org.schabi.newpipe.MainActivity"))
+            })
+        }
+        if (showArchived || archived > 0) {
+            items.add((if (showArchived) t("К проектам", "Projects") else t("Архив ($archived)", "Archive ($archived)")) to {
+                showArchived = !showArchived
+                render()
+            })
+        }
+        items.add(t("Восстановить из резервной копии…", "Restore from a backup…") to {
+            @Suppress("DEPRECATION")
+            startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
+        })
+        items.add(t("Журнал и отчёт об ошибке", "Logs and bug report") to {
+            startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))
+        })
+        AlertDialog.Builder(this).setTitle("Lumen").setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()
     }
 
     private fun projectMenu(p: Project) {

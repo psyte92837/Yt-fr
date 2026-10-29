@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.widget.CheckBox
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -31,8 +32,10 @@ class ProjectActivity : LumenBase() {
     val ui = HashMap<String, Any>()
 
     // video list view state
-    private var onlyMarked = false
-    private var onlyUncollected = false
+    private var listMode = "all" // all | marked | uncollected
+    private var searchQuery = ""
+    private var keepScrollOnce = false
+    private var onMarkChanged: (() -> Unit)? = null
     private var labelFilter = ""
     private var listSort = "added"
     private var shown = 50
@@ -112,12 +115,24 @@ class ProjectActivity : LumenBase() {
         videos = Store.videos(project.id)
     }
 
-    private val tabs get() = (if (project.source.isNotBlank()) listOf("overview" to t("Обзор", "Overview")) else emptyList()) + listOf(
-        "videos" to t("Видео", "Videos"), "collect" to t("Сбор", "Collect"),
-        "recs" to t("Рекомендации", "Recommendations"), "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"),
+    private class NavGroup(val icon: Ic, val name: String, val tabs: List<String>)
+
+    private val tabNames get() = mapOf(
+        "overview" to t("Обзор", "Overview"), "videos" to t("Видео", "Videos"), "collect" to t("Сбор", "Collect"),
+        "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"), "recs" to t("Рекомендации", "Recommendations"),
         "audience" to t("Аудитория", "Audience"), "seo" to "SEO", "ai" to "AI",
         "export" to t("Экспорт", "Export"), "settings" to t("Настройки", "Settings")
     )
+
+    /** Bottom navigation: related sections share one destination and switch with a segmented bar. */
+    private val groups get() = listOfNotNull(
+        if (project.source.isNotBlank()) NavGroup(Ic.HOME, t("Обзор", "Overview"), listOf("overview")) else null,
+        NavGroup(Ic.LIST, t("Данные", "Data"), listOf("videos", "collect", "channels")),
+        NavGroup(Ic.CHART, t("Анализ", "Analysis"), listOf("analytics", "recs", "audience", "seo")),
+        NavGroup(Ic.SPARK, "AI", listOf("ai")),
+        NavGroup(Ic.MORE, t("Ещё", "More"), listOf("export", "settings"))
+    )
+    private val groupTab = HashMap<Int, String>()
 
     fun render() {
         val c = Col(this)
@@ -127,10 +142,6 @@ class ProjectActivity : LumenBase() {
                 val pv = text(ctx, busy, 14f, bold = true, color = Palette.ON_SURFACE)
                 progressView = pv
                 add(pv, 0)
-                button(t("Остановить", "Stop"), style = BtnStyle.OUTLINED) {
-                    cancel.set(true)
-                    if (CollectState.running) CollectService.stop(this@ProjectActivity)
-                }
             }
         }
         when (tab) {
@@ -146,30 +157,54 @@ class ProjectActivity : LumenBase() {
             "export" -> exportTab(c)
             else -> settingsTab(c)
         }
-        val fab: Pair<String, () -> Unit>? = when (tab) {
-            "videos" -> t("Найти", "Search") to { runSearch() }
-            "collect" -> t("Собрать", "Collect") to { startCollect(selectedForCollect()) }
-            "recs" -> t("Запустить", "Run") to { startRecs() }
+        val running = busy.isNotEmpty() || (CollectState.running && CollectState.projectId == project.id)
+        val markedCount = videos.values.count { it.marked }
+        val fab: Pair<String, () -> Unit>? = when {
+            running -> t("Остановить", "Stop") to {
+                cancel.set(true)
+                if (CollectState.running) CollectService.stop(this@ProjectActivity)
+            }
+            tab == "videos" && markedCount > 0 -> t("Собрать ($markedCount)", "Collect ($markedCount)") to { startCollect(selectedForCollect()) }
+            tab == "videos" -> t("Найти", "Search") to { runSearch() }
+            tab == "collect" -> t("Собрать", "Collect") to { startCollect(selectedForCollect()) }
+            tab == "recs" -> t("Запустить", "Run") to { startRecs() }
             else -> null
         }
+        val gl = groups
+        val gi = maxOf(0, gl.indexOfFirst { tab in it.tabs })
+        val group = gl[gi]
+        groupTab[gi] = tab
+        val header: View? = if (group.tabs.size > 1) {
+            LinearLayout(this).apply {
+                setPadding(dp(16), dp(4), dp(16), dp(8))
+                addView(segBar(this@ProjectActivity, group.tabs.map { tabNames[it] ?: it }, group.tabs.indexOf(tab)) {
+                    tab = group.tabs[it]
+                    render()
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+        } else null
+        val keep = keepScrollOnce
+        keepScrollOnce = false
         page(
             project.name, c.root,
-            header = tabBar(this, tabs.map { it.second }, maxOf(0, tabs.indexOfFirst { it.first == tab })) {
-                tab = tabs[it].first
+            header = header,
+            actions = listOf("⋮" to { projectMenu() }),
+            fab = fab,
+            footer = bottomNav(this, gl.map { it.icon to it.name }, gi) {
+                tab = groupTab[it]?.takeIf { id -> id in gl[it].tabs } ?: gl[it].tabs[0]
                 render()
             },
-            actions = listOf("⋮" to { sectionsMenu() }),
-            fab = if (busy.isEmpty()) fab else null
+            keepScroll = keep
         )
     }
 
-    /** All sections at a glance: the tab row scrolls, this list does not hide anything. */
-    private fun sectionsMenu() {
-        val list = tabs
-        val names = list.map { (id, name) -> if (id == tab) "● $name" else name }.toTypedArray()
-        AlertDialog.Builder(this).setTitle(t("Разделы проекта", "Project sections")).setItems(names) { _, i ->
-            tab = list[i].first
-            render()
+    private fun projectMenu() {
+        val items = arrayOf(t("Импорт видео", "Import videos"), t("Фильтры поиска проекта", "Project search filters"))
+        AlertDialog.Builder(this).setTitle(project.name).setItems(items) { _, i ->
+            if (i == 0) importDialog() else {
+                tab = "settings"
+                render()
+            }
         }.show()
     }
 
@@ -355,8 +390,10 @@ class ProjectActivity : LumenBase() {
 
     private fun filteredVideos(): List<Video> {
         var list = videos.values.toList()
-        if (onlyMarked) list = list.filter { it.marked }
-        if (onlyUncollected) list = list.filter { !it.collected }
+        if (listMode == "marked") list = list.filter { it.marked }
+        if (listMode == "uncollected") list = list.filter { !it.collected }
+        val q = searchQuery.trim().lowercase()
+        if (q.isNotEmpty()) list = list.filter { it.title.lowercase().contains(q) || it.channel.lowercase().contains(q) }
         if (labelFilter.isNotEmpty()) list = list.filter { labelFilter in it.labels }
         return when (listSort) {
             "date" -> list.sortedByDescending { it.uploadMs }
@@ -372,64 +409,140 @@ class ProjectActivity : LumenBase() {
         render()
     }
 
+    private fun sortName() = when (listSort) {
+        "date" -> t("дата публикации", "upload date")
+        "views" -> t("просмотры", "views")
+        "velocity" -> t("быстрорастущие", "fastest growing")
+        else -> t("недавно добавленные", "recently added")
+    }
+
+    private fun filtersSheet() {
+        val labels = videos.values.flatMap { it.labels }.distinct().sorted()
+        bottomSheet(t("Фильтры", "Filters"), onDismiss = {
+            shown = 50
+            render()
+        }) { dismiss ->
+            lateinit var showBtn: android.widget.Button
+            fun upd() {
+                showBtn.text = t("Показать ${filteredVideos().size}", "Show ${filteredVideos().size}")
+            }
+            add(text(ctx, t("Сортировка", "Sort"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+            add(choiceChips(ctx, listOf(
+                "added" to t("Недавние", "Recent"), "date" to t("Дата", "Date"),
+                "views" to t("Просмотры", "Views"), "velocity" to t("Быстрорастущие", "Fastest growing")
+            ), listSort) {
+                listSort = it
+                upd()
+            }, 8)
+            if (labels.isNotEmpty()) {
+                add(text(ctx, t("Метки", "Labels"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+                add(choiceChips(ctx, listOf("" to t("Все", "All")) + labels.map { it to "#$it" }, labelFilter) {
+                    labelFilter = it
+                    upd()
+                }, 8)
+            }
+            showBtn = btn(ctx, "", primary = true) { dismiss() }
+            row(
+                btn(ctx, t("Сбросить", "Reset"), style = BtnStyle.OUTLINED) {
+                    listSort = "added"
+                    labelFilter = ""
+                    dismiss()
+                },
+                showBtn
+            )
+            upd()
+        }
+    }
+
     private fun videosTab(c: Col) {
         val total = videos.size
         val marked = videos.values.count { it.marked }
-        c.muted(t("Запросы: ", "Queries: ") + project.effectiveQueries().joinToString(" · "))
-        c.row(
-            btn(this, t("Импорт", "Import"), style = BtnStyle.TONAL) { importDialog() },
-            btn(this, t("Фильтры", "Filters"), style = BtnStyle.OUTLINED) {
-                tab = "settings"
+        val uncollected = videos.values.count { !it.collected }
+
+        // selection bar: marked videos are the ones collected next
+        val selText = text(this, "", 14f, bold = true, color = Palette.ON_SOFT)
+        val selBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = roundBg(Palette.ACCENT_SOFT, 12f, this@ProjectActivity)
+            setPadding(dp(16), 0, dp(4), 0)
+            addView(selText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(btn(this@ProjectActivity, t("Все", "All"), style = BtnStyle.TEXT) { setMarked(filteredVideos().map { it.id }, true) })
+            addView(btn(this@ProjectActivity, t("Снять", "Clear"), style = BtnStyle.TEXT) { setMarked(videos.keys, false) })
+        }
+        fun refreshSel() {
+            val m = videos.values.count { it.marked }
+            selText.text = t("Выбрано: $m", "Selected: $m")
+            selBar.visibility = if (m > 0) View.VISIBLE else View.GONE
+        }
+        refreshSel()
+        c.add(selBar, 0)
+        onMarkChanged = {
+            val m = videos.values.count { it.marked }
+            if ((m > 0) != (marked > 0)) {
+                keepScrollOnce = true
                 render()
+            } else {
+                refreshSel()
             }
-        )
-        val list = filteredVideos()
-        c.h2(t("Видео: $total · отмечено: $marked", "Videos: $total · marked: $marked"))
+        }
+
+        val search = edt(this, t("Поиск по названию или каналу", "Search title or channel"), searchQuery)
+        val active = (if (labelFilter.isNotEmpty()) 1 else 0) + (if (listSort != "added") 1 else 0)
+        val filterBtn = btn(this, if (active > 0) t("Фильтры · $active", "Filters · $active") else t("Фильтры", "Filters"), style = BtnStyle.TONAL) { filtersSheet() }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(search, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(filterBtn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        }
+        c.add(bar, 8)
+
         c.chips(
             listOf(
-                chip(this, t("Отмеченные", "Marked"), onlyMarked) {
-                    onlyMarked = !onlyMarked
-                    render()
-                },
-                chip(this, t("Не собранные", "Not collected"), onlyUncollected) {
-                    onlyUncollected = !onlyUncollected
-                    render()
-                },
-                chip(this, t("Выбрать все", "Select all")) { setMarked(list.map { it.id }, true) },
-                chip(this, t("Снять все", "Clear all")) { setMarked(list.map { it.id }, false) }
-            )
-        )
-        val labels = videos.values.flatMap { it.labels }.distinct().sorted()
-        if (labels.isNotEmpty()) {
-            c.chips(labels.map { l ->
-                chip(this, "#$l", labelFilter == l) {
-                    labelFilter = if (labelFilter == l) "" else l
+                "all" to t("Все $total", "All $total"), "marked" to t("Отмеченные $marked", "Marked $marked"),
+                "uncollected" to t("Не собранные $uncollected", "Not collected $uncollected")
+            ).map { (k, label) ->
+                chip(this, label, listMode == k) {
+                    listMode = k
+                    shown = 50
                     render()
                 }
-            })
+            }
+        )
+        val summary = text(this, "", 13f, bold = true, color = Palette.MUTED).apply {
+            minimumHeight = dp(40)
+            gravity = Gravity.CENTER_VERTICAL
+            setOnClickListener { filtersSheet() }
         }
-        c.spinner(
-            t("Порядок", "Order"),
-            listOf(
-                "added" to t("Недавно добавленные", "Recently added"), "date" to t("Дата публикации", "Upload date"),
-                "views" to t("Просмотры", "Views"), "velocity" to t("Быстрорастущие", "Fastest growing")
-            ),
-            listSort
-        ) {
-            if (it != listSort) {
-                listSort = it
-                render()
+        c.add(summary, 4)
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        c.add(box, 0)
+
+        fun fill() {
+            box.removeAllViews()
+            val list = filteredVideos()
+            summary.text = t("Сначала: ${sortName()} ▾ · ${list.size} видео", "Sorted by ${sortName()} ▾ · ${list.size} videos")
+            if (list.isEmpty()) {
+                box.addView(text(this, if (total == 0) t("Пока нет видео. Нажмите «Найти» или импортируйте канал/плейлист через ⋮.", "No videos yet. Tap Search or import a channel/playlist via ⋮.")
+                else t("Нет видео под выбранный фильтр.", "No videos match the filter."), 13f, color = Palette.MUTED))
+            }
+            for (v in list.take(shown)) {
+                box.addView(videoRow(v), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+            }
+            if (list.size > shown) {
+                box.addView(btn(this, t("Показать ещё (${list.size - shown})", "Show more (${list.size - shown})"), style = BtnStyle.TEXT) {
+                    shown += 100
+                    fill()
+                })
             }
         }
-        if (list.isEmpty()) {
-            c.muted(if (total == 0) t("Пока нет видео. Нажмите «Найти» или импортируйте канал/плейлист.", "No videos yet. Tap Search or import a channel/playlist.")
-            else t("Нет видео под выбранный фильтр.", "No videos match the filter."))
-        }
-        for (v in list.take(shown)) c.add(videoRow(v), 8)
-        if (list.size > shown) c.button(t("Показать ещё (${list.size - shown})", "Show more (${list.size - shown})"), style = BtnStyle.TEXT) {
-            shown += 100
-            render()
-        }
+        search.addTextChangedListener(SimpleWatcher {
+            searchQuery = it
+            shown = 50
+            fill()
+        })
+        fill()
     }
 
     private fun videoRow(v: Video): View {
@@ -446,6 +559,7 @@ class ProjectActivity : LumenBase() {
             setOnCheckedChangeListener { _, on ->
                 v.marked = on
                 Store.updateVideo(project.id, v.id) { it.marked = on }
+                onMarkChanged?.invoke()
             }
         }
         row.addView(cb, LinearLayout.LayoutParams(dp(48), dp(48)))
@@ -475,6 +589,10 @@ class ProjectActivity : LumenBase() {
         row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         row.setOnClickListener {
             startActivity(Intent(this, VideoActivity::class.java).putExtra("pid", project.id).putExtra("vid", v.id))
+        }
+        row.setOnLongClickListener {
+            cb.isChecked = !cb.isChecked
+            true
         }
         return row
     }

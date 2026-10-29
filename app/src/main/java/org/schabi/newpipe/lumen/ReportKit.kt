@@ -388,7 +388,7 @@ object ReportKit {
         if (asPdf) pdf(blocks, out, footer) else png(blocks, out)
 
     /** Writes the report into the app's external cache (shareable through the FileProvider) and opens the share sheet. */
-    fun share(ctx: Context, file: File, pdf: Boolean, subject: String) {
+    fun share(ctx: Context, file: File, pdf: Boolean, subject: String, mime: String? = null) {
         val auth = ctx.packageName + ".provider"
         val uri = try {
             androidx.core.content.FileProvider.getUriForFile(ctx, auth, file)
@@ -398,7 +398,7 @@ object ReportKit {
             file.copyTo(copy, overwrite = true)
             androidx.core.content.FileProvider.getUriForFile(ctx, auth, copy)
         }
-        val i = Intent(Intent.ACTION_SEND).setType(if (pdf) "application/pdf" else "image/png")
+        val i = Intent(Intent.ACTION_SEND).setType(mime ?: if (pdf) "application/pdf" else "image/png")
             .putExtra(Intent.EXTRA_STREAM, uri).putExtra(Intent.EXTRA_SUBJECT, subject)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         i.clipData = ClipData.newRawUri(subject, uri)

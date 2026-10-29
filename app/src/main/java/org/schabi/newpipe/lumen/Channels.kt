@@ -142,7 +142,7 @@ object ChannelStore {
 
     fun get(pid: String, url: String): ChannelData? = all(pid)[key(url)]
 
-    fun put(pid: String, c: ChannelData) {
+    @Synchronized fun put(pid: String, c: ChannelData) {
         val all = all(pid)
         all[key(c.url)] = c
         Store.writeFile(pid, FILE, JSONObject().put("channels", JSONArray().also { a -> all.values.forEach { a.put(it.toJson()) } }).toString())
@@ -157,10 +157,7 @@ object ChannelStore {
 object ChannelFetch {
     private val yt get() = ServiceList.YouTube
 
-    private fun pause() {
-        val d = Settings.requestDelayMs
-        if (d > 0) Thread.sleep(d.toLong())
-    }
+    private fun pause() = Par.gate()
 
     private fun video(it: StreamInfoItem, query: String): Video? {
         val id = YtQuery.videoIdFromUrl(it.url) ?: return null
@@ -238,13 +235,13 @@ object ChannelFetch {
     /** Fetches stats for the distinct channels of [videos] (cached ones are skipped). */
     fun forVideos(pid: String, videos: Collection<Video>, cancel: AtomicBoolean, limit: Int = 50, progress: (String) -> Unit = {}): Int {
         val urls = videos.map { it.channelUrl }.filter { it.isNotBlank() }.distinctBy { ChannelStore.key(it) }.take(limit)
-        var n = 0
-        for ((i, u) in urls.withIndex()) {
-            if (cancel.get()) break
-            progress(t("Каналы ${i + 1}/${urls.size}", "Channels ${i + 1}/${urls.size}"))
+        val done = java.util.concurrent.atomic.AtomicInteger(0)
+        Par.each(urls, cancel = cancel) { _, u ->
+            progress(t("Каналы ${done.get() + 1}/${urls.size}", "Channels ${done.get() + 1}/${urls.size}"))
             fetch(pid, u, recentLimit = 30, withPlaylists = false)
-            n++
+            done.incrementAndGet()
         }
+        val n = done.get()
         return n
     }
 }
@@ -270,7 +267,7 @@ object ChannelExplorer {
     fun run(pid: String, seeds: List<String>, cfg: Config, cancel: AtomicBoolean, progress: (String) -> Unit): String {
         val g = RecGraph.load(pid, RecGraph.CHANNELS_FILE)
         g.mode = "channels"
-        var requests = 0
+        val requests = java.util.concurrent.atomic.AtomicInteger()
         if (cfg.topic) {
             progress(t("Подтверждение темы…", "Confirming topic…"))
             TopicFilter.ensure(pid)
@@ -279,7 +276,7 @@ object ChannelExplorer {
         val topicOn = cfg.topic && project != null
         // off-topic channels do not count against the limit and are removed at the end
         fun size() = g.nodes.values.count { it.relevant != 0 }
-        fun limit() = cancel.get() || requests >= cfg.budget || size() >= cfg.maxChannels
+        fun limit() = cancel.get() || requests.get() >= cfg.budget || size() >= cfg.maxChannels
         fun node(url: String, name: String, depth: Int, from: String): RecNode {
             val k = ChannelStore.key(url)
             return g.nodes.getOrPut(k) { RecNode(k, url = url, title = name, channel = name, depth = depth, from = from, relevant = if (topicOn) -1 else 1) }
@@ -305,29 +302,28 @@ object ChannelExplorer {
                 .sortedWith(compareByDescending<RecNode> { it.seed }.thenByDescending { it.hits }.thenByDescending { it.views })
                 .let { if (level == 0) it else it.take(beam) }
             // 1) fetch every channel of the level, 2) ask the topic filter once for the whole level, 3) expand only on-topic ones
-            val fetched = ArrayList<Pair<RecNode, ChannelData>>()
-            for (n in frontier) {
-                if (cancel.get() || requests >= cfg.budget) break
-                progress(t("Каналы: глубина ${level + 1}/${cfg.depth} · найдено ${size()}\n", "Channels: depth ${level + 1}/${cfg.depth} · found ${size()}\n") + n.title.ifBlank { n.url })
+            val shown = java.util.concurrent.atomic.AtomicInteger(0)
+            val fetched = Par.map(frontier, cancel = cancel) { _, n ->
+                if (requests.get() >= cfg.budget) return@map null
+                progress(t("Каналы: глубина ${level + 1}/${cfg.depth} · найдено ${size()} · ${shown.incrementAndGet()}/${frontier.size}\n", "Channels: depth ${level + 1}/${cfg.depth} · found ${size()} · ${shown.get()}/${frontier.size}\n") + n.title.ifBlank { n.url })
                 val c = ChannelFetch.fetch(pid, n.url, recentLimit = 15, withPlaylists = cfg.useFeatured)
-                requests += 3
-                fill(n, c)
-                fetched.add(n to c)
-            }
+                requests.addAndGet(3)
+                n to c
+            }.filterNotNull()
+            fetched.forEach { (n, c) -> fill(n, c) }
             judge(fetched)
-            for ((n, c) in fetched) {
-                if (limit()) break
-                if (n.relevant == 0) continue
-                n.expanded = true
+            // related-channel counts: the "Up next" requests of all on-topic channels run in parallel, graph edits stay sequential
+            val expand = fetched.filter { it.first.relevant != 0 }
+            val countsList = Par.map(expand, cancel = cancel) { _, (n, c) ->
                 val counts = LinkedHashMap<String, Pair<String, Int>>() // url -> (name, count)
                 if (cfg.useFeatured) c.featured.forEach { u -> counts[u] = (counts[u]?.first ?: "") to ((counts[u]?.second ?: 0) + 2) }
                 for (v in c.recent.filter { !it.isShort }.sortedByDescending { it.views }.take(cfg.videosPerChannel)) {
-                    if (limit()) break
+                    if (cancel.get() || requests.get() >= cfg.budget) break
                     try {
-                        Thread.sleep(Settings.requestDelayMs.toLong())
+                        Par.gate()
                         val ex = yt.getStreamExtractor(v.url)
                         ex.fetchPage()
-                        requests++
+                        requests.incrementAndGet()
                         ex.relatedItems?.items?.filterIsInstance<StreamInfoItem>()?.take(cfg.perVideo)?.forEach { it ->
                             val u = it.uploaderUrl ?: return@forEach
                             if (ChannelStore.key(u) == n.id) return@forEach
@@ -337,6 +333,13 @@ object ChannelExplorer {
                         L.w("chgraph", "related of ${v.id}: ${e.message}")
                     }
                 }
+                counts
+            }
+            for ((idx, pair) in expand.withIndex()) {
+                if (limit()) break
+                val n = pair.first
+                val counts = countsList[idx] ?: continue
+                n.expanded = true
                 var rank = 0
                 for ((u, p) in counts.entries.sortedByDescending { it.value.second }) {
                     val k = ChannelStore.key(u)
@@ -350,15 +353,16 @@ object ChannelExplorer {
             }
         }
         // leaves that were never fetched: light fetch (no playlists), then the topic filter
-        val light = ArrayList<Pair<RecNode, ChannelData>>()
-        for (n in g.nodes.values.filter { !it.expanded && (it.uploadText.isBlank() || it.relevant == -1) && it.relevant != 0 }) {
-            if (cancel.get() || requests >= cfg.budget + cfg.maxChannels * 2) break
-            progress(t("Статистика каналов: ", "Channel stats: ") + n.title)
+        val leaves = g.nodes.values.filter { !it.expanded && (it.uploadText.isBlank() || it.relevant == -1) && it.relevant != 0 }
+        val lightDone = java.util.concurrent.atomic.AtomicInteger(0)
+        val light = Par.map(leaves, cancel = cancel) { _, n ->
+            if (requests.get() >= cfg.budget + cfg.maxChannels * 2) return@map null
+            progress(t("Статистика каналов ${lightDone.incrementAndGet()}/${leaves.size}: ", "Channel stats ${lightDone.get()}/${leaves.size}: ") + n.title)
             val c = ChannelFetch.fetch(pid, n.url, recentLimit = 15, withPlaylists = false)
-            requests += 2
-            fill(n, c)
-            light.add(n to c)
-        }
+            requests.addAndGet(2)
+            n to c
+        }.filterNotNull()
+        light.forEach { (n, c) -> fill(n, c) }
         judge(light)
         // anything still undecided (budget ran out) is not confirmed on-topic -> dropped when the filter is on
         if (topicOn) g.nodes.values.filter { it.relevant == -1 && !it.seed }.forEach { it.relevant = 0 }
@@ -368,7 +372,7 @@ object ChannelExplorer {
         }
         val dropped = if (topicOn) TopicFilter.prune(g) else 0
         g.computePageRank()
-        g.requests += requests
+        g.requests += requests.get()
         g.updatedAt = System.currentTimeMillis()
         RecGraph.save(pid, g, RecGraph.CHANNELS_FILE)
         return t("Каналов: ${g.nodes.size}, связей: ${g.edges.size}, не по теме отброшено: $dropped, запросов: $requests", "Channels: ${g.nodes.size}, edges: ${g.edges.size}, off-topic dropped: $dropped, requests: $requests")

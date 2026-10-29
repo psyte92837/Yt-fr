@@ -122,8 +122,10 @@ object TopicFilter {
             byKeywords(items)
             return out
         }
-        items.chunked(15).forEachIndexed { bi, batch ->
-            progress(t("Фильтр по теме: ", "Topic filter: ") + (bi * 15 + batch.size) + "/" + items.size)
+        val batches = items.chunked(15)
+        val finished = java.util.concurrent.atomic.AtomicInteger(0)
+        val verdicts = Par.map(batches) { _, batch ->
+            val res = HashMap<String, Boolean>()
             try {
                 val data = batch.mapIndexed { i, (_, c) -> channelLine(i + 1, c) }.joinToString("\n")
                 val prompt = Prompts.get("relevance_channels").replace("{phrase}", p.phrase.ifBlank { topic?.phrase.orEmpty() })
@@ -131,12 +133,15 @@ object TopicFilter {
                 val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 800, task = "relevance_channels", pid = p.id)
                 if (!hasVerdict(r.text)) throw IllegalStateException("no verdict")
                 val yes = parseIndexes(r.text)
-                batch.forEachIndexed { i, (id, _) -> out[id] = (i + 1) in yes }
+                batch.forEachIndexed { i, (id, _) -> res[id] = (i + 1) in yes }
             } catch (e: Exception) {
                 L.w("topic", "channel judge: ${e.message}")
-                byKeywords(batch)
+                batch.forEach { (id, c) -> res[id] = channelMatches(kw, c) }
             }
+            progress(t("Фильтр по теме: ", "Topic filter: ") + minOf(items.size, finished.incrementAndGet() * 15) + "/" + items.size)
+            res
         }
+        verdicts.forEach { if (it != null) out.putAll(it) }
         return out
     }
 }

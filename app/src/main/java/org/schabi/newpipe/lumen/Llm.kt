@@ -144,7 +144,7 @@ object Llm {
         val started = System.currentTimeMillis()
         var raw: String? = null
         try {
-            val r = completeRaw(p, model, system, user, json, fileUri, maxTokens, lowMedia) { raw = it }
+            val r = Par.retrying { completeRaw(p, model, system, user, json, fileUri, maxTokens, lowMedia) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, user, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started)
             return r

@@ -160,7 +160,7 @@ object Seo {
 
     fun usage(pid: String): List<JSONObject> = arr(pid, "usage.json", "usage").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
 
-    private fun logUsage(pid: String, task: String, model: String, inTok: Int, outTok: Int, error: String?) {
+    @Synchronized private fun logUsage(pid: String, task: String, model: String, inTok: Int, outTok: Int, error: String?) {
         val list = usage(pid).toMutableList()
         list.add(JSONObject().put("at", System.currentTimeMillis()).put("task", task).put("model", model)
             .put("in", inTok).put("out", outTok).put("error", error ?: JSONObject.NULL))
@@ -329,8 +329,9 @@ object Seo {
             )
         }
         Store.writeFile(p.id, "voc_ai/${v.id}.json", JSONObject().put("items", JSONArray(out)).put("_meta", m).toString())
-        val all = insights(p.id).filter { it.optString("video_id") != v.id } + out
-        saveInsights(p.id, all)
+        synchronized(this) {
+            saveInsights(p.id, insights(p.id).filter { it.optString("video_id") != v.id } + out)
+        }
         return out.size
     }
 
@@ -429,18 +430,25 @@ object Seo {
         val queries = seeds.flatMap { s ->
             listOf(s) + if (extended) prefixes(lang).map { "$it $s" } + alphabet(lang).map { "$s $it" } else emptyList()
         }.distinct()
-        for ((i, q) in queries.withIndex()) {
-            if (cancel.get()) break
-            progress("${i + 1}/${queries.size}: $q")
+        // suggestion requests run in parallel; results are merged in query order on this thread
+        val started = java.util.concurrent.atomic.AtomicInteger(0)
+        val fetched = Par.map(queries, cancel = cancel) { _, q ->
+            progress("${started.incrementAndGet()}/${queries.size}: $q")
             val sources = mutableListOf<Pair<String, () -> List<String>>>("youtube_suggest" to { RecEngine.suggestions(q) })
             if (Settings.googleSuggest) sources.add("google_suggest" to { googleSuggest(q, lang, gl) })
-            for ((src, f) in sources) {
+            sources.map { (src, f) ->
                 val res = try {
                     f()
                 } catch (e: Exception) {
                     L.w("seo", "$src failed for \"$q\": ${e.message}")
                     emptyList()
                 }
+                Par.gate(maxOf(250, Settings.requestDelayMs / 2))
+                src to res
+            }
+        }
+        for ((i, q) in queries.withIndex()) {
+            for ((src, res) in fetched[i] ?: continue) {
                 for (s in res) {
                     if (seen.add("$src|${s.lowercase()}")) {
                         list.add(JSONObject().put("q", s).put("source", src).put("seed", q).put("checked_at", now)
@@ -448,7 +456,6 @@ object Seo {
                         added++
                     }
                 }
-                Thread.sleep(maxOf(250L, Settings.requestDelayMs.toLong() / 2))
             }
         }
         saveKeywords(p.id, list)

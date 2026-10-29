@@ -25,10 +25,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object YouTube {
     private val yt get() = ServiceList.YouTube
 
-    private fun pause() {
-        val d = Settings.requestDelayMs
-        if (d > 0) Thread.sleep(d.toLong())
-    }
+    private fun pause() = Par.gate()
 
     private fun toVideo(it: StreamInfoItem, query: String): Video? {
         val id = YtQuery.videoIdFromUrl(it.url) ?: return null

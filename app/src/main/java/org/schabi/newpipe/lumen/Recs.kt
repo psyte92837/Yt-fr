@@ -169,10 +169,7 @@ object RecEngine {
         fun limitReached() = cancel.get() || requests >= cfg.budget || g.nodes.size >= cfg.maxNodes
     }
 
-    private fun pause() {
-        val d = Settings.requestDelayMs
-        if (d > 0) Thread.sleep(d.toLong())
-    }
+    private fun pause() = Par.gate()
 
     private fun passes(ctx: Ctx, it: StreamInfoItem): Boolean {
         val c = ctx.cfg
@@ -217,8 +214,10 @@ object RecEngine {
         pause()
         val ex = yt.getStreamExtractor(n.url)
         ex.fetchPage()
-        ctx.requests++
-        ctx.g.requests++
+        synchronized(ctx) {
+            ctx.requests++
+            ctx.g.requests++
+        }
         fun <T> safe(f: () -> T): T? = try {
             f()
         } catch (e: Exception) {
@@ -247,7 +246,7 @@ object RecEngine {
                     byKeywords(ctx, unknown)
                     return
                 }
-                unknown.chunked(30).forEach { batch ->
+                Par.each(unknown.chunked(30)) { _, batch ->
                     try {
                         val data = batch.mapIndexed { i, n -> "${i + 1}. ${n.title} — ${n.channel}" }.joinToString("\n")
                         val prompt = Prompts.get("relevance").replace("{phrase}", ctx.p.phrase)
@@ -278,6 +277,11 @@ object RecEngine {
             n.expanded = true
             return emptyList()
         }
+        return link(ctx, n, childDepth, rel)
+    }
+
+    /** Graph edits for an already fetched list of related videos (always on the calling thread). */
+    private fun link(ctx: Ctx, n: RecNode, childDepth: Int, rel: List<StreamInfoItem>): List<RecNode> {
         L.d("recs", "expand ${n.id} depth=${n.depth} related=${rel.size}")
         val fresh = mutableListOf<RecNode>()
         var rank = 0
@@ -373,13 +377,27 @@ object RecEngine {
                         .thenByDescending { it.weight }.thenByDescending { it.views }
                 )
             val take = if (level == 0) candidates else candidates.take(beam)
-            for (n in take) {
+            // watch pages of a level are independent: fetch them in parallel chunks, edit the graph sequentially
+            for (chunk in take.chunked(maxOf(1, Settings.parallel * 2))) {
                 if (ctx.limitReached()) break
-                ctx.progress(
-                    t("Глубина ${level + 1}/${cfg.depth} · узлов ${ctx.g.nodes.size} · запросов ${ctx.requests}/${cfg.budget}\n",
-                        "Depth ${level + 1}/${cfg.depth} · nodes ${ctx.g.nodes.size} · requests ${ctx.requests}/${cfg.budget}\n") + n.title
-                )
-                expand(ctx, n, level + 1)
+                val batch = chunk.take(maxOf(0, cfg.budget - ctx.requests))
+                val fetched = Par.map(batch, cancel = ctx.cancel) { _, n ->
+                    ctx.progress(
+                        t("Глубина ${level + 1}/${cfg.depth} · узлов ${ctx.g.nodes.size} · запросов ${ctx.requests}/${cfg.budget}\n",
+                            "Depth ${level + 1}/${cfg.depth} · nodes ${ctx.g.nodes.size} · requests ${ctx.requests}/${cfg.budget}\n") + n.title
+                    )
+                    try {
+                        related(ctx, n)
+                    } catch (e: Exception) {
+                        L.w("recs", "expand ${n.id} failed: ${e.message}")
+                        n.expanded = true
+                        null
+                    }
+                }
+                for ((i, n) in batch.withIndex()) {
+                    if (ctx.g.nodes.size >= cfg.maxNodes) break
+                    fetched[i]?.let { link(ctx, n, level + 1, it) }
+                }
             }
             if (ctx.g.nodes.values.none { it.depth > level && !it.expanded }) break
         }
@@ -430,18 +448,25 @@ object RecEngine {
     private fun mix(ctx: Ctx, seeds: List<RecNode>) {
         val cfg = ctx.cfg
         val perSeed = maxOf(cfg.fanout, cfg.maxNodes / maxOf(1, seeds.size))
-        for ((si, seed) in seeds.withIndex()) {
-            if (ctx.limitReached()) return
+        val live = seeds.take(maxOf(0, cfg.budget - ctx.requests))
+        val fetched = Par.map(live, cancel = ctx.cancel) { si, seed ->
             ctx.progress(t("Mix ${si + 1}/${seeds.size}\n", "Mix ${si + 1}/${seeds.size}\n") + seed.title)
             pause()
-            val items = try {
-                PlaylistInfo.getInfo(yt, "https://www.youtube.com/watch?v=${seed.id}&list=RD${seed.id}").relatedItems
+            try {
+                PlaylistInfo.getInfo(yt, "https://www.youtube.com/watch?v=${seed.id}&list=RD${seed.id}").relatedItems.also {
+                    synchronized(ctx) {
+                        ctx.requests++
+                        ctx.g.requests++
+                    }
+                }
             } catch (e: Exception) {
                 L.w("recs", "mix for ${seed.id} failed: ${e.message}")
-                continue
+                null
             }
-            ctx.requests++
-            ctx.g.requests++
+        }
+        for ((si, seed) in live.withIndex()) {
+            if (ctx.limitReached()) return
+            val items = fetched[si] ?: continue
             seed.expanded = true
             var rank = 0
             for (item in items) {

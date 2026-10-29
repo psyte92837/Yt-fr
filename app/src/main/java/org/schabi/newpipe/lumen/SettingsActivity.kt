@@ -74,6 +74,11 @@ class SettingsActivity : LumenBase() {
             Settings.requestDelayMs = it
         }
         c.muted(t("Большая пауза снижает риск временной блокировки со стороны YouTube.", "A longer delay lowers the risk of temporary blocking by YouTube."))
+        c.spinner(t("Параллельные запросы (каналы, видео, AI)", "Parallel requests (channels, videos, AI)"),
+            listOf(1 to t("1 (последовательно)", "1 (sequential)"), 2 to "2", 3 to "3", 4 to "4", 6 to "6", 8 to "8"), Settings.parallel) {
+            Settings.parallel = it
+        }
+        c.muted(t("Ускоряет сбор и анализ. Пауза между запросами к YouTube делится между потоками. При ошибках лимита уменьшите.", "Speeds up collection and analysis. The YouTube delay is shared across threads. Lower it if you hit rate limits."))
         c.button(t("Пройти мастер настройки заново", "Run the setup wizard again"), style = BtnStyle.TEXT) {
             Settings.wizardDone = false
             startActivity(Intent(this, WizardActivity::class.java))

@@ -265,16 +265,16 @@ object Dossier {
         val cfg = Config.load()
         val groups = group(Store.videos(pid).values, cfg.channels, cfg.videos)
         if (groups.isEmpty()) throw LlmException(t("В проекте нет видео с каналами", "The project has no videos with channels"))
-        var made = 0
-        var errors = 0
+        val made = java.util.concurrent.atomic.AtomicInteger(0)
+        val started = java.util.concurrent.atomic.AtomicInteger(0)
+        val errors = java.util.concurrent.atomic.AtomicInteger(0)
         var lastErr = ""
-        for ((i, g) in groups.withIndex()) {
-            if (cancel.get()) break
-            progress(t("Досье: канал ${i + 1}/${groups.size}\n", "Dossier: channel ${i + 1}/${groups.size}\n") + g.name)
+        Par.each(groups, cancel = cancel) { _, g ->
+            progress(t("Досье: канал ${started.incrementAndGet()}/${groups.size}\n", "Dossier: channel ${started.get()}/${groups.size}\n") + g.name)
             try {
-                if (runChannel(p, prov, g)) made++
+                if (runChannel(p, prov, g)) made.incrementAndGet()
             } catch (e: Exception) {
-                errors++
+                errors.incrementAndGet()
                 lastErr = e.message ?: e.javaClass.simpleName
                 L.w("dossier", "${g.name}: $lastErr")
             }
@@ -284,15 +284,15 @@ object Dossier {
             try {
                 runOverview(p, prov, groups)
             } catch (e: Exception) {
-                errors++
+                errors.incrementAndGet()
                 lastErr = e.message ?: e.javaClass.simpleName
                 L.w("dossier", "overview: $lastErr")
             }
         }
         val st = stored(pid)
         val ready = groups.count { st[it.key]?.second != null }
-        return t("Досье: готово каналов $ready из ${groups.size}, новых $made", "Dossier: $ready of ${groups.size} channels ready, $made new") +
-            (if (errors > 0) t(", ошибок $errors ($lastErr)", ", errors $errors ($lastErr)") else "") +
+        return t("Досье: готово каналов $ready из ${groups.size}, новых ${made.get()}", "Dossier: $ready of ${groups.size} channels ready, ${made.get()} new") +
+            (if (errors.get() > 0) t(", ошибок ${errors.get()} ($lastErr)", ", errors ${errors.get()} ($lastErr)") else "") +
             t(". Экспорт — во вкладке «Экспорт».", ". Export it from the Export tab.")
     }
 }

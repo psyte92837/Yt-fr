@@ -336,13 +336,10 @@ class ProjectActivity : LumenBase() {
         busy = t("Загрузка ссылок…", "Loading links…")
         render()
         Lumen.async({
-            val list = urls.mapNotNull { u ->
-                try {
-                    YouTube.single(u).also { Thread.sleep(Settings.requestDelayMs.toLong()) }
-                } catch (e: Exception) {
-                    null
-                }
-            }
+            val list = Par.map(urls) { _, u ->
+                Par.gate()
+                YouTube.single(u)
+            }.filterNotNull()
             Store.mergeVideos(project.id, list)
         }, {
             busy = ""
@@ -744,13 +741,13 @@ class ProjectActivity : LumenBase() {
         c.button(t("Сводки по видео (с расшифровкой)", "Per-video summaries (with transcript)"), primary = true) {
             val target = scope.filter { it.hasTranscript }.ifEmpty { scope }.take(50)
             aiRun(t("Сводки по видео", "Video summaries"), AiTasks.estimateVideoSummaries(project.id, target)) {
-                var last: AiResult? = null
-                target.forEachIndexed { i, v ->
-                    if (cancel.get()) return@forEachIndexed
-                    Lumen.ui { progressView?.text = t("Сводка ${i + 1}/${target.size}: ", "Summary ${i + 1}/${target.size}: ") + v.title }
-                    last = AiTasks.videoSummary(project, v)
+                val started = java.util.concurrent.atomic.AtomicInteger(0)
+                val results = Par.map(target, cancel = cancel) { _, v ->
+                    val i = started.incrementAndGet()
+                    Lumen.ui { progressView?.text = t("Сводка $i/${target.size}: ", "Summary $i/${target.size}: ") + v.title }
+                    AiTasks.videoSummary(project, v)
                 }
-                val l = last ?: throw LlmException("—")
+                val l = results.lastOrNull { it != null } ?: throw LlmException("—")
                 l.copy(text = t("Готово: ${target.size} сводок. Откройте видео, чтобы прочитать сводку. Последняя:\n\n", "Done: ${target.size} summaries. Open a video to read its summary. Last one:\n\n") + l.text)
             }
         }

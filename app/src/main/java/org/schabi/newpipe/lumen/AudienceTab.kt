@@ -100,12 +100,12 @@ fun ProjectActivity.audienceTab(c: Col) {
             val target = pending.take(30)
             if (target.isEmpty()) return@btn toast(t("Все выбранные источники уже обработаны", "All selected sources are processed"))
             aiRun(t("Извлечение инсайтов", "Insight extraction"), target.sumOf { v -> Seo.estimateP1(project.id, v) }) {
-                var n = 0
-                target.forEachIndexed { i, v ->
-                    if (cancel.get()) return@forEachIndexed
-                    Lumen.ui { progressView?.text = "P1 ${i + 1}/${target.size}: ${v.title}" }
-                    n += Seo.extractInsights(project, v)
-                }
+                val started = java.util.concurrent.atomic.AtomicInteger(0)
+                val n = Par.map(target, cancel = cancel) { _, v ->
+                    val i = started.incrementAndGet()
+                    Lumen.ui { progressView?.text = "P1 $i/${target.size}: ${v.title}" }
+                    Seo.extractInsights(project, v)
+                }.sumOf { it ?: 0 }
                 AiResult("", "p1", "project", "", t("Извлечено инсайтов: $n из ${target.size} источников.", "Extracted $n insights from ${target.size} sources."), 0, 0)
             }
         },

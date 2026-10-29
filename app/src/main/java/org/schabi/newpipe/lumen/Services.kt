@@ -167,15 +167,15 @@ class CollectService : Service() {
 
     private fun run(pid: String, ids: List<String>) {
         val project = Store.project(pid) ?: return
-        var added = 0
-        for (id in ids) {
-            if (CollectState.cancel.get()) break
-            val v = Store.videos(pid)[id] ?: continue
+        val added = java.util.concurrent.atomic.AtomicInteger(0)
+        Par.each(ids, cancel = CollectState.cancel) { _, id ->
+            val v = Store.videos(pid)[id] ?: return@each
             CollectState.current = v.title
             startFg(v.title, CollectState.done, CollectState.total)
             var ok = false
             var lastError = ""
             for (attempt in 0..2) {
+                if (CollectState.cancel.get()) break
                 try {
                     YouTube.collect(pid, project.phrase, v, project.collect)
                     ok = true
@@ -187,9 +187,9 @@ class CollectService : Service() {
                 }
             }
             if (ok) {
-                added++
+                added.incrementAndGet()
             } else {
-                CollectState.errors++
+                synchronized(CollectState) { CollectState.errors++ }
                 v.collectError = lastError.take(200)
             }
             Store.updateVideo(pid, id) { saved ->
@@ -208,7 +208,7 @@ class CollectService : Service() {
                 if (v.duration > 0) saved.duration = v.duration
                 if (v.title.isNotBlank()) saved.title = v.title
             }
-            CollectState.done++
+            synchronized(CollectState) { CollectState.done++ }
         }
         // channel statistics and links for the collected videos (cached for 12 h)
         if (project.collect.channelStats && !CollectState.cancel.get()) {
@@ -219,7 +219,7 @@ class CollectService : Service() {
             }
         }
         Store.project(pid)?.let {
-            it.runs.add(RunRecord(System.currentTimeMillis(), "collect", ids.size, added,
+            it.runs.add(RunRecord(System.currentTimeMillis(), "collect", ids.size, added.get(),
                 if (CollectState.cancel.get()) "stopped" else "errors=${CollectState.errors}"))
             Store.save(it)
         }
@@ -346,7 +346,7 @@ object Monitoring {
                 // recommendations are optional
             }
         }
-        for (v in found) {
+        Par.each(found.toList()) { _, v ->
             try {
                 YouTube.collect(pid, p.phrase, v, p.collect)
                 Store.updateVideo(pid, v.id) { s ->

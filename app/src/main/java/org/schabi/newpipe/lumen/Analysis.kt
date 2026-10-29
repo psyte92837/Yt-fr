@@ -176,14 +176,14 @@ object AiTasks {
         val key = sha1("video_summary|${prov.smartModel}|${Prompts.get("video_summary")}|${data.hashCode()}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
         val max = Settings.chunkChars
-        var inTok = 0
-        var outTok = 0
+        val inAcc = java.util.concurrent.atomic.AtomicInteger()
+        val outAcc = java.util.concurrent.atomic.AtomicInteger()
         val body = if (data.length > max) {
             // map: summarise chunks with the fast model, reduce with the smart model
-            val parts = Chunks.split(data, max).map { chunk ->
+            val parts = Par.mapAll(Chunks.split(data, max)) { _, chunk ->
                 val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, Prompts.fill("chunk_summary", vars(p, chunk)), maxTokens = 1500, task = "chunk_summary", pid = p.id)
-                inTok += r.inTokens
-                outTok += r.outTokens
+                inAcc.addAndGet(r.inTokens)
+                outAcc.addAndGet(r.outTokens)
                 r.text
             }
             "Title: ${v.title}\nChannel: ${v.channel}\nSummaries of transcript parts:\n" + parts.joinToString("\n---\n")
@@ -191,7 +191,7 @@ object AiTasks {
             data
         }
         val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("video_summary", vars(p, body)), maxTokens = 2500, task = "video_summary", pid = p.id)
-        val res = AiResult(key, "video_summary", v.id, r.model, r.text, inTok + r.inTokens, outTok + r.outTokens)
+        val res = AiResult(key, "video_summary", v.id, r.model, r.text, inAcc.get() + r.inTokens, outAcc.get() + r.outTokens)
         Store.saveAi(p.id, res)
         return res
     }

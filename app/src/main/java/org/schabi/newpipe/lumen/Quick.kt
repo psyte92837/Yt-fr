@@ -241,26 +241,31 @@ object QuickAnalysis {
                     "collect" -> {
                         val all = Store.videos(pid).values.toList()
                         val target = if (type == "video") all else all.sortedByDescending { it.views }.take(cfg.collectTop)
-                        var ok = 0
-                        for ((i, v) in target.withIndex()) {
-                            if (cancel.get()) break
-                            progress(QuickState.label("collect") + " ${i + 1}/${target.size}")
+                        val ok = java.util.concurrent.atomic.AtomicInteger(0)
+                        val started = java.util.concurrent.atomic.AtomicInteger(0)
+                        Par.each(target, cancel = cancel) { _, v ->
+                            progress(QuickState.label("collect") + " ${started.incrementAndGet()}/${target.size}")
                             try {
                                 YouTube.collect(pid, p.phrase, v, p.collect)
                                 Store.updateVideo(pid, v.id) { s -> copyCollected(v, s) }
-                                ok++
+                                ok.incrementAndGet()
                             } catch (e: Exception) {
                                 L.w("quick", "collect ${v.id}: ${e.message}")
                             }
                         }
-                        "$ok/${target.size}"
+                        "${ok.get()}/${target.size}"
                     }
                     "summary" -> {
                         if (Provider.active() == null) {
                             st.status = "skipped"
                             t("AI не подключён", "AI not connected")
                         } else {
-                            Store.videos(pid).values.forEach { v -> AiTasks.videoSummary(p, v) }
+                            val vids = Store.videos(pid).values.toList()
+                            val started = java.util.concurrent.atomic.AtomicInteger(0)
+                            Par.each(vids, cancel = cancel) { _, v ->
+                                progress(QuickState.label("summary") + " ${started.incrementAndGet()}/${vids.size}")
+                                AiTasks.videoSummary(p, v)
+                            }
                             "OK"
                         }
                     }

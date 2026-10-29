@@ -38,7 +38,9 @@ object Notify {
         if (Build.VERSION.SDK_INT >= 26) Notification.Builder(ctx, channel) else Notification.Builder(ctx)
 
     fun openProject(ctx: Context, projectId: String): PendingIntent {
-        val i = Intent(ctx, ProjectActivity::class.java).putExtra("id", projectId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val harvest = Store.project(projectId)?.quickMode == "harvest"
+        val i = (if (harvest) Intent(ctx, HarvestActivity::class.java).setData(android.net.Uri.parse("lumen://harvest/$projectId")) else Intent(ctx, ProjectActivity::class.java))
+            .putExtra("id", projectId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return PendingIntent.getActivity(ctx, projectId.hashCode(), i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
@@ -119,7 +121,12 @@ class CollectService : Service() {
         CollectState.lastError = ""
         Thread {
             try {
-                if (kind == "quick") {
+                if (kind == "harvest") {
+                    CollectState.lastResult = Harvest.run(pid, CollectState.cancel) { msg ->
+                        CollectState.current = msg
+                        startFg(msg.substringBefore('\n'), 0, 0)
+                    }
+                } else if (kind == "quick") {
                     CollectState.lastResult = QuickAnalysis.run(pid, CollectState.cancel) { msg ->
                         CollectState.current = msg
                         startFg(msg.substringBefore('\n'), 0, 0)
@@ -228,6 +235,7 @@ class CollectService : Service() {
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle(
                 if (CollectState.kind == "recs") "Lumen: " + t("рекомендации", "recommendations")
+                else if (CollectState.kind == "harvest") "Lumen: " + t("сбор похожих", "collecting similar")
                 else if (CollectState.kind == "quick") "Lumen: " + t("быстрый анализ", "instant analysis")
                 else if (CollectState.kind == "chgraph") "Lumen: " + t("граф каналов", "channel graph")
                 else if (CollectState.kind == "style") "Lumen: " + t("стиль видео", "video style")

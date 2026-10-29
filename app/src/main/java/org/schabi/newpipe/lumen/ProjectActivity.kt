@@ -59,7 +59,7 @@ class ProjectActivity : LumenBase() {
                     render()
                     when {
                         CollectState.lastError.isNotEmpty() -> err(IllegalStateException(CollectState.lastError))
-                        CollectState.kind == "recs" -> toast(CollectState.lastResult)
+                        CollectState.kind == "recs" || CollectState.kind == "audit" -> toast(CollectState.lastResult)
                         else -> toast(t("Сбор завершён", "Collection finished"))
                     }
                 }

@@ -61,6 +61,13 @@ fun ProjectActivity.recsTab(c: Col) {
         }
     }
 
+    c.card {
+        add(text(ctx, t("🧪 Аудит алгоритма", "🧪 Algorithm audit"), Type.TITLE_M, bold = true), 0)
+        muted(t("Виртуальный зритель много раз идёт по «Следующему»: как быстро уходит тема, к каким каналам и видео сходится алгоритм.",
+            "A virtual viewer follows “Up next” many times: how fast the topic fades, which channels and videos the algorithm converges to."))
+        button(t("Открыть аудит", "Open audit"), style = BtnStyle.TONAL) { AuditActivity.open(ctx, project.id) }
+    }
+
     // ---------------- settings
     c.h2(t("Режим", "Mode"))
     c.spinner(

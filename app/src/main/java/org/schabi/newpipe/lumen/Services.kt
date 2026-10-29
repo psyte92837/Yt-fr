@@ -107,6 +107,7 @@ object CollectState {
         kind == "recs" -> t("Рекомендации: ", "Recommendations: ") + current
         kind == "quick" -> t("Быстрый анализ: ", "Instant analysis: ") + current
         kind == "chgraph" -> current
+        kind == "audit" -> t("Аудит алгоритма: ", "Algorithm audit: ") + current
         kind == "style" -> t("Стиль видео: ", "Video style: ") + current
         kind == "dossier" -> current
         else -> "$done / $total · ${t("ошибок", "errors")}: $errors\n$current"
@@ -175,6 +176,11 @@ class CollectService : Service() {
                     CollectState.lastResult = Dossier.run(pid, CollectState.cancel) { msg ->
                         CollectState.current = msg
                         startFg(msg.substringAfter('\n'), 0, 0)
+                    }
+                } else if (kind == "audit") {
+                    CollectState.lastResult = AuditEngine.run(pid, CollectState.cancel) { msg ->
+                        CollectState.current = msg
+                        startFg(msg.substringBefore('\n'), 0, 0)
                     }
                 } else if (kind == "recs") {
                     CollectState.lastResult = RecEngine.run(pid, CollectState.cancel) { msg ->
@@ -285,6 +291,7 @@ class CollectService : Service() {
                 if (CollectState.kind == "recs") "Lumen: " + t("рекомендации", "recommendations")
                 else if (CollectState.kind == "quick") "Lumen: " + t("быстрый анализ", "instant analysis")
                 else if (CollectState.kind == "chgraph") "Lumen: " + t("граф каналов", "channel graph")
+                else if (CollectState.kind == "audit") "Lumen: " + t("аудит алгоритма", "algorithm audit")
                 else if (CollectState.kind == "style") "Lumen: " + t("стиль видео", "video style")
                 else if (CollectState.kind == "dossier") "Lumen: " + t("AI-досье", "AI dossier")
                 else "Lumen: ${t("сбор", "collecting")} $done/$total"

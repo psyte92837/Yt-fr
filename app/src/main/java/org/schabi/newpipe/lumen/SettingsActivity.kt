@@ -59,6 +59,12 @@ class SettingsActivity : LumenBase() {
                 recreate()
             }
         }
+        c.spinner(t("Готовая градиентная тема", "Gradient theme"), Palette.gradientNames, Settings.style) {
+            if (it != Settings.style) {
+                Settings.style = it
+                recreate()
+            }
+        }
         c.spinner(t("Цвет акцента", "Accent colour"), Palette.accentNames, Settings.accent) {
             if (it != Settings.accent) {
                 Settings.accent = it

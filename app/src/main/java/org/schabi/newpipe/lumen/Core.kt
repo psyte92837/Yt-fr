@@ -71,6 +71,11 @@ object Settings {
         get() = p.getString("accent", "dynamic") ?: "dynamic"
         set(v) = p.edit().putString("accent", v).apply()
 
+    /** "none" or a gradient theme name (overrides theme and accent). */
+    var style: String
+        get() = p.getString("style", "none") ?: "none"
+        set(v) = p.edit().putString("style", v).apply()
+
     /** Text scale in percent. */
     var textScale: Int
         get() = p.getInt("text_scale", 100)

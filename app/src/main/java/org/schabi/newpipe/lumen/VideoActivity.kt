@@ -105,8 +105,9 @@ class VideoActivity : LumenBase() {
                 muted(summary.model + " · " + Fmt.dateTime(summary.at))
             }
         }
+        if (busy) c.working(t("AI думает…", "AI is thinking…"))
         c.button(
-            if (busy) t("AI думает…", "AI is thinking…") else if (summary == null) t("Сделать сводку", "Summarise") else t("Обновить сводку", "Refresh summary"),
+            if (summary == null) t("Сделать сводку", "Summarise") else t("Обновить сводку", "Refresh summary"),
             style = BtnStyle.TONAL
         ) { summarise(summary != null) }
 

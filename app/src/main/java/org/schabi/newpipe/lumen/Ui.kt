@@ -40,6 +40,7 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
@@ -502,6 +503,15 @@ class Col(val ctx: Context, padding: Int = 16) {
     fun h2(s: String) = add(text(ctx, s, Type.TITLE_M, bold = true), 24)
     fun p(s: String, size: Float = Type.BODY, color: Int? = null) = add(text(ctx, s, size, color = color ?: Palette.ON_SURFACE))
     fun muted(s: String) = add(text(ctx, s, 13f, color = Palette.MUTED), 4)
+
+    /** "Something is happening" line: status text plus a moving bar (determinate when the text carries "i/n"). */
+    fun working(s: String, bold: Boolean = true): Pair<TextView, ProgressBar> {
+        val tv = add(text(ctx, s, 14f, bold = bold, color = Palette.ON_SURFACE), 0) as TextView
+        val bar = add(busyBar(ctx), 8) as ProgressBar
+        bar.layoutParams.height = ctx.dp(4)
+        bar.showProgress(s)
+        return tv to bar
+    }
     fun button(s: String, primary: Boolean = false, style: BtnStyle? = null, onClick: () -> Unit) = add(btn(ctx, s, primary, style, onClick), 4)
     fun check(s: String, value: Boolean, onChange: (Boolean) -> Unit) = add(chk(ctx, s, value, onChange), 0)
     fun edit(hint: String, value: String = "", multiline: Boolean = false, number: Boolean = false) =
@@ -854,5 +864,41 @@ object Thumbs {
                 // thumbnails are optional
             }
         }
+    }
+}
+
+
+/** Parses "3/10"-style counters out of progress messages. */
+object ProgressText {
+    private val rx = Regex("""(\d+)\s*/\s*(\d+)""")
+
+    /** Fraction 0..1 from the last "done/total" in [s]; null when absent or nonsensical. */
+    fun fraction(s: String): Float? {
+        val m = rx.findAll(s).lastOrNull() ?: return null
+        val done = m.groupValues[1].toLongOrNull() ?: return null
+        val total = m.groupValues[2].toLongOrNull() ?: return null
+        if (total <= 0 || done > total) return null
+        return done.toFloat() / total
+    }
+}
+
+/** Thin M3-style linear progress; indeterminate until [showProgress] finds a counter. */
+fun busyBar(ctx: Context): ProgressBar = ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
+    max = 1000
+    isIndeterminate = true
+    indeterminateTintList = ColorStateList.valueOf(Palette.ACCENT)
+    progressTintList = ColorStateList.valueOf(Palette.ACCENT)
+    progressBackgroundTintList = ColorStateList.valueOf(Palette.ACCENT_SOFT)
+    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+}
+
+/** Switches the bar between determinate (message has "i/n") and indeterminate. */
+fun ProgressBar.showProgress(message: String) {
+    val f = ProgressText.fraction(message)
+    if (f == null) {
+        if (!isIndeterminate) isIndeterminate = true
+    } else {
+        if (isIndeterminate) isIndeterminate = false
+        progress = (f * max).toInt()
     }
 }

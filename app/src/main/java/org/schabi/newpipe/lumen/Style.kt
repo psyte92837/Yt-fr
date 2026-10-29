@@ -531,12 +531,13 @@ fun Activity.styleCard(c: Col, pid: String, v: Video, full: Boolean, onFinish: (
         }
     }
     if (running) {
-        val pv = c.muted("⏳ " + CollectState.current)
+        val (pv, bar) = c.working(CollectState.current, bold = false)
         val tick = object : Runnable {
             override fun run() {
                 if (isFinishing || isDestroyed) return
                 if (CollectState.running && CollectState.kind == "style") {
-                    pv.text = "⏳ " + CollectState.current
+                    pv.text = CollectState.current
+                    bar.showProgress(CollectState.current)
                     pv.postDelayed(this, 1000)
                 } else {
                     if (CollectState.lastError.isNotEmpty()) toast(CollectState.lastError) else if (CollectState.lastResult.isNotEmpty()) toast(CollectState.lastResult)

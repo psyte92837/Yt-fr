@@ -438,7 +438,8 @@ class NewProjectActivity : LumenBase() {
         val input = c.edit(t("Слово или фраза, напр. «электромобили»", "Word or phrase, e.g. \"electric cars\""), phrase)
         input.addTextChangedListener(SimpleWatcher { phrase = it })
         val ai = Provider.active()
-        c.button(if (busy) t("AI думает…", "AI is thinking…") else t("✨ Уточнить доменную область через AI", "✨ Refine domain with AI")) {
+        if (busy) c.working(t("AI думает…", "AI is thinking…"))
+        c.button(t("✨ Уточнить доменную область через AI", "✨ Refine domain with AI")) {
             if (phrase.isBlank()) return@button toast(t("Введите фразу", "Enter a phrase"))
             if (ai == null) {
                 confirm(t("AI не подключён", "AI not connected"), t("Подключить API-ключ сейчас?", "Connect an API key now?")) {

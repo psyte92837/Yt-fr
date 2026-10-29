@@ -26,6 +26,7 @@ class ProjectActivity : LumenBase() {
     val cancel = AtomicBoolean(false)
     private val handler = Handler(Looper.getMainLooper())
     var progressView: TextView? = null
+    var progressBar: android.widget.ProgressBar? = null
 
     // recommendations / audience / SEO tab state (see RecsTab.kt, AudienceTab.kt, SeoTab.kt)
     val ui = HashMap<String, Any>()
@@ -122,11 +123,13 @@ class ProjectActivity : LumenBase() {
     fun render() {
         val c = Col(this)
         progressView = null
+        progressBar = null
         if (busy.isNotEmpty() || (CollectState.running && CollectState.projectId == project.id)) {
             c.card {
-                val pv = text(ctx, busy, 14f, bold = true, color = Palette.ON_SURFACE)
+                val (pv, bar) = working(busy)
                 progressView = pv
-                add(pv, 0)
+                progressBar = bar
+                pv.addTextChangedListener(SimpleWatcher { bar.showProgress(it) })
                 button(t("Остановить", "Stop"), style = BtnStyle.OUTLINED) {
                     cancel.set(true)
                     if (CollectState.running) CollectService.stop(this@ProjectActivity)

@@ -67,7 +67,7 @@ class TopicActivity : LumenBase() {
         val p = project()
         val pl = Seo.pipeline(cl)
         val c = Col(this)
-        if (busy.isNotEmpty()) c.card { add(text(ctx, busy, 14f, bold = true), 0) }
+        if (busy.isNotEmpty()) c.card { working(busy) }
 
         // ---- topic & evidence
         c.add(text(this, cl.optString("name"), Type.TITLE_L), 0)

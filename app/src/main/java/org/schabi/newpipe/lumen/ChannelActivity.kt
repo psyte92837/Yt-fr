@@ -45,7 +45,7 @@ class ChannelActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        if (busy.isNotEmpty()) c.card { add(text(ctx, busy, 14f, bold = true), 0) }
+        if (busy.isNotEmpty()) c.card { working(busy) }
         val d = data
         if (d == null) {
             page(t("Канал", "Channel"), c.root)

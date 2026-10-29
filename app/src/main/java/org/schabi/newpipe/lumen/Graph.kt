@@ -260,6 +260,8 @@ class GraphActivity : LumenBase() {
             setPadding(dp(16), 0, dp(16), dp(8))
         }
         header.addView(legend)
+        val layoutBar = busyBar(this)
+        header.addView(layoutBar, LinearLayout.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, dp(4)).apply { marginStart = dp(16); marginEnd = dp(16); bottomMargin = dp(8) })
         val pr = Store.project(pid)
         page(
             (if (channels) t("Каналы · ", "Channels · ") else "") + (pr?.name ?: t("Граф", "Graph")), view, header = header, scroll = false,
@@ -275,6 +277,7 @@ class GraphActivity : LumenBase() {
             view.colorBy = colorBy
             view.setGraph(list, e, x, y)
             view.colorBy = colorBy
+            layoutBar.visibility = View.GONE
             val p = Store.project(pid)
             current = GraphReport.Input(p?.name ?: "Lumen", p?.phrase ?: "", channels, list, e, ranks, x, y, colorBy, onlyOnTopic, graph.updatedAt, graph.requests)
             legend.text = t("Узлов ${list.size} · связей ${e.size} · размер = как часто рекомендуют. ",

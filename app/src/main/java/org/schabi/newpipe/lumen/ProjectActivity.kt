@@ -477,6 +477,7 @@ class ProjectActivity : LumenBase() {
             addView(btn(this@ProjectActivity, t("Все", "All"), style = BtnStyle.TEXT) { setMarked(filteredVideos().map { it.id }, true) })
             addView(btn(this@ProjectActivity, t("Снять", "Clear"), style = BtnStyle.TEXT) { setMarked(videos.keys, false) })
         }
+        var markedChip: TextView? = null
         fun refreshSel() {
             val m = videos.values.count { it.marked }
             selText.text = t("Выбрано: $m", "Selected: $m")
@@ -506,7 +507,6 @@ class ProjectActivity : LumenBase() {
         }
         c.add(bar, 8)
 
-        var markedChip: TextView? = null
         c.chips(
             listOf(
                 "all" to t("Все $total", "All $total"), "marked" to t("Отмеченные $marked", "Marked $marked"),

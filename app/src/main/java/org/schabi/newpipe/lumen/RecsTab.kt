@@ -198,11 +198,11 @@ fun ProjectActivity.recsTab(c: Col) {
             cfg.blocked = it
             save()
         })
-
-        if (g.nodes.isEmpty()) return
-
-        // ---------------- results
     }
+
+    if (g.nodes.isEmpty()) return
+
+    // ---------------- results
 
     c.h2(t("Что рекомендует YouTube", "What YouTube recommends"))
     val sort = state("recSort", "hits") as String

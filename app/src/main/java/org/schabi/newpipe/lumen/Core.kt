@@ -61,6 +61,11 @@ object Settings {
         get() = p.getString("lang", "ru") ?: "ru"
         set(v) = p.edit().putString("lang", v).apply()
 
+    /** "system" | "light" | "dark". */
+    var theme: String
+        get() = p.getString("theme", "system") ?: "system"
+        set(v) = p.edit().putString("theme", v).apply()
+
     var wizardDone: Boolean
         get() = p.getBoolean("wizard_done", false)
         set(v) = p.edit().putBoolean("wizard_done", v).apply()

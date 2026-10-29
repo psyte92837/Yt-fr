@@ -51,6 +51,12 @@ class SettingsActivity : LumenBase() {
                 render()
             }
         }
+        c.spinner(t("Тема", "Theme"), listOf("system" to t("Как в системе", "System default"), "light" to t("Светлая", "Light"), "dark" to t("Тёмная", "Dark")), Settings.theme) {
+            if (it != Settings.theme) {
+                Settings.theme = it
+                recreate()
+            }
+        }
         c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер NewPipe", "Analytics + NewPipe player")), Settings.mode) {
             Settings.mode = it
         }

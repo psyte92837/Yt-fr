@@ -682,6 +682,22 @@ fun Context.shareText(subject: String, body: String) {
  * optional extended FAB for the primary action of the screen.
  */
 abstract class LumenBase : Activity() {
+    override fun attachBaseContext(base: Context) {
+        val mode = base.getSharedPreferences("lumen_prefs", Context.MODE_PRIVATE).getString("theme", "system")
+        val night = when (mode) {
+            "dark" -> Configuration.UI_MODE_NIGHT_YES
+            "light" -> Configuration.UI_MODE_NIGHT_NO
+            else -> null
+        }
+        if (night == null) {
+            super.attachBaseContext(base)
+        } else {
+            val cfg = Configuration(base.resources.configuration)
+            cfg.uiMode = (cfg.uiMode and Configuration.UI_MODE_NIGHT_MASK.inv()) or night
+            super.attachBaseContext(base.createConfigurationContext(cfg))
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Lumen.init(this)
         Palette.init(this)

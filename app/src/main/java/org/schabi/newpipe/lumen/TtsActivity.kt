@@ -14,6 +14,7 @@ import android.text.TextWatcher
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.SeekBar
 import android.widget.TextView
 import java.io.File
@@ -51,7 +52,8 @@ class TtsActivity : LumenBase() {
     private lateinit var playBtn: TextView
     private var player: MediaPlayer? = null
     private var busy = false
-    @Volatile private var cancel = false
+    private lateinit var bar: ProgressBar
+    private var handledSeq = -1
     private var lastAudio: File? = null
     private var lastKey = ""
     private var gender = TtsPrefs.gender
@@ -97,6 +99,7 @@ class TtsActivity : LumenBase() {
         c.muted(t("TXT, MD, FB2, EPUB, DOCX, HTML, SRT/VTT субтитры. Кодировка определяется сама (UTF-8, UTF-16, Windows-1251).",
             "TXT, MD, FB2, EPUB, DOCX, HTML, SRT/VTT subtitles. Encoding is detected automatically (UTF-8, UTF-16, Windows-1251)."))
         status = c.muted("")
+        bar = c.add(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; visibility = android.view.View.GONE })
         c.check(t("Подбирать язык голоса по тексту", "Match the voice language to the text"), TtsPrefs.auto) {
             TtsPrefs.auto = it
             if (it) autoPick(input.text.toString())
@@ -104,6 +107,10 @@ class TtsActivity : LumenBase() {
         c.check(t("Читать выделенное или с места курсора", "Read the selection or from the cursor"), TtsPrefs.fromCursor) {
             TtsPrefs.fromCursor = it
         }
+        c.check(t("Сохранять MP3 в Музыка/Lumen сразу после озвучки (Android 10+)", "Save the MP3 to Music/Lumen as soon as it is ready (Android 10+)"), TtsPrefs.autoSave) {
+            TtsPrefs.autoSave = it
+        }
+        c.check(t("Проигрывать после озвучки", "Play when ready"), TtsPrefs.playAfter) { TtsPrefs.playAfter = it }
         c.h2(t("Язык и голос", "Language and voice"))
         langBox = c.add(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL })
         voiceBox = c.add(LinearLayout(this).apply { orientation = LinearLayout.VERTICAL })
@@ -307,28 +314,51 @@ class TtsActivity : LumenBase() {
             return
         }
         stopPlayer()
-        busy = true
-        cancel = false
-        playBtn.text = t("Озвучивается…", "Synthesizing…")
-        Lumen.async({
-            val mp3 = EdgeTts.synthesize(text, o, { cancel }) { done, total ->
-                if (total > 1) Lumen.ui { status.text = t("Озвучено частей: $done из $total", "Parts done: $done of $total") }
-            }
-            File(cacheDir, "tts_last.mp3").apply { writeBytes(mp3) }
-        }, { e ->
-            busy = false
-            playBtn.text = t("▶  Озвучить", "▶  Read aloud")
-            updateCount()
-            err(e)
-        }) { f ->
-            busy = false
-            playBtn.text = t("▶  Озвучить", "▶  Read aloud")
-            updateCount()
-            if (cancel || isFinishing) return@async
-            lastAudio = f
-            lastKey = key
-            startPlayer(f)
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 2)
+        TtsState.file = null
+        TtsService.start(this, text, o, key, TtsPrefs.autoSave)
+        showState()
+    }
+
+    /** Syncs the screen with the background job: progress bar, status, button, result. */
+    private fun showState() {
+        val s = TtsState
+        busy = s.running
+        playBtn.text = if (s.running) t("Озвучивается…", "Synthesizing…") else t("▶  Озвучить", "▶  Read aloud")
+        bar.visibility = if (s.running) android.view.View.VISIBLE else android.view.View.GONE
+        if (s.running) {
+            bar.isIndeterminate = s.total == 0
+            bar.progress = TtsProgress.percent(s.done, s.total)
+            status.text = if (s.total > 0) TtsProgress.label(s.done, s.total) else t("Подготовка…", "Preparing…")
+            return
         }
+        updateCount()
+        if (handledSeq == s.seq) return
+        handledSeq = s.seq
+        val f = s.file
+        val e = s.error
+        when {
+            e != null -> status.text = e
+            f != null && f.exists() -> {
+                lastAudio = f
+                lastKey = s.key
+                status.text = s.savedAs?.let { t("Готово. Сохранено: $it", "Done. Saved: $it") } ?: t("Готово. Нажмите «Сохранить MP3»", "Done. Tap “Save MP3”")
+                if (TtsPrefs.playAfter && !isFinishing) startPlayer(f)
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        TtsState.listener = ::showState
+        showState()
+    }
+
+    override fun onStop() {
+        TtsState.listener = null
+        super.onStop()
     }
 
     /** Whole text, or the selection / the rest from the cursor when that option is on. */
@@ -438,7 +468,7 @@ class TtsActivity : LumenBase() {
     }
 
     private fun stop() {
-        cancel = true
+        TtsService.stop(this)
         stopPlayer()
         status.text = t("Остановлено", "Stopped")
     }
@@ -478,7 +508,6 @@ class TtsActivity : LumenBase() {
     }
 
     override fun onDestroy() {
-        cancel = true
         stopPlayer()
         super.onDestroy()
     }

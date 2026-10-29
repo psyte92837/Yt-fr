@@ -127,6 +127,10 @@
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <service
+            android:name=".lumen.TtsService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
             android:name=".lumen.RecKeepAlive"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />

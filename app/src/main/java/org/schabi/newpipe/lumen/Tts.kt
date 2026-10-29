@@ -19,6 +19,8 @@ import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.TimeUnit
 
 /** A Microsoft Edge "Read Aloud" neural voice. */
@@ -54,6 +56,9 @@ object EdgeTts {
         "Chrome/$MAJOR.0.0.0 Safari/537.36 Edg/$MAJOR.0.0.0"
     /** Escaped text per request, in UTF-8 bytes (the service limit is 4096 incl. SSML). */
     const val CHUNK_BYTES = 3600
+
+    /** Parts synthesised at the same time (each one is its own connection). */
+    const val WORKERS = 4
 
     /** Server clock minus device clock, seconds; learned from a 403 response. */
     @Volatile var skewSec = 0L
@@ -313,34 +318,39 @@ object EdgeTts {
      * Synthesises [text] to MP3 bytes. Long text is sent in pieces (one connection each);
      * [onProgress] gets (done, total). [cancelled] is polled between pieces.
      */
-    // Parts already synthesised for the last text: after a network failure a new tap continues from there.
+    // Parts already synthesised for the last text: after a network failure a new run continues from there.
     private var partsKey = ""
-    private val parts = mutableListOf<ByteArray>()
+    private var parts = arrayOfNulls<ByteArray>(0)
 
     fun synthesize(text: String, o: TtsOptions, cancelled: () -> Boolean = { false }, onProgress: (Int, Int) -> Unit = { _, _ -> }): ByteArray {
         val chunks = split(text)
         if (chunks.isEmpty()) throw TtsException(t("Нет текста для озвучки", "No text to speak"))
+        val total = chunks.size
         val key = sha1(chunks.joinToString("\u0000") + "|" + o)
-        synchronized(parts) {
-            if (key != partsKey) {
-                parts.clear()
+        val store: Array<ByteArray?>
+        synchronized(this) {
+            if (key != partsKey || parts.size != total) {
+                parts = arrayOfNulls(total)
                 partsKey = key
-            } else if (parts.isNotEmpty()) {
-                L.i("tts", "resume from part ${parts.size + 1}/${chunks.size}")
+            } else if (parts.any { it != null }) {
+                L.i("tts", "resume: ${parts.count { it != null }}/$total parts ready")
             }
+            store = parts
         }
-        for (i in parts.size until chunks.size) {
-            if (cancelled()) break
-            onProgress(i, chunks.size)
-            val audio = withRetry(i, chunks.size, cancelled) { one(chunks[i], o) } ?: break
-            synchronized(parts) { if (partsKey == key) parts.add(audio) }
+        fun ready() = synchronized(store) { store.count { it != null } }
+        onProgress(ready(), total)
+        TtsPool.run(total, WORKERS, { synchronized(store) { store[it] != null } }, cancelled, { i, stop ->
+            withRetry(i, total, stop, ::ready) { one(chunks[i], o) }
+        }) { i, audio ->
+            synchronized(store) { store[i] = audio }
+            onProgress(ready(), total)
         }
+        if (cancelled() || store.any { it == null }) return ByteArray(0)
         val out = ByteArrayOutputStream()
-        synchronized(parts) { parts.forEach { out.write(it) } }
-        if (!cancelled()) {
-            onProgress(chunks.size, chunks.size)
-            synchronized(parts) {
-                parts.clear()
+        store.forEach { out.write(it!!) }
+        synchronized(this) {
+            if (parts === store) {
+                parts = arrayOfNulls(0)
                 partsKey = ""
             }
         }
@@ -348,7 +358,7 @@ object EdgeTts {
     }
 
     /** Runs [block]; on network errors waits for the network and retries with growing pauses. null = cancelled. */
-    private fun withRetry(i: Int, total: Int, cancelled: () -> Boolean, block: () -> ByteArray): ByteArray? {
+    private fun withRetry(i: Int, total: Int, cancelled: () -> Boolean, ready: () -> Int, block: () -> ByteArray): ByteArray? {
         var attempt = 0
         var forbiddenRetried = false
         while (true) {
@@ -360,7 +370,7 @@ object EdgeTts {
             } catch (e: java.io.IOException) {
                 val delay = TtsRetry.delayMs(attempt)
                 L.w("tts", "part ${i + 1}/$total attempt ${attempt + 1}: ${e.javaClass.simpleName}: ${e.message}")
-                if (delay == null) throw TtsException(TtsRetry.message(e, i, total))
+                if (delay == null) throw TtsException(TtsRetry.message(e, ready(), total))
                 attempt++
                 if (!sleepUntil(delay, cancelled)) return null
                 // no network (phone sleeping, Wi-Fi ↔ mobile): wait for it up to a minute
@@ -648,6 +658,13 @@ object TtsPrefs {
     var gender: String
         get() = p.getString("tts_gender", "all") ?: "all"
         set(v) = p.edit().putString("tts_gender", v).apply()
+    /** Save the finished MP3 to Music/Lumen right away (Android 10+). */
+    var autoSave: Boolean
+        get() = p.getBoolean("tts_auto_save", true)
+        set(v) = p.edit().putBoolean("tts_auto_save", v).apply()
+    var playAfter: Boolean
+        get() = p.getBoolean("tts_play_after", false)
+        set(v) = p.edit().putBoolean("tts_play_after", v).apply()
     var playSpeed: Float
         get() = p.getFloat("tts_play_speed", 1f)
         set(v) = p.edit().putFloat("tts_play_speed", v).apply()
@@ -676,5 +693,54 @@ object TtsRetry {
             " Parts done: $done of $total — tap Read aloud again to continue from there.") else
             t(" Нажмите «Озвучить» ещё раз.", " Tap Read aloud again.")
         return t("Озвучка прервалась: ", "Reading stopped: ") + why + "." + where
+    }
+}
+
+/** Runs numbered jobs on several threads; finished results are handed over as they come (pure, unit-tested). */
+object TtsPool {
+    /**
+     * Calls [work] for every index in 0 until [total] that is not yet [have], on up to [workers] threads.
+     * [work] gets a stop flag (cancelled or another part failed) and returns null when it gave up.
+     * The first failure stops taking new indices and is rethrown after the running ones end.
+     */
+    fun run(
+        total: Int, workers: Int, have: (Int) -> Boolean, cancelled: () -> Boolean,
+        work: (Int, () -> Boolean) -> ByteArray?, onPart: (Int, ByteArray) -> Unit
+    ) {
+        val todo = (0 until total).filter { !have(it) }
+        val next = AtomicInteger(0)
+        val failure = AtomicReference<Throwable?>(null)
+        val stop = { cancelled() || failure.get() != null }
+        val threads = (0 until minOf(workers, todo.size)).map {
+            Thread {
+                while (!stop()) {
+                    val k = next.getAndIncrement()
+                    if (k >= todo.size) break
+                    try {
+                        val audio = work(todo[k], stop) ?: break
+                        onPart(todo[k], audio)
+                    } catch (e: Throwable) {
+                        failure.compareAndSet(null, e)
+                        break
+                    }
+                }
+            }.apply { isDaemon = true; start() }
+        }
+        threads.forEach { it.join() }
+        failure.get()?.let { throw it }
+    }
+}
+
+/** Progress numbers and the file name for the notification and the progress bar (pure, unit-tested). */
+object TtsProgress {
+    fun percent(done: Int, total: Int): Int = if (total <= 0) 0 else (done.coerceIn(0, total) * 100L / total).toInt()
+
+    fun label(done: Int, total: Int): String =
+        t("Озвучено частей: $done из $total (${percent(done, total)}%)", "Parts done: $done of $total (${percent(done, total)}%)")
+
+    /** "lumen-<first words>-<day>.mp3", safe for any file system. */
+    fun fileName(text: String, day: String): String {
+        val words = text.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.take(4).joinToString("-").take(40)
+        return "lumen-" + (if (words.isEmpty()) "tts" else words) + "-" + day + ".mp3"
     }
 }

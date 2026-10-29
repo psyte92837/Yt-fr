@@ -20,6 +20,47 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
 
+/** Node colours and legend for a colouring mode; shared by the screen and the exported report. */
+object GraphColors {
+    private fun hsv(h: Float, s: Float = 0.55f, v: Float = 0.9f) = Color.HSVToColor(floatArrayOf(h, s, v))
+
+    fun of(nodes: List<RecNode>, colorBy: String, ok: Int, off: Int, warn: Int): Pair<IntArray, List<Pair<Int, String>>> {
+        val n = nodes.size
+        val colors = IntArray(n)
+        val leg = mutableListOf<Pair<Int, String>>()
+        when (colorBy) {
+            "relevance" -> {
+                for (i in 0 until n) {
+                    colors[i] = when (nodes[i].relevant) {
+                        1 -> ok
+                        0 -> off
+                        else -> warn
+                    }
+                }
+                leg += ok to t("по теме", "on topic")
+                leg += off to t("не по теме", "off topic")
+                leg += warn to t("не проверено", "unknown")
+            }
+            "channel" -> {
+                val top = nodes.groupingBy { it.channel }.eachCount().entries.sortedByDescending { it.value }.take(8).map { it.key }
+                val map = HashMap<String, Int>()
+                top.forEachIndexed { i, ch -> map[ch] = hsv(i * 45f, 0.6f, 0.85f) }
+                for (i in 0 until n) colors[i] = map[nodes[i].channel] ?: off
+                top.forEach { leg += (map[it] ?: 0) to it.take(18) }
+                leg += off to t("другие", "other")
+            }
+            else -> {
+                val maxDepth = max(1, nodes.maxOfOrNull { it.depth } ?: 1)
+                for (i in 0 until n) colors[i] = hsv(265f - 245f * nodes[i].depth / maxDepth)
+                for (dd in 0..maxDepth step max(1, maxDepth / 5)) {
+                    leg += hsv(265f - 245f * dd / maxDepth) to (if (dd == 0) t("старт", "seed") else "$dd")
+                }
+            }
+        }
+        return colors to leg
+    }
+}
+
 /** Interactive recommendation graph: pinch to zoom, drag to pan, tap a node, double tap to fit. */
 class GraphView(ctx: Context) : View(ctx) {
     var nodes: List<RecNode> = emptyList()
@@ -72,41 +113,9 @@ class GraphView(ctx: Context) : View(ctx) {
         fit()
     }
 
-    private fun hsv(h: Float, s: Float = 0.55f, v: Float = 0.9f) = Color.HSVToColor(floatArrayOf(h, s, v))
-
     private fun recolor() {
-        val n = nodes.size
-        colors = IntArray(n)
-        val leg = mutableListOf<Pair<Int, String>>()
-        when (colorBy) {
-            "relevance" -> {
-                for (i in 0 until n) {
-                    colors[i] = when (nodes[i].relevant) {
-                        1 -> Palette.OK
-                        0 -> Palette.OUTLINE
-                        else -> Palette.WARN
-                    }
-                }
-                leg += Palette.OK to t("по теме", "on topic")
-                leg += Palette.OUTLINE to t("не по теме", "off topic")
-                leg += Palette.WARN to t("не проверено", "unknown")
-            }
-            "channel" -> {
-                val top = nodes.groupingBy { it.channel }.eachCount().entries.sortedByDescending { it.value }.take(8).map { it.key }
-                val map = HashMap<String, Int>()
-                top.forEachIndexed { i, ch -> map[ch] = hsv(i * 45f, 0.6f, 0.85f) }
-                for (i in 0 until n) colors[i] = map[nodes[i].channel] ?: Palette.OUTLINE
-                top.forEach { leg += (map[it] ?: 0) to it.take(18) }
-                leg += Palette.OUTLINE to t("другие", "other")
-            }
-            else -> {
-                val maxDepth = max(1, nodes.maxOfOrNull { it.depth } ?: 1)
-                for (i in 0 until n) colors[i] = hsv(265f - 245f * nodes[i].depth / maxDepth)
-                for (dd in 0..maxDepth step max(1, maxDepth / 5)) {
-                    leg += hsv(265f - 245f * dd / maxDepth) to (if (dd == 0) t("старт", "seed") else "$dd")
-                }
-            }
-        }
+        val (c, leg) = GraphColors.of(nodes, colorBy, Palette.OK, Palette.OUTLINE, Palette.WARN)
+        colors = c
         legend = leg
     }
 
@@ -221,6 +230,8 @@ class GraphActivity : LumenBase() {
     private var colorBy = "depth"
     private var onlyOnTopic = true
     private val layoutCache = HashMap<Boolean, Pair<DoubleArray, DoubleArray>>()
+    private var current: GraphReport.Input? = null
+    private var pendingPdf = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -252,21 +263,20 @@ class GraphActivity : LumenBase() {
         val pr = Store.project(pid)
         page(
             (if (channels) t("Каналы · ", "Channels · ") else "") + (pr?.name ?: t("Граф", "Graph")), view, header = header, scroll = false,
-            actions = listOf("⤢" to {
+            actions = listOf("⇪" to { exportMenu() }, "⤢" to {
                 view.selected = -1
                 view.fit()
             })
         )
-        val all = graph.nodes.values.toList()
-        val list = if (onlyOnTopic) all.filter { it.relevant != 0 || it.seed } else all
-        val index = HashMap<String, Int>()
-        list.forEachIndexed { i, n -> index[n.id] = i }
-        val e = graph.edges.mapNotNull { ed -> val a = index[ed.from]; val b = index[ed.to]; if (a != null && b != null) a to b else null }
+        val (list, e, ranks) = GraphReport.subgraph(graph, onlyOnTopic)
         val key = onlyOnTopic
+        current = null
         Lumen.async({ layoutCache[key] ?: GraphAlgo.layout(list.size, e).also { layoutCache[key] = it } }, ::err) { (x, y) ->
             view.colorBy = colorBy
             view.setGraph(list, e, x, y)
             view.colorBy = colorBy
+            val p = Store.project(pid)
+            current = GraphReport.Input(p?.name ?: "Lumen", p?.phrase ?: "", channels, list, e, ranks, x, y, colorBy, onlyOnTopic, graph.updatedAt, graph.requests)
             legend.text = t("Узлов ${list.size} · связей ${e.size} · размер = как часто рекомендуют. ",
                 "Nodes ${list.size} · edges ${e.size} · size = how often recommended. ") +
                 view.legend.joinToString("   ") { "● " + it.second }
@@ -279,6 +289,53 @@ class GraphActivity : LumenBase() {
                 i++
             }
             legend.text = sb
+        }
+    }
+
+    private fun reportName(pdf: Boolean) = ReportKit.safeName(Store.project(pid)?.name ?: "graph") +
+        (if (channels) "-channels" else "-graph") + "-" + Fmt.isoDay(System.currentTimeMillis()) + if (pdf) ".pdf" else ".png"
+
+    /** Export of the graph as a mobile report: share or save, PNG or PDF. */
+    private fun exportMenu() {
+        val inp = current ?: return toast(t("Граф ещё строится — подождите", "The graph is still being laid out — wait a moment"))
+        if (inp.nodes.isEmpty()) return toast(t("Граф пуст", "The graph is empty"))
+        val items = arrayOf(
+            t("Поделиться картинкой (PNG)", "Share image (PNG)"),
+            t("Поделиться PDF", "Share PDF"),
+            t("Сохранить картинку…", "Save image…"),
+            t("Сохранить PDF…", "Save PDF…")
+        )
+        AlertDialog.Builder(this).setTitle(t("Отчёт по графу", "Graph report"))
+            .setItems(items) { _, w ->
+                val pdf = w == 1 || w == 3
+                if (w < 2) {
+                    toast(t("Готовлю отчёт…", "Preparing the report…"))
+                    Lumen.async({
+                        val f = ReportKit.shareFile(this, reportName(pdf))
+                        f.outputStream().use { GraphReport.write(inp, pdf, it) }
+                        f
+                    }, ::err) { f -> ReportKit.share(this, f, pdf, inp.project) }
+                } else {
+                    pendingPdf = pdf
+                    val i = android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).addCategory(android.content.Intent.CATEGORY_OPENABLE)
+                        .setType(if (pdf) "application/pdf" else "image/png").putExtra(android.content.Intent.EXTRA_TITLE, reportName(pdf))
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(i, REQ_SAVE)
+                }
+            }.setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: android.content.Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (requestCode != REQ_SAVE || resultCode != RESULT_OK) return
+        val inp = current ?: return
+        val pdf = pendingPdf
+        toast(t("Сохраняю…", "Saving…"))
+        Lumen.async({ contentResolver.openOutputStream(uri)?.use { GraphReport.write(inp, pdf, it) } }, ::err) {
+            toast(t("Отчёт сохранён", "Report saved"))
         }
     }
 
@@ -314,5 +371,9 @@ class GraphActivity : LumenBase() {
                 toast(if (added > 0) t("Добавлено в проект", "Added to project") else t("Уже в проекте", "Already in project"))
             }
             .setNegativeButton(t("Закрыть", "Close"), null).show()
+    }
+
+    companion object {
+        const val REQ_SAVE = 71
     }
 }

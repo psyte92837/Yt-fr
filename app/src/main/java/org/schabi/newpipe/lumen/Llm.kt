@@ -289,6 +289,7 @@ object Prompts {
 
     init {
         defaults.putAll(SEO_PROMPTS)
+        defaults.putAll(DOSSIER_PROMPTS)
     }
 
     fun get(key: String): String = Lumen.prefs.getString("prompt_$key", null) ?: defaults[key].orEmpty()

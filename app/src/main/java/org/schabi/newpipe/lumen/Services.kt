@@ -75,6 +75,7 @@ object CollectState {
         kind == "quick" -> t("Быстрый анализ: ", "Instant analysis: ") + current
         kind == "chgraph" -> current
         kind == "style" -> t("Стиль видео: ", "Video style: ") + current
+        kind == "dossier" -> current
         else -> "$done / $total · ${t("ошибок", "errors")}: $errors\n$current"
     }
 }
@@ -134,6 +135,11 @@ class CollectService : Service() {
                     val q = QuickConfig.load()
                     CollectState.lastResult = ChannelExplorer.run(pid, seeds,
                         ChannelExplorer.Config(depth = q.graphDepth, maxChannels = q.graphChannels, budget = q.graphChannels * 3, topic = q.topicFilter), CollectState.cancel) { msg ->
+                        CollectState.current = msg
+                        startFg(msg.substringAfter('\n'), 0, 0)
+                    }
+                } else if (kind == "dossier") {
+                    CollectState.lastResult = Dossier.run(pid, CollectState.cancel) { msg ->
                         CollectState.current = msg
                         startFg(msg.substringAfter('\n'), 0, 0)
                     }
@@ -231,6 +237,7 @@ class CollectService : Service() {
                 else if (CollectState.kind == "quick") "Lumen: " + t("быстрый анализ", "instant analysis")
                 else if (CollectState.kind == "chgraph") "Lumen: " + t("граф каналов", "channel graph")
                 else if (CollectState.kind == "style") "Lumen: " + t("стиль видео", "video style")
+                else if (CollectState.kind == "dossier") "Lumen: " + t("AI-досье", "AI dossier")
                 else "Lumen: ${t("сбор", "collecting")} $done/$total"
             )
             .setContentText(text)

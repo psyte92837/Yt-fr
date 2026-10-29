@@ -28,6 +28,9 @@ object Export {
             "gexf" -> out.write(gexf(projectId).toByteArray())
             "recs_nodes" -> out.write(("\uFEFF" + recsNodes(projectId)).toByteArray())
             "recs_edges" -> out.write(("\uFEFF" + recsEdges(projectId)).toByteArray())
+            "graph_pdf", "graph_png" -> GraphReport.write(GraphReport.input(projectId, RecGraph.FILE), kind.endsWith("pdf"), out)
+            "chgraph_pdf", "chgraph_png" -> GraphReport.write(GraphReport.input(projectId, RecGraph.CHANNELS_FILE), kind.endsWith("pdf"), out)
+            "dossier_pdf", "dossier_png" -> DossierReport.write(projectId, kind.endsWith("pdf"), out)
         }
     }
 

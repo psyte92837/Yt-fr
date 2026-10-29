@@ -805,6 +805,8 @@ class ProjectActivity : LumenBase() {
         c.muted(t("Файл сохраняется в выбранную вами папку. API-ключи никогда не попадают в экспорт.",
             "The file is saved to a folder you choose. API keys are never exported."))
         val base = project.name.replace(Regex("[^\\p{L}\\p{Nd}_-]+"), "_").take(40)
+        reportsBlock(c, base)
+        c.h2(t("Файлы данных", "Data files"))
         listOf(
             Triple("csv_videos", t("CSV — видео", "CSV — videos"), "$base-videos.csv"),
             Triple("csv_comments", t("CSV — комментарии", "CSV — comments"), "$base-comments.csv"),
@@ -823,7 +825,8 @@ class ProjectActivity : LumenBase() {
                 val mime = when (kind) {
                     "json" -> "application/json"
                     "md" -> "text/markdown"
-                    "pdf" -> "application/pdf"
+                    "pdf", "graph_pdf", "chgraph_pdf", "dossier_pdf" -> "application/pdf"
+                    "graph_png", "chgraph_png", "dossier_png" -> "image/png"
                     "insights_json", "clusters_json" -> "application/json"
                     "gexf" -> "application/xml"
                     else -> "text/csv"
@@ -836,6 +839,108 @@ class ProjectActivity : LumenBase() {
         c.button(t("Поделиться отчётом (текст)", "Share report (text)"), style = BtnStyle.OUTLINED) {
             Lumen.async({ Export.markdown(project.id) }, ::err) { shareText(project.name, it) }
         }
+    }
+
+    /** Phone-format reports: AI dossier of channels and videos, graph reports. Share or save as PDF / PNG. */
+    private fun reportsBlock(c: Col, base: String) {
+        c.h2(t("Отчёты для телефона", "Phone reports"))
+        c.muted(t("PDF и картинки под экран телефона: описания, графики, связи. Удобно отправить в мессенджер.",
+            "PDFs and images sized for a phone screen: descriptions, charts, links. Easy to send in a messenger."))
+        fun shareRow(col: Col, kind: String, file: String) {
+            col.row(
+                btn(col.ctx, t("PDF ↗", "PDF ↗"), style = BtnStyle.TONAL) { shareReport(kind + "_pdf", "$file.pdf") },
+                btn(col.ctx, t("Картинка ↗", "Image ↗"), style = BtnStyle.TONAL) { shareReport(kind + "_png", "$file.png") },
+                btn(col.ctx, t("Сохранить", "Save"), style = BtnStyle.TEXT) { saveReport(kind, file) }
+            )
+        }
+        val day = Fmt.isoDay(System.currentTimeMillis())
+        val cfg = Dossier.Config.load()
+        c.card {
+            add(text(ctx, t("🗂 AI-досье: каналы и видео", "🗂 AI dossier: channels & videos"), Type.TITLE_M, bold = true), 0)
+            muted(t("О чём каждый канал и каждое видео, ключевые тезисы, о чём говорят в комментариях и их настроение, общая картина ниши.",
+                "What every channel and video is about, key points, what viewers say in the comments and their mood, the big picture of the niche."))
+            val status = muted(t("Считаю…", "Counting…"))
+            Lumen.async({ DossierReport.status(project.id) }) { (total, ready) ->
+                status.text = t("Каналов: $total (до ${cfg.videos} видео на каждый) · AI-описание готово: $ready", "Channels: $total (up to ${cfg.videos} videos each) · AI description ready: $ready")
+            }
+            button(t("Составить досье (AI)", "Build dossier (AI)"), style = BtnStyle.FILLED) { dossierDialog() }
+            shareRow(this, "dossier", "$base-dossier-$day")
+        }
+        if (RecGraph.load(project.id).nodes.isNotEmpty()) c.card {
+            add(text(ctx, t("🕸 Граф рекомендаций", "🕸 Recommendation graph"), Type.TITLE_M, bold = true), 0)
+            muted(t("Карта связей, выводы простым языком, графики по шагам и теме, центральные узлы и ключевые связи.",
+                "Map of links, plain-language findings, charts by step and topic, central nodes and key links."))
+            shareRow(this, "graph", "$base-graph-$day")
+        }
+        if (RecGraph.load(project.id, RecGraph.CHANNELS_FILE).nodes.isNotEmpty()) c.card {
+            add(text(ctx, t("📡 Граф каналов", "📡 Channel graph"), Type.TITLE_M, bold = true), 0)
+            muted(t("Какие каналы YouTube связывает между собой: карта, лидеры, взаимные связи, подписчики.",
+                "Which channels YouTube links together: map, leaders, mutual links, subscribers."))
+            shareRow(this, "chgraph", "$base-channels-$day")
+        }
+    }
+
+    private fun shareReport(kind: String, file: String) {
+        busy = t("Готовлю отчёт…", "Preparing the report…")
+        render()
+        Lumen.async({
+            val f = ReportKit.shareFile(this, file)
+            f.outputStream().use { Export.write(this, project.id, kind, it) }
+            f
+        }, {
+            busy = ""
+            render()
+            err(it)
+        }) { f ->
+            busy = ""
+            render()
+            ReportKit.share(this, f, kind.endsWith("pdf"), project.name)
+        }
+    }
+
+    private fun saveReport(kind: String, file: String) {
+        val items = arrayOf("PDF", t("Картинка PNG", "PNG image"))
+        android.app.AlertDialog.Builder(this).setTitle(t("Сохранить как", "Save as")).setItems(items) { _, w ->
+            val pdf = w == 0
+            pendingExport = kind + if (pdf) "_pdf" else "_png"
+            val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType(if (pdf) "application/pdf" else "image/png").putExtra(Intent.EXTRA_TITLE, file + if (pdf) ".pdf" else ".png")
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, REQ_EXPORT)
+        }.show()
+    }
+
+    /** Scope of the AI dossier, cost estimate, then the background job. */
+    private fun dossierDialog() {
+        if (Provider.active() == null) {
+            confirm(t("AI не подключён", "AI not connected"), t("Подключить API-ключ?", "Connect an API key?")) {
+                startActivity(Intent(this, SettingsActivity::class.java).putExtra("ai", true))
+            }
+            return
+        }
+        if (CollectState.running) return toast(t("Уже идёт другая задача — дождитесь её конца", "Another job is running — wait for it to finish"))
+        val presets = listOf(
+            Dossier.Config(5, 4) to t("Быстро: 5 каналов × 4 видео", "Quick: 5 channels × 4 videos"),
+            Dossier.Config(10, 6) to t("Стандарт: 10 каналов × 6 видео", "Standard: 10 channels × 6 videos"),
+            Dossier.Config(25, 8) to t("Подробно: 25 каналов × 8 видео", "Detailed: 25 channels × 8 videos"),
+            Dossier.Config(60, 10) to t("Максимум: 60 каналов × 10 видео", "Maximum: 60 channels × 10 videos")
+        )
+        android.app.AlertDialog.Builder(this).setTitle(t("Объём досье", "Dossier scope"))
+            .setItems(presets.map { it.second }.toTypedArray()) { _, w ->
+                val cfg = presets[w].first
+                Dossier.Config.save(cfg)
+                Lumen.async({ Dossier.estimate(project.id, cfg) }, ::err) { est ->
+                    val cost = Llm.estimateCost(est, est / 3)
+                    val msg = t("Один AI-запрос на канал и один на общую картину. Примерно ~$est входных токенов", "One AI request per channel plus one for the overview. About ~$est input tokens") +
+                        (if (cost > 0) String.format(" · ≈ $%.4f", cost) else "") + "\n" +
+                        t("Готовые каналы берутся из кэша бесплатно. Задача идёт в фоне, прогресс — в уведомлении.",
+                            "Ready channels come from the free cache. The job runs in the background, progress is in the notification.")
+                    confirm(t("Составить досье", "Build dossier"), msg, t("Запустить", "Run")) {
+                        CollectService.startKind(this, project.id, "dossier")
+                        toast(t("Досье составляется в фоне", "The dossier is being built in the background"))
+                    }
+                }
+            }.show()
     }
 
     @Deprecated("Deprecated in Java")

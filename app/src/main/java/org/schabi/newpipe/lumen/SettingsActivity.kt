@@ -202,7 +202,9 @@ class SettingsActivity : LumenBase() {
             "p4_brief" to t("P4 · SEO-бриф", "P4 · SEO brief"),
             "p5_article" to t("P5 · Статья", "P5 · Article"),
             "p6_quality" to t("P6 · Контроль качества", "P6 · Quality check"),
-            "p7_ideas" to t("P7 · Идеи контента", "P7 · Content ideas")
+            "p7_ideas" to t("P7 · Идеи контента", "P7 · Content ideas"),
+            "dossier_channel" to t("Досье · канал и его видео", "Dossier · channel and its videos"),
+            "dossier_overview" to t("Досье · общая картина", "Dossier · overview")
         )
         for ((k, label) in names) {
             val card = c.card {

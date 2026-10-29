@@ -31,6 +31,7 @@ object Export {
             "graph_pdf", "graph_png" -> GraphReport.write(GraphReport.input(projectId, RecGraph.FILE), kind.endsWith("pdf"), out)
             "chgraph_pdf", "chgraph_png" -> GraphReport.write(GraphReport.input(projectId, RecGraph.CHANNELS_FILE), kind.endsWith("pdf"), out)
             "dossier_pdf", "dossier_png" -> DossierReport.write(projectId, kind.endsWith("pdf"), out)
+            else -> CustomReport.Format.ofKind(kind)?.let { CustomReport.write(projectId, it, out) }
         }
     }
 

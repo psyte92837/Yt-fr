@@ -866,6 +866,26 @@ class ProjectActivity : LumenBase() {
             button(t("Составить досье (AI)", "Build dossier (AI)"), style = BtnStyle.FILLED) { dossierDialog() }
             shareRow(this, "dossier", "$base-dossier-$day")
         }
+        c.card {
+            add(text(ctx, t("✍️ Свой отчёт (AI)", "✍️ Custom report (AI)"), Type.TITLE_M, bold = true), 0)
+            muted(t("Напишите, что должно быть в отчёте, и выберите формат: AI соберёт содержание по данным проекта, приложение оформит файл.",
+                "Describe what the report should contain and pick a format: the AI writes the content from the project data, the app lays out the file."))
+            val req = edit(t("Например: сравни топ-5 каналов и дай 3 идеи для видео", "E.g. compare the top 5 channels and give 3 video ideas"),
+                Lumen.prefs.getString("custom_report_req", "").orEmpty(), multiline = true)
+            spinner(t("Формат", "Format"), CustomReport.Format.values().map { it to t(it.ru, it.en) }, customFormat) {
+                customFormat = it
+                Lumen.prefs.edit().putString("custom_report_fmt", it.name).apply()
+            }
+            button(t("Составить отчёт (AI)", "Build report (AI)"), style = BtnStyle.FILLED) { customReport(req.text.toString()) }
+            CustomReport.latest(project.id)?.let { r ->
+                muted(t("Последний: ", "Last: ") + Fmt.dateTime(r.at) + " · " + r.target)
+                row(
+                    btn(ctx, t("Поделиться ↗", "Share ↗"), style = BtnStyle.TONAL) { shareCustom() },
+                    btn(ctx, t("Сохранить", "Save"), style = BtnStyle.TEXT) { saveCustom() },
+                    btn(ctx, t("Читать", "Read"), style = BtnStyle.TEXT) { showText(r.target, CustomReport.plain(CustomReport.parse(r.text))) }
+                )
+            }
+        }
         if (RecGraph.load(project.id).nodes.isNotEmpty()) c.card {
             add(text(ctx, t("🕸 Граф рекомендаций", "🕸 Recommendation graph"), Type.TITLE_M, bold = true), 0)
             muted(t("Карта связей, выводы простым языком, графики по шагам и теме, центральные узлы и ключевые связи.",
@@ -878,6 +898,70 @@ class ProjectActivity : LumenBase() {
                 "Which channels YouTube links together: map, leaders, mutual links, subscribers."))
             shareRow(this, "chgraph", "$base-channels-$day")
         }
+    }
+
+    private var customFormatSet: CustomReport.Format? = null
+    private var customFormat: CustomReport.Format
+        get() = customFormatSet ?: (CustomReport.Format.values().firstOrNull { it.name == Lumen.prefs.getString("custom_report_fmt", "") } ?: CustomReport.Format.PDF)
+        set(v) { customFormatSet = v }
+
+    /** One AI request from the user's wording, then offers to share, save or read the result in the chosen format. */
+    private fun customReport(request: String) {
+        if (request.isBlank()) return toast(t("Опишите, что должно быть в отчёте", "Describe what the report should contain"))
+        Lumen.prefs.edit().putString("custom_report_req", request.trim()).apply()
+        if (Provider.active() == null) {
+            confirm(t("AI не подключён", "AI not connected"), t("Подключить API-ключ?", "Connect an API key?")) {
+                startActivity(Intent(this, SettingsActivity::class.java).putExtra("ai", true))
+            }
+            return
+        }
+        if (busy.isNotEmpty()) return
+        busy = t("AI составляет отчёт…", "The AI is writing the report…")
+        render()
+        Lumen.async({ CustomReport.generate(project.id, request) }, {
+            busy = ""
+            render()
+            err(it)
+        }) {
+            busy = ""
+            render()
+            val items = arrayOf(t("Поделиться ↗", "Share ↗"), t("Сохранить в файл", "Save to file"), t("Читать", "Read"))
+            android.app.AlertDialog.Builder(this).setTitle(t("Отчёт готов", "Report is ready")).setItems(items) { _, w ->
+                when (w) {
+                    0 -> shareCustom()
+                    1 -> saveCustom()
+                    else -> showText(project.name, CustomReport.plain(CustomReport.parse(it)))
+                }
+            }.setNegativeButton(t("Закрыть", "Close"), null).show()
+        }
+    }
+
+    private fun shareCustom() {
+        val f = customFormat
+        busy = t("Готовлю отчёт…", "Preparing the report…")
+        render()
+        Lumen.async({
+            val file = ReportKit.shareFile(this, ReportKit.safeName(project.name) + "-report-" + Fmt.isoDay(System.currentTimeMillis()) + "." + f.ext)
+            file.outputStream().use { CustomReport.write(project.id, f, it) }
+            file
+        }, {
+            busy = ""
+            render()
+            err(it)
+        }) { file ->
+            busy = ""
+            render()
+            ReportKit.share(this, file, f == CustomReport.Format.PDF, project.name, f.mime)
+        }
+    }
+
+    private fun saveCustom() {
+        val f = customFormat
+        pendingExport = f.kind
+        val i = Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(f.mime)
+            .putExtra(Intent.EXTRA_TITLE, ReportKit.safeName(project.name) + "-report." + f.ext)
+        @Suppress("DEPRECATION")
+        startActivityForResult(i, REQ_EXPORT)
     }
 
     private fun shareReport(kind: String, file: String) {

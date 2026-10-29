@@ -42,7 +42,7 @@ val DIAGRAM_PROMPTS = linkedMapOf(
 /** AI diagram generation; every call goes through Llm.complete with its own task name. */
 object DiagramAi {
     fun generate(p: Project, kind: String, source: String, fallbackTitle: String): Diagram {
-        val prov = Analysis.requireProvider()
+        val prov = AiTasks.requireProvider()
         val key = "diagram_$kind"
         val lang = if (Settings.lang == "en") "English" else "русский"
         val prompt = Prompts.fill(key, mapOf("phrase" to p.phrase, "lang" to lang, "data" to source.take(14_000), "domain" to p.domain.ifBlank { "-" }, "question" to ""))

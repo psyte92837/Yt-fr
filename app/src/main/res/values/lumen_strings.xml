@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="lumen_tts_share" translatable="false">Озвучить (Lumen)</string>
+    <string name="lumen_tts_listen" translatable="false">Озвучить в Lumen</string>
+    <string name="lumen_tts_save" translatable="false">Сохранить озвучку (Lumen)</string>
 </resources>

@@ -112,16 +112,17 @@ object EdgeTts {
     private fun bytes(s: String) = s.toByteArray(Charsets.UTF_8).size
 
     /**
-     * Splits text into escaped pieces of at most [limit] UTF-8 bytes, preferring paragraph,
+     * Splits text into escaped pieces of at most [limit] UTF-8 bytes (the first one [firstLimit]), preferring paragraph,
      * sentence and word boundaries; never cuts inside an XML entity.
      */
-    fun split(text: String, limit: Int = CHUNK_BYTES): List<String> {
+    fun split(text: String, limit: Int = CHUNK_BYTES, firstLimit: Int = limit): List<String> {
         val src = clean(text).trim()
         if (src.isEmpty()) return emptyList()
         val out = mutableListOf<String>()
         var rest = src
         while (rest.isNotEmpty()) {
-            if (bytes(xmlEscape(rest)) <= limit) {
+            val lim = if (out.isEmpty()) firstLimit else limit // a short first piece starts playback sooner
+            if (bytes(xmlEscape(rest)) <= lim) {
                 out.add(xmlEscape(rest))
                 break
             }
@@ -130,7 +131,7 @@ object EdgeTts {
             var hi = rest.length
             while (lo < hi) {
                 val mid = (lo + hi + 1) / 2
-                if (bytes(xmlEscape(rest.substring(0, mid))) <= limit) lo = mid else hi = mid - 1
+                if (bytes(xmlEscape(rest.substring(0, mid))) <= lim) lo = mid else hi = mid - 1
             }
             var cut = lo
             // don't split a surrogate pair
@@ -318,43 +319,39 @@ object EdgeTts {
      * Synthesises [text] to MP3 bytes. Long text is sent in pieces (one connection each);
      * [onProgress] gets (done, total). [cancelled] is polled between pieces.
      */
-    // Parts already synthesised for the last text: after a network failure a new run continues from there.
-    private var partsKey = ""
-    private var parts = arrayOfNulls<ByteArray>(0)
-
-    fun synthesize(text: String, o: TtsOptions, cancelled: () -> Boolean = { false }, onProgress: (Int, Int) -> Unit = { _, _ -> }): ByteArray {
-        val chunks = split(text)
+    /** Escaped pieces for [text] and the folder name that identifies this exact job (text + voice settings). */
+    fun plan(text: String, o: TtsOptions, firstLimit: Int = CHUNK_BYTES): Pair<List<String>, String> {
+        val chunks = split(text, CHUNK_BYTES, firstLimit)
         if (chunks.isEmpty()) throw TtsException(t("Нет текста для озвучки", "No text to speak"))
+        return chunks to sha1(chunks.joinToString("\u0000") + "|" + o)
+    }
+
+    /**
+     * Synthesises [chunks] into numbered MP3 files in [dir], several at once. Files already there are kept,
+     * so a repeated run (after a network failure) continues where it stopped. [onProgress] gets (parts done, total),
+     * [onPart] every finished part (also the ones found on disk). Returns the files in order, or null when cancelled.
+     */
+    fun synthesizeTo(
+        dir: File, chunks: List<String>, o: TtsOptions, cancelled: () -> Boolean,
+        onProgress: (Int, Int) -> Unit, onPart: (Int, File) -> Unit
+    ): List<File>? {
+        dir.mkdirs()
         val total = chunks.size
-        val key = sha1(chunks.joinToString("\u0000") + "|" + o)
-        val store: Array<ByteArray?>
-        synchronized(this) {
-            if (key != partsKey || parts.size != total) {
-                parts = arrayOfNulls(total)
-                partsKey = key
-            } else if (parts.any { it != null }) {
-                L.i("tts", "resume: ${parts.count { it != null }}/$total parts ready")
-            }
-            store = parts
-        }
-        fun ready() = synchronized(store) { store.count { it != null } }
-        onProgress(ready(), total)
-        TtsPool.run(total, WORKERS, { synchronized(store) { store[it] != null } }, cancelled, { i, stop ->
-            withRetry(i, total, stop, ::ready) { one(chunks[i], o) }
+        val files = (0 until total).map { File(dir, "part_$it.mp3") }
+        fun has(i: Int) = files[i].length() > 0
+        val ready = AtomicInteger(files.indices.count { has(it) })
+        onProgress(ready.get(), total)
+        files.indices.filter { has(it) }.forEach { onPart(it, files[it]) }
+        TtsPool.run(total, WORKERS, { has(it) }, cancelled, { i, stop ->
+            withRetry(i, total, stop, { ready.get() }) { one(chunks[i], o, stop) }
         }) { i, audio ->
-            synchronized(store) { store[i] = audio }
-            onProgress(ready(), total)
+            val tmp = File(dir, "part_$i.tmp")
+            tmp.writeBytes(audio)
+            if (!tmp.renameTo(files[i])) throw java.io.IOException("rename ${tmp.name}")
+            onProgress(ready.incrementAndGet(), total)
+            onPart(i, files[i])
         }
-        if (cancelled() || store.any { it == null }) return ByteArray(0)
-        val out = ByteArrayOutputStream()
-        store.forEach { out.write(it!!) }
-        synchronized(this) {
-            if (parts === store) {
-                parts = arrayOfNulls(0)
-                partsKey = ""
-            }
-        }
-        return out.toByteArray()
+        return if (cancelled() || files.indices.any { !has(it) }) null else files
     }
 
     /** Runs [block]; on network errors waits for the network and retries with growing pauses. null = cancelled. */
@@ -406,7 +403,7 @@ object EdgeTts {
         "Microsoft's service rejected the request (403). Update the app: Microsoft may have changed its protection."
     ))
 
-    private fun one(escaped: String, o: TtsOptions): ByteArray {
+    private fun one(escaped: String, o: TtsOptions, cancelled: () -> Boolean): ByteArray {
         val url = "wss://$BASE/edge/v1?TrustedClientToken=$TOKEN&Sec-MS-GEC=${gecToken(now())}" +
             "&Sec-MS-GEC-Version=$GEC_VERSION&ConnectionId=${UUID.randomUUID().toString().replace("-", "")}"
         val req = Request.Builder().url(url)
@@ -470,7 +467,11 @@ object EdgeTts {
         })
         // a long part at a slow rate streams for minutes: fail only when nothing arrives for IDLE_MS
         val started = System.currentTimeMillis()
-        while (!done.await(1, TimeUnit.SECONDS)) {
+        while (!done.await(250, TimeUnit.MILLISECONDS)) {
+            if (cancelled()) {
+                ws.cancel()
+                throw java.util.concurrent.CancellationException()
+            }
             val now = System.currentTimeMillis()
             if (TtsRetry.stalled(now - lastData.get(), now - started)) {
                 ws.cancel()
@@ -612,6 +613,18 @@ object TtsText {
         }
     }
 
+    /** Reads a picked / shared file into text; returns (file name, text). Throws on unreadable or too big files. */
+    fun load(ctx: android.content.Context, uri: android.net.Uri, maxBytes: Int): Pair<String, String> {
+        val name = runCatching {
+            ctx.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment ?: "file"
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error(t("Не удалось открыть файл", "Could not open the file"))
+        if (bytes.size > maxBytes) error(t("Файл больше ${maxBytes / 1024 / 1024} МБ", "The file is larger than ${maxBytes / 1024 / 1024} MB"))
+        return name to fromFile(name, ctx.contentResolver.getType(uri), bytes)
+    }
+
     /** Short phrase to preview a voice. */
     fun sample(lang: String): String = when (lang) {
         "ru" -> "Привет! Так звучит этот голос. Скорость и тон можно настроить."
@@ -658,13 +671,17 @@ object TtsPrefs {
     var gender: String
         get() = p.getString("tts_gender", "all") ?: "all"
         set(v) = p.edit().putString("tts_gender", v).apply()
-    /** Save the finished MP3 to Music/Lumen right away (Android 10+). */
-    var autoSave: Boolean
-        get() = p.getBoolean("tts_auto_save", true)
-        set(v) = p.edit().putBoolean("tts_auto_save", v).apply()
-    var playAfter: Boolean
-        get() = p.getBoolean("tts_play_after", false)
-        set(v) = p.edit().putBoolean("tts_play_after", v).apply()
+    /** Also keep an MP3 in Music/Lumen after "Listen" (Save always does). */
+    var saveAfterListen: Boolean
+        get() = p.getBoolean("tts_save_after_listen", false)
+        set(v) = p.edit().putBoolean("tts_save_after_listen", v).apply()
+    /** Voice panel / sound panel open state. */
+    var voiceOpen: Boolean
+        get() = p.getBoolean("tts_voice_open", false)
+        set(v) = p.edit().putBoolean("tts_voice_open", v).apply()
+    var soundOpen: Boolean
+        get() = p.getBoolean("tts_sound_open", false)
+        set(v) = p.edit().putBoolean("tts_sound_open", v).apply()
     var playSpeed: Float
         get() = p.getFloat("tts_play_speed", 1f)
         set(v) = p.edit().putFloat("tts_play_speed", v).apply()
@@ -738,9 +755,27 @@ object TtsProgress {
     fun label(done: Int, total: Int): String =
         t("Озвучено частей: $done из $total (${percent(done, total)}%)", "Parts done: $done of $total (${percent(done, total)}%)")
 
+    /** Rough speaking time in seconds: ~16 characters per second at normal rate. */
+    fun estimateSec(chars: Int, rate: Int): Int = if (chars <= 0) 0 else (chars / 16.0 * 100 / (100 + rate).coerceAtLeast(20)).toInt().coerceAtLeast(1)
+
+    fun duration(sec: Int): String = when {
+        sec < 60 -> t("< 1 мин", "< 1 min")
+        sec < 3600 -> t("≈ ${(sec + 30) / 60} мин", "≈ ${(sec + 30) / 60} min")
+        else -> t("≈ ${sec / 3600} ч ${(sec % 3600 + 30) / 60} мин", "≈ ${sec / 3600} h ${(sec % 3600 + 30) / 60} min")
+    }
+
+    /** First words of the text, for notification and file titles. */
+    fun title(text: String): String = text.trim().replace(Regex("\\s+"), " ").take(48).let { if (text.trim().length > 48) "$it…" else it }
+
     /** "lumen-<first words>-<day>.mp3", safe for any file system. */
     fun fileName(text: String, day: String): String {
         val words = text.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.take(4).joinToString("-").take(40)
         return "lumen-" + (if (words.isEmpty()) "tts" else words) + "-" + day + ".mp3"
     }
+}
+
+/** Which part to play after a skip (pure, unit-tested). */
+object TtsQueue {
+    /** [dir] is +1 / -1; stays inside 0 until total. */
+    fun target(cur: Int, total: Int, dir: Int): Int = if (total <= 0) 0 else (cur + dir).coerceIn(0, total - 1)
 }

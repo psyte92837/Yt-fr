@@ -80,3 +80,37 @@ class TtsPoolTest {
         assertFalse(TtsProgress.fileName("a/b\\c:d", "d").contains("/"))
     }
 }
+
+class TtsQueueTest {
+    @Test
+    fun skipStaysInsideTheList() {
+        assertEquals(1, TtsQueue.target(0, 5, 1))
+        assertEquals(0, TtsQueue.target(0, 5, -1))
+        assertEquals(4, TtsQueue.target(4, 5, 1))
+        assertEquals(0, TtsQueue.target(0, 0, 1))
+    }
+
+    @Test
+    fun estimateAndDuration() {
+        assertEquals(0, TtsProgress.estimateSec(0, 0))
+        assertEquals(60, TtsProgress.estimateSec(960, 0))
+        assertEquals(30, TtsProgress.estimateSec(960, 100))
+        assertTrue(TtsProgress.duration(20).contains("1"))
+        assertTrue(TtsProgress.duration(600).contains("10"))
+        assertTrue(TtsProgress.duration(3 * 3600 + 600).contains("3"))
+    }
+
+    @Test
+    fun titleIsShortAndOneLine() {
+        assertEquals("Привет мир", TtsProgress.title("  Привет\n\n  мир "))
+        assertEquals(49, TtsProgress.title("a".repeat(100)).length)
+    }
+
+    @Test
+    fun shortFirstPiece() {
+        val text = ("Предложение номер один. ").repeat(200)
+        val parts = EdgeTts.split(text, 3600, 300)
+        assertTrue(parts[0].toByteArray().size <= 300)
+        assertTrue(parts.drop(1).any { it.toByteArray().size > 300 })
+    }
+}

@@ -396,27 +396,35 @@ object QuickAnalysis {
 }
 
 /**
- * For a video link asks what to do: the usual analysis or video style detection (style costs AI tokens, so it runs only on request).
- * Channel and playlist links go straight to the analysis. [onDone] runs after a choice or cancel.
+ * For a video link asks what to do: the usual analysis, video style, or one focused collection
+ * (similar channels / similar videos / by period / by filters / by AI filter) that opens its own result screen.
+ * A channel link offers the analysis or similar channels; playlists go straight to the analysis. [onDone] runs after a choice or cancel.
  */
 fun Activity.chooseLinkAction(text: String, onDone: () -> Unit = {}) {
     val link = YtLink.classify(text)
-    if (link.type != "video") {
+    if (link.type != "video" && link.type != "channel") {
         QuickAnalysis.start(this, text)
         onDone()
         return
     }
     var chosen = false
     val theme = if (isNight()) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
-    val items = arrayOf(
-        t("📊 Анализ (как прежде)", "📊 Analysis (as before)"),
-        t("🎨 Определить стиль видео", "🎨 Detect video style")
+    val actions: List<Pair<String, () -> Unit>> = if (link.type == "channel") listOf(
+        t("📊 Полный анализ канала", "📊 Full channel analysis") to { QuickAnalysis.start(this, link.url); onDone() },
+        t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) }
+    ) else listOf(
+        t("📊 Полный анализ", "📊 Full analysis") to { QuickAnalysis.start(this, link.url); onDone() },
+        t("🎨 Определить стиль видео", "🎨 Detect video style") to { QuickAnalysis.start(this, link.url, "style"); onDone() },
+        t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) },
+        t("▶ Только похожие и рекомендованные видео", "▶ Only similar & recommended videos") to { harvestSetup(link.url, "related", onDone) },
+        t("📅 Похожие видео за период…", "📅 Similar videos by period…") to { harvestSetup(link.url, "period", onDone) },
+        t("🎚 Похожие видео по параметрам…", "🎚 Similar videos by filters…") to { harvestSetup(link.url, "params", onDone) },
+        t("🤖 Похожие видео по AI-фильтру…", "🤖 Similar videos by AI filter…") to { harvestSetup(link.url, "ai", onDone) }
     )
-    AlertDialog.Builder(this, theme).setTitle(t("Что сделать с видео?", "What to do with the video?"))
-        .setItems(items) { _, which ->
+    AlertDialog.Builder(this, theme).setTitle(if (link.type == "channel") t("Что сделать с каналом?", "What to do with the channel?") else t("Что сделать с видео?", "What to do with the video?"))
+        .setItems(actions.map { it.first }.toTypedArray()) { _, which ->
             chosen = true
-            QuickAnalysis.start(this, link.url, if (which == 1) "style" else "")
-            onDone()
+            actions[which].second()
         }
         .setOnDismissListener { if (!chosen) onDone() }
         .show()

@@ -108,6 +108,12 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <!-- Focused collection from Share: each result opens as its own task in Recents -->
+        <activity
+            android:name=".lumen.HarvestActivity"
+            android:exported="false"
+            android:documentLaunchMode="intoExisting"
+            android:theme="@style/LumenTheme" />
         <activity
             android:name=".lumen.ChannelActivity"
             android:exported="false"

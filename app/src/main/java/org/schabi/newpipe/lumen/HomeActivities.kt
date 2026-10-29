@@ -199,7 +199,7 @@ class LumenActivity : LumenBase() {
                 if (added > 0) add(text(ctx, t("В последнем запуске добавлено: +$added", "Added in the last run: +$added"), 13f, bold = true, color = Palette.ACCENT), 4)
             }
             card.contentDescription = p.name
-            card.setOnClickListener { startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id)) }
+            card.setOnClickListener { openProjectScreen(p) }
             card.setOnLongClickListener {
                 projectMenu(p)
                 true
@@ -258,7 +258,7 @@ class LumenActivity : LumenBase() {
         )
         AlertDialog.Builder(this).setTitle(p.name).setItems(items) { _, which ->
             when (which) {
-                0 -> startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id))
+                0 -> openProjectScreen(p)
                 1 -> {
                     Store.duplicate(p.id)
                     render()
@@ -561,4 +561,9 @@ class NewProjectActivity : LumenBase() {
             fab = (if (watch) t("Начать наблюдение", "Start watching") else t("Создать и искать", "Create and search")) to create
         )
     }
+}
+
+/** Focused collections open their own result screen, everything else the project. */
+fun android.app.Activity.openProjectScreen(p: Project) {
+    if (p.quickMode == "harvest") HarvestActivity.open(this, p.id) else startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", p.id))
 }

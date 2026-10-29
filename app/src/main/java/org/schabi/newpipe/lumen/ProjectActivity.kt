@@ -880,12 +880,17 @@ class ProjectActivity : LumenBase() {
             val target = scope.filter { it.hasTranscript }.ifEmpty { scope }.take(50)
             aiRun(t("Сводки по видео", "Video summaries"), AiTasks.estimateVideoSummaries(project.id, target)) {
                 val started = java.util.concurrent.atomic.AtomicInteger(0)
+                val firstError = java.util.concurrent.atomic.AtomicReference<Exception?>(null)
                 val results = Par.map(target, cancel = cancel) { _, v ->
                     val i = started.incrementAndGet()
                     Lumen.ui { progressView?.text = t("Сводка $i/${target.size}: ", "Summary $i/${target.size}: ") + v.title }
-                    AiTasks.videoSummary(project, v)
+                    try { AiTasks.videoSummary(project, v) } catch (e: Exception) { firstError.compareAndSet(null, e); throw e }
                 }
-                val l = results.lastOrNull { it != null } ?: throw LlmException("—")
+                val l = results.lastOrNull { it != null } ?: throw LlmException(
+                    if (cancel.get()) t("Отменено", "Cancelled")
+                    else t("Не удалось получить ни одной сводки: ", "No summaries could be produced: ") + (firstError.get()?.message ?: "?"),
+                    (firstError.get() as? LlmException)?.raw ?: ""
+                )
                 l.copy(text = t("Готово: ${target.size} сводок. Откройте видео, чтобы прочитать сводку. Последняя:\n\n", "Done: ${target.size} summaries. Open a video to read its summary. Last one:\n\n") + l.text)
             }
         }

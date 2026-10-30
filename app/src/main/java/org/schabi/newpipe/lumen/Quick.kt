@@ -206,11 +206,24 @@ object QuickAnalysis {
                     "source" -> {
                         when (type) {
                             "video" -> {
-                                val v = YouTube.single(p.source)
+                                var blocked = false
+                                val v = try {
+                                    YouTube.single(p.source)
+                                } catch (e: Exception) {
+                                    // Bot check: take basic data from oEmbed so the next steps still have a video and a channel.
+                                    val id = YtQuery.videoIdFromUrl(p.source)
+                                    if (!YtBlock.isBotCheck(e) || id == null) throw e
+                                    L.w("quick", "bot check, oEmbed fallback: ${e.message}")
+                                    blocked = true
+                                    try { OEmbed.fetch(id) } catch (x: Exception) { throw IllegalStateException(YtBlock.hint(), e) }
+                                }
                                 Store.mergeVideos(pid, listOf(v.also { it.marked = true }))
                                 channelUrl = v.channelUrl
                                 rename(pid, v.title, v.channel)
-                                v.title
+                                if (blocked) {
+                                    st.status = "warn"
+                                    v.title + t(" · только название и канал: ", " · title and channel only: ") + YtBlock.hint()
+                                } else v.title
                             }
                             "channel" -> {
                                 val c = ChannelFetch.fetch(pid, p.source, recentLimit = maxOf(cfg.channelImport, cfg.channelRecent), force = true)
@@ -241,7 +254,9 @@ object QuickAnalysis {
                     "collect" -> {
                         val all = Store.videos(pid).values.toList()
                         val target = if (type == "video") all else all.sortedByDescending { it.views }.take(cfg.collectTop)
+                        if (target.isEmpty()) throw IllegalStateException(t("Нет видео для сбора", "No videos to collect"))
                         val ok = java.util.concurrent.atomic.AtomicInteger(0)
+                        var lastError: Exception? = null
                         val started = java.util.concurrent.atomic.AtomicInteger(0)
                         Par.each(target, cancel = cancel) { _, v ->
                             progress(QuickState.label("collect") + " ${started.incrementAndGet()}/${target.size}")
@@ -250,9 +265,11 @@ object QuickAnalysis {
                                 Store.updateVideo(pid, v.id) { s -> copyCollected(v, s) }
                                 ok.incrementAndGet()
                             } catch (e: Exception) {
+                                lastError = e
                                 L.w("quick", "collect ${v.id}: ${e.message}")
                             }
                         }
+                        if (ok.get() == 0) throw IllegalStateException("0/${target.size}: " + (lastError?.let { YtBlock.message(it) } ?: ""), lastError)
                         "${ok.get()}/${target.size}"
                     }
                     "summary" -> {
@@ -261,6 +278,7 @@ object QuickAnalysis {
                             t("AI не подключён", "AI not connected")
                         } else {
                             val vids = Store.videos(pid).values.toList()
+                            if (vids.isEmpty()) throw IllegalStateException(t("Нет видео", "No videos"))
                             val started = java.util.concurrent.atomic.AtomicInteger(0)
                             Par.each(vids, cancel = cancel) { _, v ->
                                 progress(QuickState.label("summary") + " ${started.incrementAndGet()}/${vids.size}")
@@ -271,6 +289,7 @@ object QuickAnalysis {
                     }
                     "channel" -> {
                         if (channelUrl.isBlank()) channelUrl = Store.videos(pid).values.firstOrNull()?.channelUrl ?: ""
+                        if (channelUrl.isBlank()) throw IllegalStateException(t("Канал не определён: исходное видео не загрузилось", "Channel unknown: the source video did not load"))
                         val c = ChannelFetch.fetch(pid, channelUrl, recentLimit = cfg.channelRecent)
                         if (c.error.isNotEmpty()) throw IllegalStateException(c.error)
                         ChannelStats.line(c)
@@ -291,10 +310,11 @@ object QuickAnalysis {
                         val seeds = listOf(channelUrl).filter { it.isNotBlank() }.ifEmpty {
                             Store.videos(pid).values.groupingBy { it.channelUrl }.eachCount().entries.sortedByDescending { it.value }.take(3).map { it.key }.filter { it.isNotBlank() }
                         }
+                        if (seeds.isEmpty()) throw IllegalStateException(t("Нет каналов для старта графа", "No channels to start the graph"))
                         ChannelExplorer.run(pid, seeds, ChannelExplorer.Config(depth = cfg.graphDepth, maxChannels = cfg.graphChannels, budget = cfg.graphChannels * 3, topic = cfg.topicFilter), cancel) { progress(it) }
                     }
                     "channel_ai" -> {
-                        val c = ChannelStore.get(pid, channelUrl)
+                        val c = if (channelUrl.isBlank()) null else ChannelStore.get(pid, channelUrl)
                         if (Provider.active() == null || c == null) {
                             st.status = "skipped"
                             t("нет AI или канала", "no AI or channel")
@@ -333,17 +353,18 @@ object QuickAnalysis {
                 if (st.status == "running") st.status = "done"
             } catch (e: Exception) {
                 st.status = "error"
-                st.note = (e.message ?: e.javaClass.simpleName).take(200)
+                st.note = YtBlock.message(e).take(240)
                 L.e("quick", "step ${st.key} failed", e)
             }
             QuickState.save(pid, steps)
         }
         Store.project(pid)?.let {
             it.lastRunAt = System.currentTimeMillis()
-            it.runs.add(RunRecord(it.lastRunAt, "quick:$type", steps.count { s -> s.status == "done" }, steps.size, steps.filter { s -> s.status == "error" }.joinToString(",") { s -> s.key }))
+            it.runs.add(RunRecord(it.lastRunAt, "quick:$type", steps.count { s -> s.status == "done" || s.status == "warn" }, steps.size, steps.filter { s -> s.status == "error" }.joinToString(",") { s -> s.key }))
             Store.save(it)
         }
-        return t("Готово: ${steps.count { it.status == "done" }}/${steps.size} шагов", "Done: ${steps.count { it.status == "done" }}/${steps.size} steps")
+        val ok = steps.count { it.status == "done" || it.status == "warn" }
+        return t("Готово: $ok/${steps.size} шагов", "Done: $ok/${steps.size} steps")
     }
 
     private fun rename(pid: String, title: String, channel: String) {

@@ -222,9 +222,17 @@ object YouTube {
 
     /** Collects metadata, transcript and comments for one video according to [cfg]. */
     fun collect(projectId: String, phrase: String, v: Video, cfg: CollectConfig) {
-        val info = StreamInfo.getInfo(yt, v.url)
-        if (cfg.meta) applyStreamInfo(v, info)
-        if (cfg.subtitles) {
+        // On a bot check the watch page is closed, but comments (a different endpoint) and AI transcription may still work.
+        var blocked: Exception? = null
+        val info = try {
+            StreamInfo.getInfo(yt, v.url)
+        } catch (e: Exception) {
+            if (!YtBlock.isBotCheck(e) || !(cfg.comments || cfg.aiTranscribe)) throw e
+            blocked = e
+            null
+        }
+        if (cfg.meta && info != null) applyStreamInfo(v, info)
+        if (cfg.subtitles && info != null) {
             val sub = pickSubtitle(info.subtitles, cfg.subLang)
             if (sub != null) {
                 pause()
@@ -257,8 +265,9 @@ object YouTube {
             Store.saveComments(projectId, v.id, list)
             v.commentsCount = list.size
         }
+        if (blocked != null && !v.hasTranscript && v.commentsCount <= 0) throw blocked
         v.collected = true
-        v.collectError = ""
+        v.collectError = if (blocked != null) YtBlock.hint() else ""
     }
 
     private fun toComment(c: CommentsInfoItem, reply: Boolean) = Comment(

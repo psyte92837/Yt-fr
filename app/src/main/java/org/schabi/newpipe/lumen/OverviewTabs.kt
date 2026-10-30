@@ -22,8 +22,8 @@ fun ProjectActivity.overviewTab(c: Col) {
     if (steps.isNotEmpty()) {
         c.h2(t("Шаги анализа", "Analysis steps"))
         steps.forEach { s ->
-            val mark = when (s.status) { "done" -> "✅"; "running" -> "⏳"; "error" -> "❌"; "skipped" -> "➖"; else -> "⬜" }
-            c.add(text(this, "$mark  ${QuickState.label(s.key)}" + if (s.note.isNotBlank()) " — ${s.note.take(120)}" else "", 14f,
+            val mark = when (s.status) { "done" -> "✅"; "warn" -> "⚠️"; "running" -> "⏳"; "error" -> "❌"; "skipped" -> "➖"; else -> "⬜" }
+            c.add(text(this, "$mark  ${QuickState.label(s.key)}" + if (s.note.isNotBlank()) " — ${s.note.take(240)}" else "", 14f,
                 color = if (s.status == "error") Palette.BAD else Palette.ON_SURFACE), 4)
         }
     }

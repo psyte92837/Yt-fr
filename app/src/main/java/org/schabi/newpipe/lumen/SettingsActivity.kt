@@ -220,6 +220,8 @@ class SettingsActivity : LumenBase() {
         }
         if (testing.isNotEmpty()) c.p(testing, 13f, Palette.MUTED)
         c.button(t("Журнал всех ответов AI (", "Journal of all AI answers (") + AiJournal.list().size + ")", style = BtnStyle.OUTLINED) { AiJournalActivity.open(this) }
+        sendRules(c)
+        c.h2(t("Провайдеры", "Providers"))
         for (p in Provider.entries) {
             val card = c.card {
                 val configured = p.isConfigured
@@ -244,6 +246,32 @@ class SettingsActivity : LumenBase() {
             Settings.priceInPerM = pin.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
             Settings.priceOutPerM = pout.text.toString().replace(',', '.').toDoubleOrNull() ?: 0.0
             toast(t("Сохранено", "Saved"))
+        }
+    }
+
+    private var rulesOpen = false
+
+    /** "What is sent": review before every AI call and a rule per task (ask / send / never). */
+    private fun sendRules(c: Col) {
+        c.h2(t("Что отправляется в AI", "What is sent to AI"))
+        c.check(t("Показывать данные перед каждой отправкой и давать выбрать", "Show the data before every call and let me choose"), SendGate.reviewOn) {
+            SendGate.reviewOn = it
+        }
+        c.muted(t("Перед запросом откроется экран со всем, что уйдёт провайдеру: инструкция, блоки собранных данных, строки, видео. Лишнее можно снять галочкой или отредактировать. Отправленный текст сохраняется в журнале.",
+            "Before a call a screen shows everything the provider receives: instruction, blocks of collected data, lines, video. Untick or edit what should not go out. The sent text is kept in the journal."))
+        val tasks = (Prompts.defaults.keys + SendGate.storedTasks() + AiJournal.list().map { it.task })
+            .filter { it.isNotBlank() && it != "ping" }.distinct().sorted()
+        val special = tasks.count { SendGate.stored(it) != Outgoing.Rule.ASK }
+        c.section(t("Правила по задачам", "Rules per task"), t("задач ", "tasks ") + tasks.size + t(", особых правил ", ", custom rules ") + special, rulesOpen, {
+            rulesOpen = it
+            render()
+        }) {
+            val opts = listOf(Outgoing.Rule.ASK to t("спрашивать", "ask"), Outgoing.Rule.SEND to t("без вопросов", "send"), Outgoing.Rule.BLOCK to t("никогда", "never"))
+            tasks.forEach { task -> spinner(task, opts, SendGate.stored(task)) { SendGate.setStored(task, it) } }
+            button(t("Сбросить выбор «до перезапуска»", "Reset \"until restart\" choices"), style = BtnStyle.TEXT) {
+                SendGate.clearSession()
+                toast(t("Сброшено", "Reset"))
+            }
         }
     }
 

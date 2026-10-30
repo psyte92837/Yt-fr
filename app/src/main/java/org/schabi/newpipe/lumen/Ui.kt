@@ -1059,7 +1059,18 @@ abstract class LumenBase : Activity() {
 
     override fun onResume() {
         super.onResume()
+        visible++
         L.d("ui", "open ${javaClass.simpleName}")
+    }
+
+    override fun onPause() {
+        visible = maxOf(0, visible - 1)
+        super.onPause()
+    }
+
+    companion object {
+        /** Lumen screens currently on top; the AI send review opens by itself only while one is visible. */
+        @Volatile var visible = 0
     }
 }
 

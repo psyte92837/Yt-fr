@@ -338,7 +338,8 @@ class SettingsActivity : LumenBase() {
             "dossier_overview" to t("Досье · общая картина", "Dossier · overview"),
             "diagram_flow" to t("Схема · блок-схема процесса", "Diagram · process flowchart"),
             "diagram_mind" to t("Схема · карта идей", "Diagram · mind map"),
-            "diagram_video" to t("Схема · структура видео", "Diagram · video structure")
+            "diagram_video" to t("Схема · структура видео", "Diagram · video structure"),
+            "pains" to t("Боли и кейсы людей", "Pains and cases of people")
         )
         for ((k, label) in names) {
             val card = c.card {

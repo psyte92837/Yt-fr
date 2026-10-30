@@ -117,6 +117,7 @@ object QuickState {
         "project_ai" -> t("AI-сводка по проекту", "AI project summary")
         "style_data" -> t("Стиль: раскадровка, главы, речь, обложка", "Style: storyboard, chapters, speech, thumbnail")
         "style_ai" -> t("Стиль: описание и шаблон через AI", "Style: AI description and template")
+        "pains" -> t("Боли и кейсы людей", "Pains and cases of people")
         else -> key
     }
 }
@@ -151,7 +152,18 @@ object QuickAnalysis {
 
     /** Creates a project for the link and returns its id (the service then runs [run]). */
     fun createProject(link: YtLink.Link, mode: String = ""): Project {
-        val p = Project(name = (if (mode == "style") t("Стиль: ", "Style: ") else t("Анализ: ", "Analysis: ")) + link.type, phrase = "", queries = mutableListOf())
+        val p = Project(name = when (mode) {
+            "style" -> t("Стиль: ", "Style: ")
+            "pains" -> t("Боли: ", "Pains: ")
+            else -> t("Анализ: ", "Analysis: ")
+        } + link.type, phrase = "", queries = mutableListOf())
+        if (mode == "pains") {
+            // more comments and the replies: stories are often in the threads
+            p.collect.commentsLimit = if (link.type == "video") 1000 else 300
+            p.collect.replies = true
+            p.collect.commentsSort = "top"
+            p.collect.subtitles = false
+        }
         p.source = link.url
         p.sourceType = link.type
         p.quickMode = mode
@@ -167,7 +179,10 @@ object QuickAnalysis {
         val type = p0.sourceType
         val keys = mutableListOf("source")
         val style = p0.quickMode == "style" && type == "video"
-        if (style) keys += listOf("style_data", "style_ai") else when (type) {
+        val pains = p0.quickMode == "pains"
+        if (style) keys += listOf("style_data", "style_ai") else if (pains) {
+            keys += listOf("collect", "pains")
+        } else when (type) {
             "video" -> {
                 if (cfg.collect) keys += "collect"
                 if (cfg.aiSummary) keys += "summary"
@@ -182,7 +197,7 @@ object QuickAnalysis {
                 if (cfg.channelStats) keys += "channels"
             }
         }
-        if (!style) {
+        if (!style && !pains) {
             if (cfg.recs) keys += "recs"
             if (cfg.channelGraph) keys += "chgraph"
             if (cfg.aiChannelSummary && type != "playlist") keys += "channel_ai"
@@ -253,7 +268,8 @@ object QuickAnalysis {
                     }
                     "collect" -> {
                         val all = Store.videos(pid).values.toList()
-                        val target = if (type == "video") all else all.sortedByDescending { it.views }.take(cfg.collectTop)
+                        val top = if (p.quickMode == "pains") maxOf(cfg.collectTop, 10) else cfg.collectTop
+                        val target = if (type == "video") all else all.sortedByDescending { it.views }.take(top)
                         if (target.isEmpty()) throw IllegalStateException(t("Нет видео для сбора", "No videos to collect"))
                         val ok = java.util.concurrent.atomic.AtomicInteger(0)
                         var lastError: Exception? = null
@@ -339,6 +355,24 @@ object QuickAnalysis {
                             VideoStyle.ai(p, v, m, force = true).let { r -> r.model + " · " + Fmt.num((r.inTokens + r.outTokens).toLong()) + t(" ток.", " tok") }
                         }
                     }
+                    "pains" -> {
+                        val n = Pains.projectMessages(pid).size
+                        if (n == 0) throw IllegalStateException(t("Комментарии не собраны (отключены или недоступны)", "No comments collected (disabled or unavailable)"))
+                        if (Provider.active() == null) {
+                            st.status = "warn"
+                            t("комментариев: $n · AI не подключён — только сигналы по словам", "comments: $n · AI not connected — keyword signals only")
+                        } else {
+                            progress(t("AI ищет боли и кейсы…", "AI looks for pains and cases…"))
+                            val r = Pains.ai(p, force = true)
+                            val rep = Pains.parse(r.text, Pains.projectMessages(pid))
+                            if (rep == null) {
+                                st.status = "warn"
+                                t("комментариев: $n · AI вернул нечитаемый ответ, показаны сигналы по словам", "comments: $n · unreadable AI reply, keyword signals shown")
+                            } else {
+                                t("комментариев: $n · болей ${rep.pains.size} · кейсов ${rep.cases.size}", "comments: $n · pains ${rep.pains.size} · cases ${rep.cases.size}")
+                            }
+                        }
+                    }
                     "project_ai" -> {
                         if (Provider.active() == null) {
                             st.status = "skipped"
@@ -370,7 +404,7 @@ object QuickAnalysis {
     private fun rename(pid: String, title: String, channel: String) {
         Store.project(pid)?.let {
             if (title.isNotBlank()) {
-                it.name = (if (it.quickMode == "style") "🎨 " else "") + title.take(80)
+                it.name = (when (it.quickMode) { "style" -> "🎨 "; "pains" -> "😣 "; else -> "" }) + title.take(80)
                 it.phrase = title.take(120)
             }
             if (channel.isNotBlank()) it.domain = channel
@@ -432,9 +466,11 @@ fun Activity.chooseLinkAction(text: String, onDone: () -> Unit = {}) {
     val theme = if (isNight()) android.R.style.Theme_DeviceDefault_Dialog_Alert else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert
     val actions: List<Pair<String, () -> Unit>> = if (link.type == "channel") listOf(
         t("📊 Полный анализ канала", "📊 Full channel analysis") to { QuickAnalysis.start(this, link.url); onDone() },
+        t("😣 Боли и кейсы зрителей канала", "😣 Pains and cases of the channel's viewers") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },
         t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) }
     ) else listOf(
         t("📊 Полный анализ", "📊 Full analysis") to { QuickAnalysis.start(this, link.url); onDone() },
+        t("😣 Боли и кейсы людей (отчёт)", "😣 Pains and cases of people (report)") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },
         t("🎨 Определить стиль видео", "🎨 Detect video style") to { QuickAnalysis.start(this, link.url, "style"); onDone() },
         t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) },
         t("▶ Только похожие и рекомендованные видео", "▶ Only similar & recommended videos") to { harvestSetup(link.url, "related", onDone) },

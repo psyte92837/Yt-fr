@@ -52,6 +52,9 @@ fun ProjectActivity.overviewTab(c: Col) {
         }
     }
 
+    // ---- pains and cases of people (Share → "Pains and cases")
+    if (project.quickMode == "pains" || Pains.latest(project.id) != null) painsCard(c)
+
     // ---- AI summaries
     val summary = Store.latestAi(project.id, "project_summary", "project")
         ?: vids.firstNotNullOfOrNull { Store.latestAi(project.id, "video_summary", it.id) }
@@ -243,4 +246,87 @@ fun ProjectActivity.channelsTab(c: Col) {
             card.setOnClickListener { ChannelActivity.open(this, project.id, ch.url) }
         }
     }
+}
+
+/** Report "Pains and cases of people": AI part with checked quotes, or keyword signals without AI. */
+fun ProjectActivity.painsCard(c: Col) {
+    c.h2("😣 " + t("Боли и кейсы людей", "Pains and cases of people"))
+    val msgs = Pains.projectMessages(project.id)
+    if (msgs.isEmpty()) {
+        c.muted(if (CollectState.running && CollectState.projectId == project.id) t("Собираю комментарии…", "Collecting comments…")
+        else t("Комментариев пока нет: дождитесь шага сбора или перезапустите анализ.", "No comments yet: wait for the collection step or restart."))
+        return
+    }
+    val loc = Pains.local(msgs)
+    val ai = Pains.latest(project.id)
+    val r = ai?.let { Pains.parse(it.text, msgs) }
+    c.chips(listOf(Voc.PAIN, Pains.CASE, Voc.QUESTION, Voc.OBJECTION, Voc.REQUEST).map { k ->
+        chip(this, Pains.categoryLabel(k).lowercase() + " " + (loc.counts[k] ?: 0))
+    })
+    c.muted(t("комментариев: ", "comments: ") + loc.total + if (ai != null) " · " + ai.model + " · " + Fmt.dateTime(ai.at) else "")
+    if (r != null) {
+        if (r.summary.isNotBlank()) c.card { add(text(ctx, r.summary, 14f).apply { setTextIsSelectable(true) }, 0) }
+        r.pains.take(6).forEachIndexed { i, p ->
+            c.card {
+                add(text(ctx, "${i + 1}. " + p.title, 15f, bold = true), 0)
+                muted(listOfNotNull(
+                    if (p.ids.isNotEmpty()) t("упоминаний ", "mentions ") + p.ids.size else null,
+                    if (p.severity > 0) t("острота ", "severity ") + "●".repeat(p.severity) else null
+                ).joinToString(" · "))
+                if (p.detail.isNotBlank()) add(text(ctx, p.detail, 13f), 4)
+                p.quotes.firstOrNull()?.let { add(text(ctx, "«" + it.text.take(240) + "»", 13f, color = Palette.MUTED), 4) }
+            }
+        }
+        if (r.cases.isNotEmpty()) {
+            c.add(text(this, t("Кейсы", "Cases"), 15f, bold = true), 12)
+            r.cases.take(4).forEach { k ->
+                c.card {
+                    if (k.who.isNotBlank()) add(text(ctx, "👤 " + k.who, 14f, bold = true), 0)
+                    add(text(ctx, k.situation, 13f), 2)
+                    if (k.outcome.isNotBlank()) muted(t("Итог: ", "Outcome: ") + k.outcome)
+                    if (k.need.isNotBlank()) muted(t("Нужно: ", "Needs: ") + k.need)
+                }
+            }
+        }
+    } else {
+        if (ai != null) c.muted(t("AI-ответ не удалось разобрать — показаны сигналы по ключевым словам. Нажмите «Обновить через AI».",
+            "Could not read the AI reply — keyword signals shown. Tap “Refresh with AI”."))
+        listOf(Voc.PAIN, Voc.QUESTION, Voc.OBJECTION).forEach { k ->
+            val items = loc.top[k].orEmpty().take(3)
+            if (items.isNotEmpty()) c.card {
+                add(text(ctx, Pains.categoryLabel(k), 14f, bold = true), 0)
+                items.forEach { add(text(ctx, "• " + it.text.take(200) + "  ♥" + it.likes, 13f), 4) }
+            }
+        }
+        if (loc.cases.isNotEmpty()) c.card {
+            add(text(ctx, Pains.categoryLabel(Pains.CASE), 14f, bold = true), 0)
+            loc.cases.take(3).forEach { add(text(ctx, "• " + it.text.take(260), 13f), 4) }
+        }
+    }
+    c.button(t("Весь отчёт", "Full report"), style = BtnStyle.TONAL) { showText(t("Боли и кейсы людей", "Pains and cases of people"), Pains.text(project.id)) }
+    c.row(
+        btn(this, t("PDF ↗", "PDF ↗"), style = BtnStyle.TONAL) { sharePains(true) },
+        btn(this, t("Картинка ↗", "Image ↗"), style = BtnStyle.TONAL) { sharePains(false) },
+        btn(this, t("Текст ↗", "Text ↗"), style = BtnStyle.TEXT) { shareText(project.name, Pains.text(project.id)) }
+    )
+    if (Provider.active() != null && !CollectState.running) {
+        c.button(if (ai == null) t("Разобрать через AI", "Analyse with AI") else t("Обновить через AI", "Refresh with AI"), style = BtnStyle.OUTLINED) {
+            toast(t("AI ищет боли и кейсы…", "AI looks for pains and cases…"))
+            Lumen.async({ Pains.ai(project, force = true) }, { err(it) }) {
+                if (!isFinishing) {
+                    reload()
+                    render()
+                }
+            }
+        }
+    }
+}
+
+private fun ProjectActivity.sharePains(pdf: Boolean) {
+    val name = ReportKit.safeName(t("боли_", "pains_") + project.name) + if (pdf) ".pdf" else ".png"
+    Lumen.async({
+        val f = ReportKit.shareFile(this, name)
+        f.outputStream().use { Pains.write(project.id, pdf, it) }
+        f
+    }, { err(it) }) { f -> ReportKit.share(this, f, pdf, project.name) }
 }

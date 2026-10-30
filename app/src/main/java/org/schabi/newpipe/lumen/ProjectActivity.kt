@@ -207,7 +207,7 @@ class ProjectActivity : LumenBase() {
             footer = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 val scope = { videos.values.filter { it.marked }.ifEmpty { videos.values.toList() } }
-                addView(askAiBar(this@ProjectActivity, { askAiSheet(project, scope()) }, { askAiSheet(project, scope(), startVoice = true) }))
+                addView(askAiBar(this@ProjectActivity, AskAi.hint(tab), { askAiSheet(project, scope(), tab) }, { askAiSheet(project, scope(), tab, startVoice = true) }))
                 addView(bottomNav(this@ProjectActivity, gl.map { it.icon to it.name }, gi) {
                     tab = groupTab[it]?.takeIf { id -> id in gl[it].tabs } ?: gl[it].tabs[0]
                     render()

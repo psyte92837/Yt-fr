@@ -26,4 +26,17 @@ class AskAiTest {
         assertEquals("Привет", AskAi.append("", "Привет"))
         assertEquals("Что нового? Расскажи", AskAi.append("Что нового?  ", "Расскажи"))
     }
+
+    @Test
+    fun framedAddsTabFocusOnlyForKnownTabs() {
+        assertEquals("Вопрос", AskAi.framed("unknown", "Вопрос"))
+        assertEquals(true, AskAi.framed("seo", "Вопрос").endsWith("\nВопрос"))
+        assertEquals(true, AskAi.framed("recs", "Вопрос").contains("Рекомендации"))
+    }
+
+    @Test
+    fun everyProjectTabHasFocus() {
+        listOf("overview", "videos", "collect", "channels", "analytics", "recs", "audience", "seo", "ai", "export", "schemes", "settings")
+            .forEach { assertEquals(it, false, AskAi.focus(it).isBlank()) }
+    }
 }

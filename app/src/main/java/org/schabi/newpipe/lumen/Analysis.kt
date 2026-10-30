@@ -260,11 +260,28 @@ object AiTasks {
         return AiResult(key, "sentiment", "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 
-    fun chat(p: Project, videos: List<Video>, question: String): AiResult {
+    /** Extra data block for the tab the user asks from; empty when the project corpus alone is enough. */
+    private fun tabData(p: Project, videos: List<Video>, tab: String): String = when (tab) {
+        "recs" -> RecGraph.load(p.id).let { g ->
+            val top = RecEngine.ranked(g, "hits").take(25).joinToString("\n") { "- ${it.title} | ${it.channel} | hits=${it.hits} depth=${it.depth} rel=${it.relevant}" }
+            val drift = RecEngine.drift(g).joinToString("; ") { "d${it.depth}: ${it.onTopic}/${it.nodes} on topic" }
+            if (g.nodes.isEmpty()) "" else "Recommendation graph: ${g.nodes.size} nodes.\nDrift: $drift\nMost recommended:\n$top"
+        }
+        "audience", "seo" -> Seo.insights(p.id).take(80).joinToString("\n") { "- [${it.optString("type")}] ${it.optString("statement")}" }
+            .let { if (it.isBlank()) "" else "Audience insights:\n$it" }
+        "channels", "analytics", "overview" -> videos.groupBy { it.channel }.entries.sortedByDescending { it.value.size }.take(20)
+            .joinToString("\n") { (c, l) -> "- $c: ${l.size} videos, ${l.sumOf { maxOf(it.views, 0L) }} views" }
+            .let { if (it.isBlank()) "" else "Top channels:\n$it" }
+        else -> ""
+    }
+
+    fun chat(p: Project, videos: List<Video>, question: String, tab: String = ""): AiResult {
         val prov = requireProvider()
+        val extra = tabData(p, videos, tab).take(Settings.chunkChars)
+        val data = if (extra.isBlank()) boundedCorpus(p, videos) else extra + "\n\n" + boundedCorpus(p, videos)
         val r = Llm.complete(
             prov, prov.smartModel, Prompts.SYSTEM,
-            Prompts.fill("chat", vars(p, boundedCorpus(p, videos), question)), maxTokens = 2500, task = "chat", pid = p.id
+            Prompts.fill("chat", vars(p, data, AskAi.framed(tab, question))), maxTokens = 2500, task = "chat", pid = p.id
         )
         val res = AiResult(sha1("chat|${System.nanoTime()}"), "chat", question.take(200), r.model, r.text, r.inTokens, r.outTokens)
         Store.saveAi(p.id, res)

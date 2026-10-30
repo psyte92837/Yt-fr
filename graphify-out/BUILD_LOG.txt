@@ -64,28 +64,28 @@ Commands:
     --context C             explicit edge-context filter (repeatable)
     --seed X                start at node X (id, label or file path; repeatable)
 [graphify extract] scanning /home/runner/work/_temp/src
-[graphify extract] found 74 code, 0 docs, 0 papers, 0 images
-[graphify extract] AST extraction on 74 code files...
-  AST cache: 0/74 files served from cache (0%); 74 to extract
+[graphify extract] found 76 code, 0 docs, 0 papers, 0 images
+[graphify extract] AST extraction on 76 code files...
+  AST cache: 0/76 files served from cache (0%); 76 to extract
   warning: 2 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted)
-[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 1929 nodes, 6269 edges, 87 communities
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 1945 nodes, 6310 edges, 82 communities
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
 Loading existing graph...
-Graph: 1929 nodes, 6269 edges
+Graph: 1945 nodes, 6310 edges
 Re-clustering...
-Done - 87 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+Done - 82 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-graph_map: 87 communities named, 74 files mapped
+graph_map: 82 communities named, 76 files mapped
 map exit=0
-total 3268
-drwxr-xr-x 3 runner runner    4096 Oct 29 12:50 .
-drwxr-xr-x 4 runner runner    4096 Oct 29 12:50 ..
--rw-r--r-- 1 runner runner  150417 Oct 29 12:50 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 29 12:50 .graphify_root
--rw-r--r-- 1 runner runner    6266 Oct 29 12:50 BUILD_LOG.txt
--rw-r--r-- 1 runner runner   24855 Oct 29 12:50 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Oct 29 12:50 cache
--rw-r--r-- 1 runner runner 3118361 Oct 29 12:50 graph.json
--rw-r--r-- 1 runner runner   17789 Oct 29 12:50 manifest.json
+total 3296
+drwxr-xr-x 3 runner runner    4096 Oct 30 18:26 .
+drwxr-xr-x 4 runner runner    4096 Oct 30 18:26 ..
+-rw-r--r-- 1 runner runner  151588 Oct 30 18:26 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 30 18:26 .graphify_root
+-rw-r--r-- 1 runner runner    6266 Oct 30 18:26 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner   25683 Oct 30 18:26 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 30 18:26 cache
+-rw-r--r-- 1 runner runner 3141652 Oct 30 18:26 graph.json
+-rw-r--r-- 1 runner runner   18271 Oct 30 18:26 manifest.json

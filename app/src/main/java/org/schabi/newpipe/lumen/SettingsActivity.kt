@@ -163,7 +163,7 @@ class SettingsActivity : LumenBase() {
                 recreate()
             }
         }
-        c.spinner(t("Размер текста", "Text size"), listOf(85 to "85%", 100 to "100%", 115 to "115%", 130 to "130%"), Settings.textScale) {
+        c.spinner(t("Размер текста", "Text size"), listOf(85, 100, 115, 130, 150, 175, 200).map { it to "$it%" }, Settings.textScale) {
             if (it != Settings.textScale) {
                 Settings.textScale = it
                 recreate()

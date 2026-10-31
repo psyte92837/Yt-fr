@@ -2204,15 +2204,9 @@ class StudioActivity : LumenBase() {
             return
         }
         val useScript = mode != "edge" && (task == StudioTask.VOICE || StudioPrefs.readScript) && sc.scenes.isNotEmpty()
-        if (mode != "edge" && !useScript && !StudioRecognizer.available(this)) {
-            showText(t("Нужен текст", "Text needed"), t(
-                "Распознавание записи работает на Android 13 и новее с установленным сервисом распознавания речи. " +
-                    "Вставьте текст, который звучит в записи, в сценарий (шаг 1) и включите «Я читаю сценарий».",
-                "Recognising a take needs Android 13+ with a speech recognition service. " +
-                    "Paste the spoken text into the script (step 1) and turn on \"I read the script\"."
-            ))
-            return
-        }
+        // no script and no recogniser: edit by the sound alone with a no-AI template
+        val canRecognise = mode == "edge" || useScript || StudioRecognizer.available(this)
+        var noText = false
         resetAnalysis()
         busy = "analyse"
         cancel = false
@@ -2224,7 +2218,10 @@ class StudioActivity : LumenBase() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             previewMs = 0
             render()
-            if (StudioPrefs.autoDirect || autoAll) {
+            if (noText) {
+                toast(t("Речь не распознана — смонтировано по звуку шаблоном «Ритм»", "No speech recognised: edited by the sound with the Rhythm template"))
+                animate(StudioApproach.RHYTHM, remember = false)
+            } else if (StudioPrefs.autoDirect || autoAll) {
                 val ap = StudioApproach.of(StudioPrefs.approach)
                 val own = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
                 if (own != null) animateEdit(own)
@@ -2240,7 +2237,19 @@ class StudioActivity : LumenBase() {
         when {
             mode == "edge" -> job("analyse", { analyseEdge(sc) }, fail, done)
             useScript -> job("analyse", { analyseTake(sc) }, fail, done)
-            else -> Lumen.async({ speechOf(loadTake()) }, fail) { (take, speech) ->
+            else -> Lumen.async({ speechOf(loadTake(), silentOk = true) }, fail) { (take, speech) ->
+                // the take cannot be turned into text: beats by the sound, then a template
+                fun byBeats() {
+                    noText = true
+                    pcm = take
+                    words = Studio.beatWords(speech, take.ms)
+                    transcript = ""
+                    script = SScript("", listOf(SScene("")))
+                    ranges = listOf(words.indices)
+                    stats = Studio.stats(take.ms, speech, 0)
+                    done(Unit)
+                }
+                if (!canRecognise || speech.isEmpty()) return@async byBeats()
                 report("analyse", t("Распознавание речи…", "Recognising speech…"))
                 val pieces = Studio.groupSpans(speech)
                 StudioRecognizer.recognize(this, take.data, take.rate, pieces, lang() + "-" + lang().uppercase().replace("EN", "US").replace("UK", "UA"),
@@ -2251,8 +2260,8 @@ class StudioActivity : LumenBase() {
                     }
                     val w = Studio.alignPieces(res, speech)
                     if (w.isEmpty()) {
-                        fail(IllegalStateException(t("Речь не распознана. Проверьте язык и громкость записи или вставьте текст в сценарий.",
-                            "No speech recognised. Check the language and loudness, or paste the text into the script.")))
+                        L.w("studio", "no words recognised, editing by beats")
+                        byBeats()
                         return@recognize
                     }
                     pcm = take
@@ -2274,12 +2283,13 @@ class StudioActivity : LumenBase() {
     }
 
     /** Speech of the take; with "cut pauses" on, the take is cut first and [cuts] remembers what was kept. */
-    private fun speechOf(take0: StudioAudio.Pcm): Pair<StudioAudio.Pcm, List<Span>> {
+    private fun speechOf(take0: StudioAudio.Pcm, silentOk: Boolean = false): Pair<StudioAudio.Pcm, List<Span>> {
         report("analyse", t("Поиск речи и пауз…", "Finding speech and pauses…"))
         var take = take0
         var speech = Studio.speechSpans(take.data, take.rate)
-        if (speech.isEmpty()) error(t("В записи не слышно речи. Говорите ближе к микрофону.", "No speech heard. Speak closer to the microphone."))
         cuts = null
+        if (speech.isEmpty() && silentOk) return take to speech
+        if (speech.isEmpty()) error(t("В записи не слышно речи. Говорите ближе к микрофону.", "No speech heard. Speak closer to the microphone."))
         if (StudioPrefs.cutPauses) {
             val keep = Studio.keepSegments(speech, take.ms)
             if (keep.sumOf { it.ms } < take.ms - 300) {

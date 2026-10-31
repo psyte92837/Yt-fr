@@ -553,6 +553,21 @@ object Studio {
     }
 
     /**
+     * Beats without text for a take with no script that could not be recognised: the speech (or the whole
+     * take when no speech is heard) is cut into pieces of about [stepMs], so the no-AI templates still work.
+     */
+    fun beatWords(speech: List<Span>, totalMs: Long, stepMs: Long = 1200): List<SWord> {
+        val parts = speech.filter { it.ms > 0 }.ifEmpty { if (totalMs > 0) listOf(Span(0, totalMs)) else emptyList() }
+        return parts.flatMap { s ->
+            val n = max(1L, (s.ms + stepMs / 2) / stepMs).toInt()
+            (0 until n).map { k ->
+                val a = s.startMs + s.ms * k / n
+                SWord("", a, max(a + 1, s.startMs + s.ms * (k + 1) / n))
+            }
+        }
+    }
+
+    /**
      * Scenes from a recognised take without AI: a new scene after a long pause, a sentence end
      * once the scene has some words, or at [maxWords].
      */

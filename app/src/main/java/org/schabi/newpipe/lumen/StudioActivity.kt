@@ -49,6 +49,14 @@ object StudioPrefs {
     var aspect: String
         get() = p.getString("studio_aspect", StudioAspect.PORTRAIT.id) ?: StudioAspect.PORTRAIT.id
         set(v) = p.edit().putString("studio_aspect", v).apply()
+    /** Frame of the Cartoon task: [StudioAspect.id]. */
+    var cartoonAspect: String
+        get() = p.getString("studio_aspect_cartoon", StudioAspect.LANDSCAPE.id) ?: StudioAspect.LANDSCAPE.id
+        set(v) = p.edit().putString("studio_aspect_cartoon", v).apply()
+    /** Characters of the Cartoon task. */
+    var cast: List<SChar>
+        get() = StudioToon.parseCast(p.getString("studio_cast", null)).ifEmpty { StudioToon.defaultCast() }
+        set(v) = p.edit().putString("studio_cast", StudioToon.castJson(v)).apply()
     /** Frame of the Cuts task: [StudioAspect.id]. */
     var cutsAspect: String
         get() = p.getString("studio_aspect_cuts", StudioAspect.LANDSCAPE.id) ?: StudioAspect.LANDSCAPE.id
@@ -323,7 +331,7 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts")), task.ordinal) {
+        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🧸 Мультик", "🧸 Cartoon")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
         c.muted(when (task) {
@@ -339,6 +347,9 @@ class StudioActivity : LumenBase() {
             StudioTask.CUTS -> t(
                 "Нарезка с голосом за кадром: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, AI-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1.",
                 "A voice-over over cuts: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1.")
+            StudioTask.CARTOON -> t(
+                "Познавательный мультик: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
+                "An informational cartoon: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
         })
         c.steps(stepNow(), 4)
         if (task == StudioTask.VOICE) {
@@ -349,6 +360,7 @@ class StudioActivity : LumenBase() {
             voiceCard(c, 2)
         }
         if (task == StudioTask.CUTS) cutsCard(c)
+        if (task == StudioTask.CARTOON) castCard(c)
         analyseCard(c)
         videoCard(c)
         page("Lumen Studio", c.root, keepScroll = true)
@@ -413,7 +425,7 @@ class StudioActivity : LumenBase() {
         add(text(ctx, "$n. " + if (task == StudioTask.VOICE) t("Озвучка", "Voice-over") else t("Голос", "Voice"), Type.TITLE_M, bold = true), 0)
         val modes = when (task) {
             StudioTask.VOICE -> listOf("file", "mic")
-            StudioTask.CUTS -> listOf("edge", "mic", "file")
+            StudioTask.CUTS, StudioTask.CARTOON -> listOf("edge", "mic", "file")
             else -> listOf("edge", "mic", "file", "video")
         }
         val labels = if (task == StudioTask.VOICE) listOf(t("Аудиофайл", "Audio file"), t("Микрофон", "Mic"))
@@ -437,7 +449,9 @@ class StudioActivity : LumenBase() {
         val cur = ofLang.firstOrNull { it.shortName == StudioPrefs.voice } ?: EdgeTts.pickVoice(voices, lang, TtsPrefs.voiceFor(lang))
         c.muted(t("Точные тайминги каждого слова. Нужен интернет, текст уходит на сервер Microsoft.",
             "Exact timing of every word. Needs internet; the text goes to Microsoft's server."))
-        c.add(text(this, t("Голос", "Voice"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        if (task == StudioTask.CARTOON) c.muted(t("Голоса персонажей задаются в карточке «🎭 Персонажи»; здесь — голос рассказчика (реплики без @Имени).",
+            "Character voices are set in the \"🎭 Characters\" card; this is the narrator's voice (lines without @Name)."))
+        c.add(text(this, if (task == StudioTask.CARTOON) t("Голос рассказчика", "Narrator voice") else t("Голос", "Voice"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         c.chips(ofLang.map { v ->
             chip(this, (if (v.gender == "Male") "♂ " else "♀ ") + v.display + if (v.locale.length > 2 && ofLang.map { it.locale }.distinct().size > 1) " · " + v.locale.substringAfter('-') else "",
                 v.shortName == cur?.shortName) {
@@ -731,7 +745,7 @@ class StudioActivity : LumenBase() {
                 render()
             }
         }
-        if (!videoReady() && task != StudioTask.CUTS) bgBlock(this)
+        if (!videoReady() && task != StudioTask.CUTS && task != StudioTask.CARTOON) bgBlock(this)
         add(text(ctx, t("Цвет акцента", "Accent colour"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         chips(StudioPrefs.ACCENTS.map { (col, e) ->
             chip(ctx, e, col == StudioPrefs.accent) {
@@ -739,11 +753,15 @@ class StudioActivity : LumenBase() {
                 render()
             }
         })
-        if (task == StudioTask.VOICE || task == StudioTask.CUTS) {
+        if (task == StudioTask.VOICE || task == StudioTask.CUTS || task == StudioTask.CARTOON) {
             add(text(ctx, t("Кадр", "Frame"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val shapes = StudioAspect.entries
             add(segBar(ctx, listOf(t("9:16 Shorts", "9:16 Shorts"), t("16:9 YouTube", "16:9 YouTube"), t("1:1 квадрат", "1:1 square")), shapes.indexOf(aspect())) {
-                if (task == StudioTask.CUTS) StudioPrefs.cutsAspect = shapes[it].id else StudioPrefs.aspect = shapes[it].id
+                when (task) {
+                    StudioTask.CUTS -> StudioPrefs.cutsAspect = shapes[it].id
+                    StudioTask.CARTOON -> StudioPrefs.cartoonAspect = shapes[it].id
+                    else -> StudioPrefs.aspect = shapes[it].id
+                }
                 board = emptyList()
                 render()
             }, 4)
@@ -1094,7 +1112,7 @@ class StudioActivity : LumenBase() {
         File(bgDir, name).takeIf { name.isNotBlank() && it.exists() && ms > 0 }?.let { it to ms }
     }
 
-    private fun montageReady() = task != StudioTask.CUTS && (videoReady() || clips().isNotEmpty())
+    private fun montageReady() = task != StudioTask.CUTS && task != StudioTask.CARTOON && (videoReady() || clips().isNotEmpty())
 
     /** Cuts task with downloaded clips: always a montage (clips on their scenes, graphics in between). */
     private fun cutMontage() = task == StudioTask.CUTS && readyCuts().isNotEmpty()
@@ -1233,6 +1251,109 @@ class StudioActivity : LumenBase() {
         if (script != null && readyCuts().isNotEmpty()) {
             button(t("🎞 Расставить по сценам без AI", "🎞 Place on scenes without AI"), style = BtnStyle.TEXT) { autoPlace() }
         }
+    }
+
+    // ---------- cartoon characters ----------
+
+    /** Characters of the cartoon: who they are, how they look and sound. */
+    private fun castCard(c: Col) = c.card {
+        add(text(ctx, t("🎭 Персонажи", "🎭 Characters"), Type.TITLE_M, bold = true), 0)
+        muted(t("До ${StudioToon.MAX_CAST} героев. В сценарии реплика начинается с @Имя: — AI сам распределит реплики. Голоса Microsoft подбираются по полу, тон — по виду героя.",
+            "Up to ${StudioToon.MAX_CAST} characters. In the script a line starts with @Name: — AI assigns the lines. Microsoft voices are picked by gender, the pitch by the look."))
+        val cast = StudioPrefs.cast
+        cast.forEachIndexed { i, ch ->
+            val voice = when (ch.voice) {
+                "m" -> t("♂ мужской", "♂ male")
+                "f" -> t("♀ женский", "♀ female")
+                "" -> if (StudioToon.gender(ch.look) == "Male") t("♂ мужской", "♂ male") else t("♀ женский", "♀ female")
+                else -> ch.voice.substringAfterLast('-').removeSuffix("Neural")
+            }
+            val line = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(ImageView(ctx).apply {
+                    setImageBitmap(charBitmap(ch, dp(56)))
+                    contentDescription = StudioToon.lookLabel(ch.look)
+                }, LinearLayout.LayoutParams(dp(56), dp(56)))
+                addView(text(ctx, "@${ch.name}\n${StudioToon.emoji(ch.look)} ${StudioToon.lookLabel(ch.look)} · $voice", 14f),
+                    LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
+                if (busy.isEmpty()) {
+                    addView(btn(ctx, "✎", style = BtnStyle.TEXT) { editChar(i) }.apply { contentDescription = t("Изменить ${ch.name}", "Edit ${ch.name}") })
+                    if (cast.size > 1) addView(btn(ctx, "✕", style = BtnStyle.TEXT) {
+                        StudioPrefs.cast = cast.filterIndexed { k, _ -> k != i }
+                        render()
+                    }.apply { contentDescription = t("Убрать ${ch.name}", "Remove ${ch.name}") })
+                }
+            }
+            add(line, 6)
+        }
+        if (cast.size < StudioToon.MAX_CAST && busy.isEmpty()) button(t("＋ Персонаж", "＋ Character"), style = BtnStyle.TONAL) { editChar(-1) }
+    }
+
+    /** A character drawn on a transparent square [px]. */
+    private fun charBitmap(ch: SChar, px: Int, mood: String = "happy"): android.graphics.Bitmap {
+        val bmp = android.graphics.Bitmap.createBitmap(px, px, android.graphics.Bitmap.Config.ARGB_8888)
+        StudioToonArt().draw(android.graphics.Canvas(bmp), ch, px / 2f, px * 0.97f, px * 0.78f,
+            ToonPose(mood = mood, tMs = 1000, accent = StudioPrefs.accent))
+        return bmp
+    }
+
+    /** Adds a character ([index] == -1) or changes one. */
+    private fun editChar(index: Int) {
+        val cast = StudioPrefs.cast
+        val old = cast.getOrNull(index)
+        var look = old?.look ?: StudioToon.LOOKS.firstOrNull { l -> cast.none { it.look == l } } ?: "blob"
+        var voice = old?.voice ?: ""
+        val nameE = edt(this, t("Имя (одно слово)", "Name (one word)"), old?.name ?: StudioToon.lookLabel(look))
+        val col = Col(this, 20)
+        val img = ImageView(this)
+        fun build() {
+            col.root.removeAllViews()
+            img.setImageBitmap(charBitmap(SChar(nameE.text.toString().ifBlank { "?" }, look, voice), dp(120), "explain"))
+            (img.parent as? ViewGroup)?.removeView(img)
+            col.add(img, 0).layoutParams = LinearLayout.LayoutParams(dp(120), dp(120)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL }
+            (nameE.parent as? ViewGroup)?.removeView(nameE)
+            col.add(nameE, 8)
+            col.add(text(this, t("Вид", "Look"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            col.chips(StudioToon.LOOKS.map { l ->
+                chip(this, StudioToon.emoji(l) + " " + StudioToon.lookLabel(l), l == look) {
+                    val auto = nameE.text.isBlank() || StudioToon.LOOKS.any { StudioToon.lookLabel(it) == nameE.text.toString() }
+                    look = l
+                    if (auto) nameE.setText(StudioToon.lookLabel(l))
+                    build()
+                }
+            }, collapseAfter = 99)
+            col.add(text(this, t("Голос", "Voice"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val opts = listOf("" to t("Авто", "Auto"), "f" to t("♀ Женский", "♀ Female"), "m" to t("♂ Мужской", "♂ Male"))
+            col.chips(opts.map { (v, label) ->
+                chip(this, label, v == voice || (voice !in listOf("", "f", "m") && v == "")) {
+                    voice = v
+                    build()
+                }
+            })
+        }
+        build()
+        android.app.AlertDialog.Builder(this).setTitle(if (old == null) t("Новый персонаж", "New character") else "@" + old.name)
+            .setView(ScrollView(this).apply { addView(col.root) })
+            .setPositiveButton("OK") { _, _ ->
+                val name = StudioToon.cleanName(nameE.text.toString()).ifEmpty { StudioToon.cleanName(StudioToon.lookLabel(look)) }
+                if (cast.withIndex().any { (k, ch) -> k != index && ch.name.equals(name, true) }) {
+                    toast(t("Имя «$name» уже занято", "The name \"$name\" is taken"))
+                    return@setPositiveButton
+                }
+                val ch = SChar(name, look, voice)
+                val list = cast.toMutableList()
+                if (old == null) list += ch else list[index] = ch
+                StudioPrefs.cast = list
+                // the script refers to the old name: rename the lines
+                if (old != null && old.name != name) {
+                    scriptEdit.setText(scriptEdit.text.toString().replace(Regex("(^|\\n)@" + Regex.escape(old.name) + "(?=[(:\\s])"), "$1@$name"))
+                    script = script?.let { sc -> sc.copy(scenes = sc.scenes.map { if (it.who == old.name) it.copy(who = name) else it }) }
+                }
+                board = emptyList()
+                render()
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
     }
 
     /** Adds a clip ([old] == null) or changes one; a new link or time drops the downloaded file. */
@@ -1393,7 +1514,7 @@ class StudioActivity : LumenBase() {
         val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) readyIds().let { ids -> sc.scenes.indices.filter { sc.scenes[it].clip in ids }.toSet() }
         else null
         return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, StudioPrefs.overlay,
-            StudioPrefs.zooms, StudioPrefs.transitions, clipScenes)
+            StudioPrefs.zooms, StudioPrefs.transitions, clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null)
     }
 
     private fun detach(v: View): View {
@@ -1407,10 +1528,11 @@ class StudioActivity : LumenBase() {
         StudioTask.VIDEO -> StudioAspect.LANDSCAPE
         StudioTask.VOICE -> StudioAspect.of(StudioPrefs.aspect)
         StudioTask.CUTS -> StudioAspect.of(StudioPrefs.cutsAspect)
+        StudioTask.CARTOON -> StudioAspect.of(StudioPrefs.cartoonAspect)
     }
 
     /** A long YouTube script (2–10 minutes with chapters) rather than a Shorts one. */
-    private fun longScript() = task == StudioTask.VIDEO || task == StudioTask.CUTS && aspect() != StudioAspect.PORTRAIT
+    private fun longScript() = task == StudioTask.VIDEO || (task == StudioTask.CUTS || task == StudioTask.CARTOON) && aspect() != StudioAspect.PORTRAIT
 
     /** Another task: its own script, take and analysis are loaded; nothing is deleted. */
     private fun switchTask(to: StudioTask) {
@@ -1425,7 +1547,7 @@ class StudioActivity : LumenBase() {
         player = null
         StudioPrefs.task = to.id
         if (to == StudioTask.VOICE && StudioPrefs.voiceMode !in listOf("file", "mic")) StudioPrefs.voiceMode = "file"
-        if (to == StudioTask.CUTS && StudioPrefs.voiceMode == "video") StudioPrefs.voiceMode = "edge"
+        if ((to == StudioTask.CUTS || to == StudioTask.CARTOON) && StudioPrefs.voiceMode == "video") StudioPrefs.voiceMode = "edge"
         clearState()
         loadCuts()
         lastVideo = null
@@ -1463,7 +1585,9 @@ class StudioActivity : LumenBase() {
             "Строка с «|» — плитки: 🔍 исследование | 📚 контекст | ⚙️ процесс\n\n" +
             "Пример:\n[icons] Чем отличается инженерная разработка от вайб-кодинга?\n🔍 исследование | 📚 контекст | ✅ проверка\n\n" +
             "[step: Работа с контекстом] Второй этап — собрать документацию.\n\n" +
-            "[stat: 80%] Столько времени уходит на подготовку.\n⏱ подготовка",
+            "[stat: 80%] Столько времени уходит на подготовку.\n⏱ подготовка\n\n" +
+            "Мультик: реплику персонажа начните с @Имя: или @Имя(эмоция): — эмоции calm, happy, explain, think, surprise, sad, angry.\n" +
+            "@Лиса(surprise): [big] Подожди, а почему небо синее?\n💡 загадка",
         "Each scene is its own paragraph (a blank line between scenes).\n\n" +
             "The first line may start with the kind of visual:\n" +
             "[icons] emoji tiles\n[list] checklist\n[flow] process steps\n[cycle] a cycle\n" +
@@ -1472,7 +1596,9 @@ class StudioActivity : LumenBase() {
             "A line with \"|\" lists tiles: 🔍 research | 📚 context | ⚙️ process\n\n" +
             "Example:\n[icons] How is engineering different from vibe coding?\n🔍 research | 📚 context | ✅ checks\n\n" +
             "[step: Context] Stage two: collect the docs.\n\n" +
-            "[stat: 80%] That much time goes to preparation.\n⏱ preparation"
+            "[stat: 80%] That much time goes to preparation.\n⏱ preparation\n\n" +
+            "Cartoon: start a character's line with @Name: or @Name(mood): — moods calm, happy, explain, think, surprise, sad, angry.\n" +
+            "@Foxy(surprise): [big] Wait, why is the sky blue?\n💡 riddle"
     ))
 
     // ---------- step 1: AI script ----------
@@ -1493,11 +1619,15 @@ class StudioActivity : LumenBase() {
             val sec = if (long) StudioPrefs.videoSeconds else StudioPrefs.seconds
             val extra = if (scriptEdit.text.isNotBlank() && topicEdit.text.isNotBlank())
                 "Учти черновик автора и сохрани его мысли:\n" + scriptEdit.text.toString().take(3000) else ""
+            val cartoon = task == StudioTask.CARTOON
+            val cast = StudioPrefs.cast
             Lumen.async({
-                aiScript(if (long) "studio_script_video" else "studio_script", mapOf(
+                val sc = aiScript(if (cartoon) "studio_script_cartoon" else if (long) "studio_script_video" else "studio_script", mapOf(
                     "topic" to topic, "seconds" to sec.toString(), "words" to Studio.wordsFor(sec).toString(),
-                    "lang" to aiLang(), "extra" to extra, "visuals" to STUDIO_VISUALS
+                    "lang" to aiLang(), "extra" to extra, "visuals" to STUDIO_VISUALS, "cast" to StudioToon.promptCast(cast)
                 ), if (long) 14_000 else 6000)
+                // names as in the cast, so "@Name" finds its character
+                if (cartoon) sc.copy(scenes = sc.scenes.map { s -> s.copy(who = cast.getOrNull(StudioToon.find(cast, s.who))?.name ?: "") }) else sc
             }, { e -> busy = ""; render(); err(e) }) { sc ->
                 busy = ""
                 scriptEdit.setText(Studio.toText(sc))
@@ -1764,6 +1894,8 @@ class StudioActivity : LumenBase() {
         val voice = StudioPrefs.voice.takeIf { v -> voices.any { it.shortName == v } && v.startsWith(lang(), true) }
             ?: EdgeTts.pickVoice(voices, lang(), TtsPrefs.voiceFor(lang()))?.shortName ?: TtsPrefs.voice
         val o = TtsOptions(voice, StudioPrefs.rate)
+        val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
+        val castVoices = StudioToon.pickVoices(cast, voices, lang(), voice)
         val tmp = File(cacheDir, "studio_tts").apply { deleteRecursively(); mkdirs() }
         val all = mutableListOf<SWord>()
         val rs = mutableListOf<IntRange>()
@@ -1773,7 +1905,9 @@ class StudioActivity : LumenBase() {
         sc.scenes.forEachIndexed { i, scene ->
             if (cancel) throw java.util.concurrent.CancellationException()
             report("analyse", t("Озвучка сцен $i/$n", "Voicing scenes $i/$n"))
-            val pieces = EdgeTts.synthesizeWords(scene.say, o) { cancel } ?: throw java.util.concurrent.CancellationException()
+            val ci = StudioToon.find(cast, scene.who)
+            val so = if (ci >= 0) TtsOptions(castVoices[ci], StudioPrefs.rate, StudioToon.pitch(cast[ci].look)) else o
+            val pieces = EdgeTts.synthesizeWords(scene.say, so) { cancel } ?: throw java.util.concurrent.CancellationException()
             val first = all.size
             pieces.forEachIndexed { k, (mp3, ws) ->
                 val f = File(tmp, "s${i}_$k.mp3").apply { writeBytes(mp3) }
@@ -1814,7 +1948,11 @@ class StudioActivity : LumenBase() {
             StudioTask.VOICE -> t("анимированного ролика по готовой озвучке (кадр ", "an animated video for a ready voice-over (frame ") + aspect().label + ")"
             StudioTask.CUTS -> t("ролика-нарезки: голос за кадром поверх вставок из чужих видео и графики (кадр ",
                 "a cut video: a voice-over over pieces of other videos and graphics (frame ") + aspect().label + ")"
+            StudioTask.CARTOON -> t("познавательного мультика: персонажи говорят по очереди, графика рядом с ними (кадр ",
+                "an informational cartoon: characters talk in turns, graphics next to them (frame ") + aspect().label + ")"
         }
+        val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
+        val roles = script?.let { sc -> ranges?.let { StudioToon.wordRoles(sc.scenes, it, ws.size, cast) } }
         val cutsNow = if (task == StudioTask.CUTS) readyCuts() else emptyList()
         val vars = mapOf(
             "format" to format,
@@ -1834,6 +1972,12 @@ class StudioActivity : LumenBase() {
                 if (ws.size > 600) 16_000 else 8000) { StudioDirector.parse(it, ws.size, cutsNow.map { c -> c.id }.toSet()) }
             val drop = if (allowDrop) StudioDirector.safeDrop(d, ws.size) else emptySet()
             var ap = StudioDirector.apply(d, ws, p0.ms, drop)
+            // cartoon: the speakers of the words come back to the new scenes, split where the speaker changes
+            if (cast.isNotEmpty() && roles != null) {
+                val kept = roles.filterIndexed { k, _ -> k !in drop }
+                val (ss, rr) = StudioToon.restore(ap.script.scenes, ap.ranges, kept, cast, ap.words)
+                ap = ap.copy(script = ap.script.copy(scenes = ss), ranges = rr)
+            }
             // the AI put no clip anywhere: spread them by words of their notes
             if (cutsNow.isNotEmpty() && ap.script.scenes.none { it.clip.isNotEmpty() }) {
                 ap = ap.copy(script = withClips(ap.script, StudioCuts.autoAssign(ap.script.scenes, cutsNow)))

@@ -58,7 +58,9 @@ data class SScene(
     /** B-roll: English search words for a stock photo, its [brollMode] ("full" or "card"), the downloaded [media] file and its [credit]. */
     val broll: String = "", val brollMode: String = "", val media: String = "", val credit: String = "",
     /** Id of the YouTube clip shown instead of the graphics (Cuts task, see [StudioCuts]); empty = none. */
-    val clip: String = ""
+    val clip: String = "",
+    /** Cartoon task: name of the character saying the line ("" = narrator) and its mood ([StudioToon.MOODS]). */
+    val who: String = "", val mood: String = ""
 )
 
 data class SScript(val title: String, val scenes: List<SScene>)
@@ -125,7 +127,8 @@ object Studio {
         return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase(),
             shapes, broll, if (mode == "card") "card" else if (broll.isNotEmpty() || o.optString("media").isNotEmpty()) "full" else "",
             o.optString("media").trim(), o.optString("credit").trim(),
-            o.optString("clip").trim().take(16))
+            o.optString("clip").trim().take(16),
+            StudioToon.cleanName(o.optString("who")), o.optString("mood").trim().lowercase().takeIf { it in StudioToon.MOODS } ?: "")
     }
 
     const val MAX_ITEMS = 6
@@ -146,6 +149,8 @@ object Studio {
             if (sc.media.isNotEmpty()) o.put("media", sc.media)
             if (sc.credit.isNotEmpty()) o.put("credit", sc.credit)
             if (sc.clip.isNotEmpty()) o.put("clip", sc.clip)
+            if (sc.who.isNotEmpty()) o.put("who", sc.who)
+            if (sc.mood.isNotEmpty()) o.put("mood", sc.mood)
             put(o)
         }
     }).toString()
@@ -191,6 +196,8 @@ object Studio {
     //   🔍 research | 📚 context | ⚙️ process
     // The first line may start with [kind] or [kind: title]; a line with "|" (or starting with an emoji) lists tiles.
 
+    /** "@Name(mood): line" — who says the line of a cartoon. */
+    private val speaker = Regex("""^@([\p{L}\p{N}_-]{1,20})\s*(?:\(([a-zA-Z]+)\))?\s*:\s*(.*)$""")
     private val head = Regex("""^\[([a-zA-Z]+)\s*(?::\s*([^\]]*))?]\s*(.*)$""")
 
     fun parseText(text: String): SScript {
@@ -205,11 +212,18 @@ object Studio {
             }
             var kind = "text"
             var sceneTitle = ""
+            var who = ""
+            var mood = ""
             val say = StringBuilder()
             val items = mutableListOf<SItem>()
             lines.forEachIndexed { i, raw ->
                 var line = raw
                 if (i == 0) {
+                    speaker.find(line)?.let { m ->
+                        who = StudioToon.cleanName(m.groupValues[1])
+                        mood = m.groupValues[2].lowercase().takeIf { it in StudioToon.MOODS } ?: ""
+                        line = m.groupValues[3].trim()
+                    }
                     head.find(line)?.let { m ->
                         val k = m.groupValues[1].lowercase()
                         if (k in KINDS) {
@@ -226,7 +240,7 @@ object Studio {
                     say.append(line)
                 }
             }
-            if (say.isNotBlank()) scenes += SScene(say.toString(), kind, sceneTitle, items.take(MAX_ITEMS))
+            if (say.isNotBlank()) scenes += SScene(say.toString(), kind, sceneTitle, items.take(MAX_ITEMS), who = who, mood = mood)
         }
         return SScript(title, scenes)
     }
@@ -235,6 +249,11 @@ object Studio {
         if (s.title.isNotBlank()) append("# ").append(s.title).append("\n\n")
         s.scenes.forEachIndexed { i, sc ->
             if (i > 0) append("\n\n")
+            if (sc.who.isNotEmpty()) {
+                append('@').append(sc.who)
+                if (sc.mood.isNotEmpty()) append('(').append(sc.mood).append(')')
+                append(": ")
+            }
             if (sc.kind != "text" || sc.title.isNotBlank()) {
                 append('[').append(sc.kind)
                 if (sc.title.isNotBlank()) append(": ").append(sc.title)
@@ -1015,6 +1034,21 @@ val STUDIO_PROMPTS = linkedMapOf(
             "{visuals}\n" +
             "Верни строго JSON: {\"title\":\"...\",\"scenes\":[{\"say\":\"текст для озвучки\",\"kind\":\"step\",\"title\":\"Глава 1\"," +
             "\"items\":[{\"icon\":\"🔍\",\"label\":\"исследование\",\"value\":\"\"}]}]}"
+        ),
+    "studio_script_cartoon" to (
+        "Ты сценарист познавательных мультфильмов-объяснялок: нарисованные персонажи разговаривают друг с другом, " +
+            "а рядом с ними появляются простые схемы из эмодзи, цифры и диаграммы.\n" +
+            "Персонажи: {cast}.\n" +
+            "Тема: \"{topic}\". Длительность около {seconds} секунд (примерно {words} слов). Язык: {lang}.\n{extra}\n" +
+            "Каждая сцена — одна реплика одного персонажа: who — имя точно из списка (пусто — голос рассказчика, редко, например в начале или в конце). " +
+            "Пиши живой диалог с характерами: один герой спрашивает, сомневается, ошибается или удивляется, другой объясняет на простых примерах из жизни; " +
+            "лёгкий юмор, короткие фразы, без лекций и канцелярита. Факты должны быть верными. " +
+            "Реплика 1-2 предложения (до 20 слов), персонажи чередуются.\n" +
+            "mood — эмоция реплики: calm, happy, explain (объясняет и показывает на схему), think (задумался), surprise, sad, angry.\n" +
+            "{visuals}\n" +
+            "Первая сцена — цепляющий вопрос или забавная ситуация, последняя — вывод одной фразой.\n" +
+            "Верни строго JSON: {\"title\":\"...\",\"scenes\":[{\"who\":\"Имя\",\"mood\":\"surprise\",\"say\":\"текст реплики\",\"kind\":\"big\",\"title\":\"\"," +
+            "\"items\":[{\"icon\":\"🔍\",\"label\":\"подпись\"}]}]}"
         ),
     "studio_direct" to (
         "Ты режиссёр монтажа {format}. Ниже расшифровка озвучки: каждое слово с номером [N], ⏸ — пауза в секундах.\n" +

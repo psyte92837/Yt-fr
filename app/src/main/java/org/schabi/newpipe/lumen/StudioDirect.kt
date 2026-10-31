@@ -16,10 +16,11 @@ import kotlin.math.sin
 /**
  * What Lumen Studio makes. SHORTS: vertical 9:16 from a script; VIDEO: horizontal 16:9 YouTube video from a script;
  * VOICE: an existing voice-over (audio file or microphone) turned into an animated video of any shape;
- * CUTS: a voice-over over pieces of YouTube videos (B-roll, meme reactions) and graphics, see [StudioCuts].
+ * CUTS: a voice-over over pieces of YouTube videos (B-roll, meme reactions) and graphics, see [StudioCuts];
+ * CARTOON: an informational cartoon, characters drawn in code talk in their own voices next to the graphics, see [StudioToon].
  */
 enum class StudioTask(val id: String) {
-    SHORTS("shorts"), VIDEO("video"), VOICE("voice"), CUTS("cuts");
+    SHORTS("shorts"), VIDEO("video"), VOICE("voice"), CUTS("cuts"), CARTOON("cartoon");
 
     companion object {
         fun of(id: String): StudioTask = entries.firstOrNull { it.id == id } ?: SHORTS

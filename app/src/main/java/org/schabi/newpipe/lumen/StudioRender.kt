@@ -66,7 +66,9 @@ class StudioPlan(
     /** VIDEO style: inserts slide in instead of a plain fade. */
     val transitions: Boolean = true,
     /** Cuts task: scenes that show a YouTube clip; every other scene is a graphic insert. Null = not a cut montage. */
-    val clipScenes: Set<Int>? = null
+    val clipScenes: Set<Int>? = null,
+    /** Cartoon task: the characters on the stage (null = not a cartoon). */
+    val cast: List<SChar>? = null
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
@@ -97,14 +99,14 @@ class StudioPlan(
         fun build(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
-            clipScenes: Set<Int>? = null
+            clipScenes: Set<Int>? = null, cast: List<SChar>? = null
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
-            val single = style != StudioStyle.DARK
+            val single = style != StudioStyle.DARK && cast == null
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, clipScenes)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, clipScenes, cast?.takeIf { it.isNotEmpty() })
         }
     }
 }
@@ -416,7 +418,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         }
         c.drawColor(bg)
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), if (dark) glowDark else glowLight)
-        if (i < 0) return
+        if (plan.cast != null) stage(c)
+        if (i < 0) {
+            if (plan.cast != null) characters(c, i, tMs)
+            return
+        }
         c.save()
         val z = StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.07f)
         if (z != 1f) c.scale(z, z, w / 2f, h / 2f)
@@ -435,11 +441,102 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             bottomShade.alpha = 255
             palette(true)
         }
-        drawScene(c, i, tMs, full != null)
+        if (plan.cast != null) cartoonScene(c, i, tMs, full != null) else drawScene(c, i, tMs, full != null)
         shapes(c, i, tMs, a)
         pops(c, i, tMs, a)
         if (full != null) palette(plan.style == StudioStyle.DARK)
         c.restore()
+        if (plan.cast != null) characters(c, i, tMs)
+    }
+
+    // ---------- cartoon ----------
+
+    private val toonArt = StudioToonArt()
+    private val castN get() = plan.cast?.size ?: 0
+    /** Height of a character and the line its feet stand on. */
+    private val toonSize get() = if (wide) h * (if (castN >= 3) 0.40f else 0.46f) else h * (if (castN >= 3) 0.21f else 0.26f)
+    private val groundY get() = h * 0.965f
+
+    /** The floor the characters stand on. */
+    private fun stage(c: Canvas) {
+        val top = groundY - toonSize * 0.06f
+        fill.color = if (dark) 0xFF1C1F26.toInt() else 0xFFE2E7F0.toInt()
+        fill.alpha = 255
+        c.drawRect(0f, top, w.toFloat(), h.toFloat(), fill)
+        line.color = if (dark) 0xFF2C3039.toInt() else 0xFFD0D6E2.toInt()
+        line.alpha = 255
+        line.strokeWidth = max(2f, 0.5f * u)
+        c.drawLine(0f, top, w.toFloat(), top, line)
+    }
+
+    /** Captions and the visual of a cartoon scene, leaving the bottom (or the sides) to the characters. */
+    private fun cartoonScene(c: Canvas, i: Int, tMs: Long, onPhoto: Boolean) {
+        val st = plan.times[i]
+        val sc = plan.script.scenes[i]
+        val a = alphaAt(i, tMs)
+        if (a <= 0f) return
+        val local = tMs - st.startMs
+        val sceneMs = st.endMs - st.startMs
+        val card = if (onPhoto) null else photo(i)
+        val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big", "quote"))))
+        val vx = w / 2f
+        val vy = if (wide) h * 0.42f else h * 0.37f
+        if (wide) caption(c, i, tMs, a, if (textOnly) h * 0.30f else h * 0.78f, if (textOnly) 7f * u else 5.2f * u, w * (if (textOnly) 0.56f else 0.5f))
+        else caption(c, i, tMs, a, if (textOnly) h * 0.30f else h * 0.065f, if (textOnly) 7.4f * u else 5.6f * u)
+        if (textOnly) return
+        c.save()
+        val k = 0.8f
+        c.scale(k, k, vx, vy)
+        if (card != null) photoCard(c, card, i, vx, vy, local, sceneMs, a) else visual(c, sc, i, vx, vy, local, sceneMs, a)
+        c.restore()
+    }
+
+    /** All characters of the cast: the speaker of scene [i] talks, steps forward and gestures, the others listen. */
+    private fun characters(c: Canvas, i: Int, tMs: Long) {
+        val cast = plan.cast ?: return
+        val xs = StudioToon.slots(cast.size, wide).map { it * w }
+        val sc = plan.script.scenes.getOrNull(i)
+        val st = plan.times.getOrNull(i)
+        val who = sc?.let { StudioToon.find(cast, it.who) } ?: -1
+        val prev = plan.script.scenes.getOrNull(i - 1)?.let { StudioToon.find(cast, it.who) } ?: -1
+        val size = toonSize
+        cast.forEachIndexed { k, ch ->
+            val x = xs[k]
+            val side = if (x <= w / 2f) 1f else -1f
+            val talking = k == who && st != null
+            val mouth = if (talking && st != null) StudioToon.mouth(plan.words, st.words, tMs) else 0f
+            val target = when {
+                who >= 0 && who != k -> if (xs[who] > x) 1f else -1f
+                who == k -> side * 0.4f
+                else -> side * 0.6f
+            }
+            val since = if (st != null) Studio.appear(tMs, st.startMs, 260) else 1f
+            val grow = when {
+                talking -> 1f + 0.06f * since
+                k == prev && who != k -> 1.06f - 0.06f * since
+                else -> 1f
+            }
+            val enter = StudioMotion.at(tMs, k * 140L, 620) { StudioMotion.backOut(it, 1.3f) }
+            val y = groundY + (1f - enter) * size * 0.9f
+            if (talking) {
+                fill.color = accent
+                fill.alpha = (60 * since).toInt()
+                c.drawOval(RectF(x - size * 0.42f, groundY - size * 0.06f, x + size * 0.42f, groundY + size * 0.05f), fill)
+            }
+            val pose = ToonPose(
+                mouth = mouth, blink = StudioToon.blink(tMs, k * 7 + 3),
+                mood = if (talking) StudioToon.mood(sc?.mood ?: "") else "calm",
+                talking = talking, look = target, side = side, tMs = tMs, seed = k * 3 + 1, accent = accent
+            )
+            toonArt.draw(c, ch, x, y, size * grow, pose, StudioMotion.clamp(enter * 2f))
+            // name tag under the speaker
+            if (talking && since > 0f) {
+                labelP.textSize = (if (wide) 3.2f else 3.4f) * u
+                labelP.color = ink
+                labelP.alpha = (220 * since).toInt()
+                c.drawText(ch.name.replace('_', ' '), x, min(h - 0.6f * u, groundY + labelP.textSize * 1.05f), labelP)
+            }
+        }
     }
 
     /** Entry of a scene set by the AI director: slide, whip (fast push from the side) or zoom; fade is the default. */
@@ -609,14 +706,14 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     // ---------- captions ----------
 
     /** Word group with each word blurring in when it is spoken (DARK style). */
-    private fun caption(c: Canvas, scene: Int, tMs: Long, a: Float, top: Float, size: Float) {
+    private fun caption(c: Canvas, scene: Int, tMs: Long, a: Float, top: Float, size: Float, maxW: Float = w * 0.84f) {
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 90 <= tMs } ?: return
         textP.textSize = size
         val pos = layouts.getOrPut(g) {
             val ws = g.map { textP.measureText(plan.words[it].text) }
             val space = textP.measureText(" ")
-            val lines = Studio.lines(ws, space, w * 0.84f)
+            val lines = Studio.lines(ws, space, maxW)
             val out = mutableListOf<Pair<Int, Pair<Float, Float>>>()
             lines.forEachIndexed { li, r ->
                 val lineW = r.sumOf { ws[it].toDouble() }.toFloat() + space * (r.count() - 1)

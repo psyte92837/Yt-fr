@@ -250,7 +250,7 @@
 - `Services.kt` (30): .runOnce():384, Services.kt:1, .builder():49, .onStartCommand():126, .channels():35, .run():231
 - `SettingsActivity.kt` (20): .updates():590, SettingsActivity:16, .render():54, .logs():518, .backup():404, .sendRules():260
 - `Store.kt` (26): .project():50, .videos():73, Store:21, .save():55, .writeFile():128, .readFile():123
-- `StudioActivity.kt` (122): StudioActivity:184, .render():376, .videoCard():850, .directBy():2451, .analyse():2189, .direct():2515
+- `StudioActivity.kt` (122): StudioActivity:184, .render():376, .videoCard():850, .directBy():2454, .analyse():2189, .direct():2518
 - `StudioAssist.kt` (11): .parse():54, .summary():66, StudioAssist.kt:1, StudioAssist:22, .castRule():49, .presets():23
 - `StudioAuto.kt` (40): .scene():122, .split():83, StudioCompact:289, .row():335, .direct():245, StudioAuto.kt:1
 - `StudioCartoon.kt` (54): SChar:32, StudioToon:63, StudioToonArt:403, .drawParts():446, StudioCartoon.kt:1, ToonPose:45

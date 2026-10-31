@@ -1424,7 +1424,27 @@ object StudioVideo {
             val u = ByteArray(w * h / 4)
             val v = ByteArray(w * h / 4)
             val size = w * h * 3 / 2
-            for (f in 0 until frames) {
+            /** Hands one ready frame (YUV planes) to the encoder. */
+            fun encode(f: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
+                val pts = Studio.frameTimeUs(f, fps)
+                var idx: Int
+                while (true) {
+                    idx = enc.dequeueInputBuffer(TIMEOUT)
+                    if (idx >= 0) break
+                    drain(false)
+                    if (cancelled()) throw CancellationException()
+                }
+                val img = enc.getInputImage(idx)
+                if (img != null) writeImage(img, w, h, y, u, v) else writeNv12(enc.getInputBuffer(idx)!!, w, h, y, u, v)
+                enc.queueInputBuffer(idx, 0, size, pts, 0)
+                drain(false)
+                if (f % 15 == 0 || f == frames - 1) progress(t("Кадры ${f + 1}/$frames", "Frames ${f + 1}/$frames"))
+            }
+            val workers = if (video == null) Studio.frameWorkers(Runtime.getRuntime().availableProcessors(), w, h, frames) else 1
+            if (workers > 1) {
+                // graphics only (animation, Shorts…): frames are drawn on several cores while this thread encodes them in order
+                FramePipeline.run(plan, w, h, fps, frames, workers, cancelled, ::encode)
+            } else for (f in 0 until frames) {
                 if (cancelled()) throw CancellationException()
                 val pts = Studio.frameTimeUs(f, fps)
                 if (video == null && plan.style == StudioStyle.VIDEO) canvas.drawColor(0xFF000000.toInt())
@@ -1439,18 +1459,7 @@ object StudioVideo {
                 painter.draw(canvas, pts / 1000)
                 bmp.getPixels(argb, 0, w, 0, 0, w, h)
                 Studio.argbToYuv420(argb, w, h, y, u, v)
-                var idx: Int
-                while (true) {
-                    idx = enc.dequeueInputBuffer(TIMEOUT)
-                    if (idx >= 0) break
-                    drain(false)
-                    if (cancelled()) throw CancellationException()
-                }
-                val img = enc.getInputImage(idx)
-                if (img != null) writeImage(img, w, h, y, u, v) else writeNv12(enc.getInputBuffer(idx)!!, w, h, y, u, v)
-                enc.queueInputBuffer(idx, 0, size, pts, 0)
-                drain(false)
-                if (f % 15 == 0 || f == frames - 1) progress(t("Кадры ${f + 1}/$frames", "Frames ${f + 1}/$frames"))
+                encode(f, y, u, v)
             }
             while (true) {
                 val idx = enc.dequeueInputBuffer(TIMEOUT)
@@ -2010,5 +2019,70 @@ object StudioRecognizer {
             main.postDelayed({ finish(null) }, 15_000 + piece.ms * 2)
         }
         next(0)
+    }
+}
+
+/**
+ * Draws the frames of a graphics-only video on [workers] threads (each with its own painter; frame f goes to
+ * worker f % workers) and gives them to [encode] in order on the calling thread. Every worker keeps two
+ * YUV buffers, so memory stays bounded and the encoder never waits long.
+ */
+object FramePipeline {
+    private class Yuv(val y: ByteArray, val u: ByteArray, val v: ByteArray)
+
+    fun run(
+        plan: StudioPlan, w: Int, h: Int, fps: Int, frames: Int, workers: Int, cancelled: () -> Boolean,
+        encode: (Int, ByteArray, ByteArray, ByteArray) -> Unit
+    ) {
+        val stop = java.util.concurrent.atomic.AtomicBoolean(false)
+        val ready = Array(workers) { java.util.concurrent.ArrayBlockingQueue<Any>(3) }
+        val free = Array(workers) {
+            java.util.concurrent.ArrayBlockingQueue<Yuv>(2).apply { repeat(2) { add(Yuv(ByteArray(w * h), ByteArray(w * h / 4), ByteArray(w * h / 4))) } }
+        }
+        val ms = java.util.concurrent.TimeUnit.MILLISECONDS
+        val threads = (0 until workers).map { k ->
+            Thread {
+                try {
+                    val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                    val canvas = Canvas(bmp)
+                    val painter = StudioPainter(w, h, plan)
+                    val argb = IntArray(w * h)
+                    var f = k
+                    while (f < frames && !stop.get()) {
+                        val pts = Studio.frameTimeUs(f, fps)
+                        if (plan.style == StudioStyle.VIDEO) canvas.drawColor(0xFF000000.toInt())
+                        painter.draw(canvas, pts / 1000)
+                        bmp.getPixels(argb, 0, w, 0, 0, w, h)
+                        var buf: Yuv? = null
+                        while (buf == null && !stop.get()) buf = free[k].poll(200, ms)
+                        if (buf == null) break
+                        Studio.argbToYuv420(argb, w, h, buf.y, buf.u, buf.v)
+                        while (!stop.get() && !ready[k].offer(buf, 200, ms)) Unit
+                        f += workers
+                    }
+                    bmp.recycle()
+                } catch (e: Throwable) {
+                    while (!stop.get() && !ready[k].offer(e, 200, ms)) Unit
+                }
+            }.apply { name = "studio-frames-$k"; isDaemon = true; start() }
+        }
+        try {
+            for (f in 0 until frames) {
+                val k = f % workers
+                var item: Any? = null
+                while (item == null) {
+                    if (cancelled()) throw CancellationException()
+                    item = ready[k].poll(200, ms)
+                    if (item == null && !threads[k].isAlive && ready[k].isEmpty()) error("frame worker stopped")
+                }
+                if (item is Throwable) throw item
+                val buf = item as Yuv
+                encode(f, buf.y, buf.u, buf.v)
+                free[k].offer(buf)
+            }
+        } finally {
+            stop.set(true)
+            threads.forEach { runCatching { it.join(2000) } }
+        }
     }
 }

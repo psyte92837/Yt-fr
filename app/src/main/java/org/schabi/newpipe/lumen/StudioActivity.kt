@@ -941,12 +941,14 @@ class StudioActivity : LumenBase() {
         val bg = if (plan.style == StudioStyle.VIDEO) bgSpec(plan) else null
         job("board", {
             val n = plan.times.size
-            plan.times.mapIndexed { i, st ->
+            val (bw, bh) = aspect().size(144)
+            val ready = java.util.concurrent.atomic.AtomicInteger(0)
+            Par.mapAll(plan.times, Studio.cpuWorkers()) { _, st ->
                 if (cancel) throw java.util.concurrent.CancellationException()
-                report("board", t("Раскадровка $i/$n", "Storyboard $i/$n"))
                 val at = (st.startMs + minOf(900L, (st.endMs - st.startMs) / 2)).coerceAtMost(plan.totalMs)
-                val (bw, bh) = aspect().size(144)
-                at to StudioVideo.preview(plan, at, bw, bh, bg)
+                val frame = StudioVideo.preview(plan, at, bw, bh, bg)
+                report("board", t("Раскадровка ${ready.incrementAndGet()}/$n", "Storyboard ${ready.get()}/$n"))
+                at to frame
             }
         }, { e ->
             busy = ""
@@ -1503,9 +1505,10 @@ class StudioActivity : LumenBase() {
         val dirNow = cutsDir
         val maxH = StudioPrefs.quality
         job("cuts", {
-            val done = HashMap<String, SClip>()
-            val errors = mutableListOf<String>()
-            todo.forEachIndexed { i, cl ->
+            val done = java.util.concurrent.ConcurrentHashMap<String, SClip>()
+            val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
+            // two clips at a time: YouTube throttles more parallel downloads
+            Par.mapAll(todo, 2) { i, cl ->
                 if (cancel) throw java.util.concurrent.CancellationException()
                 report("cuts", t("Клип ${i + 1}/${todo.size}", "Clip ${i + 1}/${todo.size}"))
                 try {
@@ -1516,8 +1519,9 @@ class StudioActivity : LumenBase() {
                     L.w("studio", "clip ${cl.id}: ${e.message}")
                     errors += "${cl.id}: ${e.message ?: e.javaClass.simpleName}"
                 }
+                i
             }
-            done to errors
+            HashMap(done) to errors.toList()
         }, { e ->
             busy = ""
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -2108,25 +2112,42 @@ class StudioActivity : LumenBase() {
         var audio = ShortArray(0)
         var rate = 24_000
         val n = sc.scenes.size
-        sc.scenes.forEachIndexed { i, scene ->
+        // scenes are voiced and decoded at the same time (each is its own connection), then joined in order
+        val ready = java.util.concurrent.atomic.AtomicInteger(0)
+        report("analyse", t("Озвучка сцен 0/$n", "Voicing scenes 0/$n"))
+        val voiced = Par.mapAll(sc.scenes, EdgeTts.WORKERS) { i, scene ->
             if (cancel) throw java.util.concurrent.CancellationException()
-            report("analyse", t("Озвучка сцен $i/$n", "Voicing scenes $i/$n"))
             val ci = StudioToon.find(cast, scene.who)
             val so = if (ci >= 0) TtsOptions(castVoices[ci], StudioPrefs.rate, StudioToon.pitch(cast[ci].look)) else o
             val pieces = EdgeTts.synthesizeWords(scene.say, so) { cancel } ?: throw java.util.concurrent.CancellationException()
-            val first = all.size
-            pieces.forEachIndexed { k, (mp3, ws) ->
+            val out = pieces.mapIndexed { k, (mp3, ws) ->
                 val f = File(tmp, "s${i}_$k.mp3").apply { writeBytes(mp3) }
-                val p = StudioAudio.decode(f)
-                val data = if (audio.isEmpty() || p.rate == rate) p.data else Studio.resample(p.data, p.rate, rate)
-                if (audio.isEmpty()) rate = p.rate
-                val shift = Studio.durationMs(audio.size, rate)
+                StudioAudio.decode(f).also { f.delete() } to ws
+            }
+            report("analyse", t("Озвучка сцен ${ready.incrementAndGet()}/$n", "Voicing scenes ${ready.get()}/$n"))
+            out
+        }
+        if (cancel) throw java.util.concurrent.CancellationException()
+        report("analyse", t("Сборка дорожки…", "Joining the track…"))
+        // pieces are joined once at the end: no copying of the growing track for every scene
+        val chunks = mutableListOf<ShortArray>()
+        var len = 0
+        sc.scenes.forEachIndexed { i, scene ->
+            val first = all.size
+            voiced[i].forEach { (p, ws) ->
+                val data = if (chunks.isEmpty() || p.rate == rate) p.data else Studio.resample(p.data, p.rate, rate)
+                if (chunks.isEmpty()) rate = p.rate
+                val shift = Studio.durationMs(len, rate)
                 all += Studio.dress(ws, Studio.tokens(scene.say)).map { it.copy(startMs = it.startMs + shift, endMs = it.endMs + shift) }
-                audio += data
+                chunks += data
+                len += data.size
             }
             rs += first until all.size
-            audio += Studio.silence(if (i < n - 1) 180 else 400, rate)
+            val gap = Studio.silence(if (i < n - 1) 180 else 400, rate)
+            chunks += gap
+            len += gap.size
         }
+        audio = Studio.concat(chunks)
         report("analyse", t("Озвучка сцен $n/$n", "Voicing scenes $n/$n"))
         tmp.deleteRecursively()
         if (all.isEmpty()) error(t("Сервис не вернул разметку слов. Попробуйте другой голос.", "The service returned no word timings. Try another voice."))
@@ -2226,10 +2247,11 @@ class StudioActivity : LumenBase() {
         cancel = false
         render()
         job("broll", {
-            val found = HashMap<Int, Pair<String, String>>()
-            need.forEachIndexed { k, i ->
+            val found = java.util.concurrent.ConcurrentHashMap<Int, Pair<String, String>>()
+            val ready = java.util.concurrent.atomic.AtomicInteger(0)
+            report("broll", t("Фото 0/${need.size}", "Photos 0/${need.size}"))
+            Par.mapAll(need, 3) { _, i ->
                 if (cancel) throw java.util.concurrent.CancellationException()
-                report("broll", t("Фото $k/${need.size}", "Photos $k/${need.size}"))
                 val f = File(bdir, "b_${System.currentTimeMillis()}_$i.jpg")
                 val hit = try {
                     StudioBroll.fetch(sc0.scenes[i].broll, asp, true, f, maxSide) { cancel }
@@ -2240,8 +2262,10 @@ class StudioActivity : LumenBase() {
                     null
                 }
                 if (hit != null) found[i] = f.absolutePath to StudioBrollCatalog.credit(hit)
+                report("broll", t("Фото ${ready.incrementAndGet()}/${need.size}", "Photos ${ready.get()}/${need.size}"))
+                i
             }
-            found
+            HashMap(found)
         }, { e ->
             busy = ""
             render()

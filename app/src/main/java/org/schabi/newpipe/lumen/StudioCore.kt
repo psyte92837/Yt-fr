@@ -79,6 +79,30 @@ data class VoiceStats(val totalMs: Long, val speechMs: Long, val pauses: Int, va
 }
 
 object Studio {
+    /** Threads for CPU work (frames, decoding): the cores, at most 4. */
+    fun cpuWorkers(): Int = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
+
+    /**
+     * Threads that draw video frames next to the encoder: one core stays for encoding; big frames use
+     * fewer threads (each keeps a bitmap and buffers); short or tiny jobs stay on one thread.
+     */
+    fun frameWorkers(cores: Int, w: Int, h: Int, frames: Int): Int {
+        if (frames < 60) return 1
+        val byCores = (cores - 1).coerceIn(1, 3)
+        return if (w.toLong() * h > 1280L * 720) minOf(byCores, 2) else byCores
+    }
+
+    /** Joins [parts] into one array with a single copy. */
+    fun concat(parts: List<ShortArray>): ShortArray {
+        val out = ShortArray(parts.sumOf { it.size })
+        var at = 0
+        for (p in parts) {
+            System.arraycopy(p, 0, out, at, p.size)
+            at += p.size
+        }
+        return out
+    }
+
     /** Visual layouts a scene can use. */
     val KINDS = listOf("text", "step", "icons", "list", "flow", "cycle", "big", "stat", "quote", "chart", "compare")
 

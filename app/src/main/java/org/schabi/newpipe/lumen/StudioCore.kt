@@ -21,14 +21,24 @@ import kotlin.math.sqrt
 /** A spoken word and where it sounds in the audio. */
 data class SWord(val text: String, val startMs: Long, val endMs: Long)
 
-/** A tile of a scene visual: an emoji and a short label. */
-data class SItem(val icon: String, val label: String)
+/** A tile of a scene visual: an emoji and a short label; [value] is the number of a "chart" bar. */
+data class SItem(val icon: String, val label: String, val value: String = "")
+
+/**
+ * A moment of a scene tied to its word [at] (0 = the first word of the scene). [type]: "zoom" (camera punch-in),
+ * "pop" (sticker with [text] and [icon]) or "sfx" (sound effect named [text]).
+ */
+data class SCue(val type: String, val at: Int, val text: String = "", val icon: String = "")
 
 /**
  * One screen of the video. [say] is spoken (and shown as captions); [kind] picks the visual
  * (see [Studio.KINDS]); [title] is used by "step" and "stat"; [items] by the tile layouts.
+ * Set by the AI director: [emph] words highlighted in the captions, [cues] and the entry [transition].
  */
-data class SScene(val say: String, val kind: String = "text", val title: String = "", val items: List<SItem> = emptyList())
+data class SScene(
+    val say: String, val kind: String = "text", val title: String = "", val items: List<SItem> = emptyList(),
+    val emph: List<String> = emptyList(), val cues: List<SCue> = emptyList(), val transition: String = ""
+)
 
 data class SScript(val title: String, val scenes: List<SScene>)
 
@@ -47,7 +57,7 @@ data class VoiceStats(val totalMs: Long, val speechMs: Long, val pauses: Int, va
 
 object Studio {
     /** Visual layouts a scene can use. */
-    val KINDS = listOf("text", "step", "icons", "list", "flow", "cycle", "big", "stat")
+    val KINDS = listOf("text", "step", "icons", "list", "flow", "cycle", "big", "stat", "quote", "chart", "compare")
 
     // ---------- script: JSON from AI ----------
 
@@ -63,7 +73,7 @@ object Studio {
         return SScript(o.optString("title").trim(), scenes)
     }
 
-    private fun sceneOf(o: JSONObject): SScene? {
+    fun sceneOf(o: JSONObject): SScene? {
         val say = o.optString("say").ifBlank { o.optString("text") }.trim()
         if (say.isEmpty()) return null
         val kind = o.optString("kind").trim().lowercase().takeIf { it in KINDS } ?: "text"
@@ -71,22 +81,38 @@ object Studio {
             (0 until a.length()).mapNotNull { j ->
                 val it = a.opt(j)
                 when (it) {
-                    is JSONObject -> SItem(it.optString("icon").trim(), it.optString("label").trim())
+                    is JSONObject -> SItem(it.optString("icon").trim(), it.optString("label").trim(), it.optString("value").trim())
                     is String -> itemOf(it)
                     else -> null
                 }?.takeIf { s -> s.icon.isNotEmpty() || s.label.isNotEmpty() }
             }
         } ?: emptyList()
-        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS))
+        val emph = o.optJSONArray("emph")?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() && it.length <= 40 } }
+            ?.take(3) ?: emptyList()
+        val cues = o.optJSONArray("cues")?.let { a ->
+            (0 until a.length()).mapNotNull { j ->
+                val c = a.optJSONObject(j) ?: return@mapNotNull null
+                val type = c.optString("type").ifBlank { c.optString("do") }.trim().lowercase()
+                if (type !in listOf("zoom", "pop", "sfx")) return@mapNotNull null
+                SCue(type, c.optInt("at", 0).coerceAtLeast(0), c.optString("text").ifBlank { c.optString("name") }.trim(), c.optString("icon").trim())
+            }
+        } ?: emptyList()
+        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase())
     }
 
     const val MAX_ITEMS = 6
 
     fun toJson(s: SScript): String = JSONObject().put("title", s.title).put("scenes", JSONArray().apply {
         s.scenes.forEach { sc ->
-            put(JSONObject().put("say", sc.say).put("kind", sc.kind).put("title", sc.title).put("items", JSONArray().apply {
-                sc.items.forEach { put(JSONObject().put("icon", it.icon).put("label", it.label)) }
-            }))
+            val o = JSONObject().put("say", sc.say).put("kind", sc.kind).put("title", sc.title).put("items", JSONArray().apply {
+                sc.items.forEach { put(JSONObject().put("icon", it.icon).put("label", it.label).apply { if (it.value.isNotEmpty()) put("value", it.value) }) }
+            })
+            if (sc.emph.isNotEmpty()) o.put("emph", JSONArray(sc.emph))
+            if (sc.cues.isNotEmpty()) o.put("cues", JSONArray().apply {
+                sc.cues.forEach { put(JSONObject().put("type", it.type).put("at", it.at).put("text", it.text).put("icon", it.icon)) }
+            })
+            if (sc.transition.isNotEmpty()) o.put("transition", sc.transition)
+            put(o)
         }
     }).toString()
 
@@ -181,14 +207,21 @@ object Studio {
                 append("] ")
             }
             append(sc.say)
-            if (sc.items.isNotEmpty()) append('\n').append(sc.items.joinToString(" | ") { (it.icon + " " + it.label).trim() })
+            if (sc.items.isNotEmpty()) append('\n').append(sc.items.joinToString(" | ") {
+                (it.icon + " " + it.label).trim() + if (it.value.isNotEmpty()) " = " + it.value else ""
+            })
         }
     }
 
     private fun isItemLine(line: String) = line.contains('|') || (line.isNotEmpty() && startsWithEmoji(line) && line.length <= 40)
 
-    /** "🔍 research" → icon + label; a plain word becomes a label without an icon. */
+    /** "🔍 research" → icon + label; a plain word becomes a label without an icon; "2024 = 55" sets the value of a chart bar. */
     fun itemOf(s: String): SItem {
+        val eq = s.lastIndexOf('=')
+        if (eq > 0) {
+            val v = s.substring(eq + 1).trim()
+            if (v.isNotEmpty() && v.length <= 12 && v.any { it.isDigit() }) return itemOf(s.substring(0, eq)).copy(value = v)
+        }
         val t = s.trim()
         if (t.isEmpty()) return SItem("", "")
         if (!startsWithEmoji(t)) return SItem("", t)
@@ -937,13 +970,37 @@ val STUDIO_PROMPTS = linkedMapOf(
             "Верни строго JSON: {\"title\":\"...\",\"scenes\":[{\"say\":\"текст для озвучки\",\"kind\":\"icons\",\"title\":\"\"," +
             "\"items\":[{\"icon\":\"🔍\",\"label\":\"исследование\"}]}]}"
         ),
-    "studio_scenes" to (
-        "Ниже расшифровка речи автора для короткого вертикального видео. Разбей её на сцены по порядку, " +
-            "НЕ меняя, не переставляя и не пропуская слова: поле say каждой сцены — точный фрагмент расшифровки, " +
-            "вместе они дают весь текст. В сцене 1-2 предложения.\n" +
+    "studio_script_video" to (
+        "Ты сценарист горизонтальных видео для YouTube (16:9) в стиле объясняющей моушн-графики: " +
+            "крупные слова и простые схемы из эмодзи-плиток, диаграммы и цитаты появляются под голос.\n" +
+            "Тема: \"{topic}\". Длительность около {seconds} секунд (примерно {words} слов). Язык: {lang}.\n{extra}\n" +
+            "Структура: хук в первых 10 секундах (вопрос, неожиданный факт или обещание результата), короткое вступление, " +
+            "3-6 глав (каждая начинается сценой step с названием главы), в главах факты, примеры и сравнения, " +
+            "в конце вывод и призыв подписаться или посмотреть следующее видео. Держи интерес: открытые вопросы, «а дальше — самое интересное».\n" +
+            "Разбей текст на сцены по 1-2 предложения (до 25 слов). Пиши разговорно, как живой автор, без канцелярита.\n" +
             "{visuals}\n" +
-            "Подписи плиток на языке {lang}.\n" +
-            "Верни строго JSON: {\"title\":\"короткое название\",\"scenes\":[{\"say\":\"...\",\"kind\":\"text\",\"title\":\"\",\"items\":[]}]}\n\n" +
+            "Верни строго JSON: {\"title\":\"...\",\"scenes\":[{\"say\":\"текст для озвучки\",\"kind\":\"step\",\"title\":\"Глава 1\"," +
+            "\"items\":[{\"icon\":\"🔍\",\"label\":\"исследование\",\"value\":\"\"}]}]}"
+        ),
+    "studio_direct" to (
+        "Ты режиссёр монтажа {format}. Ниже расшифровка озвучки: каждое слово с номером [N], ⏸ — пауза в секундах.\n" +
+            "Сделай план ролика, чтобы его было интересно смотреть до конца.\n" +
+            "1. Раздели ВСЮ речь на сцены по смыслу, по порядку, без пропусков: from и to — номера первого и последнего слова сцены. " +
+            "Сцена — 1-2 предложения, обычно 3-8 секунд{long}.\n" +
+            "2. {visuals}\n" +
+            "3. Режиссура сцены:\n" +
+            "emph — 1-2 ключевых слова сцены точно как в тексте: они подсветятся в субтитрах;\n" +
+            "transition — как сцена входит: fade (спокойно), slide (следующий пункт), zoom (акцент, раскрытие), whip (резкая смена темы), none (без перехода);\n" +
+            "cues — события на номере слова at: " +
+            "zoom — резкий наезд камеры на ударном слове (не чаще раза в 3-4 секунды); " +
+            "pop — всплывающая плашка: text до 3 слов и icon-эмодзи («ВАЖНО», «×3», «ОШИБКА №1»), не больше 1-2 на сцену; " +
+            "sfx — звук name: whoosh (смена темы), pop (появление), click (пункт списка), ding (вывод, верный ответ), boom (сильный акцент), riser (нарастание перед раскрытием; at — слово кульминации).\n" +
+            "Первая сцена — хук: сильный визуал, zoom или pop. Чередуй визуалы и переходы. Не перегружай: 0-3 события на сцену, тихие сцены тоже нужны.\n" +
+            "4. {drop}\n" +
+            "Подписи и плашки на языке {lang}.\n" +
+            "Верни строго JSON: {\"title\":\"короткое название\",\"drop\":[],\"scenes\":[{\"from\":0,\"to\":17,\"kind\":\"stat\",\"title\":\"80%\"," +
+            "\"items\":[{\"icon\":\"📉\",\"label\":\"досмотров\",\"value\":\"\"}],\"emph\":[\"80%\"],\"transition\":\"zoom\"," +
+            "\"cues\":[{\"at\":3,\"do\":\"zoom\"},{\"at\":9,\"do\":\"pop\",\"text\":\"ЗАПОМНИ\",\"icon\":\"⚠️\"},{\"at\":0,\"do\":\"sfx\",\"name\":\"whoosh\"}]}]}\n\n" +
             "Расшифровка:\n{data}"
         )
 )
@@ -957,5 +1014,8 @@ const val STUDIO_VISUALS = "Для каждой сцены выбери визу
     "flow — 3-5 шагов процесса по порядку; " +
     "cycle — 3-5 этапов повторяющегося цикла; " +
     "big — один крупный эмодзи и подпись; " +
-    "stat — крупное число или факт в title (например \"×3\" или \"80%\") и подпись в items[0].label. " +
+    "stat — крупное число или факт в title (например \"×3\" или \"80%\") и подпись в items[0].label; " +
+    "quote — цитата или главная мысль: в title фраза до 12 слов, в items[0].label источник (можно пусто), её выделит маркер; " +
+    "chart — столбчатая диаграмма из 2-6 столбцов: items с label (подпись) и value (число, например \"55\" или \"3,5\"); " +
+    "compare — сравнение «было/стало», «миф/факт», «плохо/хорошо»: ровно 2 items (icon + label до 5 слов), в title что сравниваем. " +
     "Чередуй визуалы, не ставь один и тот же больше двух раз подряд. Эмодзи подбирай по смыслу."

@@ -280,7 +280,8 @@ class StudioTest {
         assertEquals("Lumen_Studio_Вайб_кодинг_20261031.mp4", Studio.fileName("Вайб-кодинг!", "20261031"))
         assertEquals(144, Studio.wordsFor(60))
         assertNotNull(STUDIO_PROMPTS["studio_script"])
-        assertTrue(STUDIO_PROMPTS["studio_scenes"]!!.contains("{data}"))
+        assertTrue(STUDIO_PROMPTS["studio_direct"]!!.contains("{data}"))
+        assertNotNull(STUDIO_PROMPTS["studio_script_video"])
     }
 
     // ---------- montage: video frames ----------

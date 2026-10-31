@@ -171,17 +171,21 @@ object Help {
             ),
             listOf(t("Из любого приложения: выделите текст → Lumen, или «Поделиться» документом.", "From any app: select text → Lumen, or share a document."))),
         HelpTopic("studio", "Lumen Studio",
-            t("Короткие вертикальные ролики (Shorts, Reels, TikTok) в стиле анимированной инфографики: слова появляются под голос, рядом простые схемы из эмодзи-плиток. " +
-                "Ролик собирается на телефоне в MP4 1080×1920 или 720×1280.",
-                "Short vertical videos (Shorts, Reels, TikTok) in an animated infographic style: words appear with the voice, next to simple emoji-tile schemes. " +
-                    "The video is built on the phone as an MP4, 1080×1920 or 720×1280."),
+            t("Ролики в стиле анимированной инфографики: слова появляются под голос, рядом схемы из эмодзи-плиток, диаграммы, цитаты и сравнения. " +
+                "Три задачи вверху экрана: «Shorts» — вертикальный ролик 9:16 по сценарию; «Видео» — горизонтальный ролик для YouTube 16:9 на 2–10 минут; " +
+                "«Озвучка» — готовое аудио или запись голоса превращается в анимированный ролик 9:16, 16:9 или 1:1. Ролик собирается на телефоне в MP4 720p или 1080p.",
+                "Videos in an animated infographic style: words appear with the voice, next to emoji-tile schemes, charts, quotes and comparisons. " +
+                    "Three tasks at the top: \"Shorts\" is a vertical 9:16 video from a script; \"Video\" is a horizontal 16:9 YouTube video of 2–10 minutes; " +
+                    "\"Voice-over\" turns ready audio or a recording into an animated 9:16, 16:9 or 1:1 video. The video is built on the phone as an MP4, 720p or 1080p."),
             listOf(
                 t("1. Сценарий: напишите сами или нажмите «✨ Написать (AI)» по теме. Каждая сцена — абзац; первая строка может начинаться с [icons], [list], [flow], [cycle], [step: заголовок], [big], [stat: 80%]; строка с «|» — плитки «🔍 подпись».",
                     "1. Script: write it or tap \"✨ Write (AI)\" for a topic. Each scene is a paragraph; the first line may start with [icons], [list], [flow], [cycle], [step: title], [big], [stat: 80%]; a line with \"|\" lists tiles \"🔍 label\"."),
                 t("2. Голос: голос Microsoft (точные тайминги слов), свой микрофон, аудиофайл или видео. При записи можно включить суфлёр. «Видео» — снимите себя камерой или выберите ролик: звук станет озвучкой, картинка — фоном.",
                     "2. Voice: a Microsoft voice (exact word timing), your microphone, an audio file or a video. A teleprompter can be shown while recording. \"Video\": film yourself or pick a clip; its sound is the voice-over, its picture the background."),
-                t("3. Разбор: Lumen находит речь и паузы, считает темп, расставляет слова по времени. Без сценария запись распознаётся (Android 13+), а AI разбивает текст на сцены.",
-                    "3. Analysis: Lumen finds speech and pauses, measures the pace and times every word. Without a script the take is recognised (Android 13+) and AI splits the text into scenes."),
+                t("3. Разбор: Lumen находит речь и паузы, считает темп, расставляет слова по времени. Без сценария запись распознаётся (Android 13+).",
+                    "3. Analysis: Lumen finds speech and pauses, measures the pace and times every word. Without a script the take is recognised (Android 13+)."),
+                t("AI-режиссёр (сразу после разбора или кнопкой «🎬 AI-режиссура»): AI получает расшифровку с номерами слов и возвращает план — сцены и графику, подсветку ключевых слов, резкие зумы, всплывающие плашки, звуки (whoosh, pop, click, ding, boom, riser) и переходы (slide, zoom, whip). Для своей записи он же вырезает слова-паразиты и оговорки. Lumen проверяет план и собирает ролик по нему.",
+                    "AI director (right after the analysis or with \"🎬 AI direction\"): AI gets the numbered transcript and returns a plan: scenes and graphics, highlighted key words, punch-in zooms, pop-up stickers, sounds (whoosh, pop, click, ding, boom, riser) and transitions (slide, zoom, whip). For your own take it also cuts filler words and slips. Lumen checks the plan and builds the video from it."),
                 t("4. Ролик: выберите стиль (тёмный — группы слов; светлый — заголовок и одно крупное слово; монтаж — ваше видео со словом внизу и графикой вставками или карточками поверх), цвет, качество и фоновую музыку, посмотрите кадр в предпросмотре и нажмите «🎬 Создать ролик».",
                     "4. Video: pick a style (dark: word groups; light: headline and one big word; montage: your video with the spoken word below and graphics as inserts or cards on top), colour, quality and background music, check a frame in the preview and tap \"🎬 Make video\".")
             ),
@@ -192,7 +196,8 @@ object Help {
                 t("Музыка зацикливается на длину ролика, плавно начинается и затихает, а под голосом сама становится тише.", "Music loops to the video length, fades in and out and gets quieter under the voice."),
                 t("«🔎 Найти бесплатную» ищет музыку в официальных каталогах: Openverse (без ключа; ccMixter, Freesound, Wikimedia, Jamendo) и Freesound (бесплатный ключ). По умолчанию показываются только треки, разрешённые в монетизируемых роликах (CC0, CC BY, CC BY-SA). Для CC BY Студия готовит подпись автора — скопируйте её в описание ролика.",
                     "\"🔎 Find free music\" searches official catalogs: Openverse (no key; ccMixter, Freesound, Wikimedia, Jamendo) and Freesound (free key). By default only tracks allowed in monetised videos are shown (CC0, CC BY, CC BY-SA). For CC BY the Studio prepares the author credit; copy it into the video description."),
-                t("Монтаж с видео собирается дольше: кадры декодируются и кадрируются под 9:16.", "Montage takes longer: frames are decoded and cropped to 9:16."),
+                t("Монтаж с видео собирается дольше: кадры декодируются и кадрируются под формат ролика.", "Montage takes longer: frames are decoded and cropped to the frame of the video."),
+                t("Звуки эффектов синтезируются в самом приложении, без файлов и сети; их можно выключить в шаге 4.", "Sound effects are synthesised by the app itself, with no files or network; turn them off in step 4."),
                 t("Автомонтаж своего видео: «✂ Вырезать паузы» убирает тишину (джамп-каты), «Зумы» чередуют крупность и плавно наезжают камерой, «Переходы» вводят вставки слайдом. «🎞 Раскадровка» показывает кадр каждой сцены.",
                     "Auto-edit of your video: \"✂ Cut out pauses\" removes silence (jump cuts), \"Zooms\" alternate framing and push in, \"Transitions\" slide inserts in. \"🎞 Storyboard\" shows a frame of every scene."),
                 t("«Видео на фоне»: добавьте клипы под любую озвучку (голос Microsoft, микрофон, аудио) — они идут по очереди и повторяются по кругу на всю длину озвучки.",

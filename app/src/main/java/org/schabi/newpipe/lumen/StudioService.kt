@@ -34,7 +34,9 @@ object StudioJob {
         val background: StudioBg?,
         val music: File?,
         val musicVolume: Float,
-        val musicDuck: Boolean
+        val musicDuck: Boolean,
+        /** Sound effects of the AI director (whoosh, pop…). */
+        val sfx: Boolean = true
     )
 
     @Volatile var request: Request? = null
@@ -51,11 +53,18 @@ object StudioJob {
 
     fun changed() = Lumen.ui { listener?.invoke() }
 
-    /** Voice padded to the video length, with the background music mixed in when chosen. */
+    /** Voice padded to the video length, with sound effects and the background music mixed in when chosen. */
     fun finalAudio(r: Request, progress: (String) -> Unit): StudioAudio.Pcm {
         val voice = r.voice
         val samples = (r.plan.totalMs * voice.rate / 1000).toInt()
-        val base = Studio.fit(voice.data, samples)
+        var base = Studio.fit(voice.data, samples)
+        if (r.sfx) {
+            val events = StudioSfx.events(r.plan.script, r.plan.times, r.plan.words)
+            if (events.isNotEmpty()) {
+                progress(t("Звуки эффектов", "Sound effects"))
+                base = StudioSfx.mix(base, voice.rate, events)
+            }
+        }
         val mf = r.music?.takeIf { it.exists() } ?: return StudioAudio.Pcm(base, voice.rate)
         progress(t("Музыка: сведение", "Music: mixing"))
         val (m, rate) = Studio.readWav(mf.readBytes()) ?: return StudioAudio.Pcm(base, voice.rate)

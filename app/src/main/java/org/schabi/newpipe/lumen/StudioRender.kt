@@ -66,6 +66,21 @@ class StudioPlan(
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
+    /** Time of cue [c] of the scene at [st]: the start of its word. */
+    private fun cueMs(st: SceneTime, c: SCue): Long = words.getOrNull(st.words.first + c.at)?.takeIf { st.words.first + c.at in st.words }?.startMs ?: st.startMs
+
+    /** Words highlighted by the AI director (indices into [words]). */
+    val emph: Set<Int> = times.flatMap { st ->
+        val sc = script.scenes.getOrNull(st.scene)
+        if (sc == null || sc.emph.isEmpty()) emptyList() else StudioDirector.emphWords(words.map { it.text }, st.words, sc.emph).toList()
+    }.toSet()
+
+    /** Camera punch-ins of every scene, ms. */
+    val zoomMs: List<List<Long>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "zoom" }.map { cueMs(st, it) }.sorted() }
+
+    /** Stickers of every scene with their time. */
+    val pops: List<List<Pair<Long, SCue>>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "pop" }.map { cueMs(st, it) to it } }
+
     companion object {
         /** [ranges] = words of every scene when known exactly (Edge voice per scene); otherwise split by word counts. */
         fun build(
@@ -106,7 +121,9 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
     private val green = 0xFF34C759.toInt()
     private val accent = plan.accent
-    private val u = w / 100f // 1 % of the width
+    // 1 % of the width of a vertical frame; on wide frames it follows the height so nothing gets too big
+    private val u = min(w.toFloat(), h * 0.8f) / 100f
+    private val wide = w > h
 
     private val textP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
@@ -148,7 +165,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     private fun alphaAt(i: Int, tMs: Long): Float {
         val st = plan.times[i]
         val last = i == plan.times.lastIndex
-        return Studio.appear(tMs, st.startMs - 1, 260) * (if (last) 1f else 1f - Studio.appear(tMs, st.endMs - 200, 200))
+        val tr = plan.script.scenes[i].transition
+        val nextTr = plan.script.scenes.getOrNull(i + 1)?.transition ?: ""
+        val fadeIn = if (tr == "none" || tr == "whip") 1f else Studio.appear(tMs, st.startMs - 1, 260)
+        val fadeOut = if (last || nextTr == "none" || nextTr == "whip") 1f else 1f - Studio.appear(tMs, st.endMs - 200, 200)
+        return fadeIn * fadeOut
     }
 
     /** VIDEO style: is scene [i] a full-screen graphic insert (instead of the speaker)? */
@@ -165,11 +186,12 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** Zoom of the video at [tMs] (1 = none); the centre is [focusY] of the height, where faces usually are. */
     fun camera(tMs: Long): Float {
-        if (plan.style != StudioStyle.VIDEO || !plan.zooms) return 1f
+        if (plan.style != StudioStyle.VIDEO) return 1f
         val i = Studio.sceneAt(plan.times, tMs)
         if (i < 0) return 1f
         val st = plan.times[i]
-        return Studio.cameraZoom(i, tMs - st.startMs, st.endMs - st.startMs)
+        val base = if (plan.zooms) Studio.cameraZoom(i, tMs - st.startMs, st.endMs - st.startMs) else 1f
+        return base * StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.14f)
     }
 
     val focusY = 0.38f
@@ -192,6 +214,62 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         c.drawColor(bg)
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), if (dark) glowDark else glowLight)
         if (i < 0) return
+        c.save()
+        val z = StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.07f)
+        if (z != 1f) c.scale(z, z, w / 2f, h / 2f)
+        enter(c, plan.script.scenes[i].transition, i, tMs - plan.times[i].startMs)
+        drawScene(c, i, tMs)
+        pops(c, i, tMs, alphaAt(i, tMs))
+        c.restore()
+    }
+
+    /** Entry of a scene set by the AI director: slide, whip (fast push from the side) or zoom; fade is the default. */
+    private fun enter(c: Canvas, type: String, i: Int, local: Long) {
+        if (i == 0) return
+        val dir = if (i % 2 == 0) 1f else -1f
+        when (type) {
+            "slide" -> c.translate((1 - StudioMotion.at(local, 0, 380) { StudioMotion.backOut(it, 1.2f) }) * w * 0.4f * dir, 0f)
+            "whip" -> c.translate((1 - StudioMotion.at(local, 0, 200) { StudioMotion.inOut(it) }) * w * dir, 0f)
+            "zoom" -> {
+                val k = 1.35f - 0.35f * StudioMotion.at(local, 0, 360) { StudioMotion.backOut(it) }
+                c.scale(k, k, w / 2f, h / 2f)
+            }
+        }
+    }
+
+    /** Stickers of the AI director: a tilted pill with an emoji and a few words that springs in on its word. */
+    private fun pops(c: Canvas, i: Int, tMs: Long, a: Float) {
+        val list = plan.pops.getOrNull(i) ?: return
+        if (a <= 0f) return
+        list.forEachIndexed { k, (ms, cue) ->
+            if (tMs < ms) return@forEachIndexed
+            val label = (cue.icon + " " + cue.text.uppercase()).trim()
+            if (label.isEmpty()) return@forEachIndexed
+            val p = StudioMotion.at(tMs, ms, 460) { StudioMotion.spring(it) }
+            val cx = if (wide) w * 0.80f else w / 2f
+            val cy = if (wide) h * (0.17f + 0.16f * k) else h * (0.31f + 0.075f * k)
+            headP.textAlign = Paint.Align.CENTER
+            headP.textSize = 5.4f * u
+            while (headP.measureText(label) > (if (wide) w * 0.34f else w * 0.8f) && headP.textSize > 2.5f * u) headP.textSize *= 0.9f
+            val tw = headP.measureText(label)
+            c.save()
+            c.rotate(if (k % 2 == 0) -4f else 4f, cx, cy)
+            val sc = 0.3f + 0.7f * p
+            c.scale(sc, sc, cx, cy)
+            fill.color = accent
+            fill.alpha = (255 * a * StudioMotion.clamp(p * 2)).toInt()
+            fill.setShadowLayer(1.6f * u, 0f, 0.6f * u, 0x55000000)
+            val r = RectF(cx - tw / 2 - 3.2f * u, cy - headP.textSize * 0.95f, cx + tw / 2 + 3.2f * u, cy + headP.textSize * 0.55f)
+            c.drawRoundRect(r, 3f * u, 3f * u, fill)
+            fill.clearShadowLayer()
+            headP.color = 0xFFFFFFFF.toInt()
+            headP.alpha = fill.alpha
+            c.drawText(label, cx, cy + headP.textSize * 0.1f, headP)
+            c.restore()
+        }
+    }
+
+    private fun drawScene(c: Canvas, i: Int, tMs: Long) {
         val st = plan.times[i]
         val sc = plan.script.scenes[i]
         val a = alphaAt(i, tMs)
@@ -199,11 +277,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val local = tMs - st.startMs
         val sceneMs = st.endMs - st.startMs
         if (dark) {
-            val textOnly = sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big"))
+            val textOnly = sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big", "quote"))
             caption(c, i, tMs, a, if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
             if (!textOnly) visual(c, sc, i, w / 2f, h * 0.57f, local, sceneMs, a)
         } else {
-            val head = sc.title.takeIf { it.isNotBlank() && sc.kind in listOf("step", "text", "icons", "list", "flow", "cycle") }
+            val head = sc.title.takeIf { it.isNotBlank() && sc.kind in listOf("step", "text", "icons", "list", "flow", "cycle", "chart", "compare") }
             if (head != null) headline(c, head, h * 0.15f, a, local)
             if (sc.kind != "text") visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
             singleWord(c, i, tMs, a, h * 0.80f)
@@ -219,21 +297,28 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val a = alphaAt(i, tMs)
         palette(false)
         if (insert(i)) {
-            // light insert fades in over the speaker, or slides in from alternating sides
-            val fade = Studio.appear(tMs, st.startMs - 1, if (plan.transitions) 320 else 260)
-            val dx = if (plan.transitions) (1 - fade) * w * (if (i % 2 == 0) 1f else -1f) else 0f
+            // light insert fades in over the speaker, slides or whips in from alternating sides, or zooms in
+            val tr = sc.transition
+            val slide = plan.transitions && tr !in listOf("fade", "zoom", "none")
+            val fade = if (tr == "none") 1f else Studio.appear(tMs, st.startMs - 1, if (tr == "whip") 200 else if (plan.transitions) 320 else 260)
+            val dx = if (slide) (1 - fade) * w * (if (i % 2 == 0) 1f else -1f) else 0f
             c.save()
             c.translate(dx, 0f)
+            if (tr == "zoom") {
+                val k = 1.3f - 0.3f * fade
+                c.scale(k, k, w / 2f, h / 2f)
+            }
             shade.color = bg
-            shade.alpha = (255 * (if (plan.transitions) 1f else fade)).toInt()
+            shade.alpha = (255 * (if (slide) 1f else fade)).toInt()
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), shade)
             glowLight.alpha = shade.alpha
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glowLight)
             glowLight.alpha = 255
             if (a > 0f) {
-                sc.title.takeIf { it.isNotBlank() && sc.kind != "big" && sc.kind != "stat" }?.let { headline(c, it, h * 0.15f, a, local) }
+                sc.title.takeIf { it.isNotBlank() && sc.kind !in listOf("big", "stat", "quote") }?.let { headline(c, it, h * 0.15f, a, local) }
                 visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
                 singleWord(c, i, tMs, a, h * 0.80f)
+                pops(c, i, tMs, a)
             }
             c.restore()
             return
@@ -246,9 +331,10 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             topShade.alpha = 255
         }
         if (a <= 0f) return
-        if (sc.title.isNotBlank() && sc.kind != "stat") headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
+        if (sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote")) headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
         if (graphic) visual(c, sc, i, w / 2f, h * 0.36f, local, sceneMs, a)
         spokenWord(c, i, tMs, a, h * 0.80f)
+        pops(c, i, tMs, a)
     }
 
     /** One word on the video: white bold with a shadow and an accent underline. */
@@ -258,11 +344,12 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val word = plan.words[g.first]
         val p = Studio.appear(tMs, word.startMs - 60, 160)
         val txt = word.text.trim { !it.isLetterOrDigit() }
+        val hot = g.first in plan.emph
         textP.textAlign = Paint.Align.CENTER
         textP.maskFilter = null
-        textP.textSize = 7.4f * u
+        textP.textSize = (if (hot) 8.8f else 7.4f) * u
         while (textP.measureText(txt) > w * 0.9f && textP.textSize > 3 * u) textP.textSize *= 0.9f
-        textP.color = 0xFFFFFFFF.toInt()
+        textP.color = if (hot) 0xFFFFE14D.toInt() else 0xFFFFFFFF.toInt()
         textP.alpha = (255 * p * a).toInt()
         textP.setShadowLayer(1.6f * u, 0f, 0.4f * u, 0xB0000000.toInt())
         c.save()
@@ -304,7 +391,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         for ((wi, xy) in pos) {
             val wa = Studio.appear(tMs, plan.words[wi].startMs - 90, 240)
             if (wa <= 0f) continue
-            textP.color = ink
+            textP.color = if (wi in plan.emph) accent else ink
             textP.alpha = (255 * wa * a).toInt()
             textP.maskFilter = if (wa < 0.98f) BlurMaskFilter(max(0.5f, (1 - wa) * size * 0.28f), BlurMaskFilter.Blur.NORMAL) else null
             c.drawText(plan.words[wi].text, xy.first, xy.second + size + (1 - wa) * size * 0.35f, textP)
@@ -321,7 +408,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val txt = word.text.trim { !it.isLetterOrDigit() }.uppercase()
         bigWordP.textSize = 8.4f * u
         while (bigWordP.measureText(txt) > w * 0.9f && bigWordP.textSize > 3 * u) bigWordP.textSize *= 0.9f
-        val accentWord = Studio.norm(word.text).length >= 7 && (g.first % 3 == 0)
+        val accentWord = if (plan.emph.isNotEmpty()) g.first in plan.emph else Studio.norm(word.text).length >= 7 && (g.first % 3 == 0)
         bigWordP.color = if (accentWord) accent else ink
         bigWordP.alpha = (255 * p * a).toInt()
         c.save()
@@ -364,6 +451,9 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             "cycle" -> cycle(c, sc.items, cx, cy, local, sceneMs, a)
             "big" -> big(c, sc.items.firstOrNull() ?: SItem("💡", sc.title), cx, cy, local, a)
             "stat" -> stat(c, sc, cx, cy, local, a)
+            "quote" -> quote(c, sc, cx, cy, local, a)
+            "chart" -> chart(c, sc.items, cx, cy, local, sceneMs, a)
+            "compare" -> compare(c, sc.items, cx, cy, local, a)
             else -> if (sc.items.isNotEmpty()) grid(c, sc.items, cx, cy, local, sceneMs, a)
         }
     }
@@ -513,7 +603,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         if (n == 0) return
         val rowH = 9.5f * u
         val head = if (dark && sc.title.isNotBlank()) 8f * u else 0f
-        val cw = w * 0.84f
+        val cw = min(w * 0.84f, 84f * u)
         val ch = head + n * rowH + 3f * u
         val r = RectF(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
         val pa = Studio.appear(local, 0, 300)
@@ -619,6 +709,127 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             labelP.alpha = (255 * a * Studio.appear(local, 250, 300)).toInt()
             labelP.textSize = 4.6f * u
             wrap(label, labelP, w * 0.8f, 2).forEachIndexed { i, s -> c.drawText(s, cx, cy + 14f * u + i * 5.6f * u, labelP) }
+        }
+    }
+
+    /** A quote on a card; a marker sweeps over it line by line; the source below. */
+    private fun quote(c: Canvas, sc: SScene, cx: Float, cy: Float, local: Long, a: Float) {
+        val text = sc.title.ifBlank { sc.say }
+        val cw = min(w * 0.86f, 86f * u)
+        textP.maskFilter = null
+        textP.textAlign = Paint.Align.LEFT
+        textP.textSize = 5.4f * u
+        val lines = wrap(text, textP, cw - 12f * u, 4)
+        val lh = textP.textSize * 1.35f
+        val src = sc.items.firstOrNull()?.label.orEmpty()
+        val ch = 12f * u + lines.size * lh + (if (src.isNotBlank()) 7f * u else 0f)
+        val r = RectF(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
+        val pa = Studio.appear(local, 0, 300)
+        roundCard(c, r, 3f * u, pa * a)
+        headP.textAlign = Paint.Align.LEFT
+        headP.color = accent
+        headP.alpha = (255 * pa * a).toInt()
+        headP.textSize = 16f * u
+        c.drawText("\u201C", r.left + 2.5f * u, r.top + 11f * u, headP)
+        var y = r.top + 8f * u
+        lines.forEachIndexed { li, s ->
+            val lw = textP.measureText(s)
+            val mk = StudioMotion.at(local, 350L + li * 260, 420) { StudioMotion.inOut(it) }
+            if (mk > 0f) {
+                fill.color = accent
+                fill.alpha = (80 * a * mk).toInt()
+                c.drawRoundRect(RectF(r.left + 6f * u - 0.8f * u, y + lh * 0.18f, r.left + 6f * u + lw * mk + 0.8f * u, y + lh * 0.98f), 0.8f * u, 0.8f * u, fill)
+            }
+            textP.color = ink
+            textP.alpha = (255 * a * Studio.appear(local, 120L + li * 90, 300)).toInt()
+            c.drawText(s, r.left + 6f * u, y + textP.textSize * 1.05f, textP)
+            y += lh
+        }
+        if (src.isNotBlank()) {
+            labelP.textAlign = Paint.Align.LEFT
+            labelP.color = muted
+            labelP.alpha = (255 * a * Studio.appear(local, 500, 300)).toInt()
+            labelP.textSize = 3.6f * u
+            c.drawText("\u2014 " + src, r.left + 6f * u, y + 5f * u, labelP)
+            labelP.textAlign = Paint.Align.CENTER
+        }
+    }
+
+    /** Bar chart: bars grow one after another, the biggest in full accent, numbers count up. */
+    private fun chart(c: Canvas, items: List<SItem>, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        val bars = items.mapNotNull { it0 -> StudioDirector.number(it0.value)?.let { v -> it0 to v } }.take(6)
+        if (bars.isEmpty()) return
+        val top = bars.maxOf { it.second }.coerceAtLeast(0.0001f)
+        val cw = min(w * 0.86f, 86f * u)
+        val ch = 44f * u
+        val n = bars.size
+        val gap = 3f * u
+        val bw = min((cw - gap * (n - 1)) / n, 16f * u)
+        val total = n * bw + (n - 1) * gap
+        val base = cy + ch / 2
+        line.color = stroke
+        line.alpha = (255 * a).toInt()
+        line.strokeWidth = max(1f, 0.3f * u)
+        c.drawLine(cx - cw / 2, base, cx + cw / 2, base, line)
+        bars.forEachIndexed { i, (item, v) ->
+            val p = StudioMotion.at(local, Studio.itemDelay(i, n, sceneMs), 560) { StudioMotion.backOut(it, 1.1f) }
+            val x = cx - total / 2 + i * (bw + gap)
+            val bh = ch * 0.82f * (v / top).coerceIn(0f, 1f) * p
+            fill.color = accent
+            fill.alpha = (255 * a * (if (v == top) 1f else 0.55f) * StudioMotion.clamp(p * 3)).toInt()
+            if (bh > 0.5f) c.drawRoundRect(RectF(x, base - bh, x + bw, base), 1.4f * u, 1.4f * u, fill)
+            if (p > 0f) {
+                headP.textAlign = Paint.Align.CENTER
+                headP.color = ink
+                headP.alpha = (255 * a * StudioMotion.clamp(p)).toInt()
+                headP.textSize = min(5.2f * u, bw * 0.5f)
+                c.drawText(Studio.countUp(item.value, StudioMotion.clamp(p)), x + bw / 2, base - bh - 1.5f * u, headP)
+                labelP.color = muted
+                labelP.alpha = (255 * a * StudioMotion.clamp(p)).toInt()
+                labelP.textSize = 3.3f * u
+                val lbl = (item.icon + " " + item.label).trim()
+                wrap(lbl, labelP, bw + gap * 0.8f, 1).firstOrNull()?.let { c.drawText(it, x + bw / 2, base + 5f * u, labelP) }
+            }
+        }
+    }
+
+    /** Two sides (before/after, myth/fact): the first card, then "VS", then the second one slides in. */
+    private fun compare(c: Canvas, items: List<SItem>, cx: Float, cy: Float, local: Long, a: Float) {
+        if (items.size < 2) return
+        val cw = min(w * 0.88f, 90f * u)
+        val gap = 6f * u
+        val bw = (cw - gap) / 2
+        val bh = min(bw * 1.1f, 44f * u)
+        listOf(items[0], items[1]).forEachIndexed { k, item ->
+            val p = StudioMotion.at(local, if (k == 0) 0L else 420L, 420) { StudioMotion.backOut(it, 1.3f) }
+            if (p <= 0f) return@forEachIndexed
+            val left = cx - cw / 2 + k * (bw + gap)
+            val dx = (1 - p) * 8f * u * (if (k == 0) -1 else 1)
+            val r = RectF(left + dx, cy - bh / 2, left + bw + dx, cy + bh / 2)
+            roundCard(c, r, 3f * u, StudioMotion.clamp(p) * a, if (k == 1) accent else stroke)
+            if (item.icon.isNotBlank()) {
+                emojiP.textSize = bh * 0.3f
+                emojiP.alpha = (255 * a * StudioMotion.clamp(p)).toInt()
+                c.drawText(item.icon, r.centerX(), r.top + bh * 0.42f, emojiP)
+            }
+            labelP.color = ink
+            labelP.alpha = (255 * a * StudioMotion.clamp(p)).toInt()
+            labelP.textSize = min(4.4f * u, bw * 0.11f)
+            wrap(item.label, labelP, bw * 0.86f, 3).forEachIndexed { li, s ->
+                c.drawText(s, r.centerX(), r.top + bh * (if (item.icon.isNotBlank()) 0.66f else 0.42f) + li * labelP.textSize * 1.2f, labelP)
+            }
+        }
+        val pv = StudioMotion.at(local, 260, 360) { StudioMotion.spring(it) }
+        if (pv > 0f) {
+            val rr = 5.5f * u * pv
+            fill.color = accent
+            fill.alpha = (255 * a).toInt()
+            c.drawCircle(cx, cy, rr, fill)
+            headP.textAlign = Paint.Align.CENTER
+            headP.color = 0xFFFFFFFF.toInt()
+            headP.alpha = (255 * a).toInt()
+            headP.textSize = 4.4f * u * pv
+            c.drawText("VS", cx, cy + headP.textSize * 0.36f, headP)
         }
     }
 }

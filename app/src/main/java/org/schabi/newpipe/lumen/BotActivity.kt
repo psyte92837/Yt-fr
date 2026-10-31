@@ -549,7 +549,7 @@ class BotActivity : LumenBase() {
         }
         if (html.isBlank()) {
             c.h2(t("Что должен делать мини-апп", "What the mini app should do"))
-            appDescEdit = c.edit(t("Например: каталог из 6 товаров с фото-эмодзи, корзина, кнопка «Оформить» отправляет заказ боту", "E.g. a catalog of 6 products with emoji pictures, a cart, "Checkout" sends the order to the bot"),
+            appDescEdit = c.edit(t("Например: каталог из 6 товаров с фото-эмодзи, корзина, кнопка «Оформить» отправляет заказ боту", "E.g. a catalog of 6 products with emoji pictures, a cart, \"Checkout\" sends the order to the bot"),
                 appDraft, multiline = true).apply { minLines = 4 }
             c.chips(MINIAPP_EXAMPLES.map { (label, text) ->
                 chip(this, label) {
@@ -585,7 +585,7 @@ class BotActivity : LumenBase() {
             "Telegram opens mini apps only from an https address. Lumen publishes the page for free to GitHub Pages of your account (public repository \"${GhPages.repo}\")."))
         if (GhPages.token() == null) {
             c.muted(t("1) Войдите на github.com (или зарегистрируйтесь). 2) Создайте токен: «Получить токен» → Generate token (право public_repo уже отмечено). 3) Вставьте его сюда.",
-                "1) Sign in to github.com (or sign up). 2) Make a token: "Get a token" → Generate token (public_repo is already ticked). 3) Paste it here."))
+                "1) Sign in to github.com (or sign up). 2) Make a token: \"Get a token\" → Generate token (public_repo is already ticked). 3) Paste it here."))
             c.row(
                 btn(this, t("Получить токен", "Get a token"), style = BtnStyle.TEXT) { openUrl(GhPages.TOKEN_PAGE) },
                 btn(this, t("Ввести токен", "Enter the token"), style = BtnStyle.TONAL) { connectGitHub() }
@@ -1008,11 +1008,11 @@ class BotActivity : LumenBase() {
         private val MINIAPP_EXAMPLES: List<Pair<String, () -> String>> = listOf(
             t("🛒 Каталог", "🛒 Catalog") to {
                 t("Каталог из 6–8 товаров (эмодзи вместо фото, название, цена), корзина с количеством, итог. Кнопка «Оформить» отправляет боту список товаров, сумму, имя и телефон.",
-                    "A catalog of 6–8 products (emoji instead of photos, name, price), a cart with quantities, a total. "Checkout" sends the items, sum, name and phone to the bot.")
+                    "A catalog of 6–8 products (emoji instead of photos, name, price), a cart with quantities, a total. \"Checkout\" sends the items, sum, name and phone to the bot.")
             },
             t("📝 Заявка", "📝 Request") to {
                 t("Форма заявки: имя, телефон, услуга (выбор из списка), дата и время, комментарий. Проверка полей, кнопка «Отправить» отправляет данные боту.",
-                    "A request form: name, phone, service (from a list), date and time, comment. Field validation, "Send" sends the data to the bot.")
+                    "A request form: name, phone, service (from a list), date and time, comment. Field validation, \"Send\" sends the data to the bot.")
             },
             t("📊 Опрос", "📊 Survey") to {
                 t("Опрос из 5 вопросов с вариантами ответа, прогресс-бар, в конце — результат и отправка ответов боту.",
@@ -1020,11 +1020,11 @@ class BotActivity : LumenBase() {
             },
             t("🧮 Калькулятор", "🧮 Calculator") to {
                 t("Калькулятор стоимости: ползунки площади и сроков, переключатели опций, итоговая цена пересчитывается сразу. «Отправить расчёт» — данные боту.",
-                    "A price calculator: sliders for area and terms, option switches, the total updates live. "Send the estimate" sends the data to the bot.")
+                    "A price calculator: sliders for area and terms, option switches, the total updates live. \"Send the estimate\" sends the data to the bot.")
             },
             t("🎮 Игра", "🎮 Game") to {
                 t("Простая игра «Поймай звезду» на 30 секунд: звёзды появляются в случайных местах, тап — очко. В конце результат отправляется боту для таблицы лидеров.",
-                    "A simple 30-second "Catch the star" game: stars appear at random spots, a tap scores. At the end the score is sent to the bot for a leaderboard.")
+                    "A simple 30-second \"Catch the star\" game: stars appear at random spots, a tap scores. At the end the score is sent to the bot for a leaderboard.")
             }
         )
 

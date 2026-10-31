@@ -70,3 +70,62 @@ object StudioMusic {
         }
     }
 }
+
+/** B-roll photos: search on Openverse and download, scaled down to the frame. Only the search words leave the phone. */
+object StudioBroll {
+    private val http by lazy {
+        OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
+    }
+
+    private const val UA = "Lumen/1.0 (Android; open-source YouTube topic analyser)"
+    private const val MAX_BYTES = 25L * 1024 * 1024
+
+    private fun text(url: String): String? = runCatching {
+        http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+            if (r.code == 429) throw IllegalStateException(t("Слишком много запросов, попробуйте через минуту.", "Too many requests, try again in a minute."))
+            if (r.isSuccessful) r.body?.string() else null
+        }
+    }.getOrElse { e -> if (e is IllegalStateException) throw e else null }
+
+    private fun bytes(url: String): ByteArray? = runCatching {
+        http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+            val b = r.body
+            if (!r.isSuccessful || b == null || b.contentLength() > MAX_BYTES) null else b.bytes()
+        }
+    }.getOrNull()
+
+    /** Bitmap of [data] with its long side at most [maxSide]. */
+    private fun decode(data: ByteArray, maxSide: Int): android.graphics.Bitmap? {
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null
+        var sample = 1
+        while (maxOf(o.outWidth, o.outHeight) / (sample * 2) >= maxSide) sample *= 2
+        val b = android.graphics.BitmapFactory.decodeByteArray(data, 0, data.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+            ?: return null
+        val long = maxOf(b.width, b.height)
+        if (long <= maxSide) return b
+        val k = maxSide.toFloat() / long
+        val s = android.graphics.Bitmap.createScaledBitmap(b, (b.width * k).toInt().coerceAtLeast(1), (b.height * k).toInt().coerceAtLeast(1), true)
+        if (s !== b) b.recycle()
+        return s
+    }
+
+    /** Finds a photo for [query] and saves it as [out] (JPEG); null when nothing usable was found. */
+    fun fetch(query: String, aspect: StudioAspect, commercial: Boolean, out: File, maxSide: Int, cancelled: () -> Boolean): BrollHit? {
+        var hits = text(StudioBrollCatalog.url(query, commercial, aspect))?.let { StudioBrollCatalog.parse(it) }.orEmpty()
+        if (hits.isEmpty()) hits = text(StudioBrollCatalog.url(query, commercial, null))?.let { StudioBrollCatalog.parse(it) }.orEmpty()
+        for (h in StudioBrollCatalog.rank(hits, aspect).take(4)) {
+            if (cancelled()) throw java.util.concurrent.CancellationException()
+            val data = bytes(h.url) ?: h.thumb.takeIf { it.startsWith("http") }?.let { bytes(it) } ?: continue
+            val bmp = decode(data, maxSide) ?: continue
+            out.parentFile?.mkdirs()
+            out.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 88, it) }
+            bmp.recycle()
+            L.i("studio", "broll '${query.take(40)}': ${h.width}x${h.height} ${h.license}")
+            return h
+        }
+        L.i("studio", "broll '${query.take(40)}': nothing (${hits.size} hits)")
+        return null
+    }
+}

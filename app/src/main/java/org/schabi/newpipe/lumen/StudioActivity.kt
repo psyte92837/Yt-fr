@@ -65,6 +65,10 @@ object StudioPrefs {
     var autoDirect: Boolean
         get() = p.getBoolean("studio_auto_direct", true)
         set(v) = p.edit().putBoolean("studio_auto_direct", v).apply()
+    /** Find B-roll photos for the scenes the AI director asks for. */
+    var broll: Boolean
+        get() = p.getBoolean("studio_broll", true)
+        set(v) = p.edit().putBoolean("studio_broll", v).apply()
     /** The AI director may cut out filler words and slips of the take. */
     var dropFillers: Boolean
         get() = p.getBoolean("studio_drop_fillers", true)
@@ -631,6 +635,7 @@ class StudioActivity : LumenBase() {
                     (if (StudioPrefs.voiceMode != "edge") ", and filler words to cut." else ".")))
             check(t("Запускать сразу после разбора", "Run right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
             if (StudioPrefs.voiceMode != "edge") check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
+            check(t("🖼 Подбирать фото B-roll (Openverse, свободные лицензии)", "🖼 Find B-roll photos (Openverse, open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }
             progress("ai_direct", t("AI-режиссёр размечает ролик…", "The AI director is planning the video…"))
             if (busy.isEmpty()) {
                 val go = btn(ctx, if (sc.scenes.any { it.cues.isNotEmpty() || it.emph.isNotEmpty() }) t("🎬 Режиссура заново", "🎬 Direct again") else t("🎬 AI-режиссура", "🎬 AI direction"),
@@ -638,8 +643,16 @@ class StudioActivity : LumenBase() {
                 if (transcript.isNotBlank()) row(go, btn(ctx, t("Текст", "Text"), style = BtnStyle.TEXT) { showText(t("Расшифровка", "Transcript"), transcript) })
                 else add(go, 8)
             }
+            progress("broll", t("Поиск фото…", "Finding photos…"))
             val (zooms, pops, sounds) = StudioDirector.summary(sc)
-            if (zooms + pops + sounds > 0) muted("🎬 " + t("зумов $zooms · плашек $pops · звуков $sounds", "zooms $zooms · stickers $pops · sounds $sounds"))
+            val figures = sc.scenes.sumOf { it.shapes.size }
+            val asked = sc.scenes.count { it.broll.isNotBlank() }
+            val got = sc.scenes.count { it.broll.isNotBlank() && it.media.isNotBlank() }
+            if (zooms + pops + sounds + figures + asked > 0) muted("🎬 " + t(
+                "зумов $zooms · плашек $pops · звуков $sounds · фигур $figures" + (if (asked > 0) " · фото $got из $asked" else ""),
+                "zooms $zooms · stickers $pops · sounds $sounds · shapes $figures" + (if (asked > 0) " · photos $got of $asked" else "")))
+            if (busy.isEmpty() && got < asked) button(t("🖼 Подобрать B-roll", "🖼 Find B-roll"), style = BtnStyle.TEXT) { fetchBroll() }
+            if (got > 0) button(t("⧉ Источники фото для описания", "⧉ Photo credits for the description"), style = BtnStyle.TEXT) { copyText(StudioDirector.credits(sc)) }
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
@@ -647,7 +660,8 @@ class StudioActivity : LumenBase() {
             val ready = readyIds()
             plan.times.take(60).forEach { st ->
                 val scn = sc.scenes[st.scene]
-                val fx = scn.cues.joinToString("") { when (it.type) { "zoom" -> "🔍"; "pop" -> "💬"; else -> "🔊" } }
+                val fx = scn.cues.joinToString("") { when (it.type) { "zoom" -> "🔍"; "pop" -> "💬"; else -> "🔊" } } +
+                    "✏️".repeat(scn.shapes.size) + (if (scn.media.isNotBlank()) "🖼" else if (scn.broll.isNotBlank()) "▫️" else "")
                 val what = if (scn.clip in ready) "🎞 ${scn.clip}" else kindLabel(scn.kind)
                 val line = "${Studio.clock(st.startMs)} · $what" + (if (fx.isNotEmpty()) " $fx" else "") + " · " +
                     scn.say.take(70) + if (scn.say.length > 70) "…" else ""
@@ -884,6 +898,12 @@ class StudioActivity : LumenBase() {
         c.muted(t("Лицензия требует подпись в описании ролика:", "The licence asks for a credit in the video description:"))
         c.add(text(this, credit, 13f).apply { setTextIsSelectable(true) }, 2)
         c.button(t("⧉ Скопировать подпись", "⧉ Copy the credit"), style = BtnStyle.TEXT) { copyCredit() }
+    }
+
+    private fun copyText(s: String) {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("credits", s))
+        toast(t("Скопировано", "Copied"))
     }
 
     private fun copyCredit() {
@@ -1838,6 +1858,54 @@ class StudioActivity : LumenBase() {
             saveAnalysis()
             render()
             if (ap.dropped > 0) toast(t("AI-режиссёр вырезал слов: ${ap.dropped}", "The AI director cut ${ap.dropped} words"))
+            if (StudioPrefs.broll && StudioDirector.needBroll(ap.script).isNotEmpty()) fetchBroll()
+        }
+    }
+
+    /** Photos for the scenes whose B-roll has none yet; old photos no scene uses are removed. */
+    private fun fetchBroll() {
+        val sc0 = script ?: return
+        val need = StudioDirector.needBroll(sc0)
+        if (need.isEmpty() || busy.isNotEmpty()) return
+        val asp = aspect()
+        val bdir = File(tdir, "broll").apply { mkdirs() }
+        val used = sc0.scenes.map { it.media }.toSet()
+        bdir.listFiles()?.filter { it.absolutePath !in used }?.forEach { it.delete() }
+        val maxSide = if (StudioPrefs.quality >= 1080) 1920 else 1280
+        busy = "broll"
+        cancel = false
+        render()
+        Lumen.async({
+            val found = HashMap<Int, Pair<String, String>>()
+            need.forEachIndexed { k, i ->
+                if (cancel) throw java.util.concurrent.CancellationException()
+                report("broll", t("Фото $k/${need.size}", "Photos $k/${need.size}"))
+                val f = File(bdir, "b_${System.currentTimeMillis()}_$i.jpg")
+                val hit = try {
+                    StudioBroll.fetch(sc0.scenes[i].broll, asp, true, f, maxSide) { cancel }
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    L.w("studio", "broll: ${e.message}")
+                    null
+                }
+                if (hit != null) found[i] = f.absolutePath to StudioBrollCatalog.credit(hit)
+            }
+            found
+        }, { e ->
+            busy = ""
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) { found ->
+            busy = ""
+            val cur = script
+            if (cur != null && cur.scenes.size == sc0.scenes.size) {
+                script = cur.copy(scenes = cur.scenes.mapIndexed { i, s -> found[i]?.let { (m, cr) -> s.copy(media = m, credit = cr) } ?: s })
+                saveAnalysis()
+            }
+            board = emptyList()
+            render()
+            toast(t("Фото найдено: ${found.size} из ${need.size}", "Photos found: ${found.size} of ${need.size}"))
         }
     }
 

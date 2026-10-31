@@ -10,7 +10,9 @@ import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Matrix
 import android.graphics.Path
+import android.graphics.PathMeasure
 import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
@@ -79,6 +81,13 @@ class StudioPlan(
 
     /** Camera punch-ins of every scene, ms. */
     val zoomMs: List<List<Long>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "zoom" }.map { cueMs(st, it) }.sorted() }
+
+    /** Animated shapes of every scene with the times of their key frames. */
+    val shapes: List<List<Pair<SShape, List<Long>>>> = times.map { st ->
+        script.scenes.getOrNull(st.scene)?.shapes.orEmpty().map { sh ->
+            sh to StudioKeys.times(sh.keys) { k -> words.getOrNull(st.words.first + k)?.takeIf { st.words.first + k in st.words }?.startMs ?: st.startMs }
+        }
+    }
 
     /** Stickers of every scene with their time. */
     val pops: List<List<Pair<Long, SCue>>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "pop" }.map { cueMs(st, it) to it } }
@@ -179,7 +188,195 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     private fun insert(i: Int): Boolean {
         if (plan.style != StudioStyle.VIDEO) return false
         plan.clipScenes?.let { return i !in it }
-        return !plan.overlay && plan.script.scenes[i].kind != "text"
+        return (!plan.overlay && plan.script.scenes[i].kind != "text") || fullPhoto(i) != null
+    }
+
+    /** B-roll photo of scene [i] (null when it has none or it cannot be read). */
+    private fun photo(i: Int): Bitmap? = plan.script.scenes.getOrNull(i)?.media?.takeIf { it.isNotBlank() }?.let { StudioPhotos.get(it, max(w, h)) }
+
+    /** The photo when it fills the whole frame of scene [i]. */
+    private fun fullPhoto(i: Int): Bitmap? = if (plan.script.scenes.getOrNull(i)?.brollMode == "card") null else photo(i)
+
+    private val photoPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+
+    /** A photo filling [r] with a slow Ken Burns move: zoom in or out and a small pan, alternating per scene. */
+    private fun drawPhoto(c: Canvas, bmp: Bitmap, r: RectF, i: Int, local: Long, sceneMs: Long, alpha: Float, radius: Float = 0f) {
+        if (alpha <= 0f) return
+        val p = if (sceneMs > 0) (local.toFloat() / sceneMs).coerceIn(0f, 1f) else 0f
+        val zoom = if (i % 2 == 0) 1.03f + 0.10f * p else 1.13f - 0.10f * p
+        val dir = when (i % 3) {
+            0 -> -1f
+            1 -> 1f
+            else -> 0f
+        }
+        val k = max(r.width() / bmp.width, r.height() / bmp.height) * zoom
+        val m = Matrix()
+        m.postTranslate(-bmp.width / 2f, -bmp.height / 2f)
+        m.postScale(k, k)
+        m.postTranslate(r.centerX() + dir * r.width() * 0.012f * (2 * p - 1), r.centerY())
+        c.save()
+        if (radius > 0f) c.clipPath(Path().apply { addRoundRect(r, radius, radius, Path.Direction.CW) }) else c.clipRect(r)
+        photoPaint.alpha = (255 * alpha).toInt()
+        c.drawBitmap(bmp, m, photoPaint)
+        c.restore()
+    }
+
+    /** B-roll photo on a card where the visual goes. */
+    private fun photoCard(c: Canvas, bmp: Bitmap, i: Int, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        val cw = min(w * 0.86f, 86f * u)
+        val ch = min(cw * bmp.height / max(1, bmp.width), 64f * u).coerceAtLeast(cw * 0.5f)
+        val pa = StudioMotion.at(local, 0, 420) { StudioMotion.backOut(it, 1.2f) }
+        c.save()
+        val k = 0.85f + 0.15f * pa
+        c.scale(k, k, cx, cy)
+        val r = RectF(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
+        roundCard(c, RectF(r.left - 0.8f * u, r.top - 0.8f * u, r.right + 0.8f * u, r.bottom + 0.8f * u), 3.4f * u, a * StudioMotion.clamp(pa))
+        drawPhoto(c, bmp, r, i, local, sceneMs, a * StudioMotion.clamp(pa), 2.8f * u)
+        c.restore()
+    }
+
+    private val shapeLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val shapeFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val shapeText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+
+    /** The first [d] (0..1) of the length of [p], over all its strokes in order. */
+    private fun partial(p: Path, d: Float): Path {
+        if (d >= 0.999f) return p
+        val out = Path()
+        if (d <= 0f) return out
+        var total = 0f
+        val pm = PathMeasure(p, false)
+        do {
+            total += pm.length
+        } while (pm.nextContour())
+        var left = total * d
+        val pm2 = PathMeasure(p, false)
+        do {
+            if (left <= 0f) break
+            val len = pm2.length
+            pm2.getSegment(0f, min(len, left), out, true)
+            left -= len
+        } while (pm2.nextContour())
+        return out
+    }
+
+    /** Shapes of the AI director animated on their key frames (arrows draw themselves, rings circle, a spotlight dims the rest). */
+    private fun shapes(c: Canvas, i: Int, tMs: Long, a: Float) {
+        val list = plan.shapes.getOrNull(i) ?: return
+        if (a <= 0f) return
+        val base = min(w, h).toFloat()
+        for ((sh, times) in list) {
+            val st = StudioKeys.state(sh, times, tMs) ?: continue
+            val al = st.o.coerceIn(0f, 1f) * a
+            if (al <= 0.01f) continue
+            val d = st.draw.coerceIn(0f, 1f)
+            val col = StudioKeys.color(sh.color, accent, ink)
+            val pw = sh.w * base
+            val ph = sh.h * base
+            val stroke = max(2f, 0.013f * base)
+            shapeLine.color = col
+            shapeLine.alpha = (255 * al).toInt()
+            shapeLine.strokeWidth = stroke
+            shapeFill.color = col
+            shapeFill.alpha = (255 * al).toInt()
+            if (sh.el == "spotlight") {
+                val cx = st.x * w
+                val cy = st.y * h
+                val r = max(1f, pw / 2 * st.s)
+                shapeFill.color = 0xFF000000.toInt()
+                shapeFill.alpha = (170 * al).toInt()
+                c.drawPath(Path().apply {
+                    fillType = Path.FillType.EVEN_ODD
+                    addRect(0f, 0f, w.toFloat(), h.toFloat(), Path.Direction.CW)
+                    addCircle(cx, cy, r, Path.Direction.CW)
+                }, shapeFill)
+                c.drawArc(RectF(cx - r, cy - r, cx + r, cy + r), -90f, 360f * d, false, shapeLine)
+                continue
+            }
+            c.save()
+            c.translate(st.x * w, st.y * h)
+            c.rotate(st.r)
+            if (st.s != 1f) c.scale(st.s, st.s)
+            val box = RectF(-pw / 2, -ph / 2, pw / 2, ph / 2)
+            when (sh.el) {
+                "rect" -> {
+                    val rad = min(pw, ph) * 0.18f
+                    if (sh.fill) {
+                        shapeFill.alpha = (210 * al).toInt()
+                        c.drawRoundRect(box, rad, rad, shapeFill)
+                    } else c.drawPath(partial(Path().apply { addRoundRect(box, rad, rad, Path.Direction.CW) }, d), shapeLine)
+                }
+                "circle", "ring" -> if (sh.fill) {
+                    shapeFill.alpha = (210 * al).toInt()
+                    c.drawOval(box, shapeFill)
+                } else c.drawArc(box, -90f, 360f * d, false, shapeLine)
+                "line" -> c.drawPath(partial(Path().apply { moveTo(-pw / 2, 0f); lineTo(pw / 2, 0f) }, d), shapeLine)
+                "underline" -> {
+                    shapeLine.strokeWidth = max(stroke * 2.4f, min(ph, 0.05f * base))
+                    shapeLine.alpha = (165 * al).toInt()
+                    c.drawPath(partial(Path().apply { moveTo(-pw / 2, stroke * 0.4f); quadTo(0f, -stroke * 0.8f, pw / 2, 0f) }, d), shapeLine)
+                }
+                "arrow" -> {
+                    c.drawPath(partial(Path().apply { moveTo(-pw / 2, 0f); lineTo(pw / 2, 0f) }, d), shapeLine)
+                    if (d > 0.05f) {
+                        val tip = -pw / 2 + pw * d
+                        val hs = max(stroke * 2.6f, pw * 0.11f)
+                        c.drawPath(Path().apply {
+                            moveTo(tip - hs, -hs * 0.7f)
+                            lineTo(tip, 0f)
+                            lineTo(tip - hs, hs * 0.7f)
+                        }, shapeLine)
+                    }
+                }
+                "check" -> {
+                    shapeLine.strokeWidth = stroke * 1.6f
+                    c.drawPath(partial(Path().apply {
+                        moveTo(-pw * 0.36f, 0f)
+                        lineTo(-pw * 0.1f, ph * 0.28f)
+                        lineTo(pw * 0.38f, -ph * 0.3f)
+                    }, d), shapeLine)
+                }
+                "cross" -> {
+                    shapeLine.strokeWidth = stroke * 1.6f
+                    c.drawPath(partial(Path().apply {
+                        moveTo(-pw * 0.32f, -ph * 0.32f)
+                        lineTo(pw * 0.32f, ph * 0.32f)
+                        moveTo(pw * 0.32f, -ph * 0.32f)
+                        lineTo(-pw * 0.32f, ph * 0.32f)
+                    }, d), shapeLine)
+                }
+                "text" -> {
+                    shapeText.textSize = ph
+                    while (shapeText.measureText(sh.text) > w * 0.9f / max(0.2f, st.s) && shapeText.textSize > 2 * u) shapeText.textSize *= 0.9f
+                    val tw = shapeText.measureText(sh.text)
+                    val sz = shapeText.textSize
+                    if (sh.fill) {
+                        shapeFill.alpha = (235 * al).toInt()
+                        c.drawRoundRect(RectF(-tw / 2 - sz * 0.45f, -sz * 0.75f, tw / 2 + sz * 0.45f, sz * 0.45f), sz * 0.3f, sz * 0.3f, shapeFill)
+                        shapeText.color = 0xFFFFFFFF.toInt()
+                    } else {
+                        shapeText.color = col
+                        shapeText.setShadowLayer(sz * 0.12f, 0f, sz * 0.04f, 0x99000000.toInt())
+                    }
+                    shapeText.alpha = (255 * al).toInt()
+                    c.drawText(sh.text, 0f, sz * 0.33f, shapeText)
+                    shapeText.clearShadowLayer()
+                }
+                "emoji" -> {
+                    emojiP.textSize = ph
+                    emojiP.alpha = (255 * al).toInt()
+                    c.drawText(sh.text, 0f, ph * 0.35f, emojiP)
+                }
+            }
+            c.restore()
+        }
     }
 
     /** True when the caller must put the video frame on the canvas before [draw] (hidden under a full insert). */
@@ -223,9 +420,25 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         c.save()
         val z = StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.07f)
         if (z != 1f) c.scale(z, z, w / 2f, h / 2f)
-        enter(c, plan.script.scenes[i].transition, i, tMs - plan.times[i].startMs)
-        drawScene(c, i, tMs)
-        pops(c, i, tMs, alphaAt(i, tMs))
+        val st = plan.times[i]
+        enter(c, plan.script.scenes[i].transition, i, tMs - st.startMs)
+        val full = fullPhoto(i)
+        val a = alphaAt(i, tMs)
+        if (full != null) {
+            // B-roll on the whole frame: the photo, darkened for the captions, with light text
+            drawPhoto(c, full, RectF(0f, 0f, w.toFloat(), h.toFloat()), i, tMs - st.startMs, st.endMs - st.startMs, a)
+            shade.color = 0xFF000000.toInt()
+            shade.alpha = (105 * a).toInt()
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), shade)
+            bottomShade.alpha = (255 * a).toInt()
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
+            bottomShade.alpha = 255
+            palette(true)
+        }
+        drawScene(c, i, tMs, full != null)
+        shapes(c, i, tMs, a)
+        pops(c, i, tMs, a)
+        if (full != null) palette(plan.style == StudioStyle.DARK)
         c.restore()
     }
 
@@ -275,21 +488,25 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         }
     }
 
-    private fun drawScene(c: Canvas, i: Int, tMs: Long) {
+    /** Captions and the visual of scene [i]; over a full-frame photo ([onPhoto]) only the words. */
+    private fun drawScene(c: Canvas, i: Int, tMs: Long, onPhoto: Boolean) {
         val st = plan.times[i]
         val sc = plan.script.scenes[i]
         val a = alphaAt(i, tMs)
         if (a <= 0f) return
         val local = tMs - st.startMs
         val sceneMs = st.endMs - st.startMs
-        if (dark) {
-            val textOnly = sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big", "quote"))
-            caption(c, i, tMs, a, if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
-            if (!textOnly) visual(c, sc, i, w / 2f, h * 0.57f, local, sceneMs, a)
+        val card = if (onPhoto) null else photo(i)
+        if (plan.style == StudioStyle.DARK) {
+            val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big", "quote"))))
+            caption(c, i, tMs, a, if (onPhoto) h * 0.62f else if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
+            if (card != null) photoCard(c, card, i, w / 2f, h * 0.57f, local, sceneMs, a)
+            else if (!textOnly) visual(c, sc, i, w / 2f, h * 0.57f, local, sceneMs, a)
         } else {
             val head = sc.title.takeIf { it.isNotBlank() && sc.kind in listOf("step", "text", "icons", "list", "flow", "cycle", "chart", "compare") }
             if (head != null) headline(c, head, h * 0.15f, a, local)
-            if (sc.kind != "text") visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
+            if (card != null) photoCard(c, card, i, w / 2f, h * 0.48f, local, sceneMs, a)
+            else if (sc.kind != "text" && !onPhoto) visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
             singleWord(c, i, tMs, a, h * 0.80f)
         }
     }
@@ -314,6 +531,19 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 val k = 1.3f - 0.3f * fade
                 c.scale(k, k, w / 2f, h / 2f)
             }
+            val full = fullPhoto(i)
+            if (full != null) {
+                // B-roll photo instead of the speaker, the spoken word below
+                drawPhoto(c, full, RectF(0f, 0f, w.toFloat(), h.toFloat()), i, local, sceneMs, if (slide) 1f else fade)
+                c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
+                if (a > 0f) {
+                    spokenWord(c, i, tMs, a, h * 0.80f)
+                    shapes(c, i, tMs, a)
+                    pops(c, i, tMs, a)
+                }
+                c.restore()
+                return
+            }
             shade.color = bg
             shade.alpha = (255 * (if (slide) 1f else fade)).toInt()
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), shade)
@@ -324,6 +554,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 sc.title.takeIf { it.isNotBlank() && sc.kind !in listOf("big", "stat", "quote") }?.let { headline(c, it, h * 0.15f, a, local) }
                 visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
                 singleWord(c, i, tMs, a, h * 0.80f)
+                shapes(c, i, tMs, a)
                 pops(c, i, tMs, a)
             }
             c.restore()
@@ -338,8 +569,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         }
         if (a <= 0f) return
         if (sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote")) headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
-        if (graphic) visual(c, sc, i, w / 2f, h * 0.36f, local, sceneMs, a)
+        val card = photo(i)
+        if (card != null) photoCard(c, card, i, w / 2f, h * 0.36f, local, sceneMs, a)
+        else if (graphic) visual(c, sc, i, w / 2f, h * 0.36f, local, sceneMs, a)
         spokenWord(c, i, tMs, a, h * 0.80f)
+        shapes(c, i, tMs, a)
         pops(c, i, tMs, a)
     }
 
@@ -837,6 +1071,28 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             headP.textSize = 4.4f * u * pv
             c.drawText("VS", cx, cy + headP.textSize * 0.36f, headP)
         }
+    }
+}
+
+/** B-roll photos read from disk once and kept for the frames that follow (a few at a time). */
+object StudioPhotos {
+    private val cache = LinkedHashMap<String, Bitmap>(8, 0.75f, true)
+
+    @Synchronized
+    fun get(path: String, maxSide: Int): Bitmap? {
+        val key = "$path@$maxSide"
+        cache[key]?.let { return it }
+        val f = File(path)
+        if (!f.exists()) return null
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeFile(path, o)
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null
+        var sample = 1
+        while (max(o.outWidth, o.outHeight) / (sample * 2) >= maxSide) sample *= 2
+        val b = android.graphics.BitmapFactory.decodeFile(path, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) ?: return null
+        cache[key] = b
+        while (cache.size > 6) cache.remove(cache.keys.first())
+        return b
     }
 }
 

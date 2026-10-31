@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -1362,8 +1363,9 @@ class StudioActivity : LumenBase() {
         progress("cuts", t("Загрузка клипов…", "Downloading clips…"))
         if (busy.isNotEmpty()) return@card
         val addBtn = btn(ctx, t("＋ Клип по ссылке", "＋ Clip by link"), style = BtnStyle.TONAL) { editClip(null) }
-        if (cutClips.any { it !in readyCuts() }) row(addBtn, btn(ctx, t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() })
-        else add(addBtn, 8)
+        val findBtn = btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findClips() }
+        row(addBtn, findBtn)
+        if (cutClips.any { it !in readyCuts() }) button(t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() }
         if (script != null && readyCuts().isNotEmpty()) {
             button(t("🎞 Расставить по сценам без AI", "🎞 Place on scenes without AI"), style = BtnStyle.TEXT) { autoPlace() }
         }
@@ -1469,6 +1471,119 @@ class StudioActivity : LumenBase() {
             board = emptyList()
             render()
         }.show()
+    }
+
+    /**
+     * Finds videos by title on YouTube, optionally lets AI keep only the ones that fit a description,
+     * and adds the marked ones as clips (start 0:00, the time is set later with ✎).
+     */
+    private fun findClips() {
+        var hits: List<CutHit> = emptyList()
+        var notes: Map<String, String> = emptyMap()
+        val marked = LinkedHashSet<String>()
+        lateinit var box: LinearLayout
+        lateinit var status: Pair<TextView, ProgressBar>
+        lateinit var addBtn: Button
+        var dismissSheet: () -> Unit = {}
+
+        fun updateAdd() {
+            addBtn.text = t("＋ Добавить отмеченные (${marked.size})", "＋ Add marked (${marked.size})")
+            addBtn.isEnabled = marked.isNotEmpty()
+        }
+
+        fun fill() {
+            box.removeAllViews()
+            val picked = hits.filter { it.url in notes }
+            val rest = hits.filter { it.url !in notes }
+            fun group(title: String, list: List<CutHit>) {
+                if (list.isEmpty()) return
+                if (picked.isNotEmpty()) box.addView(text(this, title, Type.LABEL, bold = true, color = Palette.MUTED),
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12) })
+                for (h in list) {
+                    val sub = listOf(h.channel, if (h.durationMs > 0) StudioCuts.stamp(h.durationMs) else "").filter { it.isNotBlank() }.joinToString(" · ")
+                    val note = notes[h.url].orEmpty()
+                    val label = h.title + (if (sub.isNotEmpty()) "\n$sub" else "") + (if (note.isNotEmpty()) "\n✨ $note" else "")
+                    box.addView(chk(this, label, h.url in marked) { on ->
+                        if (on) marked += h.url else marked -= h.url
+                        updateAdd()
+                    }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+                }
+            }
+            group(t("✨ Подобрал AI", "✨ Picked by AI"), picked)
+            group(t("Остальные", "Others"), rest)
+            updateAdd()
+        }
+
+        fun search(q: String, want: String) {
+            if (q.isBlank()) return
+            val useAi = want.isNotBlank()
+            status.first.text = t("Поиск…", "Searching…")
+            status.first.visibility = View.VISIBLE
+            status.second.visibility = View.VISIBLE
+            cancel = false
+            Lumen.async({
+                val found = YouTube.search(listOf(q), SearchFilters(limit = 30)).map {
+                    CutHit(it.url, it.title, it.channel, if (it.duration > 0) it.duration * 1000 else 0)
+                }
+                val picks = if (useAi && found.isNotEmpty()) {
+                    runOnUiThread { status.first.text = t("AI отбирает видео…", "AI is picking videos…") }
+                    aiJson("studio_cuts_filter", mapOf("want" to want, "lang" to aiLang(), "hits" to StudioCuts.hitsBlock(found)),
+                        "You pick YouTube videos by their titles. Answer with JSON only.", 2000, fast = true) { StudioCuts.parsePicks(it, found.size) }
+                } else emptyMap()
+                found to picks
+            }, { e ->
+                status.second.visibility = View.GONE
+                status.first.text = (e.message ?: e.javaClass.simpleName).take(200)
+            }) { (found, picks) ->
+                status.second.visibility = View.GONE
+                hits = found
+                notes = picks.mapKeys { found[it.key].url }.mapValues { it.value.ifBlank { found.first { h -> h.url == it.key }.title } }
+                marked.clear()
+                marked += notes.keys
+                status.first.text = when {
+                    found.isEmpty() -> t("Ничего не нашлось. Попробуйте другие слова.", "Nothing found. Try other words.")
+                    useAi -> t("Найдено: ${found.size}, AI подобрал: ${picks.size}", "Found: ${found.size}, AI picked: ${picks.size}")
+                    else -> t("Найдено: ${found.size}. Отметьте нужные.", "Found: ${found.size}. Mark the ones you need.")
+                }
+                fill()
+            }
+        }
+
+        bottomSheet(t("Найти видео для нарезки", "Find videos for cuts")) { dismiss ->
+            dismissSheet = dismiss
+            muted(t("Поиск по названию на YouTube. AI-фильтр (необязательно) оставит видео, подходящие под описание, — по названиям; в AI уходят только названия. " +
+                "Отмеченные добавятся клипами с 0:00 на 5 с — время поправьте через ✎.",
+                "Search YouTube by title. The AI filter (optional) keeps videos that fit the description, by titles; only the titles go to AI. " +
+                    "Marked ones are added as clips from 0:00 for 5 s; adjust the time with ✎."))
+            val query = edit(t("Что искать, напр. «Хоумлендер реакция»", "What to search, e.g. \"shocked reaction meme\""))
+            val want = edit(t("AI-фильтр: что должно быть в кадре (можно пусто)", "AI filter: what must be in the shot (optional)"))
+            row(
+                btn(ctx, t("🔎 Искать", "🔎 Search"), style = BtnStyle.TONAL) { search(query.text.toString().trim(), "") },
+                btn(ctx, t("✨ Искать с AI", "✨ Search with AI"), primary = true) {
+                    val w = want.text.toString().trim().ifBlank { query.text.toString().trim() }
+                    search(query.text.toString().trim(), w)
+                }
+            )
+            status = working("")
+            status.first.visibility = View.GONE
+            status.second.visibility = View.GONE
+            box = add(LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL })
+            addBtn = button(t("＋ Добавить отмеченные", "＋ Add marked"), primary = true) {
+                val chosen = hits.filter { it.url in marked }
+                if (chosen.isEmpty()) return@button
+                val before = cutClips.size
+                val list = StudioCuts.addHits(cutClips, chosen, notes)
+                if (list.size - before < chosen.size) {
+                    toast(t("Добавлено ${list.size - before}: повторы пропущены, максимум ${StudioCuts.MAX_CLIPS}",
+                        "Added ${list.size - before}: repeats skipped, at most ${StudioCuts.MAX_CLIPS}"))
+                }
+                saveCuts(list)
+                board = emptyList()
+                dismissSheet()
+                render()
+            }
+            updateAdd()
+        }
     }
 
     /** Adds a clip ([old] == null) or changes one; a new link or time drops the downloaded file. */

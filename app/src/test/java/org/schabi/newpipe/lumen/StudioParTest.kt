@@ -38,4 +38,16 @@ class StudioParTest {
         val r = Par.mapAll((1..20).toList(), 4) { _, x -> Thread.sleep((20 - x).toLong()); x * 2 }
         assertEquals((1..20).map { it * 2 }, r)
     }
+
+    @Test
+    fun ttsCacheKeyAndWords() {
+        val o = TtsOptions("ru-RU-SvetlanaNeural", 10, 0)
+        assertEquals(StudioTtsCache.key("Привет", o), StudioTtsCache.key("Привет", o))
+        assertTrue(StudioTtsCache.key("Привет", o) != StudioTtsCache.key("Привет", o.copy(pitch = 5)))
+        assertTrue(StudioTtsCache.key("Привет", o) != StudioTtsCache.key("Пока", o))
+        assertTrue('_' !in StudioTtsCache.key("x", o))
+        val ws = listOf(SWord("Привет", 0, 400), SWord("мир", 420, 800))
+        assertEquals(ws, StudioTtsCache.parseWords(StudioTtsCache.wordsJson(ws)))
+        assertEquals(null, StudioTtsCache.parseWords("oops"))
+    }
 }

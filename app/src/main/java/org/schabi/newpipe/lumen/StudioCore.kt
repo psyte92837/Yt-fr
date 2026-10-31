@@ -1129,3 +1129,21 @@ const val STUDIO_VISUALS = "Для каждой сцены выбери визу
     "chart — столбчатая диаграмма из 2-6 столбцов: items с label (подпись) и value (число, например \"55\" или \"3,5\"); " +
     "compare — сравнение «было/стало», «миф/факт», «плохо/хорошо»: ровно 2 items (icon + label до 5 слов), в title что сравниваем. " +
     "Чередуй визуалы, не ставь один и тот же больше двух раз подряд. Эмодзи подбирай по смыслу."
+
+/**
+ * Voiced scenes kept on disk between attempts: when the connection drops, the next "Analyse" voices
+ * only the scenes that are not ready yet. Pure helpers; the files are written by StudioActivity.
+ */
+object StudioTtsCache {
+    fun key(text: String, o: TtsOptions): String = sha1("${o.voice}|${o.rate}|${o.pitch}|${o.volume}|$text").take(20)
+
+    fun wordsJson(ws: List<SWord>): String =
+        org.json.JSONArray().apply { ws.forEach { put(org.json.JSONArray().put(it.text).put(it.startMs).put(it.endMs)) } }.toString()
+
+    fun parseWords(s: String): List<SWord>? = try {
+        val a = org.json.JSONArray(s)
+        (0 until a.length()).map { i -> a.getJSONArray(i).let { SWord(it.getString(0), it.getLong(1), it.getLong(2)) } }
+    } catch (e: Exception) {
+        null
+    }
+}

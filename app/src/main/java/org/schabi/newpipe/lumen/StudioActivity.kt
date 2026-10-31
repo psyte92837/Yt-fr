@@ -2100,13 +2100,31 @@ class StudioActivity : LumenBase() {
         stats = Studio.stats(take.ms, speech, w.size)
     }
 
+    /** Pieces of a scene saved by [storeScene]: "<key>_<k>.mp3" + "<key>_<k>.json" (words); null if incomplete. */
+    private fun cachedScene(dir: File, key: String): List<Pair<ByteArray, List<SWord>>>? {
+        val n = File(dir, "${key}_n").takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull() ?: return null
+        return (0 until n).map { k ->
+            val mp3 = File(dir, "${key}_$k.mp3").takeIf { it.exists() }?.readBytes() ?: return null
+            val ws = File(dir, "${key}_$k.json").takeIf { it.exists() }?.readText()?.let { StudioTtsCache.parseWords(it) } ?: return null
+            mp3 to ws
+        }
+    }
+
+    private fun storeScene(dir: File, key: String, pieces: List<Pair<ByteArray, List<SWord>>>) = runCatching {
+        pieces.forEachIndexed { k, (mp3, ws) ->
+            File(dir, "${key}_$k.mp3").writeBytes(mp3)
+            File(dir, "${key}_$k.json").writeText(StudioTtsCache.wordsJson(ws))
+        }
+        File(dir, "${key}_n").writeText(pieces.size.toString())
+    }
+
     private fun analyseEdge(sc: SScript) {
         val voice = StudioPrefs.voice.takeIf { v -> voices.any { it.shortName == v } && v.startsWith(lang(), true) }
             ?: EdgeTts.pickVoice(voices, lang(), TtsPrefs.voiceFor(lang()))?.shortName ?: TtsPrefs.voice
         val o = TtsOptions(voice, StudioPrefs.rate)
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val castVoices = StudioToon.pickVoices(cast, voices, lang(), voice)
-        val tmp = File(cacheDir, "studio_tts").apply { deleteRecursively(); mkdirs() }
+        val tmp = File(cacheDir, "studio_tts").apply { mkdirs() }
         val all = mutableListOf<SWord>()
         val rs = mutableListOf<IntRange>()
         var audio = ShortArray(0)
@@ -2115,17 +2133,26 @@ class StudioActivity : LumenBase() {
         // scenes are voiced and decoded at the same time (each is its own connection), then joined in order
         val ready = java.util.concurrent.atomic.AtomicInteger(0)
         report("analyse", t("Озвучка сцен 0/$n", "Voicing scenes 0/$n"))
-        val voiced = Par.mapAll(sc.scenes, EdgeTts.WORKERS) { i, scene ->
+        val voiced = try { Par.mapAll(sc.scenes, EdgeTts.WORKERS) { i, scene ->
             if (cancel) throw java.util.concurrent.CancellationException()
             val ci = StudioToon.find(cast, scene.who)
             val so = if (ci >= 0) TtsOptions(castVoices[ci], StudioPrefs.rate, StudioToon.pitch(cast[ci].look)) else o
-            val pieces = EdgeTts.synthesizeWords(scene.say, so) { cancel } ?: throw java.util.concurrent.CancellationException()
+            // a scene voiced in an earlier, interrupted attempt is taken from disk
+            val key = StudioTtsCache.key(scene.say, so)
+            val cached = cachedScene(tmp, key)
+            val pieces = cached ?: (EdgeTts.synthesizeWords(scene.say, so) { cancel } ?: throw java.util.concurrent.CancellationException())
+            if (cached == null) storeScene(tmp, key, pieces)
             val out = pieces.mapIndexed { k, (mp3, ws) ->
-                val f = File(tmp, "s${i}_$k.mp3").apply { writeBytes(mp3) }
+                val f = File(tmp, "dec_${key}_$k.mp3").apply { writeBytes(mp3) }
                 StudioAudio.decode(f).also { f.delete() } to ws
             }
             report("analyse", t("Озвучка сцен ${ready.incrementAndGet()}/$n", "Voicing scenes ${ready.get()}/$n"))
             out
+        } } catch (e: EdgeTts.TtsException) {
+            // "Read aloud" is the TTS screen's button; here the step is restarted, and the voiced scenes are kept
+            throw EdgeTts.TtsException(e.message.orEmpty().substringBefore(t(" Нажмите", " Tap")).substringBefore(t(" Готово частей", " Parts done")) +
+                t(" Озвучено сцен: ${ready.get()} из $n, они сохранены — нажмите «🔍 Разобрать» ещё раз, продолжится с остальных. Проверьте интернет; держите Студию открытой или свёрнутой с уведомлением.",
+                    " Scenes voiced: ${ready.get()} of $n, they are kept — tap \"🔍 Analyse\" again to continue with the rest. Check the internet; keep the Studio open or minimised with its notification."))
         }
         if (cancel) throw java.util.concurrent.CancellationException()
         report("analyse", t("Сборка дорожки…", "Joining the track…"))
@@ -2149,7 +2176,12 @@ class StudioActivity : LumenBase() {
         }
         audio = Studio.concat(chunks)
         report("analyse", t("Озвучка сцен $n/$n", "Voicing scenes $n/$n"))
-        tmp.deleteRecursively()
+        // only the scenes of this script stay for the next run (e.g. after a small edit)
+        val keep = sc.scenes.mapIndexed { i, scene ->
+            val ci = StudioToon.find(cast, scene.who)
+            StudioTtsCache.key(scene.say, if (ci >= 0) TtsOptions(castVoices[ci], StudioPrefs.rate, StudioToon.pitch(cast[ci].look)) else o)
+        }.toSet()
+        tmp.listFiles()?.filter { it.name.substringBefore('_') !in keep }?.forEach { it.delete() }
         if (all.isEmpty()) error(t("Сервис не вернул разметку слов. Попробуйте другой голос.", "The service returned no word timings. Try another voice."))
         val take = StudioAudio.Pcm(audio, rate)
         pcm = take

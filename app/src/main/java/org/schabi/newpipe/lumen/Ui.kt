@@ -95,6 +95,9 @@ object Palette {
     val gradientNames get() = listOf("none" to t("Без градиента", "None"), "aurora" to t("Аврора", "Aurora"), "sunset" to t("Закат", "Sunset"),
         "neon" to t("Неон", "Neon"), "ocean" to t("Океан", "Ocean"), "candy" to t("Конфетти (светлая)", "Candy (light)"), "peach" to t("Персик (светлая)", "Peach (light)"))
 
+    /** Tile preview for a gradient theme: colours and whether it is dark; null for "none". */
+    fun gradientPreview(name: String): Pair<IntArray, Boolean>? = gradients[name]?.let { it.bg to it.dark }
+
     /** Active gradient colours or null; windows and pages paint this behind transparent content. */
     val gradient: IntArray? get() = if (LumenEnv.ready) gradients[Settings.style]?.bg else null
 

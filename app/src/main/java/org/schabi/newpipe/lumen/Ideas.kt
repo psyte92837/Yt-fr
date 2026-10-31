@@ -12,9 +12,10 @@ import org.json.JSONObject
 import java.io.File
 
 /**
- * "Ideas for my business": a short setup (business, market country, how often) turns into a hidden
+ * "Ideas for my business": a short setup (business, market country, how often) turns into a
  * monitoring project. Every run finds fresh videos of that market, collects top comments and writes
- * an AI digest: trends, customer pains (with quotes) and business ideas. Digests are kept in ideas.json.
+ * an AI digest: trends, customer pains (with quotes) and business ideas. Several businesses can be set up;
+ * the list is in prefs "ideas_list", digests of each in files/lumen/ideas/<id>.json.
  */
 data class IdeasConfig(
     var business: String = "",
@@ -23,14 +24,15 @@ data class IdeasConfig(
     var hours: Int = 24,
     var wifiOnly: Boolean = true,
     var enabled: Boolean = false,
-    var projectId: String = ""
+    var projectId: String = "",
+    val id: String = newId()
 ) {
     fun toJson(): JSONObject = JSONObject().put("business", business).put("country", country)
         .put("queries", JSONArray(queries)).put("hours", hours).put("wifiOnly", wifiOnly)
-        .put("enabled", enabled).put("projectId", projectId)
+        .put("enabled", enabled).put("projectId", projectId).put("id", id)
 
     companion object {
-        fun from(o: JSONObject?) = IdeasConfig().apply {
+        fun from(o: JSONObject?) = IdeasConfig(id = o?.optString("id", "")?.takeIf { it.isNotEmpty() } ?: newId()).apply {
             if (o == null) return@apply
             business = o.optString("business", "")
             country = o.optString("country", "US")
@@ -63,6 +65,15 @@ object IdeasLogic {
         "KR" -> "ko"
         else -> ""
     }
+
+    fun configsFrom(a: JSONArray?): List<IdeasConfig> =
+        if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let(IdeasConfig::from) }.distinctBy { it.id }
+
+    fun configsJson(list: List<IdeasConfig>): JSONArray = JSONArray().also { a -> list.forEach { a.put(it.toJson()) } }
+
+    /** Replaces the config with the same id or appends a new one, keeping the order. */
+    fun upsert(list: List<IdeasConfig>, c: IdeasConfig): List<IdeasConfig> =
+        if (list.any { it.id == c.id }) list.map { if (it.id == c.id) c else it } else list + c
 
     fun strings(a: JSONArray?): MutableList<String> {
         val out = mutableListOf<String>()
@@ -174,35 +185,67 @@ val IDEAS_PROMPTS = linkedMapOf(
 )
 
 object Ideas {
-    private const val PREF = "ideas_cfg"
-    private const val FILE = "ideas.json"
-    private const val NOTIFY_ID = 49_877
+    private const val PREF_LIST = "ideas_list"
+    private const val PREF_OLD = "ideas_cfg"
+    private const val FILE_OLD = "ideas.json"
+    private const val NOTIFY_BASE = 49_000
     private val lock = Any()
 
-    fun config(): IdeasConfig = try {
-        IdeasConfig.from(Lumen.prefs.getString(PREF, null)?.let { JSONObject(it) })
-    } catch (e: Exception) {
-        IdeasConfig()
+    /** All businesses; the old single-business setup (ideas_cfg + ideas.json) is migrated once. */
+    fun configs(): List<IdeasConfig> = synchronized(lock) {
+        val raw = Lumen.prefs.getString(PREF_LIST, null)
+        if (raw != null) {
+            return try {
+                IdeasLogic.configsFrom(JSONArray(raw))
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        val old = Lumen.prefs.getString(PREF_OLD, null)?.let {
+            try {
+                IdeasConfig.from(JSONObject(it))
+            } catch (e: Exception) {
+                null
+            }
+        }?.takeIf { it.business.isNotBlank() }
+        val list = listOfNotNull(old)
+        if (old != null) {
+            val f = File(Store.root, FILE_OLD)
+            if (f.exists()) f.renameTo(file(old.id).also { it.parentFile?.mkdirs() })
+        }
+        Lumen.prefs.edit().putString(PREF_LIST, IdeasLogic.configsJson(list).toString()).remove(PREF_OLD).apply()
+        list
     }
 
-    fun saveConfig(c: IdeasConfig) = Lumen.prefs.edit().putString(PREF, c.toJson().toString()).apply()
+    fun config(id: String): IdeasConfig? = configs().firstOrNull { it.id == id }
 
-    fun owns(pid: String): Boolean = pid.isNotEmpty() && config().projectId == pid
+    fun saveConfig(c: IdeasConfig) = synchronized(lock) {
+        Lumen.prefs.edit().putString(PREF_LIST, IdeasLogic.configsJson(IdeasLogic.upsert(configs(), c)).toString()).apply()
+    }
 
-    private val file get() = File(Store.root, FILE)
+    fun byProject(pid: String): IdeasConfig? = if (pid.isEmpty()) null else configs().firstOrNull { it.projectId == pid }
 
-    fun digests(): List<IdeasLogic.Digest> = synchronized(lock) {
+    private fun file(id: String) = File(Store.root, "ideas/$id.json")
+
+    fun digests(id: String): List<IdeasLogic.Digest> = synchronized(lock) {
         try {
-            if (file.exists()) IdeasLogic.digestsFrom(JSONArray(file.readText())) else emptyList()
+            val f = file(id)
+            if (f.exists()) IdeasLogic.digestsFrom(JSONArray(f.readText())) else emptyList()
         } catch (e: Exception) {
             emptyList()
         }
     }
 
-    private fun remember(d: IdeasLogic.Digest) = synchronized(lock) {
+    /** The newest digest over all businesses (for the home card). */
+    fun latest(): Pair<IdeasConfig, IdeasLogic.Digest>? =
+        configs().mapNotNull { c -> digests(c.id).firstOrNull()?.let { c to it } }.maxByOrNull { it.second.at }
+
+    private fun remember(id: String, d: IdeasLogic.Digest) = synchronized(lock) {
         val a = JSONArray()
-        IdeasLogic.addDigest(digests(), d).forEach { a.put(it.toJson()) }
-        file.writeText(a.toString())
+        IdeasLogic.addDigest(digests(id), d).forEach { a.put(it.toJson()) }
+        val f = file(id)
+        f.parentFile?.mkdirs()
+        f.writeText(a.toString())
     }
 
     fun countryName(code: String) = Regions.countryName(code)
@@ -239,8 +282,8 @@ object Ideas {
         return p
     }
 
-    fun stop(ctx: Context) {
-        val c = config()
+    fun stop(ctx: Context, id: String) {
+        val c = config(id) ?: return
         c.enabled = false
         saveConfig(c)
         if (c.projectId.isNotEmpty()) {
@@ -252,23 +295,35 @@ object Ideas {
         }
     }
 
+    /** Removes the business, its digests and stops monitoring; with [withProject] the collected videos too. */
+    fun delete(ctx: Context, id: String, withProject: Boolean) {
+        val c = config(id) ?: return
+        stop(ctx, id)
+        synchronized(lock) {
+            Lumen.prefs.edit().putString(PREF_LIST, IdeasLogic.configsJson(configs().filter { it.id != id }).toString()).apply()
+            file(id).delete()
+        }
+        if (withProject && c.projectId.isNotEmpty()) Store.delete(c.projectId)
+    }
+
     /**
-     * Called by [Monitoring.runOnce] for the ideas project after new videos were collected.
+     * Called by [Monitoring.runOnce] for an ideas project after new videos were collected.
      * Writes the digest and notifies; returns the digest or null without AI / on failure.
      */
     fun afterRun(ctx: Context, pid: String, fresh: List<Video>, notify: Boolean = true): IdeasLogic.Digest? {
-        val d = digest(pid, fresh) ?: return null
-        remember(d)
-        if (notify) notify(ctx, d)
+        val c = byProject(pid) ?: return null
+        val d = digest(c, fresh) ?: return null
+        remember(c.id, d)
+        if (notify) notify(ctx, c, d)
         return d
     }
 
     /** Manual "Update now": monitoring run; when nothing new arrived, a digest of the last week's videos. Blocking. */
-    fun refreshNow(ctx: Context): IdeasLogic.Digest? {
-        val pid = config().projectId.takeIf { it.isNotEmpty() } ?: return null
-        val before = digests().firstOrNull()?.at ?: 0
+    fun refreshNow(ctx: Context, id: String): IdeasLogic.Digest? {
+        val pid = config(id)?.projectId?.takeIf { it.isNotEmpty() } ?: return null
+        val before = digests(id).firstOrNull()?.at ?: 0
         Monitoring.runOnce(ctx, pid)
-        digests().firstOrNull()?.takeIf { it.at > before }?.let { return it }
+        digests(id).firstOrNull()?.takeIf { it.at > before }?.let { return it }
         val weekAgo = System.currentTimeMillis() - 7 * 86_400_000L
         val recent = Store.videos(pid).values.filter { maxOf(it.uploadMs, it.addedAt) >= weekAgo }
             .sortedByDescending { it.addedAt }.take(40)
@@ -276,9 +331,9 @@ object Ideas {
         return afterRun(ctx, pid, recent, notify = false)
     }
 
-    private fun digest(pid: String, fresh: List<Video>): IdeasLogic.Digest? {
+    private fun digest(c: IdeasConfig, fresh: List<Video>): IdeasLogic.Digest? {
         val prov = Provider.active() ?: return null
-        val c = config()
+        val pid = c.projectId
         val items = fresh.sortedByDescending { it.views }.take(40).map { v -> v to IdeasLogic.topComments(Store.comments(pid, v.id)) }
         if (items.isEmpty()) return null
         val prompt = Prompts.get("ideas_digest").replace("{business}", c.business.trim())
@@ -295,18 +350,18 @@ object Ideas {
         }
     }
 
-    private fun notify(ctx: Context, d: IdeasLogic.Digest) {
+    private fun notify(ctx: Context, c: IdeasConfig, d: IdeasLogic.Digest) {
         Notify.channels(ctx)
-        val pi = PendingIntent.getActivity(ctx, NOTIFY_ID, Intent(ctx, IdeasActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        val nid = NOTIFY_BASE + (c.id.hashCode() and 0x3FF)
+        val pi = PendingIntent.getActivity(ctx, nid, IdeasActivity.intent(ctx, c.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        val body = d.text.take(1500)
         val n = Notify.builder(ctx, Notify.CH_MONITOR).setSmallIcon(android.R.drawable.ic_menu_search)
-            .setContentTitle(t("💡 Новые идеи для бизнеса", "💡 New business ideas"))
+            .setContentTitle(t("💡 Идеи: ", "💡 Ideas: ") + c.business.trim().take(40))
             .setContentText(IdeasLogic.headline(d.text))
-            .setStyle(android.app.Notification.BigTextStyle().bigText(body))
+            .setStyle(android.app.Notification.BigTextStyle().bigText(d.text.take(1500)))
             .setContentIntent(pi).setAutoCancel(true).build()
         try {
-            ctx.getSystemService(android.app.NotificationManager::class.java).notify(NOTIFY_ID, n)
+            ctx.getSystemService(android.app.NotificationManager::class.java).notify(nid, n)
         } catch (e: SecurityException) {
             // notifications permission not granted
         }

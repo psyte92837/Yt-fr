@@ -9,8 +9,12 @@ import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
 
-/** "Ideas for my business": short setup, then the stream of AI digests from fresh videos and comments. */
+/**
+ * "Ideas for my business": the list of businesses; a business opens its stream of AI digests from fresh
+ * videos and comments; "+" or "Edit" opens the short setup. Extra "id" opens one business directly.
+ */
 class IdeasActivity : LumenBase() {
+    private var current = "" // "" = list of businesses
     private var editing = false
     private var busy = ""
     private var draft = IdeasConfig()
@@ -20,8 +24,44 @@ class IdeasActivity : LumenBase() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        draft = Ideas.config()
-        editing = draft.business.isBlank() || draft.projectId.isEmpty()
+        current = intent.getStringExtra("id").orEmpty()
+        val all = Ideas.configs()
+        if (current.isNotEmpty() && all.none { it.id == current }) current = ""
+        // first visit: straight to the setup
+        if (current.isEmpty() && all.isEmpty()) newBusiness()
+    }
+
+    private fun newBusiness() {
+        draft = IdeasConfig()
+        current = draft.id
+        editing = true
+    }
+
+    private fun backToList() {
+        current = ""
+        editing = false
+        expanded = 0
+        render()
+    }
+
+    override fun navigateUp() {
+        @Suppress("DEPRECATION")
+        onBackPressed()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        when {
+            editing && Ideas.config(current) != null -> {
+                editing = false
+                render()
+            }
+            (editing || current.isNotEmpty()) && Ideas.configs().isNotEmpty() -> backToList()
+            else -> {
+                @Suppress("DEPRECATION")
+                super.onBackPressed()
+            }
+        }
     }
 
     override fun onResume() {
@@ -37,8 +77,51 @@ class IdeasActivity : LumenBase() {
     private fun render() {
         val c = Col(this)
         if (busy.isNotEmpty()) c.working(busy)
-        if (editing) setup(c) else dashboard(c)
-        page(t("💡 Идеи для бизнеса", "💡 Business ideas"), c.root, keepScroll = true)
+        val cfg = Ideas.config(current)
+        when {
+            editing -> setup(c)
+            cfg != null -> dashboard(c, cfg)
+            else -> list(c)
+        }
+        val title = if (cfg != null && !editing) cfg.business.take(40) else if (editing) (if (cfg == null) t("Новый бизнес", "New business") else t("Настройка", "Setup")) else t("💡 Идеи для бизнеса", "💡 Business ideas")
+        val fab = if (!editing && cfg == null) t("＋  Добавить бизнес", "＋  Add business") to {
+            newBusiness()
+            render()
+        } else null
+        page(title, c.root, keepScroll = true, fab = fab)
+    }
+
+    private fun list(c: Col) {
+        val all = Ideas.configs()
+        c.p(t("Для каждого бизнеса Lumen отдельно следит за свежими видео и комментариями на своём рынке и пишет сводки идей.",
+            "For each business Lumen watches fresh videos and comments in its market and writes idea digests."), color = Palette.MUTED)
+        if (all.isEmpty()) {
+            c.empty(t("Пока нет бизнесов", "No businesses yet"), t("Добавьте первый: пара слов о бизнесе и рынок.", "Add the first one: a few words and a market."),
+                t("Добавить бизнес", "Add business")) {
+                newBusiness()
+                render()
+            }
+        }
+        for (b in all) {
+            val last = Ideas.digests(b.id).firstOrNull()
+            val card = c.card {
+                add(text(ctx, "💡 " + b.business, Type.TITLE_M, bold = true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, 0)
+                muted(Ideas.countryName(b.country) + " · " + freq(b.hours) + if (b.enabled) "" else t(" · на паузе", " · paused"))
+                if (last != null) {
+                    add(text(ctx, Fmt.dateTime(last.at), Type.LABEL, bold = true, color = Palette.ACCENT), 8)
+                    add(text(ctx, IdeasLogic.headline(last.text), Type.BODY).apply { maxLines = 2 }, 2)
+                } else muted(t("Сводок пока нет", "No digests yet"))
+            }
+            card.setOnClickListener {
+                current = b.id
+                editing = false
+                expanded = 0
+                render()
+            }
+        }
     }
 
     private fun setup(c: Col) {
@@ -68,11 +151,24 @@ class IdeasActivity : LumenBase() {
         c.add(btn(this, t("🚀  Начать поиск идей", "🚀  Start finding ideas"), style = BtnStyle.FILLED) { start() }, 20).apply {
             minimumHeight = dp(56)
         }
-        if (draft.projectId.isNotEmpty()) c.button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) {
-            draft = Ideas.config()
-            editing = false
-            render()
+        val saved = Ideas.config(draft.id)
+        if (saved != null || Ideas.configs().isNotEmpty()) c.button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) {
+            if (saved != null) {
+                draft = saved
+                editing = false
+                render()
+            } else backToList()
         }
+        if (saved != null) c.button(t("Удалить бизнес", "Delete business"), style = BtnStyle.TEXT) { delete(saved) }
+    }
+
+    private fun delete(b: IdeasConfig) {
+        val items = arrayOf(t("Удалить, видео оставить в проектах", "Delete, keep videos in projects"), t("Удалить вместе с собранными видео", "Delete with collected videos"))
+        android.app.AlertDialog.Builder(this).setTitle(t("Удалить «${b.business.take(40)}»?", "Delete \"${b.business.take(40)}\"?"))
+            .setItems(items) { _, i ->
+                Ideas.delete(this, b.id, withProject = i == 1)
+                backToList()
+            }.setNegativeButton(t("Отмена", "Cancel"), null).show()
     }
 
     private fun start() {
@@ -88,12 +184,14 @@ class IdeasActivity : LumenBase() {
         Lumen.async({
             if (cfg.queries.isEmpty()) cfg.queries = Ideas.suggestQueries(cfg.business, cfg.country).toMutableList()
             Ideas.apply(Lumen.app, cfg)
+            cfg
         }, onError = {
             busy = ""
             render()
             err(it)
         }) {
-            draft = Ideas.config()
+            draft = it
+            current = it.id
             editing = false
             busy = ""
             render()
@@ -105,7 +203,8 @@ class IdeasActivity : LumenBase() {
         if (busy.isNotEmpty()) return
         busy = t("Ищу свежие видео и читаю комментарии… Это займёт пару минут", "Looking for fresh videos and reading comments… This takes a couple of minutes")
         render()
-        Lumen.async({ Ideas.refreshNow(Lumen.app) }, onError = {
+        val id = current
+        Lumen.async({ Ideas.refreshNow(Lumen.app, id) }, onError = {
             busy = ""
             render()
             err(it)
@@ -118,8 +217,7 @@ class IdeasActivity : LumenBase() {
         }
     }
 
-    private fun dashboard(c: Col) {
-        val cfg = Ideas.config()
+    private fun dashboard(c: Col, cfg: IdeasConfig) {
         val p = Store.project(cfg.projectId)
         c.card {
             add(text(ctx, cfg.business, Type.TITLE_M, bold = true).apply { maxLines = 3 }, 0)
@@ -131,7 +229,7 @@ class IdeasActivity : LumenBase() {
             add(btn(ctx, t("Обновить сейчас", "Update now"), style = BtnStyle.FILLED) { refresh() }, 12)
             row(
                 btn(ctx, t("Настроить", "Edit"), style = BtnStyle.TONAL) {
-                    draft = Ideas.config()
+                    draft = cfg
                     editing = true
                     render()
                 },
@@ -148,7 +246,8 @@ class IdeasActivity : LumenBase() {
                 }
             }
         }
-        val list = Ideas.digests()
+        if (Ideas.configs().size > 1) c.button(t("← Все бизнесы", "← All businesses"), style = BtnStyle.TEXT) { backToList() }
+        val list = Ideas.digests(cfg.id)
         c.h2(t("Сводки", "Digests") + if (list.isNotEmpty()) " (${list.size})" else "")
         if (list.isEmpty()) {
             c.muted(t("Первая сводка появится после проверки. Нажмите «Обновить сейчас», чтобы не ждать.",
@@ -182,7 +281,7 @@ class IdeasActivity : LumenBase() {
 
     private fun toggle(cfg: IdeasConfig) {
         if (cfg.enabled) {
-            Ideas.stop(this)
+            Ideas.stop(this, cfg.id)
             render()
             return
         }
@@ -191,7 +290,9 @@ class IdeasActivity : LumenBase() {
     }
 
     companion object {
-        fun open(ctx: Context) = ctx.startActivity(Intent(ctx, IdeasActivity::class.java))
+        fun open(ctx: Context, id: String = "") = ctx.startActivity(intent(ctx, id))
+
+        fun intent(ctx: Context, id: String = ""): Intent = Intent(ctx, IdeasActivity::class.java).apply { if (id.isNotEmpty()) putExtra("id", id) }
 
         fun freq(hours: Int): String = when (hours) {
             168 -> t("раз в неделю", "weekly")

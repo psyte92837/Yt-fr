@@ -244,8 +244,8 @@ class LumenActivity : LumenBase() {
 
     /** Big entry to "Ideas for my business": setup on first tap, then the latest digest headline. */
     private fun ideasCard(c: Col) {
-        val cfg = Ideas.config()
-        val last = if (cfg.projectId.isNotEmpty()) Ideas.digests().firstOrNull() else null
+        val all = Ideas.configs()
+        val latest = Ideas.latest()
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(20), dp(20), dp(20))
@@ -253,23 +253,26 @@ class LumenActivity : LumenBase() {
             elevation = dp(2).toFloat()
             addView(text(context, t("💡 Идеи для моего бизнеса", "💡 Ideas for my business"), Type.TITLE_L, bold = true, color = Palette.ON_ACCENT))
             val sub = when {
-                cfg.projectId.isEmpty() -> t("Опишите бизнес, выберите рынок (например, США) — Lumen будет следить за свежими видео и комментариями и присылать сводку идей",
+                all.isEmpty() -> t("Опишите бизнес, выберите рынок (например, США) — Lumen будет следить за свежими видео и комментариями и присылать сводку идей",
                     "Describe your business, pick a market (e.g. USA): Lumen watches fresh videos and comments and sends a digest of ideas")
-                last != null -> Fmt.dateTime(last.at) + " · " + IdeasLogic.headline(last.text)
-                else -> Ideas.countryName(cfg.country) + " · " + IdeasActivity.freq(cfg.hours) + if (cfg.enabled) "" else t(" · на паузе", " · paused")
+                latest != null -> (if (all.size > 1) t("Бизнесов: ${all.size} · ", "Businesses: ${all.size} · ") else "") +
+                    Fmt.dateTime(latest.second.at) + " · " + IdeasLogic.headline(latest.second.text)
+                all.size == 1 -> all[0].business.take(60) + " · " + Ideas.countryName(all[0].country) + " · " + IdeasActivity.freq(all[0].hours)
+                else -> t("Бизнесов: ${all.size}", "Businesses: ${all.size}")
             }
             addView(text(context, sub, 14f, color = Palette.ON_ACCENT).apply {
                 maxLines = 3
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(0, dp(6), 0, dp(14))
             })
-            addView(text(context, if (cfg.projectId.isEmpty()) t("Настроить за минуту  →", "Set up in a minute  →") else t("Открыть сводки  →", "Open digests  →"),
+            addView(text(context, if (all.isEmpty()) t("Настроить за минуту  →", "Set up in a minute  →") else t("Открыть сводки  →", "Open digests  →"),
                 15f, bold = true, color = Palette.ACCENT).apply {
                 background = roundBg(Palette.ON_ACCENT, 24f, this@LumenActivity)
                 setPadding(dp(20), dp(12), dp(20), dp(12))
             }, LinearLayout.LayoutParams(-2, -2))
             contentDescription = t("Идеи для моего бизнеса", "Ideas for my business")
-            setOnClickListener { IdeasActivity.open(this@LumenActivity) }
+            // a single business opens right away, several open the list
+            setOnClickListener { IdeasActivity.open(this@LumenActivity, all.singleOrNull()?.id.orEmpty()) }
         }
         c.add(box, 12)
     }

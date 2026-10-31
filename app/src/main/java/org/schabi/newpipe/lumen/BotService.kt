@@ -361,7 +361,11 @@ class BotWorker(private val ctx: Context, private val botId: String) : Thread("b
                     limiter.perDay = info.aiPerDay
                     runSchedules()
                     val a = api ?: break
+                    runPosts(a)
                     val batch = a.getUpdates(Bots.offset(botId) + 0, 20, username)
+                    BotPosts.noteChats(botId, a.chats).forEach { c ->
+                        Bots.log(botId, BotLogEntry.SYS, 0, "", t("Бот добавлен в чат: ", "The bot was added to: ") + c.label + " (${c.chat})")
+                    }
                     for (u in batch.updates) {
                         if (stopping) break
                         // at most once: a message that crashes the bot must not come back forever
@@ -489,6 +493,20 @@ class BotWorker(private val ctx: Context, private val botId: String) : Thread("b
             menuShown = want
         } catch (e: TgError) {
             Bots.log(botId, BotLogEntry.ERR, 0, "", "setChatMenuButton: ${e.description}")
+        }
+    }
+
+    private var postsAt = 0L
+
+    /** Scheduled posts and auto-filling plans (checked at most every 30 s). */
+    private fun runPosts(a: TgApi) {
+        val now = System.currentTimeMillis()
+        if (now - postsAt < 30_000L) return
+        postsAt = now
+        try {
+            PostEngine.tick(ctx, botId, a)
+        } catch (e: Exception) {
+            Bots.log(botId, BotLogEntry.ERR, 0, "", "posts: " + (e.message ?: e.javaClass.simpleName))
         }
     }
 

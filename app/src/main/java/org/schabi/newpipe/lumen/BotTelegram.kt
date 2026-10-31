@@ -60,10 +60,65 @@ class TgApi(private val token: String) {
 
     /** Waits up to [timeoutSec] for new updates. */
     fun getUpdates(offset: Long, timeoutSec: Int, botUsername: String): Tg.Batch {
-        val p = JSONObject().put("timeout", timeoutSec).put("allowed_updates", JSONArray(listOf("message", "edited_message", "callback_query")))
+        val p = JSONObject().put("timeout", timeoutSec).put("allowed_updates", JSONArray(listOf("message", "edited_message", "callback_query", "my_chat_member")))
         if (offset > 0) p.put("offset", offset)
         val o = call("getUpdates", p, (timeoutSec + 15) * 1000)
-        return Tg.parseUpdates(o.toString(), botUsername)
+        val body = o.toString()
+        chats = PostCore.chatsFromUpdates(body)
+        return Tg.parseUpdates(body, botUsername)
+    }
+
+    /** Groups and channels seen in the last getUpdates (the bot was added or wrote there). */
+    @Volatile var chats: List<Triple<String, String, String>> = emptyList()
+        private set
+
+    /** Channel or group by "@username" or id: (id, title, type). */
+    fun getChat(chat: String): Triple<String, String, String> {
+        val r = call("getChat", JSONObject().put("chat_id", chat)).getJSONObject("result")
+        return Triple(r.optLong("id").toString(), r.optString("title").ifBlank { r.optString("username") }, r.optString("type"))
+    }
+
+    /** The bot's status in the chat: "administrator", "member", "left"… and whether it may post in a channel. */
+    fun botRights(chat: String, botId: Long): Pair<String, Boolean> {
+        val r = call("getChatMember", JSONObject().put("chat_id", chat).put("user_id", botId)).getJSONObject("result")
+        val status = r.optString("status")
+        return status to (status == "creator" || (status == "administrator" && r.optBoolean("can_post_messages", true)) || status == "member")
+    }
+
+    /** Publishes a post to a channel/group (chat id or @username). HTML that Telegram rejects is re-sent as plain text. Returns the message id. */
+    fun post(chat: String, html: String, photo: String, buttonText: String, buttonUrl: String, silent: Boolean = false): Long {
+        val markup = if (buttonUrl.startsWith("http")) JSONObject().put(
+            "inline_keyboard", JSONArray().put(JSONArray().put(JSONObject().put("text", buttonText.ifBlank { "🔗" }.take(64)).put("url", buttonUrl)))
+        ) else null
+        fun send(method: String, p: JSONObject): Long {
+            p.put("chat_id", chat).put("parse_mode", "HTML")
+            if (silent) p.put("disable_notification", true)
+            if (markup != null) p.put("reply_markup", markup)
+            return try {
+                call(method, p).getJSONObject("result").optLong("message_id")
+            } catch (e: TgError) {
+                if (e.code != 400 || !(e.description.contains("parse", true) || e.description.contains("entit", true))) throw e
+                p.remove("parse_mode")
+                listOf("text", "caption").forEach { k -> if (p.has(k)) p.put(k, PostCore.stripTags(p.optString(k))) }
+                call(method, p).getJSONObject("result").optLong("message_id")
+            }
+        }
+        val text = html.ifBlank { "…" }
+        if (photo.startsWith("http")) {
+            if (PostCore.visibleLength(text) <= 1024) return send("sendPhoto", JSONObject().put("photo", photo).put("caption", text))
+            // long text: the picture first (no caption), then the text with the button
+            call("sendPhoto", JSONObject().put("chat_id", chat).put("photo", photo).put("disable_notification", true))
+        }
+        var last = 0L
+        val parts = Tg.split(text)
+        parts.forEachIndexed { i, part ->
+            last = if (i < parts.lastIndex) {
+                call("sendMessage", JSONObject().put("chat_id", chat).put("text", PostCore.stripTags(part))).getJSONObject("result").optLong("message_id")
+            } else {
+                send("sendMessage", JSONObject().put("text", part))
+            }
+        }
+        return last
     }
 
     /** Sends [text] (split into parts when long); a broken HTML/Markdown is re-sent as plain text. Returns the last message id. */

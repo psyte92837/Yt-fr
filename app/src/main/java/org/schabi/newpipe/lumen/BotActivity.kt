@@ -50,7 +50,7 @@ class BotActivity : LumenBase() {
 
     override fun onResume() {
         super.onResume()
-        BotRun.listener = { if (tab != TAB_TEST) render() }
+        BotRun.listener = { if (tab != TAB_TEST && tab != TAB_POSTS) render() }
         render()
     }
 
@@ -65,6 +65,8 @@ class BotActivity : LumenBase() {
     }
 
     private fun info() = Bots.get(botId)
+
+    private val postsTab by lazy { BotPostsTab(this, botId) { render() } }
 
     private fun render() {
         val b = info() ?: run {
@@ -84,8 +86,8 @@ class BotActivity : LumenBase() {
             })
         }
         header.addView(row)
-        header.addView(tabBar(this, listOf(t("Тест", "Test"), t("Код", "Code"), t("Мини-апп", "Mini app"), t("Журнал", "Journal"), t("Настройки", "Settings")), tab) {
-            tab = it
+        header.addView(tabBar(this, listOf(t("Тест", "Test"), t("Код", "Code"), t("Посты", "Posts"), t("Мини-апп", "Mini app"), t("Журнал", "Journal"), t("Настройки", "Settings")), ORDER.indexOf(tab).coerceAtLeast(0)) {
+            tab = ORDER[it]
             render()
         })
         val title = if (b.username.isNotBlank()) "@" + b.username else b.name
@@ -93,6 +95,7 @@ class BotActivity : LumenBase() {
             TAB_TEST -> renderTest(title, header)
             TAB_CODE -> page(title, codeTab(b).root, header = header, keepScroll = true)
             TAB_APP -> page(title, appTab(b).root, header = header, keepScroll = true)
+            TAB_POSTS -> page(title, postsTab.build().root, header = header, keepScroll = true)
             TAB_LOG -> page(title, logTab(b).root, header = header)
             else -> page(title, settingsTab(b).root, header = header, keepScroll = true)
         }
@@ -1000,6 +1003,8 @@ class BotActivity : LumenBase() {
         const val TAB_APP = 2
         const val TAB_LOG = 3
         const val TAB_SETTINGS = 4
+        const val TAB_POSTS = 5
+        private val ORDER = listOf(TAB_TEST, TAB_CODE, TAB_POSTS, TAB_APP, TAB_LOG, TAB_SETTINGS)
 
         fun open(ctx: Context, id: String, tab: Int = TAB_TEST, fresh: Boolean = false) {
             ctx.startActivity(Intent(ctx, BotActivity::class.java).putExtra("id", id).putExtra("tab", tab).putExtra("fresh", fresh))

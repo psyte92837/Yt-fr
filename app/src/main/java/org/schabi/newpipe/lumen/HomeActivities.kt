@@ -156,6 +156,12 @@ class LumenActivity : LumenBase() {
             }
             card.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java).putExtra("update", true)) }
         }
+        TaskHub.count(this).takeIf { it > 0 }?.let { n ->
+            c.card {
+                add(text(ctx, t("⚙ Задач в работе: $n", "⚙ Tasks running: $n"), Type.TITLE_M, bold = true), 0)
+                muted(t("Нажмите, чтобы посмотреть или остановить", "Tap to view or stop them"))
+            }.setOnClickListener { TasksActivity.open(this) }
+        }
         if (Provider.active() == null) {
             c.card {
                 val row = LinearLayout(ctx).apply {
@@ -327,6 +333,7 @@ class LumenActivity : LumenBase() {
             @Suppress("DEPRECATION")
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
         })
+        items.add(t("⚙ Задачи", "⚙ Tasks") + TaskHub.count(this).let { if (it > 0) " ($it)" else "" } to { TasksActivity.open(this) })
         items.add("🎬 Lumen Studio" to { StudioActivity.open(this) })
         items.add(t("🤖 Мои ТГ боты", "🤖 My Telegram bots") to { BotsActivity.open(this) })
         items.add(t("Справка и о проекте", "Help and about") to { HelpActivity.open(this, "about") })

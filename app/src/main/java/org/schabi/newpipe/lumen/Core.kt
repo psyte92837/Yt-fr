@@ -46,13 +46,18 @@ object Lumen {
 
     /** Runs [work] in background and delivers the result (or error) on the main thread. */
     fun <T> async(work: () -> T, onError: (Throwable) -> Unit = {}, onDone: (T) -> Unit) {
+        // listed in the task manager (no notification), so a hung load can be stopped
+        val task = BgTasks.quiet(t("Фоновая операция", "Background operation"), onError)
         io.execute {
+            BgTasks.adopt(task)
             try {
                 val r = work()
-                ui { onDone(r) }
+                ui { if (BgTasks.end(task)) onDone(r) }
             } catch (t: Throwable) {
-                L.e("async", t.message ?: t.javaClass.simpleName, t)
-                ui { onError(t) }
+                if (!task.cancelled) L.e("async", t.message ?: t.javaClass.simpleName, t)
+                ui { if (BgTasks.end(task)) onError(t) }
+            } finally {
+                BgTasks.adopt(null)
             }
         }
     }
@@ -65,6 +70,11 @@ object Settings {
     var lang: String
         get() = p.getString("lang", "ru") ?: "ru"
         set(v) = p.edit().putString("lang", v).apply()
+
+    /** Minutes without progress after which a task is stopped (0 = never). */
+    var taskStuckMin: Int
+        get() = p.getInt("task_stuck_min", TaskHealth.DEFAULT_MIN)
+        set(v) = p.edit().putInt("task_stuck_min", v).apply()
 
     /** Heads-up notification when a long task finishes. */
     var notifyDone: Boolean
@@ -231,6 +241,7 @@ object Par {
      * while the overall rate stays bounded (with parallel = 1 it is the old fixed pause).
      */
     fun gate(delayMs: Int = Settings.requestDelayMs, workers: Int = Settings.parallel) {
+        BgTasks.checkpoint()
         if (workers <= 1) {
             if (delayMs > 0) Thread.sleep(delayMs.toLong())
             return
@@ -253,9 +264,10 @@ object Par {
         val out = arrayOfNulls<Any>(items.size)
         if (items.isEmpty()) return emptyList()
         val n = threads(items.size, threads)
+        val owner = BgTasks.current()
         if (n == 1) {
             for ((i, x) in items.withIndex()) {
-                if (cancel?.get() == true) break
+                if (cancel?.get() == true || owner?.cancelled == true) break
                 out[i] = try { f(i, x) } catch (e: Exception) { L.w("par", "item $i failed: ${e.message}"); null }
             }
         } else {
@@ -263,13 +275,15 @@ object Par {
             val done = CountDownLatch(n)
             repeat(n) {
                 pool.execute {
+                    BgTasks.adopt(owner)
                     try {
-                        while (cancel?.get() != true) {
+                        while (cancel?.get() != true && owner?.cancelled != true) {
                             val i = next.getAndIncrement()
                             if (i >= items.size) break
                             out[i] = try { f(i, items[i]) } catch (e: Exception) { L.w("par", "item $i failed: ${e.message}"); null }
                         }
                     } finally {
+                        BgTasks.adopt(null)
                         done.countDown()
                     }
                 }
@@ -317,6 +331,7 @@ object Par {
                 val transient = m.startsWith("HTTP 429") || m.startsWith("HTTP 500") || m.startsWith("HTTP 502") ||
                     m.startsWith("HTTP 503") || m.startsWith("HTTP 504") || m.startsWith("HTTP 529")
                 if (!transient || a == attempts - 1) throw e
+                BgTasks.checkpoint()
                 Thread.sleep(1500L * (a + 1) * (a + 1))
             }
         }

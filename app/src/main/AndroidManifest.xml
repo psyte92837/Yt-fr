@@ -219,6 +219,13 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <activity
+            android:name=".lumen.TasksActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme" />
+        <receiver
+            android:name=".lumen.TaskStopReceiver"
+            android:exported="false" />
+        <activity
             android:name=".lumen.HelpActivity"
             android:exported="false"
             android:theme="@style/LumenTheme" />

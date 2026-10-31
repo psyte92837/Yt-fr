@@ -147,8 +147,9 @@ object Llm {
         val started = System.currentTimeMillis()
         var raw: String? = null
         // the user sees the data that goes out and picks what to keep (SendReviewActivity)
+        BgTasks.checkpoint()
         val out = try {
-            SendGate.review(SendGate.Request(task.ifBlank { "ai" }, pid, p, model, system, user, fileUri, maxTokens))
+            BgTasks.waitingUser { SendGate.review(SendGate.Request(task.ifBlank { "ai" }, pid, p, model, system, user, fileUri, maxTokens)) }
         } catch (e: SendCancelled) {
             AiJournal.record(pid, task, p.name, model, system, user, "", "", 0, 0, "blocked", e.message, 0)
             throw e
@@ -159,8 +160,11 @@ object Llm {
             val r = Par.retrying { completeRaw(p, model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file)
+            // stopped while waiting for the answer: the answer stays in the journal, the task ends here
+            BgTasks.checkpoint()
             return r
         } catch (e: Exception) {
+            if (e is java.util.concurrent.CancellationException) throw e
             AiJournal.record(pid, task, p.name, model, system, sent, "", raw ?: (e as? LlmException)?.raw ?: "", 0, 0,
                 "error", e.message ?: e.javaClass.simpleName, System.currentTimeMillis() - started, file)
             throw e

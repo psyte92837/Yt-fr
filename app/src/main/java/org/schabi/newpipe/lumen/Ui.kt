@@ -1122,6 +1122,10 @@ abstract class LumenBase : Activity() {
 
     /** Shows an error, logs it, and offers to share a developer report. */
     fun err(t: Throwable) {
+        if (t is java.util.concurrent.CancellationException) {
+            if (!isFinishing && !isDestroyed) toast(t("Задача остановлена", "Task stopped"))
+            return
+        }
         val msg = (t.message ?: t.javaClass.simpleName).take(500)
         L.e("ui", "${javaClass.simpleName}: $msg", t)
         // the screen may be gone by the time a background job fails: no window to attach a dialog to

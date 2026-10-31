@@ -37,6 +37,8 @@ class StudioTemplatesActivity : LumenBase() {
         private const val TASK = "studio_tpl"
         /** Shared by all copies of the screen: the work goes on when the screen is closed. */
         @Volatile private var cancel = false
+        /** True from the start of a task until its result is handed over (a chained step may start then). */
+        private var active = false
         /** Report of work that ended while the screen was closed; shown when it opens again. */
         private var pending: Pair<String, String>? = null
     }
@@ -219,15 +221,17 @@ class StudioTemplatesActivity : LumenBase() {
 
     /** Long work: a background task with a progress notification, so it goes on when the app is minimised. */
     private fun run(msg: String, work: () -> String, done: (String) -> Unit = {}) {
-        if (BgTasks.has(TASK)) {
+        if (active) {
             toast(t("Уже идёт работа над шаблоном", "A template is already being made"))
             return
         }
         busy = msg
         cancel = false
+        active = true
         render()
         val open = BgTasks.reopen(this).apply { removeExtra("video") }
         BgTasks.run(this, TASK, t("Шаблоны Studio", "Studio templates"), open, { task -> task.message = msg; work() }, { e ->
+            active = false
             busy = ""
             if (isDestroyed) {
                 if (e !is java.util.concurrent.CancellationException) pending = t("Ошибка", "Error") to (e.message ?: e.javaClass.simpleName)
@@ -236,6 +240,7 @@ class StudioTemplatesActivity : LumenBase() {
             render()
             if (e !is java.util.concurrent.CancellationException) err(e)
         }, { cancel = true }) { r ->
+            active = false
             busy = ""
             if (isDestroyed) {
                 pending = t("Готово", "Done") to r

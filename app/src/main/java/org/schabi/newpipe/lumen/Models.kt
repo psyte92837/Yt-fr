@@ -85,10 +85,11 @@ data class MonitorConfig(
     var charging: Boolean = false,
     var aiSummary: Boolean = false,
     var aiFilter: Boolean = false, // judge new videos against the topic before adding them (WatchFilter)
-    var recDrip: Int = 0 // recommended videos added to the project per monitoring run
+    var recDrip: Int = 0, // recommended videos added to the project per monitoring run
+    var anyLang: Boolean = false // also search the topic translated into other languages (WatchLangs)
 ) {
     fun toJson() = JSONObject().put("enabled", enabled).put("hours", hours).put("wifiOnly", wifiOnly)
-        .put("charging", charging).put("aiSummary", aiSummary).put("aiFilter", aiFilter).put("recDrip", recDrip)
+        .put("charging", charging).put("aiSummary", aiSummary).put("aiFilter", aiFilter).put("recDrip", recDrip).put("anyLang", anyLang)
 
     companion object {
         fun from(o: JSONObject?) = MonitorConfig().apply {
@@ -100,6 +101,7 @@ data class MonitorConfig(
             aiSummary = o.optBoolean("aiSummary", false)
             aiFilter = o.optBoolean("aiFilter", false)
             recDrip = o.optInt("recDrip", 0)
+            anyLang = o.optBoolean("anyLang", false)
         }
     }
 }

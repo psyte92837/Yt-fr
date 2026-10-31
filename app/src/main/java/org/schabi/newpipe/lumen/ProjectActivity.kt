@@ -202,7 +202,7 @@ class ProjectActivity : LumenBase() {
         page(
             project.name, c.root,
             header = header,
-            actions = listOf("⋮" to { projectMenu() }),
+            actions = listOf("🗺" to { KnowledgeMapActivity.open(this, project.id) }, "⋮" to { projectMenu() }),
             fab = fab,
             footer = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -219,11 +219,15 @@ class ProjectActivity : LumenBase() {
     }
 
     private fun projectMenu() {
-        val items = arrayOf(t("Импорт видео", "Import videos"), t("Фильтры поиска проекта", "Project search filters"))
+        val items = arrayOf(t("Импорт видео", "Import videos"), t("Фильтры поиска проекта", "Project search filters"), t("🗺 Карта знаний", "🗺 Knowledge map"))
         AlertDialog.Builder(this).setTitle(project.name).setItems(items) { _, i ->
-            if (i == 0) importDialog() else {
-                tab = "settings"
-                render()
+            when (i) {
+                0 -> importDialog()
+                2 -> KnowledgeMapActivity.open(this, project.id)
+                else -> {
+                    tab = "settings"
+                    render()
+                }
             }
         }.show()
     }
@@ -1235,7 +1239,12 @@ class ProjectActivity : LumenBase() {
                 m.hours) { m.hours = it }
             c.check(t("Только по Wi-Fi", "Wi-Fi only"), m.wifiOnly) { m.wifiOnly = it }
             c.check(t("Только при зарядке", "Only while charging"), m.charging) { m.charging = it }
+            c.check(t("Искать на всех языках", "Search in all languages"), m.anyLang) { m.anyLang = it }
+            c.muted(t("AI один раз переводит тему на ${WatchLangs.DEFAULT.size} языков (en, es, pt, hi, ar, ja…), поиск идёт по всем без фильтра страны и языка. Без AI — только исходные запросы.",
+                "AI translates the topic once into ${WatchLangs.DEFAULT.size} languages (en, es, pt, hi, ar, ja…); all are searched with no country or language filter. Without AI only the original queries are used."))
             c.check(t("AI-сводка новых видео в уведомлении", "AI summary of new videos in notification"), m.aiSummary) { m.aiSummary = it }
+            c.muted(t("В уведомлении: сколько вышло, на каких языках и о чём. Без AI — языки, каналы и заголовки.",
+                "The notification says how many came out, in which languages and what about. Without AI: languages, channels and titles."))
             c.check(t("AI-отсев: добавлять только видео по теме", "AI filter: add only on-topic videos"), m.aiFilter) { m.aiFilter = it }
             c.muted(t("Без AI-ключа отсев идёт по ключевым словам темы. Отсеянные видео не проверяются повторно.",
                 "Without an AI key the filter uses the topic's keywords. Rejected videos are not checked again."))
@@ -1255,6 +1264,16 @@ class ProjectActivity : LumenBase() {
                     reload()
                     render()
                     toast(t("Новых видео: $n", "New videos: $n"))
+                }
+            }
+            val digests = WatchDigest.history(project.id)
+            if (digests.isNotEmpty()) {
+                c.h2(t("Последние сводки", "Recent digests"))
+                digests.takeLast(5).reversed().forEach { d ->
+                    c.card {
+                        add(text(ctx, Fmt.dateTime(d.at) + " · " + d.title, 13f, bold = true), 0)
+                        add(text(ctx, d.body, 13f, color = Palette.MUTED), 4)
+                    }
                 }
             }
         }

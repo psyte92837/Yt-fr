@@ -293,7 +293,7 @@ fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
     Ic.HELP -> t("Справка", "Help")
     Ic.MOVIE -> "Lumen Studio"
     Ic.HOME, Ic.LIST, Ic.CHART, Ic.SPARK, Ic.SEARCH -> glyph
-    null -> glyph
+    null -> if (glyph == "🗺") t("Карта знаний", "Knowledge map") else glyph
 }
 
 class IconDrawable(private val ic: Ic, color: Int) : Drawable() {

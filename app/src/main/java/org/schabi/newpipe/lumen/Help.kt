@@ -12,8 +12,8 @@ import android.os.Bundle
 object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
-        "about", "home", "wizard", "new_project", "project", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "browser", "tts", "studio", "lens", "settings"
+        "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
+        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "lens", "settings"
     )
 
     private val screens = mapOf(
@@ -21,6 +21,7 @@ object HelpMap {
         "WizardActivity" to "wizard",
         "NewProjectActivity" to "new_project",
         "ProjectActivity" to "project",
+        "KnowledgeMapActivity" to "kmap",
         "VideoActivity" to "video",
         "ChannelActivity" to "channel",
         "LinkActivity" to "quick",
@@ -30,6 +31,7 @@ object HelpMap {
         "TopicActivity" to "seo",
         "DiagramActivity" to "diagram",
         "AiJournalActivity" to "journal",
+        "SendReviewActivity" to "send_review",
         "BrowserActivity" to "browser",
         "TtsActivity" to "tts",
         "TtsShareListen" to "tts",
@@ -101,7 +103,8 @@ object Help {
                 t("AI: сводки, отчёт, чат по данным проекта.", "AI: summaries, report, chat over the project data."),
                 t("Ещё → Экспорт: CSV, JSON, Markdown, PDF, GEXF.", "More → Export: CSV, JSON, Markdown, PDF, GEXF.")
             ),
-            listOf(t("Мониторинг в настройках проекта сам проверяет новые видео по расписанию.", "Monitoring in project settings checks for new videos on a schedule."))),
+            listOf(t("Мониторинг в настройках проекта сам проверяет новые видео по расписанию.", "Monitoring in project settings checks for new videos on a schedule."),
+                t("«Искать на всех языках»: тема переводится AI, уведомление сообщает, сколько вышло, на каких языках и о чём.", "\"Search in all languages\": AI translates the topic; the notification says how many came out, in which languages and what about."))),
         HelpTopic("video", t("Карточка видео", "Video card"),
             t("Метаданные, метки, сводка AI, расшифровка и комментарии одного видео.", "Metadata, labels, AI summary, transcript and comments of one video."),
             listOf(t("Откройте видео на YouTube кнопкой в шапке.", "Open the video on YouTube from the top bar."), t("Сводку AI можно пересоздать.", "The AI summary can be regenerated."), t("Текст можно озвучить 🔊.", "Text can be read aloud 🔊."),
@@ -119,6 +122,20 @@ object Help {
                 t("Результат открывается отдельной карточкой в «Недавних».", "The result opens as its own card in Recents.")
             ),
             listOf(t("Объёмы (100 видео, 100 каналов) меняются в Настройки → Быстрый анализ.", "Amounts (100 videos, 100 channels) are set in Settings → Quick analysis."))),
+        HelpTopic("kmap", t("Карта знаний", "Knowledge map"),
+            t("Всё, что собрано по проекту, деревом аспектов: тема, каналы, метки, теги, хронология, форматы, аудитория, комментарии, рекомендации, выводы AI. Ветки раскрываются до видео и комментариев.",
+                "Everything collected in a project as a tree of aspects: topic, channels, labels, tags, timeline, formats, audience, comments, recommendations, AI findings. Branches open down to videos and comments."),
+            listOf(
+                t("Откройте кнопкой «🗺 Карта знаний» на карточке проекта или в шапке проекта.", "Open it with \"🗺 Knowledge map\" on a project card or in the project's top bar."),
+                t("Нажмите на узел, чтобы раскрыть или свернуть его.", "Tap a node to open or close it."),
+                t("✨ у узла — AI-сводка именно по этой ветке; ✨✓ — сводка уже есть.", "✨ on a node makes an AI summary of that branch; ✨✓ means one exists."),
+                t("Долгое нажатие на видео или канал открывает его.", "Long press on a video or channel opens it.")
+            ),
+            listOf(
+                t("Сводка берёт обзор всех подветок, а не детали первых: чем выше узел, тем шире взгляд.", "A summary takes an overview of all sub-branches rather than details of the first ones: the higher the node, the wider the view."),
+                t("Повтор с теми же данными бесплатный — из кэша. «Обновить» запрашивает заново.", "A repeat with the same data is free from the cache. \"Refresh\" asks again."),
+                t("⋮ → «Все сводки карты» собирает их в один текст.", "⋮ → \"All map summaries\" puts them into one text.")
+            )),
         HelpTopic("graph", t("Граф рекомендаций", "Recommendation graph"),
             t("Как YouTube связывает видео и каналы темы. Размер узла — важность (PageRank), цвет — кластер.", "How YouTube links videos and channels of the topic. Node size is importance (PageRank), colour is the cluster."),
             listOf(t("Двигайте и масштабируйте двумя пальцами.", "Pan and zoom with two fingers."), t("Нажмите на узел, чтобы открыть видео или канал.", "Tap a node to open the video or channel."), t("⤢ — вписать граф в экран.", "⤢ fits the graph to the screen."))),
@@ -134,6 +151,15 @@ object Help {
         HelpTopic("journal", t("Ответы AI", "AI answers"),
             t("Каждый запрос к AI: промпт, ответ, модель, токены, ошибки. Полезно, если результат странный.", "Every AI request: prompt, answer, model, tokens, errors. Useful when a result looks odd."),
             listOf(t("Откройте запись, чтобы увидеть полный ответ.", "Open an entry to see the full answer."), t("Записью можно поделиться с разработчиком.", "An entry can be shared with the developer."))),
+        HelpTopic("send_review", t("Что отправляем в AI", "What goes to AI"),
+            t("Перед каждым запросом к AI показывает все данные, которые уйдут провайдеру: системную инструкцию, блоки и строки запроса, ссылку на видео, размер и оценку токенов. Ключ API в текст не входит.",
+                "Before every AI request it shows all data that will go to the provider: the system instruction, request blocks and lines, the video link, size and token estimate. The API key is not part of the text."),
+            listOf(
+                t("Снимите галочки с лишних блоков или строк — они не отправятся.", "Untick blocks or lines you don't want to send."),
+                t("Текст можно отредактировать вручную; выбор сохраняется для повторов той же задачи.", "You can edit the text by hand; the choice carries over to retries of the same task."),
+                t("«Отправить» или «Не отправлять»; фоновые задачи спрашивают через уведомление.", "\"Send\" or \"Don't send\"; background jobs ask via a notification.")
+            ),
+            listOf(t("Правила по задачам (спрашивать / отправлять / никогда) — в Настройки → AI → Что отправляется.", "Per-task rules (ask / send / never) are in Settings → AI → What is sent."))),
         HelpTopic("browser", t("Браузер", "Browser"),
             t("Встроенный браузер. Может записывать звук вкладки.", "Built-in browser. It can record the tab's sound."),
             listOf(t("Введите адрес или запрос в строке сверху.", "Type an address or a query in the top bar."))),

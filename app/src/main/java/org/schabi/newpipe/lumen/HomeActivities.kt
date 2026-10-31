@@ -210,6 +210,7 @@ class LumenActivity : LumenBase() {
                     if (p.monitor.enabled && Settings.monitoringAllowed) " · ⏱" else "")
                 val added = p.runs.lastOrNull()?.added ?: 0
                 if (added > 0) add(text(ctx, t("В последнем запуске добавлено: +$added", "Added in the last run: +$added"), 13f, bold = true, color = Palette.ACCENT), 4)
+                add(kmapButton(ctx, p.id), 8).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = ctx.dp(8) }
             }
             card.contentDescription = p.name
             card.setOnClickListener { openProjectScreen(p) }
@@ -270,24 +271,25 @@ class LumenActivity : LumenBase() {
 
     private fun projectMenu(p: Project) {
         val items = arrayOf(
-            t("Открыть", "Open"), t("Дублировать", "Duplicate"),
+            t("Открыть", "Open"), t("🗺 Карта знаний", "🗺 Knowledge map"), t("Дублировать", "Duplicate"),
             if (p.archived) t("Вернуть из архива", "Unarchive") else t("В архив", "Archive"),
             t("Удалить", "Delete")
         )
         AlertDialog.Builder(this).setTitle(p.name).setItems(items) { _, which ->
             when (which) {
                 0 -> openProjectScreen(p)
-                1 -> {
+                1 -> KnowledgeMapActivity.open(this, p.id)
+                2 -> {
                     Store.duplicate(p.id)
                     render()
                 }
-                2 -> {
+                3 -> {
                     p.archived = !p.archived
                     Store.save(p)
                     Monitoring.apply(this, p)
                     render()
                 }
-                3 -> confirm(t("Удалить проект?", "Delete project?"), p.name, t("Удалить", "Delete")) {
+                4 -> confirm(t("Удалить проект?", "Delete project?"), p.name, t("Удалить", "Delete")) {
                     Monitoring.cancel(this, p.id)
                     Store.delete(p.id)
                     render()
@@ -505,6 +507,7 @@ class NewProjectActivity : LumenBase() {
     /** Started from "Set a domain to watch": the project is created with monitoring switched on. */
     private val watch by lazy { intent.getBooleanExtra("watch", false) }
     private var aiFilter = true
+    private var anyLang = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -600,9 +603,19 @@ class NewProjectActivity : LumenBase() {
             c.muted(if (Provider.active() != null) t("Новые видео проверяются AI на соответствие теме и домену, остальные отбрасываются.",
                 "New videos are checked by AI against the topic and domain; the rest are dropped.")
                 else t("AI не подключён — отсев будет по ключевым словам темы.", "AI is not connected — the filter will use the topic's keywords."))
-            c.spinner(t("Страна поиска (необязательно)", "Search country (optional)"), Regions.countries, filters.country) { filters.country = it }
-            c.spinner(t("Язык оригинала видео (необязательно)", "Original language of videos (optional)"), Regions.languages, filters.origLang) {
-                filters.origLang = it
+            c.check(t("Искать на всех языках", "Search in all languages"), anyLang) {
+                anyLang = it
+                render()
+            }
+            if (anyLang) {
+                c.muted(if (Provider.active() != null) t("AI переведёт тему на ${WatchLangs.DEFAULT.size} языков; в уведомлении — сколько вышло, на каких языках и о чём.",
+                    "AI will translate the topic into ${WatchLangs.DEFAULT.size} languages; the notification says how many came out, in which languages and what about.")
+                    else t("AI не подключён — поиск только по введённым запросам.", "AI is not connected — only the entered queries are searched."))
+            } else {
+                c.spinner(t("Страна поиска (необязательно)", "Search country (optional)"), Regions.countries, filters.country) { filters.country = it }
+                c.spinner(t("Язык оригинала видео (необязательно)", "Original language of videos (optional)"), Regions.languages, filters.origLang) {
+                    filters.origLang = it
+                }
             }
         }
         c.section(t("Фильтры поиска", "Search filters"), filtersSummary(filters), filtersOpen, { open ->
@@ -624,6 +637,7 @@ class NewProjectActivity : LumenBase() {
                 p.monitor.enabled = true
                 p.monitor.aiSummary = Provider.active() != null
                 p.monitor.aiFilter = aiFilter
+                p.monitor.anyLang = anyLang
             }
             Store.save(p)
             if (watch) Monitoring.apply(this, p)

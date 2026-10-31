@@ -359,6 +359,8 @@ class SettingsActivity : LumenBase() {
             "relevance" to t("Фильтр релевантности рекомендаций", "Recommendation relevance filter"),
             "relevance_channels" to t("Фильтр каналов по теме", "Channel topic filter"),
             "topic" to t("Подтверждение темы (домена)", "Topic (domain) confirmation"),
+            "watch_translate" to t("Мониторинг · перевод темы на другие языки", "Monitoring · topic translation"),
+            "watch_digest" to t("Мониторинг · сводка новых видео", "Monitoring · digest of new videos"),
             "audit" to t("Аудит алгоритма: вывод", "Algorithm audit: verdict"),
             "p1_insights" to t("P1 · Извлечение аудитории", "P1 · Audience extraction"),
             "p2_clusters" to t("P2 · Кластеризация", "P2 · Clustering"),
@@ -373,6 +375,7 @@ class SettingsActivity : LumenBase() {
             "diagram_mind" to t("Схема · карта идей", "Diagram · mind map"),
             "diagram_video" to t("Схема · структура видео", "Diagram · video structure"),
             "pains" to t("Боли и кейсы людей", "Pains and cases of people"),
+            "kmap_aspect" to t("Карта знаний · сводка по ветке", "Knowledge map · branch summary"),
             "lens_feed" to t("Поверх YouTube · разбор ленты", "Over YouTube · feed review"),
             "lens_screen" to t("Поверх YouTube · что на экране", "Over YouTube · what is on screen")
         )

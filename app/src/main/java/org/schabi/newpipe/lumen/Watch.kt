@@ -5,6 +5,7 @@
 package org.schabi.newpipe.lumen
 
 import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Guesses the language of a short text (video title + description) without a model:
@@ -102,7 +103,7 @@ object Regions {
         "fr" to t("Французский", "French"), "es" to t("Испанский", "Spanish"), "pt" to t("Португальский", "Portuguese"),
         "it" to t("Итальянский", "Italian"), "pl" to t("Польский", "Polish"), "tr" to t("Турецкий", "Turkish"),
         "ja" to t("Японский", "Japanese"), "ko" to t("Корейский", "Korean"), "zh" to t("Китайский", "Chinese"),
-        "ar" to t("Арабский", "Arabic"), "hi" to t("Хинди", "Hindi")
+        "ar" to t("Арабский", "Arabic"), "hi" to t("Хинди", "Hindi"), "id" to t("Индонезийский", "Indonesian")
     )
 
     fun countryName(code: String) = countries.firstOrNull { it.first == code }?.second ?: code
@@ -152,9 +153,10 @@ object WatchFilter {
     }
 
     /** Returns (kept, rejected) and remembers the rejected ids. */
-    fun apply(p: Project, list: List<Video>): Pair<List<Video>, List<Video>> {
+    fun apply(p: Project, list: List<Video>, extraQueries: List<String> = emptyList()): Pair<List<Video>, List<Video>> {
         if (list.isEmpty()) return list to emptyList()
-        val kw = TopicFilter.keywordsOf(p)
+        // translated queries join the keywords, so the keyword fallback keeps videos in other languages too
+        val kw = TopicFilter.keywordsOf(p, extraQueries.joinToString(" "))
         fun byKeywords(batch: List<Video>) = batch.partition { Relevance.matches(kw, it.title + " " + it.channel + " " + it.description) }
         val prov = Provider.active()
         val keep = ArrayList<Video>()
@@ -180,5 +182,170 @@ object WatchFilter {
         }
         remember(p.id, drop.map { it.id })
         return keep to drop
+    }
+}
+
+/**
+ * Monitoring in any language: the topic's queries are translated by AI into the main YouTube languages once
+ * and cached (watch_langs.json, refreshed when the phrase, domain or queries change). Without AI only the original
+ * queries are searched.
+ */
+object WatchLangs {
+    const val FILE = "watch_langs.json"
+
+    /** Languages searched by default: the largest YouTube audiences. */
+    val DEFAULT = listOf("en", "es", "pt", "hi", "ar", "ja", "ko", "de", "fr", "ru", "tr", "id", "zh", "it", "pl", "uk")
+
+    fun signature(p: Project): String = (p.phrase + "|" + p.domain + "|" + p.effectiveQueries().joinToString("|") + "|" + DEFAULT.joinToString(",")).hashCode().toString()
+
+    /** {"queries":{"en":["…"],…}} → lang → queries; broken or missing parts are skipped. */
+    fun parse(text: String): Map<String, List<String>> {
+        val raw = JsonText.firstObject(text) ?: return emptyMap()
+        val q = try { JSONObject(raw).optJSONObject("queries") } catch (e: Exception) { null } ?: return emptyMap()
+        val out = LinkedHashMap<String, List<String>>()
+        for (lang in q.keys()) {
+            val code = lang.trim().lowercase().take(5)
+            val list = when (val v = q.opt(lang)) {
+                is JSONArray -> (0 until v.length()).map { v.optString(it) }
+                is String -> listOf(v)
+                else -> emptyList()
+            }.map { it.trim() }.filter { it.isNotEmpty() && it.length <= 120 }
+            if (code.isNotEmpty() && list.isNotEmpty()) out[code] = list
+        }
+        return out
+    }
+
+    /** Original queries first, then up to [perLang] per language; duplicates (any case) dropped, at most [max]. */
+    fun merge(original: List<String>, translated: Map<String, List<String>>, perLang: Int = 2, max: Int = 36): List<String> {
+        val seen = HashSet<String>()
+        val out = ArrayList<String>()
+        fun add(q: String) {
+            val k = q.trim().lowercase()
+            if (k.isNotEmpty() && seen.add(k) && out.size < max) out.add(q.trim())
+        }
+        original.forEach(::add)
+        translated.values.forEach { list -> list.take(perLang).forEach(::add) }
+        return out
+    }
+
+    fun cached(p: Project): Map<String, List<String>>? = Store.readFile(p.id, FILE)?.let { raw ->
+        try {
+            val o = JSONObject(raw)
+            if (o.optString("sig") != signature(p)) null else parse(o.toString())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Translated queries for the project (cached); empty without AI or when the reply is unusable. */
+    fun translated(p: Project): Map<String, List<String>> {
+        cached(p)?.let { return it }
+        val prov = Provider.active() ?: return emptyMap()
+        return try {
+            val prompt = Prompts.get("watch_translate").replace("{phrase}", p.phrase).replace("{domain}", p.domain.ifBlank { "-" })
+                .replace("{data}", p.effectiveQueries().joinToString("\n")).replace("{langs}", DEFAULT.joinToString(", "))
+            val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 1500, task = "watch_translate", pid = p.id)
+            val map = parse(r.text)
+            if (map.isNotEmpty()) {
+                val q = JSONObject()
+                map.forEach { (k, v) -> q.put(k, JSONArray(v)) }
+                Store.writeFile(p.id, FILE, JSONObject().put("sig", signature(p)).put("at", System.currentTimeMillis()).put("queries", q).toString())
+            }
+            map
+        } catch (e: Exception) {
+            L.w("watch", "translate failed, original queries used: ${e.message}")
+            emptyMap()
+        }
+    }
+}
+
+/**
+ * Short digest of a monitoring run for the notification: how many, in which languages, from which channels and,
+ * with AI, what about (prompt "watch_digest", answered in the interface language). The last digests are kept in digests.json.
+ */
+object WatchDigest {
+    const val FILE = "digests.json"
+    private const val KEEP = 30
+
+    fun langOf(v: Video): String = LangGuess.guess(v.title + " " + v.description.take(300))
+
+    /** Language code → count, most frequent first; "?" for videos whose language is unclear. */
+    fun langCounts(list: List<Video>): List<Pair<String, Int>> =
+        list.groupingBy { langOf(it).ifEmpty { "?" } }.eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { if (it.key == "?") 1 else 0 }.thenBy { it.key })
+            .map { it.key to it.value }
+
+    /** "EN 5 · RU 3 · ES 2 · +2" (unknown languages last, at most [max] shown). */
+    fun langLine(list: List<Video>, max: Int = 5): String {
+        val c = langCounts(list)
+        val shown = c.take(max).joinToString(" · ") { (l, n) -> l.uppercase() + " " + n }
+        return if (c.size > max) "$shown · +${c.size - max}" else shown
+    }
+
+    fun topChannels(list: List<Video>, max: Int = 3): List<Pair<String, Int>> =
+        list.filter { it.channel.isNotBlank() }.groupingBy { it.channel }.eachCount().entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key }).take(max).map { it.key to it.value }
+
+    fun title(name: String, n: Int, list: List<Video>): String {
+        val langs = langCounts(list).count { it.first != "?" }
+        val base = t("«$name»: новых видео — $n", "\"$name\": $n new videos")
+        return if (langs > 1) base + t(" на $langs языках", " in $langs languages") else base
+    }
+
+    /** Body without AI: languages, channels, a few titles. */
+    fun plain(list: List<Video>, titles: Int = 4): String {
+        val sb = StringBuilder()
+        sb.append(t("Языки: ", "Languages: ")).append(langLine(list))
+        val ch = topChannels(list)
+        if (ch.isNotEmpty()) sb.append("\n").append(t("Каналы: ", "Channels: ")).append(ch.joinToString(", ") { (c, n) -> if (n > 1) "$c ($n)" else c })
+        list.sortedByDescending { it.views }.take(titles).forEach { sb.append("\n• ").append(it.title.take(90)) }
+        if (list.size > titles) sb.append("\n").append(t("…и ещё ${list.size - titles}", "…and ${list.size - titles} more"))
+        return sb.toString()
+    }
+
+    /** Prompt line: "3. [es] Title — Channel. Description". */
+    fun line(i: Int, v: Video): String {
+        val l = langOf(v)
+        return "$i. " + (if (l.isNotEmpty()) "[$l] " else "") + v.title + " — " + v.channel +
+            (if (v.description.isNotBlank()) ". " + v.description.replace('\n', ' ').take(160) else "")
+    }
+
+    /** AI "what about" text; empty without AI or on failure. */
+    fun ai(p: Project, list: List<Video>): String {
+        val prov = Provider.active() ?: return ""
+        return try {
+            val data = list.take(60).mapIndexed { i, v -> line(i + 1, v) }.joinToString("\n")
+            val prompt = Prompts.get("watch_digest").replace("{phrase}", p.phrase).replace("{domain}", p.domain.ifBlank { "-" })
+                .replace("{count}", list.size.toString()).replace("{data}", data)
+                .replace("{lang}", if (Settings.lang == "en") "English" else "русский")
+            Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, maxTokens = 700, task = "watch_digest", pid = p.id).text.trim()
+        } catch (e: Exception) {
+            L.w("watch", "digest failed: ${e.message}")
+            ""
+        }
+    }
+
+    /** Notification body: AI text (or the plain digest) plus the language line and the filter note. */
+    fun body(list: List<Video>, aiText: String, dropped: Int): String {
+        val main = if (aiText.isNotBlank()) aiText.take(700) + "\n" + t("Языки: ", "Languages: ") + langLine(list) else plain(list)
+        return main + if (dropped > 0) t("\nОтсеяно как не по теме: $dropped", "\nFiltered out as off-topic: $dropped") else ""
+    }
+
+    data class Entry(val at: Long, val title: String, val body: String)
+
+    fun history(pid: String): List<Entry> = Store.readFile(pid, FILE)?.let { raw ->
+        try {
+            val a = JSONArray(raw)
+            (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Entry(it.optLong("at"), it.optString("title"), it.optString("body")) }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    } ?: emptyList()
+
+    fun remember(pid: String, e: Entry) {
+        val all = (history(pid) + e).takeLast(KEEP)
+        val a = JSONArray()
+        all.forEach { a.put(JSONObject().put("at", it.at).put("title", it.title).put("body", it.body)) }
+        Store.writeFile(pid, FILE, a.toString())
     }
 }

@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="lumen_icon_background">#FF21005D</color>
+    <color name="lumen_bots_icon_background">#FF229ED9</color>
 </resources>

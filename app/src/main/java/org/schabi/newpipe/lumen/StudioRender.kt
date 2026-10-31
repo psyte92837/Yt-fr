@@ -68,7 +68,9 @@ class StudioPlan(
     /** Voice loudness per 20 ms (0..1) when the picture pulses with the voice. */
     val pulse: FloatArray? = null,
     /** Folder of animated Noto emoji (Lottie) when emoji are animated; null = still emoji. */
-    val emojiDir: File? = null
+    val emojiDir: File? = null,
+    /** Cuts task: scenes that show a YouTube clip; every other scene is a graphic insert. Null = not a cut montage. */
+    val clipScenes: Set<Int>? = null
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
@@ -99,14 +101,14 @@ class StudioPlan(
         fun build(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
-            pulse: FloatArray? = null, emojiDir: File? = null
+            pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes)
         }
     }
 }
@@ -187,8 +189,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** VIDEO style: is scene [i] a full-screen graphic insert (instead of the speaker)? */
-    private fun insert(i: Int): Boolean =
-        plan.style == StudioStyle.VIDEO && ((!plan.overlay && plan.script.scenes[i].kind != "text") || fullPhoto(i) != null)
+    private fun insert(i: Int): Boolean {
+        if (plan.style != StudioStyle.VIDEO) return false
+        plan.clipScenes?.let { return i !in it }
+        return (!plan.overlay && plan.script.scenes[i].kind != "text") || fullPhoto(i) != null
+    }
 
     /** B-roll photo of scene [i] (null when it has none or it cannot be read). */
     private fun photo(i: Int): Bitmap? = plan.script.scenes.getOrNull(i)?.media?.takeIf { it.isNotBlank() }?.let { StudioPhotos.get(it, max(w, h)) }
@@ -1511,12 +1516,20 @@ interface StudioFrameSource : java.io.Closeable {
  * Background of a VIDEO-style video: the speaker's own video (optionally with pauses cut out, [cuts]),
  * or background [clips] that play one after another and repeat for the whole voice-over.
  */
-class StudioBg(val talking: File?, val cuts: List<Span>?, val clips: List<Pair<File, Long>>) {
-    val empty: Boolean get() = talking == null && clips.isEmpty()
+class StudioBg(
+    val talking: File?, val cuts: List<Span>?, val clips: List<Pair<File, Long>>,
+    /** Cuts task: YouTube clips on their scenes, with their files by clip id. */
+    val slots: List<ClipSlot> = emptyList(), val slotFiles: Map<String, File> = emptyMap()
+) {
+    val empty: Boolean get() = talking == null && clips.isEmpty() && slots.isEmpty()
 
     /** File and time inside it for output time [tMs] (for the preview). */
     fun frameAt(tMs: Long): Pair<File, Long>? {
         talking?.let { return it to Studio.sourceTime(tMs, cuts) }
+        if (slots.isNotEmpty()) {
+            val s = slots.getOrNull(StudioCuts.slotAt(slots, tMs)) ?: return null
+            return slotFiles[s.id]?.let { it to StudioCuts.fileTime(s, tMs) }
+        }
         if (clips.isEmpty()) return null
         val (i, local) = Studio.clipAt(tMs, clips.map { it.second })
         return clips[i].first to local
@@ -1530,8 +1543,48 @@ class StudioBg(val talking: File?, val cuts: List<Span>?, val clips: List<Pair<F
                 override fun close() = f.close()
             }
         }
+        slots.isNotEmpty() -> StudioSlotFrames(slots, slotFiles, w, h)
         clips.isNotEmpty() -> StudioClipFrames(clips, w, h)
         else -> null
+    }
+}
+
+/**
+ * Cuts task: the clip of the scene playing now. Between clips (graphic scenes) the last frame stays;
+ * a new decoder opens when another clip starts or the same one starts again.
+ */
+class StudioSlotFrames(
+    private val slots: List<ClipSlot>, private val files: Map<String, File>, private val w: Int, private val h: Int
+) : StudioFrameSource {
+    private var cur: StudioFrames? = null
+    private var curId = ""
+    private var lastUs = Long.MAX_VALUE
+    private val broken = HashSet<String>()
+
+    override fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean {
+        val s = slots.getOrNull(StudioCuts.slotAt(slots, tUs / 1000)) ?: return false
+        if (s.id in broken) return false
+        val f = files[s.id] ?: return false
+        val local = StudioCuts.fileTime(s, tUs / 1000) * 1000
+        if (s.id != curId || cur == null || local + 50_000 < lastUs) {
+            cur?.close()
+            cur = null
+            curId = s.id
+            cur = try {
+                StudioFrames(f, w, h)
+            } catch (e: Exception) {
+                L.w("studio", "clip ${s.id}: ${e.message}")
+                broken += s.id
+                null
+            }
+        }
+        lastUs = local
+        return cur?.advance(local, out, need) ?: false
+    }
+
+    override fun close() {
+        cur?.close()
+        cur = null
     }
 }
 

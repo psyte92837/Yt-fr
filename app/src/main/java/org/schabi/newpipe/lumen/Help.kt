@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "lens", "settings"
+        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "lens", "bots", "settings"
     )
 
     private val screens = mapOf(
@@ -38,6 +38,9 @@ object HelpMap {
         "TtsShareSave" to "tts",
         "StudioActivity" to "studio",
         "LensActivity" to "lens",
+        "BotsActivity" to "bots",
+        "BotNewActivity" to "bots",
+        "BotActivity" to "bots",
         "SettingsActivity" to "settings",
         "HelpActivity" to "about"
     )
@@ -173,11 +176,13 @@ object Help {
             listOf(t("Из любого приложения: выделите текст → Lumen, или «Поделиться» документом.", "From any app: select text → Lumen, or share a document."))),
         HelpTopic("studio", "Lumen Studio",
             t("Ролики в стиле анимированной инфографики: слова появляются под голос, рядом схемы из эмодзи-плиток, диаграммы, цитаты и сравнения. " +
-                "Три задачи вверху экрана: «Shorts» — вертикальный ролик 9:16 по сценарию; «Видео» — горизонтальный ролик для YouTube 16:9 на 2–10 минут; " +
-                "«Озвучка» — готовое аудио или запись голоса превращается в анимированный ролик 9:16, 16:9 или 1:1. Ролик собирается на телефоне в MP4 720p или 1080p.",
+                "Четыре задачи вверху экрана: «Shorts» — вертикальный ролик 9:16 по сценарию; «Видео» — горизонтальный ролик для YouTube 16:9 на 2–10 минут; " +
+                "«Озвучка» — готовое аудио или запись голоса превращается в анимированный ролик 9:16, 16:9 или 1:1; " +
+                "«Нарезка» — голос за кадром поверх кусков видео с YouTube и графики. Ролик собирается на телефоне в MP4 720p или 1080p.",
                 "Videos in an animated infographic style: words appear with the voice, next to emoji-tile schemes, charts, quotes and comparisons. " +
-                    "Three tasks at the top: \"Shorts\" is a vertical 9:16 video from a script; \"Video\" is a horizontal 16:9 YouTube video of 2–10 minutes; " +
-                    "\"Voice-over\" turns ready audio or a recording into an animated 9:16, 16:9 or 1:1 video. The video is built on the phone as an MP4, 720p or 1080p."),
+                    "Four tasks at the top: \"Shorts\" is a vertical 9:16 video from a script; \"Video\" is a horizontal 16:9 YouTube video of 2–10 minutes; " +
+                    "\"Voice-over\" turns ready audio or a recording into an animated 9:16, 16:9 or 1:1 video; " +
+                    "\"Cuts\" puts a voice-over over pieces of YouTube videos and graphics. The video is built on the phone as an MP4, 720p or 1080p."),
             listOf(
                 t("1. Сценарий: напишите сами или нажмите «✨ Написать (AI)» по теме. Каждая сцена — абзац; первая строка может начинаться с [icons], [list], [flow], [cycle], [step: заголовок], [big], [stat: 80%]; строка с «|» — плитки «🔍 подпись».",
                     "1. Script: write it or tap \"✨ Write (AI)\" for a topic. Each scene is a paragraph; the first line may start with [icons], [list], [flow], [cycle], [step: title], [big], [stat: 80%]; a line with \"|\" lists tiles \"🔍 label\"."),
@@ -209,6 +214,8 @@ object Help {
                 t("Звуки эффектов синтезируются в самом приложении, без файлов и сети; их можно выключить в шаге 4.", "Sound effects are synthesised by the app itself, with no files or network; turn them off in step 4."),
                 t("Автомонтаж своего видео: «✂ Вырезать паузы» убирает тишину (джамп-каты), «Зумы» чередуют крупность и плавно наезжают камерой, «Переходы» вводят вставки слайдом. «🎞 Раскадровка» показывает кадр каждой сцены.",
                     "Auto-edit of your video: \"✂ Cut out pauses\" removes silence (jump cuts), \"Zooms\" alternate framing and push in, \"Transitions\" slide inserts in. \"🎞 Storyboard\" shows a frame of every scene."),
+                t("«Нарезка»: в карточке «🎞 Клипы с YouTube» добавьте клип по ссылке — начало, конец (до 30 с) и подпись, что в кадре. «⬇ Скачать» загружает только эти секунды видео без звука. AI-режиссёр ставит клипы на сцены по подписям; сцену можно поменять вручную нажатием в списке сцен или кнопкой «Расставить по сценам без AI». Между клипами идёт графика. Чужие видео защищены авторским правом: берите короткие вставки.",
+                    "\"Cuts\": in the \"🎞 YouTube clips\" card add a clip by link: start, end (up to 30 s) and a note on what is in the shot. \"⬇ Download\" fetches only those seconds of video, without sound. The AI director puts the clips on scenes by their notes; tap a scene in the list or use \"Place on scenes without AI\" to change it. Graphics fill the scenes between clips. Other people's videos are copyrighted: use short inserts."),
                 t("«Видео на фоне»: добавьте клипы под любую озвучку (голос Microsoft, микрофон, аудио) — они идут по очереди и повторяются по кругу на всю длину озвучки.",
                     "\"Background video\": add clips under any voice-over (Microsoft voice, microphone, audio); they play in order and loop for the whole voice-over.")
             )),
@@ -237,6 +244,29 @@ object Help {
                     "Nothing recognised? Screen tab → \"🐞 Screen parse report\" and send it to the developer.")
             )
         ),
+        HelpTopic("bots", t("Мои ТГ боты", "My Telegram bots"),
+            t("Telegram-боты, которые пишет ИИ по вашему описанию, а телефон работает их сервером. У раздела своя иконка «Lumen Боты» на рабочем столе. " +
+                "Код бота — JavaScript; он выполняется на телефоне в песочнице без доступа к файлам и ключам.",
+                "Telegram bots written by AI from your description, with the phone as their server. The section has its own \"Lumen Bots\" home-screen icon. " +
+                    "The bot code is JavaScript; it runs on the phone in a sandbox with no access to files or keys."),
+            listOf(
+                t("1. В Telegram откройте @BotFather → /newbot, придумайте имя и @username, скопируйте токен.", "1. In Telegram open @BotFather → /newbot, pick a name and @username, copy the token."),
+                t("2. «＋ Новый бот»: вставьте токен, опишите, что делает бот и какие у него команды, нажмите «✨ Создать бота». ИИ напишет код, Lumen проверит его и при ошибке попросит ИИ исправить.",
+                    "2. \"＋ New bot\": paste the token, describe what the bot does and its commands, tap \"✨ Create the bot\". AI writes the code, Lumen checks it and asks AI to fix any error."),
+                t("3. Вкладка «Тест» — чат с ботом прямо на телефоне, без Telegram. Кнопки бота нажимаются.", "3. The Test tab is a chat with the bot right on the phone, without Telegram. The bot's buttons work."),
+                t("4. «▶ Запуск» — бот начинает отвечать в Telegram. В шторке висит уведомление «Lumen Боты» с кнопкой «Остановить все».", "4. \"▶ Start\" — the bot answers in Telegram. A \"Lumen Bots\" notification with \"Stop all\" stays in the shade."),
+                t("5. «Код» → «✏️ Изменить словами»: опишите правку, ИИ перепишет код; работающий бот перезагрузится сам. Старые версии можно вернуть.", "5. Code → \"✏️ Change in words\": describe the change, AI rewrites the code; a running bot reloads by itself. Old versions can be restored."),
+                t("6. «Журнал» — входящие, ответы, ошибки и пользователи. Ошибку можно отдать ИИ на исправление.", "6. Journal — incoming messages, answers, errors and users. An error can be handed to AI to fix.")
+            ),
+            listOf(
+                t("Боты отвечают, пока телефон включён и в сети. Сообщения, пришедшие офлайн, Telegram хранит до суток и бот ответит на них позже.", "Bots answer while the phone is on and online. Telegram keeps messages sent while offline for up to a day; the bot answers them later."),
+                t("Разрешите работу в фоне (снимите ограничения батареи), иначе Android усыпит ботов. На Xiaomi, Huawei, Honor, Oppo также включите автозапуск для Lumen.", "Allow background work (remove battery restrictions), or Android puts the bots to sleep. On Xiaomi, Huawei, Honor, Oppo also allow autostart for Lumen."),
+                t("Владелец: отправьте боту /lumen_owner и код из настроек — тогда /lumen_stats, /lumen_logs и /lumen_stop работают прямо в Telegram.", "Owner: send /lumen_owner and the code from settings to the bot — then /lumen_stats, /lumen_logs and /lumen_stop work right in Telegram."),
+                t("Ответы ИИ работающих ботов уходят без окна проверки и ограничены лимитами в настройках бота, чтобы чужие люди не израсходовали ключ.", "AI answers of running bots are sent without the review screen and are capped by the bot's limits so strangers cannot burn your key."),
+                t("Мини-апп (вкладка «Мини-апп»): опишите страницу — ИИ сделает её одним HTML-файлом (форма, каталог, опрос, игра). «👁 Предпросмотр» показывает её как в Telegram, данные из неё уходят в тест-чат. «🔗 Подключить к боту» — ИИ добавит кнопку открытия и обработку данных. Telegram открывает мини-апп только по https: Lumen бесплатно публикует его на GitHub Pages (нужен токен GitHub с правом public_repo) или используйте свой адрес.",
+                    "Mini app (the Mini app tab): describe the page — AI makes it as one HTML file (a form, catalog, survey, game). \"👁 Preview\" shows it like Telegram does; its data goes to the test chat. \"🔗 Connect to the bot\" — AI adds an opening button and data handling. Telegram opens mini apps only over https: Lumen publishes for free to GitHub Pages (a GitHub token with public_repo) or use your own address."),
+                t("Один токен может обслуживать только один сервер. Если бот уже работает где-то ещё, Lumen покажет «Токен занят».", "One token can be served by one server only. If the bot already runs elsewhere, Lumen shows \"Token in use\".")
+            )),
         HelpTopic("settings", t("Настройки", "Settings"),
             t("Язык, тема, режим, AI-провайдеры и модели, промпты, мониторинг, резервные копии, журнал ошибок.", "Language, theme, mode, AI providers and models, prompts, monitoring, backups, error log."),
             listOf(

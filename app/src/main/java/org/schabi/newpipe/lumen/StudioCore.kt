@@ -56,7 +56,9 @@ data class SScene(
     /** Animated shapes on key frames. */
     val shapes: List<SShape> = emptyList(),
     /** B-roll: English search words for a stock photo, its [brollMode] ("full" or "card"), the downloaded [media] file and its [credit]. */
-    val broll: String = "", val brollMode: String = "", val media: String = "", val credit: String = ""
+    val broll: String = "", val brollMode: String = "", val media: String = "", val credit: String = "",
+    /** Id of the YouTube clip shown instead of the graphics (Cuts task, see [StudioCuts]); empty = none. */
+    val clip: String = ""
 )
 
 data class SScript(val title: String, val scenes: List<SScene>)
@@ -122,7 +124,8 @@ object Studio {
         val mode = o.opt("broll").let { b -> if (b is JSONObject) b.optString("mode") else o.optString("brollMode") }.trim().lowercase()
         return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase(),
             shapes, broll, if (mode == "card") "card" else if (broll.isNotEmpty() || o.optString("media").isNotEmpty()) "full" else "",
-            o.optString("media").trim(), o.optString("credit").trim())
+            o.optString("media").trim(), o.optString("credit").trim(),
+            o.optString("clip").trim().take(16))
     }
 
     const val MAX_ITEMS = 6
@@ -142,6 +145,7 @@ object Studio {
             if (sc.brollMode.isNotEmpty()) o.put("brollMode", sc.brollMode)
             if (sc.media.isNotEmpty()) o.put("media", sc.media)
             if (sc.credit.isNotEmpty()) o.put("credit", sc.credit)
+            if (sc.clip.isNotEmpty()) o.put("clip", sc.clip)
             put(o)
         }
     }).toString()

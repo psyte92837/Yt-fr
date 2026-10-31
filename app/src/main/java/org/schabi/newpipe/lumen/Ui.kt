@@ -90,10 +90,30 @@ object Palette {
         "neon" to Grad(true, intArrayOf(0xFF0F0C29.toInt(), 0xFF302B63.toInt(), 0xFF5B1F7A.toInt()), 0xFFFF6AD5, 0xFF3A0030, 0xFF4B2C8C, 0xFFE6DAFF),
         "ocean" to Grad(true, intArrayOf(0xFF001B3A.toInt(), 0xFF05508F.toInt(), 0xFF1291B8.toInt()), 0xFF7FDBFF, 0xFF00263B, 0xFF0B4A73, 0xFFD2EFFF),
         "candy" to Grad(false, intArrayOf(0xFFFFE3F1.toInt(), 0xFFE6DDFF.toInt(), 0xFFD0F0FF.toInt()), 0xFF8A3FFC, 0xFFFFFFFF, 0xFFEADCFF, 0xFF2A0A5E),
-        "peach" to Grad(false, intArrayOf(0xFFFFF1E0.toInt(), 0xFFFFD9C2.toInt(), 0xFFFFC6D3.toInt()), 0xFFC2410C, 0xFFFFFFFF, 0xFFFFDCC8, 0xFF431407)
+        "peach" to Grad(false, intArrayOf(0xFFFFF1E0.toInt(), 0xFFFFD9C2.toInt(), 0xFFFFC6D3.toInt()), 0xFFC2410C, 0xFFFFFFFF, 0xFFFFDCC8, 0xFF431407),
+        "mint" to Grad(false, intArrayOf(0xFFE6FFF5.toInt(), 0xFFC9F4E4.toInt(), 0xFFD6EEFF.toInt()), 0xFF00796B, 0xFFFFFFFF, 0xFFB2F1E4, 0xFF00201B),
+        "sky" to Grad(false, intArrayOf(0xFFE8F4FF.toInt(), 0xFFD0E4FF.toInt(), 0xFFE6E0FF.toInt()), 0xFF0B57D0, 0xFFFFFFFF, 0xFFD3E3FD, 0xFF041E49),
+        "lavender" to Grad(false, intArrayOf(0xFFF5EDFF.toInt(), 0xFFE5D8FF.toInt(), 0xFFFFE2F4.toInt()), 0xFF6A3EC2, 0xFFFFFFFF, 0xFFE9DDFF, 0xFF23005C),
+        "sunrise" to Grad(false, intArrayOf(0xFFFFFBE3.toInt(), 0xFFFFEDC2.toInt(), 0xFFFFD8C6.toInt()), 0xFF8A5100, 0xFFFFFFFF, 0xFFFFDDB3, 0xFF2B1700),
+        "rose" to Grad(false, intArrayOf(0xFFFFEEF1.toInt(), 0xFFFFD8E2.toInt(), 0xFFF3E2FF.toInt()), 0xFFB0285A, 0xFFFFFFFF, 0xFFFFD9E2, 0xFF3E001D),
+        "pearl" to Grad(false, intArrayOf(0xFFFAFAFC.toInt(), 0xFFEDF0F5.toInt(), 0xFFE0E7F1.toInt()), 0xFF3D5A80, 0xFFFFFFFF, 0xFFD6E3F7, 0xFF0B1D33),
+        "forest" to Grad(true, intArrayOf(0xFF0B2116.toInt(), 0xFF14532D.toInt(), 0xFF3F6212.toInt()), 0xFF86EFAC, 0xFF003915, 0xFF1E5631, 0xFFD7F8DF),
+        "ember" to Grad(true, intArrayOf(0xFF1A0A0A.toInt(), 0xFF5B1313.toInt(), 0xFFB33A0B.toInt()), 0xFFFFB59A, 0xFF5A1A00, 0xFF6E2410, 0xFFFFDBCF)
     )
-    val gradientNames get() = listOf("none" to t("Без градиента", "None"), "aurora" to t("Аврора", "Aurora"), "sunset" to t("Закат", "Sunset"),
-        "neon" to t("Неон", "Neon"), "ocean" to t("Океан", "Ocean"), "candy" to t("Конфетти (светлая)", "Candy (light)"), "peach" to t("Персик (светлая)", "Peach (light)"))
+    val gradientNames get() = listOf("none" to t("Без градиента", "None"),
+        "candy" to t("Конфетти (светлая)", "Candy (light)"), "peach" to t("Персик (светлая)", "Peach (light)"),
+        "mint" to t("Мята (светлая)", "Mint (light)"), "sky" to t("Небо (светлая)", "Sky (light)"),
+        "lavender" to t("Лаванда (светлая)", "Lavender (light)"), "sunrise" to t("Рассвет (светлая)", "Sunrise (light)"),
+        "rose" to t("Роза (светлая)", "Rose (light)"), "pearl" to t("Жемчуг (светлая)", "Pearl (light)"),
+        "aurora" to t("Аврора", "Aurora"), "sunset" to t("Закат", "Sunset"), "neon" to t("Неон", "Neon"),
+        "ocean" to t("Океан", "Ocean"), "forest" to t("Лес", "Forest"), "ember" to t("Угли", "Ember"))
+
+    /** Keys of light / dark gradient themes, in menu order; "none" goes with the light group. */
+    val lightGradients get() = gradientNames.map { it.first }.filter { gradients[it]?.dark != true }
+    val darkGradients get() = gradientNames.map { it.first }.filter { gradients[it]?.dark == true }
+
+    /** Every menu key except "none" has a theme behind it (checked by tests). */
+    fun hasGradient(key: String) = key in gradients
 
     /** Tile preview for a gradient theme: colours and whether it is dark; null for "none". */
     fun gradientPreview(name: String): Pair<IntArray, Boolean>? = gradients[name]?.let { it.bg to it.dark }

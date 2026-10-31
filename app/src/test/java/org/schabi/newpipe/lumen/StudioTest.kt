@@ -387,6 +387,60 @@ class StudioTest {
         assertNull(Studio.analysisFromJson("{}"))
     }
 
+    // ---------- auto-edit ----------
+
+    @Test
+    fun keepSegmentsPadsAndMergesShortGaps() {
+        val speech = listOf(Span(1000, 2000), Span(2200, 3000), Span(6000, 7000))
+        val keep = Studio.keepSegments(speech, 8000, padMs = 100, minGapMs = 350)
+        assertEquals(listOf(Span(900, 3100), Span(5900, 7100)), keep)
+        assertEquals(listOf(Span(0, 500)), Studio.keepSegments(listOf(Span(50, 450)), 500, padMs = 100))
+    }
+
+    @Test
+    fun cutPcmAndSourceTimeAgree() {
+        val rate = 1000
+        val pcm = ShortArray(10_000) { (it / 1000).toShort() } // value = second of the take
+        val keep = listOf(Span(1000, 2000), Span(5000, 6500))
+        val cut = Studio.cutPcm(pcm, rate, keep)
+        assertEquals(2500, cut.size)
+        assertEquals(1, cut[0].toInt())
+        assertEquals(5, cut[1000].toInt())
+        assertEquals(1500L, Studio.sourceTime(500, keep))
+        assertEquals(5200L, Studio.sourceTime(1200, keep))
+        assertEquals(6500L, Studio.sourceTime(99_999, keep))
+        assertEquals(777L, Studio.sourceTime(777, null))
+        // the cut take's sample at output time t is the take's sample at sourceTime(t)
+        for (t in listOf(0L, 999L, 1000L, 2400L)) assertEquals(pcm[Studio.sourceTime(t, keep).toInt()], cut[t.toInt()])
+    }
+
+    @Test
+    fun clipsPlayInOrderAndRepeat() {
+        val d = listOf(3000L, 2000L)
+        assertEquals(0 to 0L, Studio.clipAt(0, d))
+        assertEquals(0 to 2999L, Studio.clipAt(2999, d))
+        assertEquals(1 to 0L, Studio.clipAt(3000, d))
+        assertEquals(0 to 500L, Studio.clipAt(5500, d)) // second round
+        assertEquals(1 to 1000L, Studio.clipAt(14_000, d))
+        assertEquals(0 to 0L, Studio.clipAt(100, emptyList()))
+    }
+
+    @Test
+    fun cameraZoomAlternatesAndNeverZoomsOut() {
+        for (scene in 0..7) for (t in listOf(0L, 100L, 1000L, 4000L)) assertTrue(Studio.cameraZoom(scene, t, 4000) >= 1f)
+        assertEquals(1f, Studio.cameraZoom(0, 0, 4000), 0.001f)
+        assertTrue(Studio.cameraZoom(1, 1000, 4000) > Studio.cameraZoom(0, 1000, 4000) + 0.1f) // punch-in
+        assertTrue(Studio.cameraZoom(2, 4000, 4000) > Studio.cameraZoom(2, 300, 4000)) // push-in
+        assertTrue(Studio.cameraZoom(3, 0, 4000) > Studio.cameraZoom(3, 300, 4000)) // bounce settles
+    }
+
+    @Test
+    fun analysisKeepsCuts() {
+        val a = Studio.Analysis("video", SScript("", listOf(SScene("раз"))), listOf(SWord("раз", 0, 100)), null, "",
+            VoiceStats(100, 100, 0, 0, 1), listOf(Span(500, 900), Span(1200, 3000)))
+        assertEquals(a, Studio.analysisFromJson(Studio.analysisToJson(a)))
+    }
+
     @Test
     fun emojiDetection() {
         assertTrue(Studio.startsWithEmoji("🔍 поиск"))

@@ -31,7 +31,7 @@ object StudioJob {
         val name: String,
         val w: Int,
         val h: Int,
-        val background: File?,
+        val background: StudioBg?,
         val music: File?,
         val musicVolume: Float,
         val musicDuck: Boolean

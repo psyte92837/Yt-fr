@@ -95,7 +95,9 @@ object Studio {
     /** Result of step 3, kept on disk so the screen survives the app being closed. */
     data class Analysis(
         val mode: String, val script: SScript, val words: List<SWord>, val ranges: List<IntRange>?,
-        val transcript: String, val stats: VoiceStats
+        val transcript: String, val stats: VoiceStats,
+        /** Parts of the original take kept after cutting pauses (null = nothing cut). */
+        val cuts: List<Span>? = null
     )
 
     fun analysisToJson(a: Analysis): String = JSONObject()
@@ -105,6 +107,7 @@ object Studio {
         .put("ranges", a.ranges?.let { r -> JSONArray().apply { r.forEach { put(JSONArray().put(it.first).put(it.last + 1)) } } } ?: JSONObject.NULL)
         .put("transcript", a.transcript)
         .put("stats", JSONArray().put(a.stats.totalMs).put(a.stats.speechMs).put(a.stats.pauses).put(a.stats.longestPauseMs).put(a.stats.words))
+        .put("cuts", a.cuts?.let { c -> JSONArray().apply { c.forEach { put(JSONArray().put(it.startMs).put(it.endMs)) } } } ?: JSONObject.NULL)
         .toString()
 
     fun analysisFromJson(s: String): Analysis? = try {
@@ -114,8 +117,9 @@ object Studio {
         val words = (0 until wa.length()).map { i -> wa.getJSONArray(i).let { SWord(it.getString(0), it.getLong(1), it.getLong(2)) } }
         val ranges = o.optJSONArray("ranges")?.let { ra -> (0 until ra.length()).map { i -> ra.getJSONArray(i).let { it.getInt(0) until it.getInt(1) } } }
         val st = o.getJSONArray("stats")
+        val cuts = o.optJSONArray("cuts")?.let { ca -> (0 until ca.length()).map { i -> ca.getJSONArray(i).let { Span(it.getLong(0), it.getLong(1)) } } }
         Analysis(o.optString("mode"), script, words, ranges, o.optString("transcript"),
-            VoiceStats(st.getLong(0), st.getLong(1), st.getInt(2), st.getLong(3), st.getInt(4)))
+            VoiceStats(st.getLong(0), st.getLong(1), st.getInt(2), st.getLong(3), st.getInt(4)), cuts)
     } catch (e: Exception) {
         null
     }
@@ -655,6 +659,84 @@ object Studio {
         180 -> rawH - 1 - v
         270 -> u
         else -> v
+    }
+
+    // ---------- auto-edit: jump cuts, camera, background clips ----------
+
+    /**
+     * Parts of a take to keep when pauses are cut out ("jump cuts"): speech with [padMs] of air around it;
+     * pauses shorter than [minGapMs] stay, so the speech keeps its rhythm.
+     */
+    fun keepSegments(speech: List<Span>, totalMs: Long, padMs: Long = 120, minGapMs: Long = 350): List<Span> {
+        val out = mutableListOf<Span>()
+        for (s in speech) {
+            val a = max(0L, s.startMs - padMs)
+            val b = min(totalMs, s.endMs + padMs)
+            val prev = out.lastOrNull()
+            if (prev != null && a - prev.endMs < minGapMs) out[out.lastIndex] = Span(prev.startMs, max(prev.endMs, b))
+            else out += Span(a, b)
+        }
+        return out
+    }
+
+    /** The take with only [segments] left, glued together. */
+    fun cutPcm(pcm: ShortArray, rate: Int, segments: List<Span>): ShortArray {
+        val parts = segments.map { s ->
+            val a = (s.startMs * rate / 1000).toInt().coerceIn(0, pcm.size)
+            val b = (s.endMs * rate / 1000).toInt().coerceIn(a, pcm.size)
+            a to b
+        }
+        val out = ShortArray(parts.sumOf { it.second - it.first })
+        var p = 0
+        for ((a, b) in parts) {
+            pcm.copyInto(out, p, a, b)
+            p += b - a
+        }
+        return out
+    }
+
+    /** Time in the original take for time [outMs] of the cut video (past the end: the end of the last part). */
+    fun sourceTime(outMs: Long, segments: List<Span>?): Long {
+        if (segments.isNullOrEmpty()) return outMs
+        var left = outMs
+        for (s in segments) {
+            if (left < s.ms) return s.startMs + left
+            left -= s.ms
+        }
+        return segments.last().endMs
+    }
+
+    /** Which background clip plays at [tMs] and from where: clips go one after another and repeat. */
+    fun clipAt(tMs: Long, durationsMs: List<Long>): Pair<Int, Long> {
+        val total = durationsMs.sum()
+        if (durationsMs.isEmpty() || total <= 0) return 0 to 0L
+        var left = ((tMs % total) + total) % total
+        durationsMs.forEachIndexed { i, d ->
+            if (left < d) return i to left
+            left -= d
+        }
+        return durationsMs.lastIndex to durationsMs.last() - 1
+    }
+
+    /**
+     * Camera zoom over the speaker in scene [scene]: alternating framings (wide, punch-in, medium),
+     * a slow push-in during the scene and a short bounce when the scene starts.
+     */
+    fun cameraZoom(scene: Int, localMs: Long, sceneMs: Long): Float {
+        val base = when (scene % 4) {
+            0 -> 1f
+            1 -> 1.16f
+            2 -> 1.06f
+            else -> 1.11f
+        }
+        val pushMax = when (scene % 4) {
+            0 -> 0.05f
+            2 -> 0.07f
+            else -> 0.03f
+        }
+        val p = if (sceneMs <= 0) 0f else (localMs.toFloat() / sceneMs).coerceIn(0f, 1f)
+        val bounce = if (scene == 0) 0f else 0.035f * (1 - appear(localMs, 0, 240))
+        return base + pushMax * p + bounce
     }
 
     // ---------- music ----------

@@ -58,7 +58,11 @@ class StudioPlan(
     val style: StudioStyle,
     val accent: Int,
     /** VIDEO style: graphics drawn over the video instead of full-screen light inserts. */
-    val overlay: Boolean = false
+    val overlay: Boolean = false,
+    /** VIDEO style: camera zooms and push-ins on the video. */
+    val zooms: Boolean = true,
+    /** VIDEO style: inserts slide in instead of a plain fade. */
+    val transitions: Boolean = true
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
@@ -66,14 +70,14 @@ class StudioPlan(
         /** [ranges] = words of every scene when known exactly (Edge voice per scene); otherwise split by word counts. */
         fun build(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
-            ranges: List<IntRange>? = null, overlay: Boolean = false
+            ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions)
         }
     }
 }
@@ -155,7 +159,28 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     fun needsVideo(tMs: Long): Boolean {
         if (plan.style != StudioStyle.VIDEO) return false
         val i = Studio.sceneAt(plan.times, tMs)
-        return i < 0 || !insert(i) || alphaAt(i, tMs) < 1f
+        // keep the video under an insert until its slide / fade has finished
+        return i < 0 || !insert(i) || alphaAt(i, tMs) < 1f || tMs - plan.times[i].startMs < 400
+    }
+
+    /** Zoom of the video at [tMs] (1 = none); the centre is [focusY] of the height, where faces usually are. */
+    fun camera(tMs: Long): Float {
+        if (plan.style != StudioStyle.VIDEO || !plan.zooms) return 1f
+        val i = Studio.sceneAt(plan.times, tMs)
+        if (i < 0) return 1f
+        val st = plan.times[i]
+        return Studio.cameraZoom(i, tMs - st.startMs, st.endMs - st.startMs)
+    }
+
+    val focusY = 0.38f
+
+    /** Puts a video frame on the canvas with the camera zoom of [tMs]. */
+    fun drawVideo(c: Canvas, frame: Bitmap, tMs: Long, paint: Paint) {
+        val z = camera(tMs)
+        c.save()
+        if (z != 1f) c.scale(z, z, w / 2f, h * focusY)
+        c.drawBitmap(frame, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), paint)
+        c.restore()
     }
 
     fun draw(c: Canvas, tMs: Long) {
@@ -194,18 +219,23 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val a = alphaAt(i, tMs)
         palette(false)
         if (insert(i)) {
-            // light insert fades in over the speaker
-            val fade = Studio.appear(tMs, st.startMs - 1, 260)
+            // light insert fades in over the speaker, or slides in from alternating sides
+            val fade = Studio.appear(tMs, st.startMs - 1, if (plan.transitions) 320 else 260)
+            val dx = if (plan.transitions) (1 - fade) * w * (if (i % 2 == 0) 1f else -1f) else 0f
+            c.save()
+            c.translate(dx, 0f)
             shade.color = bg
-            shade.alpha = (255 * fade).toInt()
+            shade.alpha = (255 * (if (plan.transitions) 1f else fade)).toInt()
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), shade)
-            glowLight.alpha = (255 * fade).toInt()
+            glowLight.alpha = shade.alpha
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glowLight)
             glowLight.alpha = 255
-            if (a <= 0f) return
-            sc.title.takeIf { it.isNotBlank() && sc.kind != "big" && sc.kind != "stat" }?.let { headline(c, it, h * 0.15f, a, local) }
-            visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
-            singleWord(c, i, tMs, a, h * 0.80f)
+            if (a > 0f) {
+                sc.title.takeIf { it.isNotBlank() && sc.kind != "big" && sc.kind != "stat" }?.let { headline(c, it, h * 0.15f, a, local) }
+                visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
+                singleWord(c, i, tMs, a, h * 0.80f)
+            }
+            c.restore()
             return
         }
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
@@ -744,7 +774,7 @@ object StudioVideo {
     /** [progress] gets a message with "done/total" (drives the determinate progress bars). */
     fun render(
         plan: StudioPlan, voice: StudioAudio.Pcm, out: File, w: Int, h: Int, fps: Int,
-        cancelled: () -> Boolean, background: File? = null, progress: (String) -> Unit
+        cancelled: () -> Boolean, background: StudioBg? = null, progress: (String) -> Unit
     ) {
         out.parentFile?.mkdirs()
         progress(t("Звук: кодирование 0/100", "Audio: encoding 0/100"))
@@ -810,13 +840,15 @@ object StudioVideo {
             }
         }
 
-        val video = if (background != null && plan.style == StudioStyle.VIDEO) StudioFrames(background, w, h) else null
+        val video = if (background != null && plan.style == StudioStyle.VIDEO) background.open(w, h) else null
         try {
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             val painter = StudioPainter(w, h, plan)
             val argb = IntArray(w * h)
             val frameArgb = if (video != null) IntArray(w * h) { 0xFF000000.toInt() } else null
+            val videoBmp = if (video != null) Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) else null
+            val videoPaint = Paint(Paint.FILTER_BITMAP_FLAG)
             val y = ByteArray(w * h)
             val u = ByteArray(w * h / 4)
             val v = ByteArray(w * h / 4)
@@ -824,10 +856,14 @@ object StudioVideo {
             for (f in 0 until frames) {
                 if (cancelled()) throw CancellationException()
                 val pts = Studio.frameTimeUs(f, fps)
-                if (video != null && frameArgb != null) {
+                if (video == null && plan.style == StudioStyle.VIDEO) canvas.drawColor(0xFF000000.toInt())
+                if (video != null && frameArgb != null && videoBmp != null) {
                     val need = painter.needsVideo(pts / 1000)
-                    video.advance(pts, frameArgb, need)
-                    if (need) bmp.setPixels(frameArgb, 0, w, 0, 0, w, h)
+                    if (video.advance(pts, frameArgb, need)) videoBmp.setPixels(frameArgb, 0, w, 0, 0, w, h)
+                    if (need) {
+                        canvas.drawColor(0xFF000000.toInt())
+                        painter.drawVideo(canvas, videoBmp, pts / 1000, videoPaint)
+                    }
                 }
                 painter.draw(canvas, pts / 1000)
                 bmp.getPixels(argb, 0, w, 0, 0, w, h)
@@ -901,22 +937,27 @@ object StudioVideo {
     }
 
     /** A still frame for the preview on screen; [background] is the speaker's video for the VIDEO style. */
-    fun preview(plan: StudioPlan, tMs: Long, w: Int, h: Int, background: File? = null): Bitmap {
+    fun preview(plan: StudioPlan, tMs: Long, w: Int, h: Int, background: StudioBg? = null): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val painter = StudioPainter(w, h, plan)
-        if (background != null && painter.needsVideo(tMs)) {
+        val at = background?.frameAt(tMs)
+        if (plan.style == StudioStyle.VIDEO) c.drawColor(0xFF000000.toInt())
+        if (at != null && painter.needsVideo(tMs)) {
             c.drawColor(0xFF000000.toInt())
             val r = android.media.MediaMetadataRetriever()
             try {
-                r.setDataSource(background.absolutePath)
-                r.getFrameAtTime(tMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { f ->
+                r.setDataSource(at.first.absolutePath)
+                r.getFrameAtTime(at.second * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { f ->
+                    val crop = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                     val s = max(w.toFloat() / f.width, h.toFloat() / f.height)
                     val sw = w / s
                     val sh = h / s
                     val src = android.graphics.Rect(((f.width - sw) / 2).toInt(), ((f.height - sh) / 2).toInt(), ((f.width + sw) / 2).toInt(), ((f.height + sh) / 2).toInt())
-                    c.drawBitmap(f, src, android.graphics.Rect(0, 0, w, h), Paint(Paint.FILTER_BITMAP_FLAG))
+                    Canvas(crop).drawBitmap(f, src, android.graphics.Rect(0, 0, w, h), Paint(Paint.FILTER_BITMAP_FLAG))
                     f.recycle()
+                    painter.drawVideo(c, crop, tMs, Paint(Paint.FILTER_BITMAP_FLAG))
+                    crop.recycle()
                 }
             } catch (e: Exception) {
                 L.w("studio", "preview frame: ${e.message}")
@@ -929,11 +970,69 @@ object StudioVideo {
     }
 }
 
+/** Something that fills [out] with the background picture for an output time (frames of one video, clips, cut video). */
+interface StudioFrameSource : java.io.Closeable {
+    /** Moves to [tUs]; with [need] the picture goes into [out]. Returns true when [out] changed. */
+    fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean
+}
+
+/**
+ * Background of a VIDEO-style video: the speaker's own video (optionally with pauses cut out, [cuts]),
+ * or background [clips] that play one after another and repeat for the whole voice-over.
+ */
+class StudioBg(val talking: File?, val cuts: List<Span>?, val clips: List<Pair<File, Long>>) {
+    val empty: Boolean get() = talking == null && clips.isEmpty()
+
+    /** File and time inside it for output time [tMs] (for the preview). */
+    fun frameAt(tMs: Long): Pair<File, Long>? {
+        talking?.let { return it to Studio.sourceTime(tMs, cuts) }
+        if (clips.isEmpty()) return null
+        val (i, local) = Studio.clipAt(tMs, clips.map { it.second })
+        return clips[i].first to local
+    }
+
+    fun open(w: Int, h: Int): StudioFrameSource? = when {
+        talking != null -> {
+            val f = StudioFrames(talking, w, h)
+            if (cuts.isNullOrEmpty()) f else object : StudioFrameSource {
+                override fun advance(tUs: Long, out: IntArray, need: Boolean) = f.advance(Studio.sourceTime(tUs / 1000, cuts) * 1000, out, need)
+                override fun close() = f.close()
+            }
+        }
+        clips.isNotEmpty() -> StudioClipFrames(clips, w, h)
+        else -> null
+    }
+}
+
+/** Background clips in a loop: a new decoder opens when the next clip (or the next round) starts. */
+class StudioClipFrames(private val clips: List<Pair<File, Long>>, private val w: Int, private val h: Int) : StudioFrameSource {
+    private var cur: StudioFrames? = null
+    private var curIdx = -1
+    private var lastLocal = Long.MAX_VALUE
+
+    override fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean {
+        val (i, localMs) = Studio.clipAt(tUs / 1000, clips.map { it.second })
+        val local = localMs * 1000
+        if (i != curIdx || local < lastLocal && cur != null && local + 50_000 < lastLocal) {
+            cur?.close()
+            cur = StudioFrames(clips[i].first, w, h)
+            curIdx = i
+        }
+        lastLocal = local
+        return cur?.advance(local, out, need) ?: false
+    }
+
+    override fun close() {
+        cur?.close()
+        cur = null
+    }
+}
+
 /**
  * Frames of the speaker's video, decoded in order and centre-cropped to the output size
  * (rotation of phone videos is taken into account). Pixels are converted only when they are shown.
  */
-class StudioFrames(private val file: File, private val w: Int, private val h: Int) : java.io.Closeable {
+class StudioFrames(private val file: File, private val w: Int, private val h: Int) : StudioFrameSource {
     private val ex = MediaExtractor()
     // fallback for decoders that give no YUV image: slower frame-by-frame reading through MediaMetadataRetriever
     private var retriever: android.media.MediaMetadataRetriever? = null
@@ -1018,7 +1117,7 @@ class StudioFrames(private val file: File, private val w: Int, private val h: In
      * Moves to the last frame at or before [tUs]; with [need] its pixels go into [out]
      * (after the video ends, the last shown frame stays). Returns true when [out] changed.
      */
-    fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean {
+    override fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean {
         if (useRetriever) return need && fallback(tUs, out)
         var cand = -1
         while (!outEos) {

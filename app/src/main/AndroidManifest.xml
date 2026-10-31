@@ -263,6 +263,23 @@
             android:exported="false"
             android:taskAffinity=""
             android:theme="@style/RouterActivityThemeDark" />
+        <!-- Lumen Lens: floating button over the YouTube app; reads the video cards on its screen (only YouTube windows are used) -->
+        <service
+            android:name=".lumen.LensService"
+            android:exported="true"
+            android:label="@string/lumen_lens"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/lumen_lens" />
+        </service>
+        <activity
+            android:name=".lumen.LensActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme" />
         <!-- ===== /Lumen ===== -->
 
         <receiver

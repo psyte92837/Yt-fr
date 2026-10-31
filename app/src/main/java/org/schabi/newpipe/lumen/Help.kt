@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "settings"
+        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "lens", "settings"
     )
 
     private val screens = mapOf(
@@ -37,6 +37,7 @@ object HelpMap {
         "TtsShareListen" to "tts",
         "TtsShareSave" to "tts",
         "StudioActivity" to "studio",
+        "LensActivity" to "lens",
         "SettingsActivity" to "settings",
         "HelpActivity" to "about"
     )
@@ -203,6 +204,31 @@ object Help {
                 t("«Видео на фоне»: добавьте клипы под любую озвучку (голос Microsoft, микрофон, аудио) — они идут по очереди и повторяются по кругу на всю длину озвучки.",
                     "\"Background video\": add clips under any voice-over (Microsoft voice, microphone, audio); they play in order and loop for the whole voice-over.")
             )),
+        HelpTopic("lens", t("Кнопка поверх YouTube", "Button over YouTube"),
+            t("Плавающая кнопка «L» поверх обычного приложения YouTube. Lumen читает карточки видео на экране (через спецвозможности Android) " +
+                "и прямо поверх YouTube показывает: что сейчас на экране, AI-сводку видео, похожие, мини-граф рекомендаций, канал. " +
+                "Видео можно ставить в очередь на полный анализ, а ленту за сессию — разобрать через AI или сохранить проектом.",
+                "A floating \"L\" button over the regular YouTube app. Lumen reads the video cards on screen (via Android accessibility) " +
+                    "and shows right over YouTube: what is on screen, an AI summary, similar videos, a mini recommendation graph, the channel. " +
+                    "Videos can be queued for the full analysis, and the session feed can be reviewed by AI or saved as a project."),
+            listOf(
+                t("Меню ⋮ на главном экране → «Кнопка поверх YouTube» → «Включить» и включите службу Lumen в Спецвозможностях.",
+                    "Home menu ⋮ → \"Button over YouTube\" → \"Turn on\" and enable the Lumen service in Accessibility."),
+                t("Откройте YouTube и нажмите «L». Вкладка «Экран» — видео на экране, «Видео» — действия с выбранным, «Лента» — всё, что показал YouTube, «Очередь» — анализы по порядку.",
+                    "Open YouTube and tap \"L\". Screen = videos on screen, Video = actions for the chosen one, Feed = everything YouTube showed, Queue = analyses in order."),
+                t("«＋» у видео ставит его в очередь: каждое пройдёт полный быстрый анализ в фоне, один за другим.",
+                    "\"＋\" next to a video queues it: each gets the full instant analysis in the background, one after another."),
+                t("Ссылки на экране нет, поэтому Lumen находит видео поиском по названию. Не нашлось — скопируйте ссылку в YouTube (Поделиться → Копировать) и нажмите ⟳.",
+                    "The screen has no links, so Lumen finds a video by searching its title. Not found — copy the link in YouTube (Share → Copy link) and tap ⟳.")
+            ),
+            listOf(
+                t("Кнопку можно перетащить к краю; долгое нажатие прячет её до выхода из YouTube.", "Drag the button to an edge; a long press hides it until you leave YouTube."),
+                t("Android 13+: если переключатель службы серый — Настройки → Приложения → Lumen → ⋮ → «Разрешить ограниченные настройки».",
+                    "Android 13+: if the service switch is grey — Settings → Apps → Lumen → ⋮ → \"Allow restricted settings\"."),
+                t("Ничего не распознаётся? Вкладка «Экран» → «🐞 Отчёт о разборе экрана» и пришлите его разработчику.",
+                    "Nothing recognised? Screen tab → \"🐞 Screen parse report\" and send it to the developer.")
+            )
+        ),
         HelpTopic("settings", t("Настройки", "Settings"),
             t("Язык, тема, режим, AI-провайдеры и модели, промпты, мониторинг, резервные копии, журнал ошибок.", "Language, theme, mode, AI providers and models, prompts, monitoring, backups, error log."),
             listOf(

@@ -144,6 +144,12 @@ class CollectService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        launch(pid, ids, kind)
+        return START_NOT_STICKY
+    }
+
+    /** Runs one task in a worker thread; a finished instant analysis takes the next link of [AnalysisQueue]. */
+    private fun launch(pid: String, ids: ArrayList<String>, kind: String) {
         CollectState.cancel.set(false)
         CollectState.running = true
         CollectState.projectId = pid
@@ -221,11 +227,25 @@ class CollectService : Service() {
                     }
                     Notify.done(this, NOTIF_ID + 10, (if (failed) "⚠️ " else "✅ ") + label + if (name.isNotBlank()) " · $name" else "", body.take(300), pid, !failed)
                 }
-                stopForegroundCompat()
-                stopSelf()
+                val next = try {
+                    if (kind == "quick" && AnalysisQueue.has(pid)) {
+                        AnalysisQueue.finished(pid, CollectState.lastError.isEmpty() && !CollectState.cancel.get(),
+                            if (CollectState.cancel.get()) t("остановлено", "stopped") else CollectState.lastError.ifBlank { CollectState.lastResult })
+                    }
+                    if (CollectState.cancel.get()) null else AnalysisQueue.claimNext()
+                } catch (e: Exception) {
+                    L.w("queue", "next: ${e.message}")
+                    null
+                }
+                if (next != null) {
+                    L.i("queue", "next project $next")
+                    launch(next, arrayListOf(), "quick")
+                } else {
+                    stopForegroundCompat()
+                    stopSelf()
+                }
             }
         }.start()
-        return START_NOT_STICKY
     }
 
     private fun run(pid: String, ids: List<String>) {

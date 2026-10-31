@@ -3,4 +3,6 @@
     <string name="lumen_tts_share" translatable="false">Озвучить (Lumen)</string>
     <string name="lumen_tts_listen" translatable="false">Озвучить в Lumen</string>
     <string name="lumen_tts_save" translatable="false">Сохранить озвучку (Lumen)</string>
+    <string name="lumen_lens" translatable="false">Lumen: кнопка поверх YouTube</string>
+    <string name="lumen_lens_desc" translatable="false">Плавающая кнопка Lumen поверх приложения YouTube: сводка, похожие, граф и очередь анализа для видео на экране. Служба читает только окна YouTube (названия, каналы, просмотры карточек); данные остаются на устройстве. / Lumen floating button over the YouTube app. Reads only YouTube windows; data stays on the device.</string>
 </resources>

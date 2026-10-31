@@ -163,7 +163,7 @@
 - `GraphReport.kt` (14): .blocks():182, GraphReport.kt:1, GraphReport:24, Picture:69, Input:25, .input():57
 - `Harvest.kt` (42): HarvestSpec:21, .videos():378, HarvestRules:153, HarvestItem:67, HarvestState:105, Harvest.kt:1
 - `HarvestActivity.kt` (16): .render():235, harvestSetup():49, HarvestActivity.kt:1, HarvestActivity:203, .videoRow():321, startHarvest():21
-- `Help.kt` (11): .render():210, Help.kt:1, HelpActivity:193, .topics():52, .onCreate():203, .open():195
+- `Help.kt` (11): .render():220, Help.kt:1, HelpActivity:203, .topics():53, .onCreate():213, .open():205
 - `HomeActivities.kt` (29): .render():513, .render():143, HomeActivities.kt:1, SimpleWatcher:94, .projectMenu():270, WizardActivity:310
 - `KeyText.kt` (3): .clean():12, KeyText:8, KeyText.kt:1
 - `KeyVault.kt` (6): KeyVault.kt:1, KeyVault:21, .get():51, .has():63, .put():39, .secretKey():25

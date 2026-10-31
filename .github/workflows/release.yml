@@ -27,9 +27,12 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         env:
           TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$TAG" in v*) ;; *) echo "::error::Tag must start with v"; exit 1 ;; esac
-          if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null; then echo "::error::Tag $TAG already exists"; exit 1; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "::error::Release $TAG already exists"; exit 1; fi
+          # a tag left by a failed run (no release, no APK) is removed so the release is created on the current commit
+          if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null; then git push origin ":refs/tags/$TAG"; git tag -d "$TAG" || true; fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Set up JDK 21

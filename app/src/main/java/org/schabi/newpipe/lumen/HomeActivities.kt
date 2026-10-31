@@ -140,17 +140,7 @@ class LumenActivity : LumenBase() {
         if (requestCode == REQ_RESTORE && resultCode == RESULT_OK && uri != null) restoreFrom(uri) { render() }
     }
 
-    /** Option button: tap saves the choice and redraws the step; moving on is always the explicit «Далее» button. */
-    private fun choice(c: Col, label: String, selected: Boolean, pick: () -> Unit) =
-        c.button((if (selected) "✓ " else "") + label, style = if (selected) BtnStyle.TONAL else BtnStyle.OUTLINED) {
-            pick()
-            render()
-        }
-
-    private fun nextButton(c: Col) = c.button(WizardSteps.nextLabel(step), true) { next() }
-
     private fun render() {
-        step = step.coerceIn(0, WizardSteps.KEYS.size - 1)
         val c = Col(this)
         Updates.available?.let { u ->
             val broken = System.currentTimeMillis() - Updates.brokenAt < 3 * 86_400_000L
@@ -582,17 +572,7 @@ class NewProjectActivity : LumenBase() {
         render()
     }
 
-    /** Option button: tap saves the choice and redraws the step; moving on is always the explicit «Далее» button. */
-    private fun choice(c: Col, label: String, selected: Boolean, pick: () -> Unit) =
-        c.button((if (selected) "✓ " else "") + label, style = if (selected) BtnStyle.TONAL else BtnStyle.OUTLINED) {
-            pick()
-            render()
-        }
-
-    private fun nextButton(c: Col) = c.button(WizardSteps.nextLabel(step), true) { next() }
-
     private fun render() {
-        step = step.coerceIn(0, WizardSteps.KEYS.size - 1)
         val c = Col(this)
         if (watch) {
             c.title(t("Домен для наблюдения", "Domain to watch"))

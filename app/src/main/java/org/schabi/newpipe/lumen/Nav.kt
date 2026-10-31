@@ -137,7 +137,7 @@ object Nav {
     }
 
     private fun rootOf(t: ActivityManager.AppTask): String =
-        runCatching { t.taskInfo.baseIntent.component?.className }.getOrNull().orEmpty()
+        runCatching { t.taskInfo?.baseIntent?.component?.className }.getOrNull().orEmpty()
 
     // ---------- intents ----------
 

@@ -20,6 +20,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Text of the "running tasks" notification (pure logic, tested). */
@@ -42,16 +43,93 @@ object TaskText {
     }
 }
 
+/** Health of a running task and the history of finished ones (pure logic, tested). */
+object TaskHealth {
+    enum class State { OK, SLOW, STUCK }
+
+    /** Minutes without progress that mark a task as hung when auto-stop is off. */
+    const val DEFAULT_MIN = 20
+
+    /** A task asked to stop that still runs after this is dropped by force. */
+    const val GRACE_MS = 15_000L
+
+    /** Choices of the auto-stop setting, minutes (0 = off). */
+    val CHOICES = listOf(0, 5, 10, 20, 30, 60)
+
+    fun limitMs(limitMin: Int): Long = (if (limitMin > 0) limitMin else DEFAULT_MIN) * 60_000L
+
+    fun state(now: Long, lastActive: Long, limitMin: Int, waiting: Boolean = false): State {
+        if (waiting) return State.OK
+        val idle = now - lastActive
+        val lim = limitMs(limitMin)
+        return when {
+            idle >= lim -> State.STUCK
+            idle >= lim / 2 -> State.SLOW
+            else -> State.OK
+        }
+    }
+
+    /** True when the watchdog must stop the task: no progress for [limitMin] minutes (0 = never). */
+    fun autoStop(now: Long, lastActive: Long, limitMin: Int, waiting: Boolean = false): Boolean =
+        limitMin > 0 && !waiting && now - lastActive >= limitMin * 60_000L
+
+    /** True when the user should be asked about the task: half the limit, or [DEFAULT_MIN] with auto-stop off. */
+    fun warn(now: Long, lastActive: Long, limitMin: Int, waiting: Boolean = false): Boolean =
+        !waiting && now - lastActive >= (if (limitMin > 0) limitMin * 30_000L else DEFAULT_MIN * 60_000L)
+
+    /** True when a task asked to stop at [cancelAt] still has not ended and may be dropped. */
+    fun force(now: Long, cancelAt: Long): Boolean = cancelAt > 0 && now - cancelAt >= GRACE_MS
+
+    class Entry(val title: String, val outcome: String, val ms: Long, val at: Long, val error: String = "")
+
+    const val DONE = "done"
+    const val ERROR = "error"
+    const val STOPPED = "stopped"
+    const val AUTO = "auto"
+
+    fun push(list: List<Entry>, e: Entry, max: Int = 40): List<Entry> = (listOf(e) + list).take(max)
+
+    fun label(outcome: String): String = when (outcome) {
+        DONE -> "✓ " + t("готово", "done")
+        ERROR -> "✗ " + t("ошибка", "error")
+        AUTO -> "⏱ " + t("зависла, остановлена", "hung, stopped")
+        else -> "⏹ " + t("остановлена", "stopped")
+    }
+
+    fun outcome(e: Throwable?, cancelled: Boolean, auto: Boolean): String = when {
+        auto -> AUTO
+        cancelled || e is java.util.concurrent.CancellationException -> STOPPED
+        e != null -> ERROR
+        else -> DONE
+    }
+}
+
 /**
  * Long tasks started from screens (AI, imports, downloads…). Each runs on its own thread while
  * [TaskService] shows its progress in a notification and keeps the process alive, so the work
  * goes on when the app is minimised or the screen is closed. When the app is not visible,
  * the end of the work is reported by a notification that opens the screen again.
+ * Every task can be stopped from [TasksActivity]; a task without progress for too long is stopped
+ * by the watchdog. Short [Lumen.async] work is listed here too ("quiet": no notification).
  */
 object BgTasks {
-    class Task(val id: Int, val key: String, val title: String, val open: Intent?, val onCancel: (() -> Unit)?) {
-        @Volatile var message = ""
+    class Task(val id: Int, val key: String, val title: String, val open: Intent?, val onCancel: (() -> Unit)?, val quiet: Boolean = false) {
         val startedAt = System.currentTimeMillis()
+        @Volatile var lastActive = startedAt
+        @Volatile var message = ""
+            set(v) {
+                field = v
+                lastActive = System.currentTimeMillis()
+            }
+        @Volatile var cancelled = false
+        @Volatile var cancelAt = 0L
+        @Volatile var auto = false
+        /** Above zero while the task waits for the user (review of the data sent to AI). */
+        val waiting = AtomicInteger(0)
+        internal val closed = AtomicBoolean(false)
+        internal var fail: (Throwable) -> Unit = {}
+
+        fun beat() { lastActive = System.currentTimeMillis() }
     }
 
     private val list = CopyOnWriteArrayList<Task>()
@@ -59,18 +137,23 @@ object BgTasks {
     private val handler by lazy { Handler(Looper.getMainLooper()) }
     private val started = AtomicInteger(0)
     private var hooked = false
+    private val current = ThreadLocal<Task?>()
+    @Volatile var history: List<TaskHealth.Entry> = emptyList()
+        private set
 
     /** Screens that want to know about progress (main thread). */
     val watchers = CopyOnWriteArrayList<() -> Unit>()
 
-    fun running(): List<Task> = list.toList()
-    fun has(prefix: String) = list.any { it.key.startsWith(prefix) }
-    fun find(prefix: String) = list.firstOrNull { it.key.startsWith(prefix) }
+    /** Tasks with a notification (not the quiet ones). */
+    fun running(): List<Task> = list.filter { !it.quiet }
+    fun all(): List<Task> = list.toList()
+    fun has(prefix: String) = list.any { !it.quiet && it.key.startsWith(prefix) }
+    fun find(prefix: String) = list.firstOrNull { !it.quiet && it.key.startsWith(prefix) }
 
     /** True while at least one screen of the app is on screen. */
     val visible get() = started.get() > 0
 
-    /** Counts visible activities; called once from [Lumen.init]. */
+    /** Counts visible activities and starts the watchdog; called once from [Lumen.init]. */
     fun hook(app: Context) {
         if (hooked) return
         val a = app as? Application ?: return
@@ -84,6 +167,12 @@ object BgTasks {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
             override fun onActivityDestroyed(activity: Activity) {}
         })
+        handler.postDelayed(object : Runnable {
+            override fun run() {
+                runCatching { TaskHub.watchdog(a) }.onFailure { L.w("tasks", "watchdog: ${it.message}") }
+                handler.postDelayed(this, 30_000)
+            }
+        }, 30_000)
     }
 
     /** Intent that brings [a] back with its extras (for the notification tap). */
@@ -93,32 +182,73 @@ object BgTasks {
     /**
      * Runs [work] in the background with a progress notification; [onDone] / [onError] come on
      * the main thread (also when the screen was closed meanwhile, so results saved there still land).
-     * [key] groups tasks of one screen; [onCancel] adds "Cancel" to the notification.
+     * [key] groups tasks of one screen; [onCancel] lets the work end itself gracefully when stopped.
+     * A stopped task ends with [onError] (CancellationException); a late result is dropped.
      */
     fun <T> run(
         ctx: Context, key: String, title: String, open: Intent?,
         work: (Task) -> T, onError: (Throwable) -> Unit = {}, onCancel: (() -> Unit)? = null, onDone: (T) -> Unit
     ): Task {
         val task = Task(seq.getAndIncrement(), key, title, open, onCancel)
+        task.fail = onError
         list += task
         TaskService.ensure(ctx.applicationContext)
         changed()
         Thread {
+            current.set(task)
             try {
                 val r = work(task)
                 handler.post {
-                    runCatching { onDone(r) }.onFailure { L.w("tasks", "$key done: ${it.message}") }
-                    finished(task, null)
+                    if (task.closed.compareAndSet(false, true)) {
+                        runCatching { onDone(r) }.onFailure { L.w("tasks", "$key done: ${it.message}") }
+                        finished(task, null)
+                    }
                 }
             } catch (e: Throwable) {
-                if (e !is java.util.concurrent.CancellationException) L.e("tasks", "$key: ${e.message ?: e.javaClass.simpleName}", e)
-                handler.post {
-                    runCatching { onError(e) }.onFailure { L.w("tasks", "$key error: ${it.message}") }
-                    finished(task, e)
-                }
+                if (e !is java.util.concurrent.CancellationException && !task.cancelled) L.e("tasks", "$key: ${e.message ?: e.javaClass.simpleName}", e)
+                handler.post { close(task, e) }
+            } finally {
+                current.remove()
             }
         }.apply { name = "lumen-task-$key"; isDaemon = true; start() }
         return task
+    }
+
+    /** Registers short work of [Lumen.async]: listed in the manager, no notification. */
+    fun quiet(title: String, onError: (Throwable) -> Unit): Task =
+        Task(seq.getAndIncrement(), "async", title, null, null, quiet = true).also {
+            it.fail = onError
+            list += it
+        }
+
+    /** Ends a quiet task with its result; false when it was stopped meanwhile (the result is dropped). */
+    fun end(task: Task): Boolean {
+        if (!task.closed.compareAndSet(false, true)) return false
+        list.remove(task)
+        return true
+    }
+
+    /** The task of the calling thread (set for [run] work and passed on to [Par] workers). */
+    fun current(): Task? = current.get()
+    fun adopt(task: Task?) = if (task == null) current.remove() else current.set(task)
+
+    /** Throws when the task of this thread was stopped; otherwise counts as a sign of life. */
+    fun checkpoint() {
+        val task = current.get() ?: return
+        if (task.cancelled) throw java.util.concurrent.CancellationException(t("Задача остановлена", "Task stopped"))
+        task.beat()
+    }
+
+    /** [f] waits for the user: the watchdog does not count this time. */
+    fun <T> waitingUser(f: () -> T): T {
+        val task = current.get() ?: return f()
+        task.waiting.incrementAndGet()
+        try {
+            return f()
+        } finally {
+            task.waiting.decrementAndGet()
+            task.beat()
+        }
     }
 
     /** Status line of the tasks of [key]. */
@@ -128,7 +258,37 @@ object BgTasks {
         if (hit) changed()
     }
 
-    fun cancelAll() = list.forEach { runCatching { it.onCancel?.invoke() } }
+    /**
+     * Stops [task]: work that can end itself ([Task.onCancel]) gets [TaskHealth.GRACE_MS] for it,
+     * other work is dropped at once (its AI calls stop at the next step, a late result is ignored).
+     */
+    fun stop(task: Task, auto: Boolean = false) {
+        if (task.closed.get()) return
+        if (!task.cancelled) {
+            task.cancelled = true
+            task.cancelAt = System.currentTimeMillis()
+            task.auto = auto
+            L.i("tasks", "${task.key} stopped" + if (auto) " (no progress)" else "")
+            runCatching { task.onCancel?.invoke() }
+        }
+        val e = java.util.concurrent.CancellationException(t("Задача остановлена", "Task stopped"))
+        if (task.onCancel == null) handler.post { close(task, e) } else handler.postDelayed({ close(task, e) }, TaskHealth.GRACE_MS)
+        changed()
+    }
+
+    /** Drops a stopped task right away, without waiting for it to end. */
+    fun kill(task: Task) {
+        if (!task.cancelled) stop(task)
+        handler.post { close(task, java.util.concurrent.CancellationException(t("Задача остановлена", "Task stopped"))) }
+    }
+
+    fun cancelAll() = list.forEach { stop(it) }
+
+    private fun close(task: Task, e: Throwable) {
+        if (!task.closed.compareAndSet(false, true)) return
+        runCatching { task.fail(e) }.onFailure { L.w("tasks", "${task.key} error: ${it.message}") }
+        finished(task, e)
+    }
 
     private fun changed() = handler.post {
         TaskService.refresh()
@@ -137,26 +297,42 @@ object BgTasks {
 
     private fun finished(task: Task, e: Throwable?) {
         list.remove(task)
+        val outcome = TaskHealth.outcome(e, task.cancelled, task.auto)
+        if (!task.quiet || outcome != TaskHealth.DONE) record(task.title, outcome, System.currentTimeMillis() - task.startedAt,
+            if (outcome == TaskHealth.ERROR) e?.message ?: e?.javaClass?.simpleName ?: "" else "")
+        if (task.quiet) return
         changed()
-        if (visible || e is java.util.concurrent.CancellationException) return
+        if (task.auto) return report(task, e)
+        if (visible || e is java.util.concurrent.CancellationException || task.cancelled) return
         // in a chain of steps only the last one (or a failure) is reported
         if (e == null && list.any { it.key == task.key }) return
         report(task, e)
     }
 
+    /** Adds a finished task to the history shown in [TasksActivity]. */
+    fun record(title: String, outcome: String, ms: Long, error: String = "") {
+        history = TaskHealth.push(history, TaskHealth.Entry(title, outcome, ms, System.currentTimeMillis(), error))
+    }
+
+    fun clearHistory() { history = emptyList() }
+
     private fun report(task: Task, e: Throwable?) {
         val ctx = Lumen.app
         if (e == null && !Settings.notifyDone) return
         Notify.channels(ctx)
-        val body = if (e == null) t("Готово за ", "Done in ") + TaskText.elapsed(System.currentTimeMillis() - task.startedAt)
-        else (e.message ?: e.javaClass.simpleName)
+        val body = when {
+            task.auto -> t("Нет прогресса ${Settings.taskStuckMin} мин — остановлена автоматически",
+                "No progress for ${Settings.taskStuckMin} min — stopped automatically")
+            e == null -> t("Готово за ", "Done in ") + TaskText.elapsed(System.currentTimeMillis() - task.startedAt)
+            else -> e.message ?: e.javaClass.simpleName
+        }
         val b = Notify.builder(ctx, Notify.doneChannel())
             .setSmallIcon(if (e == null) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentTitle((if (e == null) "✓ " else "✗ ") + task.title)
+            .setContentTitle((if (task.auto) "⏱ " else if (e == null) "✓ " else "✗ ") + task.title)
             .setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setAutoCancel(true)
-        task.open?.let {
+        (if (task.auto) Intent(ctx, TasksActivity::class.java) else task.open)?.let {
             b.setContentIntent(Nav.pending(ctx, 7500 + task.id % 400, it))
         }
         try {
@@ -238,13 +414,17 @@ class TaskService : Service() {
             .setOnlyAlertOnce(true)
             .setOngoing(true)
             .setProgress(1000, ((f ?: 0f) * 1000).toInt(), f == null)
-        tasks.firstOrNull { it.open != null }?.open?.let {
+        val manager = Intent(this, TasksActivity::class.java)
+        (if (tasks.size == 1) tasks[0].open ?: manager else manager).let {
             b.setContentIntent(Nav.pending(this, 7421, it))
         }
-        if (tasks.any { it.onCancel != null }) {
+        if (tasks.isNotEmpty()) {
             val cancel = PendingIntent.getService(this, 7422, Intent(this, TaskService::class.java).setAction(ACTION_CANCEL),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-            b.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel, t("Отмена", "Cancel"), cancel).build())
+            b.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,
+                if (tasks.size == 1) t("Отмена", "Cancel") else t("Остановить все", "Stop all"), cancel).build())
+            b.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_manage, t("Задачи", "Tasks"),
+                Nav.pending(this, 7423, manager)).build())
         }
         return b.build()
     }

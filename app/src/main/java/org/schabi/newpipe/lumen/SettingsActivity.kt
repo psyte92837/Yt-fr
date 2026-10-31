@@ -174,6 +174,7 @@ class SettingsActivity : LumenBase() {
             Settings.mode = it
         }
         c.h2(t("Уведомления", "Notifications"))
+        c.button(t("⚙ Менеджер задач (зависшие, автоостановка)", "⚙ Task manager (hung tasks, auto-stop)"), style = BtnStyle.OUTLINED) { TasksActivity.open(this) }
         c.check(t("Уведомлять о завершении задач (сбор, анализ, граф, озвучка)", "Notify when tasks finish (collection, analysis, graph, speech)"), Settings.notifyDone) {
             Settings.notifyDone = it
         }

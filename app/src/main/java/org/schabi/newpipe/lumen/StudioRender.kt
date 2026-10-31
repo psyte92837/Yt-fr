@@ -64,7 +64,11 @@ class StudioPlan(
     /** VIDEO style: camera zooms and push-ins on the video. */
     val zooms: Boolean = true,
     /** VIDEO style: inserts slide in instead of a plain fade. */
-    val transitions: Boolean = true
+    val transitions: Boolean = true,
+    /** Voice loudness per 20 ms (0..1) when the picture pulses with the voice. */
+    val pulse: FloatArray? = null,
+    /** Folder of animated Noto emoji (Lottie) when emoji are animated; null = still emoji. */
+    val emojiDir: File? = null
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
@@ -94,14 +98,15 @@ class StudioPlan(
         /** [ranges] = words of every scene when known exactly (Edge voice per scene); otherwise split by word counts. */
         fun build(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
-            ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true
+            ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
+            pulse: FloatArray? = null, emojiDir: File? = null
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir)
         }
     }
 }
@@ -364,9 +369,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                     shapeText.clearShadowLayer()
                 }
                 "emoji" -> {
-                    emojiP.textSize = ph
-                    emojiP.alpha = (255 * al).toInt()
-                    c.drawText(sh.text, 0f, ph * 0.35f, emojiP)
+                    emoji(c, sh.text, 0f, ph * 0.35f, ph, al)
                 }
             }
             c.restore()
@@ -388,7 +391,53 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         if (i < 0) return 1f
         val st = plan.times[i]
         val base = if (plan.zooms) Studio.cameraZoom(i, tMs - st.startMs, st.endMs - st.startMs) else 1f
-        return base * StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.14f)
+        return base * StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.14f) * (1f + 0.02f * pulseAt(tMs))
+    }
+
+    /** Voice loudness at [tMs] for the pulse (0 when it is off). */
+    private fun pulseAt(tMs: Long): Float = plan.pulse?.let { p -> if (p.isEmpty()) 0f else p[(tMs / 20).toInt().coerceIn(0, p.lastIndex)] } ?: 0f
+
+    /** Time of the frame being drawn (animated emoji follow it). */
+    private var nowMs = 0L
+    private val lottie = HashMap<String, com.airbnb.lottie.LottieDrawable>()
+
+    /** Animated emoji [e] when it is downloaded; null for a still one. */
+    private fun live(e: String): com.airbnb.lottie.LottieDrawable? {
+        val dir = plan.emojiDir ?: return null
+        lottie[e]?.let { return it }
+        val comp = StudioLottie.composition(dir, e) ?: return null
+        val d = runCatching {
+            com.airbnb.lottie.LottieDrawable().apply {
+                setAsyncUpdates(com.airbnb.lottie.AsyncUpdates.DISABLED)
+                setComposition(comp)
+            }
+        }.getOrNull() ?: return null
+        lottie[e] = d
+        return d
+    }
+
+    /** Emoji [e] centred at [cx] with its text baseline at [baseline] and size [size]: animated when possible, else text. */
+    private fun emoji(c: Canvas, e: String, cx: Float, baseline: Float, size: Float, alpha: Float) {
+        if (e.isBlank() || alpha <= 0f) return
+        val d = live(e.trim())
+        val comp = d?.composition
+        if (d != null && comp != null) {
+            try {
+                val dur = max(1f, comp.duration)
+                d.progress = (nowMs % dur.toLong()).toFloat() / dur
+                val half = size * 0.58f
+                val cy = baseline - size * 0.36f
+                d.setBounds((cx - half).toInt(), (cy - half).toInt(), (cx + half).toInt(), (cy + half).toInt())
+                d.alpha = (255 * alpha).toInt().coerceIn(0, 255)
+                d.draw(c)
+                return
+            } catch (ex: Exception) {
+                lottie.remove(e.trim())
+            }
+        }
+        emojiP.textSize = size
+        emojiP.alpha = (255 * alpha).toInt()
+        c.drawText(e, cx, baseline, emojiP)
     }
 
     val focusY = 0.38f
@@ -403,6 +452,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     fun draw(c: Canvas, tMs: Long) {
+        nowMs = tMs
         val i = Studio.sceneAt(plan.times, tMs)
         if (plan.style == StudioStyle.VIDEO) {
             if (i >= 0) drawOnVideo(c, i, tMs)
@@ -412,7 +462,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), if (dark) glowDark else glowLight)
         if (i < 0) return
         c.save()
-        val z = StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.07f)
+        val z = StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.07f) * (1f + 0.035f * pulseAt(tMs))
         if (z != 1f) c.scale(z, z, w / 2f, h / 2f)
         val st = plan.times[i]
         enter(c, plan.script.scenes[i].transition, i, tMs - st.startMs)
@@ -718,9 +768,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         roundCard(c, r, size * 0.2f, al, if (highlight) accent else stroke)
         val hasLabel = item.label.isNotBlank()
         if (item.icon.isNotBlank()) {
-            emojiP.textSize = size * (if (hasLabel) 0.36f else 0.5f)
-            emojiP.alpha = (255 * al).toInt()
-            c.drawText(item.icon, x, y + (if (hasLabel) -size * 0.04f else size * 0.17f), emojiP)
+            emoji(c, item.icon, x, y + (if (hasLabel) -size * 0.04f else size * 0.17f), size * (if (hasLabel) 0.36f else 0.5f), al)
         }
         if (hasLabel) {
             labelP.color = ink
@@ -855,9 +903,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             val y = r.top + 1.5f * u + head + rowH * i + rowH / 2
             val al = (255 * p * a).toInt()
             val dx = (1 - p) * 4 * u
-            emojiP.textSize = 4.6f * u
-            emojiP.alpha = al
-            if (it.icon.isNotBlank()) c.drawText(it.icon, r.left + 7f * u + dx, y + 1.6f * u, emojiP)
+            if (it.icon.isNotBlank()) emoji(c, it.icon, r.left + 7f * u + dx, y + 1.6f * u, 4.6f * u, al / 255f)
             labelP.textAlign = Paint.Align.LEFT
             labelP.color = ink
             labelP.alpha = al
@@ -917,9 +963,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         fill.color = accent
         fill.alpha = (46 * p * a).toInt()
         c.drawCircle(cx, cy - 4f * u, 22f * u * pulse * (0.7f + 0.3f * p), fill)
-        emojiP.textSize = 22f * u * (0.8f + 0.2f * p)
-        emojiP.alpha = (255 * p * a).toInt()
-        c.drawText(item.icon.ifBlank { "💡" }, cx, cy + 3.5f * u, emojiP)
+        emoji(c, item.icon.ifBlank { "💡" }, cx, cy + 3.5f * u, 22f * u * (0.8f + 0.2f * p), p * a)
         if (item.label.isNotBlank()) {
             labelP.color = ink
             labelP.alpha = (255 * a * Studio.appear(local, 200, 300)).toInt()
@@ -1042,9 +1086,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             val r = RectF(left + dx, cy - bh / 2, left + bw + dx, cy + bh / 2)
             roundCard(c, r, 3f * u, StudioMotion.clamp(p) * a, if (k == 1) accent else stroke)
             if (item.icon.isNotBlank()) {
-                emojiP.textSize = bh * 0.3f
-                emojiP.alpha = (255 * a * StudioMotion.clamp(p)).toInt()
-                c.drawText(item.icon, r.centerX(), r.top + bh * 0.42f, emojiP)
+                emoji(c, item.icon, r.centerX(), r.top + bh * 0.42f, bh * 0.3f, a * StudioMotion.clamp(p))
             }
             labelP.color = ink
             labelP.alpha = (255 * a * StudioMotion.clamp(p)).toInt()
@@ -1065,6 +1107,28 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             headP.textSize = 4.4f * u * pv
             c.drawText("VS", cx, cy + headP.textSize * 0.36f, headP)
         }
+    }
+}
+
+/** Animated Noto emoji read once from their Lottie files. */
+object StudioLottie {
+    private val cache = HashMap<String, com.airbnb.lottie.LottieComposition>()
+
+    /** File of emoji [e] in [dir] (may not exist yet). */
+    fun file(dir: File, e: String) = File(dir, StudioLiveEmoji.code(e) + ".json")
+
+    /** Marker of an emoji that has no animated version. */
+    fun missing(dir: File, e: String) = File(dir, StudioLiveEmoji.code(e) + ".none")
+
+    @Synchronized
+    fun composition(dir: File, e: String): com.airbnb.lottie.LottieComposition? {
+        val code = StudioLiveEmoji.code(e)
+        cache[code]?.let { return it }
+        val f = file(dir, e)
+        if (!f.exists() || f.length() == 0L) return null
+        val comp = runCatching { com.airbnb.lottie.LottieCompositionFactory.fromJsonStringSync(f.readText(), "noto_$code").value }.getOrNull() ?: return null
+        cache[code] = comp
+        return comp
     }
 }
 

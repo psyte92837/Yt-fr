@@ -349,6 +349,9 @@ dependencies {
     // Date and time formatting
     implementation(libs.ocpsoft.prettytime)
 
+    // Lumen Studio: Lottie for animated emoji in the videos
+    implementation(libs.lottie)
+
     // Debugging and memory leak detection
     debugImplementation(libs.squareup.leakcanary.watcher)
     debugImplementation(libs.squareup.leakcanary.plumber)

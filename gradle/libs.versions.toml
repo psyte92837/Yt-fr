@@ -29,6 +29,7 @@ fragment = "1.9.1"
 groupie = "2.10.1"
 jsoup = "1.23.2"
 json = "20250517" # real org.json for JVM unit tests (android.jar only has stubs)
+lottie = "6.7.1" # Lumen Studio: animated Noto emoji (Apache-2.0)
 junit = "4.13.2"
 junit-ext = "1.3.0"
 kermit = "2.2.0"
@@ -147,6 +148,7 @@ jetbrains-lifecycle-viewmodel = { module = "org.jetbrains.androidx.lifecycle:lif
 jetbrains-navigation3-ui = { module = "org.jetbrains.androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 json = { module = "org.json:json", version.ref = "json" }
+lottie = { module = "com.airbnb.android:lottie", version.ref = "lottie" }
 junit = { module = "junit:junit", version.ref = "junit" }
 koin-annotations = { module = "io.insert-koin:koin-annotations", version.ref = "koin" }
 koin-compose-navigation3 = { module = "io.insert-koin:koin-compose-navigation3", version.ref = "koin" }

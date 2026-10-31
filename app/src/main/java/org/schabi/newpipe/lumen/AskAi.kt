@@ -130,7 +130,7 @@ fun LumenBase.askAiSheet(project: Project, scope: List<Video>, tab: String, star
             if (question.isEmpty() || busy) return@button
             busy = true
             answer.text = t("Думаю…", "Thinking…")
-            Lumen.async({ AiTasks.chat(project, scope, question, tab) }, {
+            bgTask(t("AI отвечает на вопрос", "AI answers the question"), { AiTasks.chat(project, scope, question, tab) }, {
                 busy = false
                 answer.text = ""
                 err(it)

@@ -866,7 +866,7 @@ class ProjectActivity : LumenBase() {
         confirm(label, msg, t("Запустить", "Run")) {
             busy = "$label…"
             render()
-            Lumen.async(work, {
+            bgTask(label, work, {
                 busy = ""
                 render()
                 err(it)
@@ -1076,7 +1076,7 @@ class ProjectActivity : LumenBase() {
         if (busy.isNotEmpty()) return
         busy = t("AI составляет отчёт…", "The AI is writing the report…")
         render()
-        Lumen.async({ CustomReport.generate(project.id, request) }, {
+        bgTask(t("Свой отчёт (AI)", "Custom report (AI)"), { CustomReport.generate(project.id, request) }, {
             busy = ""
             render()
             err(it)
@@ -1098,7 +1098,7 @@ class ProjectActivity : LumenBase() {
         val f = customFormat
         busy = t("Готовлю отчёт…", "Preparing the report…")
         render()
-        Lumen.async({
+        bgTask(t("Подготовка отчёта", "Preparing the report"), {
             val file = ReportKit.shareFile(this, ReportKit.safeName(project.name) + "-report-" + Fmt.isoDay(System.currentTimeMillis()) + "." + f.ext)
             file.outputStream().use { CustomReport.write(project.id, f, it) }
             file
@@ -1125,7 +1125,7 @@ class ProjectActivity : LumenBase() {
     private fun shareReport(kind: String, file: String) {
         busy = t("Готовлю отчёт…", "Preparing the report…")
         render()
-        Lumen.async({
+        bgTask(t("Подготовка отчёта", "Preparing the report"), {
             val f = ReportKit.shareFile(this, file)
             f.outputStream().use { Export.write(this, project.id, kind, it) }
             f
@@ -1201,7 +1201,7 @@ class ProjectActivity : LumenBase() {
         val kind = pendingExport
         busy = t("Экспорт…", "Exporting…")
         render()
-        Lumen.async({
+        bgTask(t("Экспорт", "Export"), {
             contentResolver.openOutputStream(uri)?.use { out -> Export.write(this, project.id, kind, out) }
         }, {
             busy = ""
@@ -1256,7 +1256,7 @@ class ProjectActivity : LumenBase() {
             c.button(t("Проверить сейчас", "Check now"), style = BtnStyle.OUTLINED) {
                 busy = t("Проверка новых видео…", "Checking for new videos…")
                 render()
-                Lumen.async({ Monitoring.runOnce(this, project.id) }, {
+                bgTask(t("Мониторинг: проверка", "Monitoring: check"), { Monitoring.runOnce(this, project.id) }, {
                     busy = ""
                     render()
                     err(it)

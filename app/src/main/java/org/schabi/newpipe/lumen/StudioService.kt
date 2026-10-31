@@ -73,6 +73,15 @@ object StudioJob {
         return StudioAudio.Pcm(Studio.mixMusic(base, music, voice.rate, r.musicVolume, speech), voice.rate)
     }
 
+    /** Mixes the sound, encodes the video and saves it to Movies (worker thread). */
+    fun build(ctx: Context, r: Request, progress: (String) -> Unit) {
+        val audio = finalAudio(r, progress)
+        StudioVideo.render(r.plan, audio, r.out, r.w, r.h, 30, { cancel }, r.background) { progress(it) }
+        progress(t("Сохранение…", "Saving…"))
+        savedAs = saveToMovies(ctx, r.out, r.name)
+        result = r.out
+    }
+
     /** Movies/Lumen through MediaStore on Android 10+; older versions keep it in the app's Movies folder. */
     fun saveToMovies(ctx: Context, f: File, name: String): String {
         if (Build.VERSION.SDK_INT >= 29) {
@@ -116,7 +125,34 @@ class StudioService : Service() {
             StudioJob.running = true
             StudioJob.startedAt = System.currentTimeMillis()
             val i = Intent(ctx, StudioService::class.java).setAction(ACTION_START)
-            if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            try {
+                if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i)
+            } catch (e: Exception) {
+                // Android 12+ refuses to start it from the background (the AI chain went on with the app minimised)
+                L.w("studio", "service: ${e.message}")
+                inTasks(ctx.applicationContext, r)
+            }
+        }
+
+        /** The same build through [BgTasks] when the service cannot be started. */
+        private fun inTasks(ctx: Context, r: StudioJob.Request) {
+            val key = "studio:render"
+            val end = {
+                StudioJob.running = false
+                StudioJob.request = null
+                StudioJob.changed()
+            }
+            BgTasks.run(ctx, key, t("Lumen Studio: сборка ролика", "Lumen Studio: building the video"),
+                Intent(ctx, StudioActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), {
+                    StudioJob.build(ctx, r) { m ->
+                        StudioJob.message = m
+                        StudioJob.changed()
+                        BgTasks.progress(key, m)
+                    }
+                }, { e ->
+                    if (e !is java.util.concurrent.CancellationException) StudioJob.error = e.message ?: e.javaClass.simpleName
+                    end()
+                }, { StudioJob.cancel = true }) { end() }
         }
 
         fun cancel(ctx: Context) {
@@ -153,11 +189,7 @@ class StudioService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "lumen:studio").apply { acquire(60 * 60_000L) }
         worker = Thread {
             try {
-                val audio = StudioJob.finalAudio(r) { progress(it) }
-                StudioVideo.render(r.plan, audio, r.out, r.w, r.h, 30, { StudioJob.cancel }, r.background) { progress(it) }
-                progress(t("Сохранение…", "Saving…"))
-                StudioJob.savedAs = StudioJob.saveToMovies(this, r.out, r.name)
-                StudioJob.result = r.out
+                StudioJob.build(this, r) { progress(it) }
                 L.i("studio", "video ${r.out.length() / 1024} KB, ${r.w}x${r.h}, ${r.plan.totalMs} ms in ${(System.currentTimeMillis() - StudioJob.startedAt) / 1000} s")
                 notifyDone(r.out)
             } catch (e: java.util.concurrent.CancellationException) {

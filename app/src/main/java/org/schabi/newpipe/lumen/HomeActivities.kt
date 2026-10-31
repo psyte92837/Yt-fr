@@ -364,7 +364,7 @@ const val REQ_RESTORE = 61
 
 /** Restores a picked backup, then reports and calls [done]. API keys are not in backups. */
 fun LumenBase.restoreFrom(uri: android.net.Uri, done: () -> Unit) {
-    Lumen.async({ AutoBackup.restore(this, uri); Store.projects().size }, ::err) { n ->
+    bgTask(t("Восстановление", "Restore"), { AutoBackup.restore(this, uri); Store.projects().size }, ::err) { n ->
         toast(t("Восстановлено проектов: $n. API-ключ AI нужно ввести заново.", "Projects restored: $n. Re-enter the AI API key."))
         done()
     }

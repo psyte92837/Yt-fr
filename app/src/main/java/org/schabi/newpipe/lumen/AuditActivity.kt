@@ -324,7 +324,7 @@ class AuditActivity : LumenBase() {
     private fun ai(run: AuditRun) {
         if (Provider.active() == null) return toast(t("Настройте AI-провайдера в настройках", "Configure an AI provider in Settings"))
         toast(t("AI анализирует…", "AI is analysing…"))
-        Lumen.async({ AuditEngine.aiVerdict(project, run) }, { err(it) }) { showText(t("AI-вывод аудита", "Audit AI verdict"), it) }
+        bgTask(t("AI-вывод аудита", "Audit AI verdict"), { AuditEngine.aiVerdict(project, run) }, { err(it) }) { showText(t("AI-вывод аудита", "Audit AI verdict"), it) }
     }
 
     private fun compare(run: AuditRun, r: AuditReport) {

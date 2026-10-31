@@ -315,7 +315,7 @@ fun ProjectActivity.painsCard(c: Col) {
     if (Provider.active() != null && !CollectState.running) {
         c.button(if (ai == null) t("Разобрать через AI", "Analyse with AI") else t("Обновить через AI", "Refresh with AI"), style = BtnStyle.OUTLINED) {
             toast(t("AI ищет боли и кейсы…", "AI looks for pains and cases…"))
-            Lumen.async({ Pains.ai(project, force = true) }, { err(it) }) {
+            bgTask(t("AI: боли и кейсы", "AI: pains and cases"), { Pains.ai(project, force = true) }, { err(it) }) {
                 if (!isFinishing) {
                     reload()
                     render()
@@ -363,7 +363,7 @@ fun ProjectActivity.digestCard(c: Col) {
     if (Provider.active() != null && !CollectState.running) {
         c.button(if (ai == null) t("Сделать сводку через AI", "Make the digest with AI") else t("Обновить сводку", "Refresh the digest"), style = BtnStyle.OUTLINED) {
             toast(t("AI делает сводку комментариев…", "AI summarises the comments…"))
-            Lumen.async({ CommentDigest.ai(project, force = true) }, { err(it) }) {
+            bgTask(t("AI: сводка комментариев", "AI: comment digest"), { CommentDigest.ai(project, force = true) }, { err(it) }) {
                 if (!isFinishing) {
                     reload()
                     render()

@@ -40,7 +40,7 @@ class TopicActivity : LumenBase() {
         confirm(label, t("≈ $est входных токенов", "≈ $est input tokens") + (if (cost > 0) String.format(" · ≈ $%.4f", cost) else ""), t("Запустить", "Run")) {
             busy = "$label…"
             render()
-            Lumen.async(work, {
+            bgTask(label, work, {
                 busy = ""
                 render()
                 err(it)

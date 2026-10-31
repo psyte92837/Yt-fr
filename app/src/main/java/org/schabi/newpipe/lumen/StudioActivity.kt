@@ -228,8 +228,15 @@ class StudioActivity : LumenBase() {
     private var preview: ImageView? = null
     private var previewMs = 0L
 
+    /** A closed Studio screen is still working in the background: this one only shows it and saves nothing. */
+    private var foreign = false
+    private var reloading = false
+    private val watcher: () -> Unit = { onForeign() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        foreign = BgTasks.has("studio:") && BgTasks.find("studio:")?.key != "studio:render"
+        BgTasks.watchers += watcher
         scriptEdit = edt(this, t("Сценарий: сцены через пустую строку", "Script: scenes separated by a blank line"), StudioPrefs.script, multiline = true).apply {
             minLines = 8
             maxLines = 18
@@ -311,13 +318,15 @@ class StudioActivity : LumenBase() {
     override fun onDestroy() {
         musicPreview?.release()
         musicPreview = null
-        cancel = true
+        // background jobs (AI, imports, downloads) go on: their results are saved to disk
+        BgTasks.watchers -= watcher
         recorder?.stop()
         player?.release()
         super.onDestroy()
     }
 
     private fun saveInputs() {
+        if (foreign) return
         StudioPrefs.script = scriptEdit.text.toString()
         StudioPrefs.topic = topicEdit.text.toString()
     }
@@ -351,6 +360,16 @@ class StudioActivity : LumenBase() {
                 "Познавательная анимация: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
                 "An informational animation: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
         })
+        if (foreign) {
+            c.card {
+                add(text(ctx, t("⏳ Задача выполняется в фоне", "⏳ A task is running in the background"), Type.TITLE_M, bold = true), 0)
+                muted(t("Её начал прежний экран Студии. Экран обновится сам, когда она закончится; прогресс — и в уведомлении.",
+                    "It was started by the previous Studio screen. This screen refreshes when it ends; progress is also in the notification."))
+                bars["foreign"] = working(BgTasks.find("studio:")?.let { it.title + ": " + it.message } ?: "…")
+            }
+            page("Lumen Studio", c.root, keepScroll = true)
+            return
+        }
         c.steps(stepNow(), 4)
         if (task == StudioTask.VOICE) {
             voiceCard(c, 1)
@@ -364,6 +383,49 @@ class StudioActivity : LumenBase() {
         analyseCard(c)
         videoCard(c)
         page("Lumen Studio", c.root, keepScroll = true)
+    }
+
+    /** Long work of the screen: runs through [BgTasks] with a notification, so it survives minimising or closing. */
+    private fun <T> job(key: String, work: () -> T, fail: (Throwable) -> Unit, done: (T) -> Unit) {
+        BgTasks.run(this, "studio:$key", "Lumen Studio: " + jobTitle(key), BgTasks.reopen(this), { work() }, { e ->
+            if (e !is java.util.concurrent.CancellationException) autoAll = false
+            runCatching { fail(e) }.onFailure { L.w("studio", "$key: ${it.message}") }
+        }, { cancel = true }) { r ->
+            runCatching { done(r) }.onFailure { L.w("studio", "$key: ${it.message}") }
+        }
+    }
+
+    private fun jobTitle(key: String) = when (key) {
+        "ai_script" -> t("AI пишет сценарий", "AI writes the script")
+        "ai_edit" -> t("AI правит сценарий", "AI edits the script")
+        "analyse" -> t("озвучка и разметка", "voice and timing")
+        "ai_direct" -> t("AI-режиссёр", "AI director")
+        "broll" -> t("поиск фото", "finding photos")
+        "board" -> t("раскадровка", "storyboard")
+        "music" -> t("музыка", "music")
+        "bg" -> t("клипы фона", "background clips")
+        "cuts" -> t("загрузка нарезки", "downloading cuts")
+        else -> t("импорт", "import")
+    }
+
+    private fun onForeign() {
+        if (!foreign) return
+        val tk = BgTasks.find("studio:")
+        if (tk == null || tk.key == "studio:render") {
+            // the closed screen has just saved its results (files are written a moment later)
+            android.os.Handler(mainLooper).postDelayed({
+                if (!isDestroyed && foreign && !reloading && BgTasks.find("studio:")?.key.let { it == null || it == "studio:render" }) {
+                    reloading = true
+                    recreate()
+                }
+            }, 900)
+            return
+        }
+        bars["foreign"]?.let { (tv, bar) ->
+            val m = tk.title + ": " + tk.message
+            tv.text = m
+            bar.showProgress(m)
+        }
     }
 
     private fun stepNow(): Int = when {
@@ -382,6 +444,7 @@ class StudioActivity : LumenBase() {
     }
 
     private fun report(key: String, msg: String) = Lumen.ui {
+        BgTasks.progress("studio:$key", msg)
         bars[key]?.let { (tv, bar) ->
             tv.text = msg
             bar.showProgress(msg)
@@ -411,6 +474,11 @@ class StudioActivity : LumenBase() {
             btn(ctx, t("✨ Написать (AI)", "✨ Write (AI)"), style = BtnStyle.TONAL) { writeScript() },
             btn(ctx, t("Формат", "Format"), style = BtnStyle.TEXT) { formatHelp() }
         )
+        if (task == StudioTask.CARTOON && busy.isEmpty()) {
+            button(t("🤖 AI сделает всё: идея → готовый мультфильм", "🤖 AI makes everything: idea → finished cartoon"), style = BtnStyle.TONAL) { autoDialog() }
+            muted(t("Необязательно: опишите идею, сцены или сценарий — AI напишет реплики, озвучит героев, смонтирует и соберёт видео. Работает и в свёрнутом приложении.",
+                "Optional: describe an idea, scenes or a script; AI writes the lines, voices the characters, edits and builds the video. Works with the app minimised."))
+        }
         progress("ai_script", t("AI пишет сценарий…", "AI is writing the script…"))
         if (scriptEdit.text.isNotBlank() && busy.isEmpty()) {
             val undo = prevScript
@@ -559,7 +627,7 @@ class StudioActivity : LumenBase() {
         busy = "import"
         cancel = false
         render()
-        Lumen.async({
+        job("import", {
             val total = runCatching {
                 contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { c -> if (c.moveToFirst()) c.getLong(0) else -1L }
             }.getOrNull() ?: -1L
@@ -871,7 +939,7 @@ class StudioActivity : LumenBase() {
         cancel = false
         render()
         val bg = if (plan.style == StudioStyle.VIDEO) bgSpec(plan) else null
-        Lumen.async({
+        job("board", {
             val n = plan.times.size
             plan.times.mapIndexed { i, st ->
                 if (cancel) throw java.util.concurrent.CancellationException()
@@ -1067,7 +1135,7 @@ class StudioActivity : LumenBase() {
         busy = "music"
         cancel = false
         render()
-        Lumen.async({
+        job("music", {
             val f = File(cacheDir, "studio_music_dl")
             StudioMusic.download(h, f, { cancel }) { pct -> report("music", t("Загрузка $pct/100", "Downloading $pct/100")) }
             report("music", t("Декодирование…", "Decoding…"))
@@ -1102,7 +1170,7 @@ class StudioActivity : LumenBase() {
         busy = "music"
         cancel = false
         render()
-        Lumen.async({
+        job("music", {
             report("music", t("Декодирование…", "Decoding…"))
             storeMusic(StudioAudio.decode(this, uri, 10 * 60_000L))
             runCatching {
@@ -1185,7 +1253,7 @@ class StudioActivity : LumenBase() {
         busy = "bg"
         cancel = false
         render()
-        Lumen.async({
+        job("bg", {
             val added = mutableListOf<Pair<File, Long>>()
             uris.forEachIndexed { i, uri ->
                 if (cancel) throw java.util.concurrent.CancellationException()
@@ -1434,7 +1502,7 @@ class StudioActivity : LumenBase() {
         render()
         val dirNow = cutsDir
         val maxH = StudioPrefs.quality
-        Lumen.async({
+        job("cuts", {
             val done = HashMap<String, SClip>()
             val errors = mutableListOf<String>()
             todo.forEachIndexed { i, cl ->
@@ -1625,34 +1693,86 @@ class StudioActivity : LumenBase() {
             toast(t("Введите тему или идею ролика", "Type a topic or idea first"))
             return
         }
-        val go = {
-            busy = "ai_script"
-            cancel = false
-            render()
-            val long = longScript()
-            val sec = if (long) StudioPrefs.videoSeconds else StudioPrefs.seconds
-            val extra = if (scriptEdit.text.isNotBlank() && topicEdit.text.isNotBlank())
-                "Учти черновик автора и сохрани его мысли:\n" + scriptEdit.text.toString().take(3000) else ""
-            val cartoon = task == StudioTask.CARTOON
-            val cast = StudioPrefs.cast
-            Lumen.async({
-                val sc = aiScript(if (cartoon) "studio_script_cartoon" else if (long) "studio_script_video" else "studio_script", mapOf(
-                    "topic" to topic, "seconds" to sec.toString(), "words" to Studio.wordsFor(sec).toString(),
-                    "lang" to aiLang(), "extra" to extra, "visuals" to STUDIO_VISUALS, "cast" to StudioToon.promptCast(cast)
-                ), if (long) 14_000 else 6000)
-                // names as in the cast, so "@Name" finds its character
-                if (cartoon) sc.copy(scenes = sc.scenes.map { s -> s.copy(who = cast.getOrNull(StudioToon.find(cast, s.who))?.name ?: "") }) else sc
-            }, { e -> busy = ""; render(); err(e) }) { sc ->
-                busy = ""
-                prevScript = scriptEdit.text.toString().takeIf { it.isNotBlank() }
-                scriptEdit.setText(Studio.toText(sc))
-                resetAnalysis()
-                render()
-            }
-        }
+        val extra = if (scriptEdit.text.isNotBlank() && topicEdit.text.isNotBlank())
+            "Учти черновик автора и сохрани его мысли:\n" + scriptEdit.text.toString().take(3000) else ""
+        val go = { runWrite(topic, extra) {} }
         if (scriptEdit.text.isNotBlank()) confirm(t("Заменить сценарий?", "Replace the script?"),
             t("AI напишет новый сценарий по теме; текущий текст будет учтён как черновик.", "AI will write a new script; the current text is used as a draft."),
             t("Написать", "Write"), go) else go()
+    }
+
+    /** AI writes the script on [topic] (with the author's [extra] wishes); [then] runs after it is in the editor. */
+    private fun runWrite(topic: String, extra: String, then: () -> Unit) {
+        busy = "ai_script"
+        cancel = false
+        render()
+        val long = longScript()
+        val sec = if (long) StudioPrefs.videoSeconds else StudioPrefs.seconds
+        val cartoon = task == StudioTask.CARTOON
+        val cast = StudioPrefs.cast
+        job("ai_script", {
+            val sc = aiScript(if (cartoon) "studio_script_cartoon" else if (long) "studio_script_video" else "studio_script", mapOf(
+                "topic" to topic, "seconds" to sec.toString(), "words" to Studio.wordsFor(sec).toString(),
+                "lang" to aiLang(), "extra" to extra, "visuals" to STUDIO_VISUALS, "cast" to StudioToon.promptCast(cast)
+            ), if (long) 14_000 else 6000)
+            // names as in the cast, so "@Name" finds its character
+            if (cartoon) sc.copy(scenes = sc.scenes.map { s -> s.copy(who = cast.getOrNull(StudioToon.find(cast, s.who))?.name ?: "") }) else sc
+        }, { e -> busy = ""; render(); err(e) }) { sc ->
+            busy = ""
+            prevScript = scriptEdit.text.toString().takeIf { it.isNotBlank() }
+            scriptEdit.setText(Studio.toText(sc))
+            resetAnalysis()
+            render()
+            then()
+        }
+    }
+
+    /** "AI makes everything" for the animation: the author describes an idea, scenes and/or a script (all optional). */
+    private var autoAll = false
+
+    private fun autoDialog() {
+        if (Provider.active() == null) {
+            toast(t("Подключите AI в настройках", "Connect an AI in the settings"))
+            return
+        }
+        val ideaE = edt(this, t("Идея: о чём мультфильм", "Idea: what the cartoon is about"), topicEdit.text.toString(), multiline = true)
+        val scenesE = edt(this, t("Сцены (необязательно): что происходит по порядку, по строке на сцену", "Scenes (optional): what happens in order, one line per scene"), "", multiline = true)
+        val scriptE = edt(this, t("Сценарий или реплики (необязательно)", "Script or lines (optional)"), scriptEdit.text.toString(), multiline = true).apply { maxLines = 8 }
+        var build = true
+        val col = Col(this, 20)
+        col.muted(t("Заполните любое из полей — остальное AI придумает сам: сценарий с репликами персонажей, сцены и графику, озвучку голосами героев, монтаж режиссёра и, если включено, сборку видео. Персонажи — из карточки «🎭 Персонажи», длительность и кадр — как выбраны на экране.",
+            "Fill in any of the fields; AI invents the rest: the script with the characters' lines, scenes and graphics, the voices, the director's edit and, if on, the video build. Characters come from the \"🎭 Characters\" card, length and frame as chosen on the screen."))
+        col.add(ideaE, 12)
+        col.add(scenesE, 8)
+        col.add(scriptE, 8)
+        col.add(android.widget.CheckBox(this).apply {
+            text = t("Сразу собрать видео", "Build the video right away")
+            isChecked = true
+            setOnCheckedChangeListener { _, v -> build = v }
+        }, 8)
+        android.app.AlertDialog.Builder(this).setTitle(t("🤖 AI сделает всё", "🤖 AI makes everything"))
+            .setView(ScrollView(this).apply { addView(col.root) })
+            .setPositiveButton(t("Начать", "Start")) { _, _ ->
+                val idea = ideaE.text.toString().trim()
+                val scenes = scenesE.text.toString().trim()
+                val draft = scriptE.text.toString().trim()
+                val topic = StudioAuto.topic(idea, scenes, draft)
+                if (topic.isBlank()) {
+                    toast(t("Опишите идею, сцены или сценарий", "Describe an idea, scenes or a script"))
+                    return@setPositiveButton
+                }
+                if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                    runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
+                }
+                topicEdit.setText(idea.ifBlank { topic })
+                if (StudioPrefs.voiceMode != "edge") StudioPrefs.voiceMode = "edge"
+                autoAll = build
+                runWrite(topic, StudioAuto.extra(scenes, draft)) {
+                    analyse()
+                    if (busy.isEmpty()) autoAll = false
+                }
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
     }
 
     /** Text of the script before the last edit of the AI assistant (for undo). */
@@ -1709,7 +1829,7 @@ class StudioActivity : LumenBase() {
         busy = "ai_edit"
         cancel = false
         render()
-        Lumen.async({
+        job("ai_edit", {
             aiJson("studio_script_edit", mapOf(
                 "format" to format, "lang" to aiLang(), "ask" to ask, "cast" to StudioAssist.castRule(cast),
                 "visuals" to STUDIO_VISUALS, "script" to Studio.toJson(before)
@@ -1797,7 +1917,7 @@ class StudioActivity : LumenBase() {
         busy = "import"
         cancel = false
         render()
-        Lumen.async({
+        job("import", {
             report("import", t("Декодирование…", "Decoding…"))
             val p = StudioAudio.decode(this, uri)
             if (p.data.isEmpty()) error(t("В файле нет звука", "No sound in the file"))
@@ -1901,7 +2021,7 @@ class StudioActivity : LumenBase() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             previewMs = 0
             render()
-            if (StudioPrefs.autoDirect && Provider.active() != null) direct()
+            if ((StudioPrefs.autoDirect || autoAll) && Provider.active() != null) direct() else autoFinish()
         }
         val fail = { e: Throwable ->
             busy = ""
@@ -1910,8 +2030,8 @@ class StudioActivity : LumenBase() {
             if (e !is java.util.concurrent.CancellationException) err(e)
         }
         when {
-            mode == "edge" -> Lumen.async({ analyseEdge(sc) }, fail, done)
-            useScript -> Lumen.async({ analyseTake(sc) }, fail, done)
+            mode == "edge" -> job("analyse", { analyseEdge(sc) }, fail, done)
+            useScript -> job("analyse", { analyseTake(sc) }, fail, done)
             else -> Lumen.async({ speechOf(loadTake()) }, fail) { (take, speech) ->
                 report("analyse", t("Распознавание речи…", "Recognising speech…"))
                 val pieces = Studio.groupSpans(speech)
@@ -2053,7 +2173,7 @@ class StudioActivity : LumenBase() {
         busy = "ai_direct"
         cancel = false
         render()
-        Lumen.async({
+        job("ai_direct", {
             val d = aiJson("studio_direct", vars, "You are a video editor and motion designer. Answer with JSON only.",
                 if (ws.size > 600) 16_000 else 8000) { StudioDirector.parse(it, ws.size, cutsNow.map { c -> c.id }.toSet()) }
             val drop = if (allowDrop) StudioDirector.safeDrop(d, ws.size) else emptySet()
@@ -2077,7 +2197,7 @@ class StudioActivity : LumenBase() {
             if (e !is java.util.concurrent.CancellationException) err(e)
         }) { (ap, np, nc) ->
             busy = ""
-            if (ap.script.scenes.isEmpty()) return@async
+            if (ap.script.scenes.isEmpty()) return@job
             pcm = np
             words = ap.words
             script = ap.script
@@ -2088,7 +2208,7 @@ class StudioActivity : LumenBase() {
             saveAnalysis()
             render()
             if (ap.dropped > 0) toast(t("AI-режиссёр вырезал слов: ${ap.dropped}", "The AI director cut ${ap.dropped} words"))
-            if (StudioPrefs.broll && StudioDirector.needBroll(ap.script).isNotEmpty()) fetchBroll()
+            if (StudioPrefs.broll && StudioDirector.needBroll(ap.script).isNotEmpty()) fetchBroll() else autoFinish()
         }
     }
 
@@ -2105,7 +2225,7 @@ class StudioActivity : LumenBase() {
         busy = "broll"
         cancel = false
         render()
-        Lumen.async({
+        job("broll", {
             val found = HashMap<Int, Pair<String, String>>()
             need.forEachIndexed { k, i ->
                 if (cancel) throw java.util.concurrent.CancellationException()
@@ -2127,6 +2247,7 @@ class StudioActivity : LumenBase() {
             render()
             if (e !is java.util.concurrent.CancellationException) err(e)
         }) { found ->
+            autoFinishLater = true
             busy = ""
             val cur = script
             if (cur != null && cur.scenes.size == sc0.scenes.size) {
@@ -2136,7 +2257,20 @@ class StudioActivity : LumenBase() {
             board = emptyList()
             render()
             toast(t("Фото найдено: ${found.size} из ${need.size}", "Photos found: ${found.size} of ${need.size}"))
+            if (autoFinishLater) {
+                autoFinishLater = false
+                autoFinish()
+            }
         }
+    }
+
+    private var autoFinishLater = false
+
+    /** End of the "AI makes everything" chain: the video is built right away. */
+    private fun autoFinish() {
+        if (!autoAll) return
+        autoAll = false
+        renderVideo()
     }
 
     // ---------- step 4: video ----------
@@ -2152,7 +2286,7 @@ class StudioActivity : LumenBase() {
         val out = ReportKit.shareFile(this, name)
         lastVideo = null
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
+            runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
         }
         StudioService.start(this, StudioJob.Request(
             plan, voice, out, name, wdt, hgt,

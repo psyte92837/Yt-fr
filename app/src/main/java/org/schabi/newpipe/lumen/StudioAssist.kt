@@ -69,3 +69,20 @@ object StudioAssist {
             "Scenes: ${before.scenes.size} → ${after.scenes.size} · words: ${words(before)} → ${words(after)}")
     }
 }
+
+/** "AI makes everything" for the animation: the author's idea, scenes and draft turned into the script request. */
+object StudioAuto {
+    /** Topic for the prompt: the idea, else the start of the scenes or of the draft. */
+    fun topic(idea: String, scenes: String, draft: String): String =
+        idea.trim().ifBlank { scenes.trim().ifBlank { draft.trim() } }.replace(Regex("\\s+"), " ").take(300).trim()
+
+    /** Extra block of the prompt with the scenes and the draft (empty when none). */
+    fun extra(scenes: String, draft: String): String {
+        val out = mutableListOf<String>()
+        val sc = scenes.lines().map { it.trim().trimStart('-', '•', '*', ' ') }.filter { it.isNotEmpty() }
+        if (sc.isNotEmpty()) out += "Сцены, которые задумал автор (сохрани порядок и смысл, можно добавить связки):\n" +
+            sc.take(40).mapIndexed { i, l -> "${i + 1}. ${l.take(300)}" }.joinToString("\n")
+        if (draft.isNotBlank()) out += "Черновик сценария автора — сохрани его мысли и удачные реплики:\n" + draft.trim().take(3000)
+        return out.joinToString("\n")
+    }
+}

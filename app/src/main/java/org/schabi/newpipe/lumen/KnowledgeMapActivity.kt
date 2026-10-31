@@ -422,7 +422,7 @@ class KnowledgeMapActivity : LumenBase() {
         val tree = root ?: return
         busy = t("Собираю ветку «", "Collecting the branch \"") + n.title.take(40) + t("»…", "\"…")
         render(keep = true)
-        Lumen.async({
+        bgTask(t("Карта знаний: сводка ветки", "Knowledge map: branch summary"), {
             val path = KMap.path(tree, n.id).joinToString(" › ")
             path to KMap.context(n, KMapAi.limit())
         }, {
@@ -432,7 +432,7 @@ class KnowledgeMapActivity : LumenBase() {
         }) { (path, data) ->
             busy = ""
             render(keep = true)
-            if (data.isBlank()) return@async toast(t("В этой ветке нет данных", "This branch has no data"))
+            if (data.isBlank()) return@bgTask toast(t("В этой ветке нет данных", "This branch has no data"))
             val tokens = KMapAi.estimate(data)
             val cost = Llm.estimateCost(tokens, 1500)
             confirm(t("AI-сводка: ", "AI summary: ") + n.title.take(50),

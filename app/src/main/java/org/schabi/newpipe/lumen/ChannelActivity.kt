@@ -40,7 +40,7 @@ class ChannelActivity : LumenBase() {
     private fun load(force: Boolean) {
         busy = t("Загрузка канала…", "Loading channel…")
         render()
-        Lumen.async({ ChannelFetch.fetch(pid, url, recentLimit = QuickConfig.load().channelRecent, force = force) }, {
+        bgTask(t("Загрузка канала", "Loading the channel"), { ChannelFetch.fetch(pid, url, recentLimit = QuickConfig.load().channelRecent, force = force) }, {
             busy = ""
             render()
             err(it)
@@ -129,7 +129,7 @@ class ChannelActivity : LumenBase() {
                 if (Provider.active() == null) return@btn toast(t("Подключите AI в настройках", "Connect AI in settings"))
                 busy = t("AI думает…", "AI is thinking…")
                 render()
-                Lumen.async({ ChannelAi.summary(pid, d, force = ai != null) }, {
+                bgTask(t("AI-сводка канала", "Channel AI summary"), { ChannelAi.summary(pid, d, force = ai != null) }, {
                     busy = ""
                     render()
                     err(it)

@@ -313,7 +313,7 @@ fun ProjectActivity.schemesTab(c: Col) {
         }
         toast(t("Строю схему…", "Drawing the diagram…"))
         val p = project
-        Lumen.async({ DiagramAi.generate(p, kind, source, title) }, { err(it) }) { created(it) }
+        bgTask(t("AI строит схему", "AI builds the diagram"), { DiagramAi.generate(p, kind, source, title) }, { err(it) }) { created(it) }
     }
     c.button(t("Блок-схема процесса из текста…", "Flowchart from a text…"), primary = true) {
         prompt(t("Вставьте текст процесса", "Paste the process text"), t("Описание шагов, правил, инструкции", "Steps, rules, instructions"), multiline = true) {

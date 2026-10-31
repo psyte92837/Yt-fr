@@ -207,7 +207,7 @@ class VideoActivity : LumenBase() {
         if (Provider.active() == null) return toast(t("Подключите AI в настройках", "Connect AI in settings"))
         busy = true
         render()
-        Lumen.async({ AiTasks.videoSummary(p, video, force) }, {
+        bgTask(t("AI-сводка видео", "Video AI summary"), { AiTasks.videoSummary(p, video, force) }, {
             busy = false
             render()
             err(it)

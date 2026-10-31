@@ -36,6 +36,7 @@ object Lumen {
         prefs = app.getSharedPreferences("lumen_prefs", Context.MODE_PRIVATE)
         LumenEnv.ready = true
         L.init(app)
+        BgTasks.hook(app)
     }
 
     fun ui(block: () -> Unit) {

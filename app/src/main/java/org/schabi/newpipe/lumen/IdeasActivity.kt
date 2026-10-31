@@ -181,7 +181,7 @@ class IdeasActivity : LumenBase() {
         val cfg = draft.copy(queries = draft.queries.toMutableList(), enabled = true)
         busy = if (cfg.queries.isEmpty()) t("Подбираю запросы для рынка…", "Picking queries for the market…") else t("Запускаю…", "Starting…")
         render()
-        Lumen.async({
+        bgTask(t("Идеи: запуск", "Ideas: start"), {
             if (cfg.queries.isEmpty()) cfg.queries = Ideas.suggestQueries(cfg.business, cfg.country).toMutableList()
             Ideas.apply(Lumen.app, cfg)
             cfg
@@ -204,7 +204,7 @@ class IdeasActivity : LumenBase() {
         busy = t("Ищу свежие видео и читаю комментарии… Это займёт пару минут", "Looking for fresh videos and reading comments… This takes a couple of minutes")
         render()
         val id = current
-        Lumen.async({ Ideas.refreshNow(Lumen.app, id) }, onError = {
+        bgTask(t("Идеи: обновление", "Ideas: refresh"), { Ideas.refreshNow(Lumen.app, id) }, onError = {
             busy = ""
             render()
             err(it)
@@ -286,7 +286,7 @@ class IdeasActivity : LumenBase() {
             return
         }
         cfg.enabled = true
-        Lumen.async({ Ideas.apply(Lumen.app, cfg) }, onError = { err(it) }) { render() }
+        bgTask(t("Идеи: создание проекта", "Ideas: creating the project"), { Ideas.apply(Lumen.app, cfg) }, onError = { err(it) }) { render() }
     }
 
     companion object {

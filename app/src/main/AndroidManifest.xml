@@ -206,6 +206,10 @@
             android:name=".lumen.StudioService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+        <service
+            android:name=".lumen.TaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <activity
             android:name=".lumen.HelpActivity"
             android:exported="false"

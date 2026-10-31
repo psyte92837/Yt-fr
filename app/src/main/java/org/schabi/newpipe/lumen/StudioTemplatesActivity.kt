@@ -306,7 +306,7 @@ class StudioTemplatesActivity : LumenBase() {
         val vid = YtQuery.videoIdFromUrl(url) ?: error(t("Не понял ссылку", "Cannot read the link"))
         val v = Video(vid, url)
         val extra = StyleExtra(12)
-        val m = VideoStyle.measure(null, v, "auto", { say(it) }, extra)
+        val m = VideoStyle.measure(null, v, "auto", extra) { say(it) }
         val cues = runCatching { StyleMath.cues(extra.vtt).map { it.startMs to it.text } }.getOrDefault(emptyList())
         val data = StudioVideoTpl.brief(v.title, v.channel, if (m.duration > 0) m.duration * 1000 else 60_000, m.isShort, m.lines(), extra.cutMs, cues)
         val prov = AiTasks.requireProvider()

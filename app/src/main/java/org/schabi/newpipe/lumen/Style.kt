@@ -342,7 +342,7 @@ object VideoStyle {
     fun latest(pid: String, vid: String): AiResult? = Store.latestAi(pid, "video_style", vid)
 
     /** Step 1, no AI: measures the video and saves style_<id>.json. */
-    fun measure(pid: String?, v: Video, subLang: String = "auto", progress: (String) -> Unit = {}, extra: StyleExtra? = null): StyleMetrics {
+    fun measure(pid: String?, v: Video, subLang: String = "auto", extra: StyleExtra? = null, progress: (String) -> Unit = {}): StyleMetrics {
         progress(t("Метаданные и главы…", "Metadata and chapters…"))
         val info = StreamInfo.getInfo(yt, v.url)
         YouTube.applyInfo(v, info)

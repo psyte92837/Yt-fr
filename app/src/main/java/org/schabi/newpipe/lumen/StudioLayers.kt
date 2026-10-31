@@ -18,7 +18,7 @@ enum class StudioLayers(val id: String, val subs: Boolean, val graphics: Boolean
 
         /** Does the scene carry a scheme at all (not only words)? */
         fun hasScheme(kind: String, items: Int): Boolean = kind != "text" &&
-            (items > 0 || Studio.isTpl(kind) || kind in listOf("step", "stat", "big", "quote"))
+            (items > 0 || Studio.isTpl(kind) || kind in listOf("step", "stat", "big", "quote", "scheme"))
 
         /**
          * Centre (fraction of the height) of a scheme drawn over a background: the upper part, so that the

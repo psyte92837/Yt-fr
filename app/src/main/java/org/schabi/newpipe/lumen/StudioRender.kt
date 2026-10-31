@@ -114,6 +114,11 @@ class StudioPlan(
         }.getOrDefault(emptyList())
     }
 
+    /** Appear times of the info-scheme nodes of every scene (lumen.scheme), ms. */
+    val schemeMs: List<List<Long>> = times.map { st ->
+        script.scenes.getOrNull(st.scene)?.scheme?.let { StudioScheme.reveal(it, words, st.words, st.startMs, st.endMs) }.orEmpty()
+    }
+
     /** Stickers of every scene with their time. */
     val pops: List<List<Pair<Long, SCue>>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "pop" }.map { cueMs(st, it) to it } }
 
@@ -755,7 +760,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glowLight)
             glowLight.alpha = 255
             if (a > 0f) {
-                sc.title.takeIf { it.isNotBlank() && sc.kind !in listOf("big", "stat", "quote") }?.let { headline(c, it, h * 0.15f, a, local) }
+                sc.title.takeIf { it.isNotBlank() && sc.kind !in listOf("big", "stat", "quote", "scheme") }?.let { headline(c, it, h * 0.15f, a, local) }
                 visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
                 singleWord(c, i, tMs, a, h * 0.80f)
                 shapes(c, i, tMs, a)
@@ -773,7 +778,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             topShade.alpha = 255
         }
         if (a <= 0f) return
-        if (sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote")) headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
+        if (sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote", "scheme")) headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
         val card = photo(i)
         if (card != null) photoCard(c, card, i, w / 2f, h * 0.36f, local, sceneMs, a)
         else if (graphic) overVisual(c, sc, i, local, sceneMs, a)
@@ -916,6 +921,10 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             if (sc.items.isNotEmpty()) grid(c, sc.items, cx, cy, local, sceneMs, a)
             return
         }
+        if (sc.kind == "scheme") sc.scheme?.let {
+            scheme(c, it, index, cx, cy, local + plan.times[index].startMs, a)
+            return
+        }
         when (sc.kind) {
             "step" -> step(c, plan.steps[index], if (dark) sc.title else "", cx, cy, local, a)
             "icons" -> grid(c, sc.items, cx, cy, local, sceneMs, a)
@@ -928,6 +937,199 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             "chart" -> chart(c, sc.items, cx, cy, local, sceneMs, a)
             "compare" -> compare(c, sc.items, cx, cy, local, a)
             else -> if (sc.items.isNotEmpty()) grid(c, sc.items, cx, cy, local, sceneMs, a)
+        }
+    }
+
+    // ---------- info-schemes (lumen.scheme) ----------
+
+    /** An info-scheme: nodes pop in on their words, arrows grow between them, the layout's guides behind. */
+    private fun scheme(c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a: Float) {
+        val bw = if (wide) w * 0.80f else w * 0.92f
+        var bh = if (wide) h * 0.60f else h * 0.44f
+        var top = cy - bh / 2
+        val left = cx - bw / 2
+        val pTitle = Studio.appear(tMs, plan.times[index].startMs, 300)
+        if (s.title.isNotBlank()) {
+            labelP.textSize = 4.4f * u
+            labelP.isFakeBoldText = true
+            labelP.color = ink
+            labelP.alpha = (255 * a * pTitle).toInt()
+            c.drawText(s.title, cx, top + labelP.textSize, labelP)
+            labelP.isFakeBoldText = false
+            top += labelP.textSize * 1.8f
+            bh -= labelP.textSize * 1.8f
+        }
+        val boxes = StudioScheme.layout(s, bw / bh)
+        val times = plan.schemeMs.getOrNull(index).orEmpty()
+        val ps = s.nodes.indices.map { Studio.appear(tMs, times.getOrElse(it) { 0L }, 320) }
+        val rects = boxes.map { b -> RectF(left + (b.x - b.w / 2) * bw, top + (b.y - b.h / 2) * bh, left + (b.x + b.w / 2) * bw, top + (b.y + b.h / 2) * bh) }
+        val guide = Studio.appear(tMs, plan.times[index].startMs, 400) * a
+        line.color = muted
+        line.strokeWidth = max(1.5f, 0.4f * u)
+        line.alpha = (150 * guide).toInt()
+        when (s.layout) {
+            "timeline" -> if (wide) c.drawLine(left, top + bh / 2, left + bw * guide, top + bh / 2, line)
+            else c.drawLine(cx, top, cx, top + bh * guide, line)
+            "matrix" -> {
+                c.drawLine(cx, top, cx, top + bh, line)
+                c.drawLine(left, top + bh / 2, left + bw, top + bh / 2, line)
+                labelP.textSize = 3f * u
+                labelP.color = muted
+                labelP.alpha = (255 * guide).toInt()
+                s.axes.getOrNull(0)?.let { c.drawText("$it →", left + bw * 0.80f, top + bh / 2 - 1.2f * u, labelP) }
+                s.axes.getOrNull(1)?.let { c.drawText("↑ $it", cx, top - 1.2f * u, labelP) }
+            }
+        }
+        // arrows between nodes
+        val ids = s.nodes.map { it.id }
+        for (l in StudioScheme.links(s)) {
+            val i = ids.indexOf(l.from)
+            val j = ids.indexOf(l.to)
+            if (i < 0 || j < 0) continue
+            val p = min(ps[i], ps[j])
+            if (p <= 0f) continue
+            arrow(c, rects[i], boxes[i].shape, rects[j], boxes[j].shape, p, a, l.label)
+        }
+        // timeline ticks from the axis to every event
+        if (s.layout == "timeline") rects.forEachIndexed { i, r ->
+            if (ps[i] <= 0f) return@forEachIndexed
+            line.alpha = (150 * ps[i] * a).toInt()
+            if (wide) c.drawLine(r.centerX(), top + bh / 2, r.centerX(), if (r.centerY() < top + bh / 2) r.bottom else r.top, line)
+            else c.drawLine(cx, r.centerY(), if (r.centerX() < cx) r.right else r.left, r.centerY(), line)
+            fill.color = accent
+            fill.alpha = (255 * ps[i] * a).toInt()
+            if (wide) c.drawCircle(r.centerX(), top + bh / 2, 1.1f * u, fill) else c.drawCircle(cx, r.centerY(), 1.1f * u, fill)
+        }
+        s.nodes.forEachIndexed { i, n -> schemeNode(c, n, rects[i], boxes[i].shape, ps[i], a) }
+        if (s.layout == "venn" && s.center.isNotBlank()) {
+            val p = ps.maxOrNull() ?: 0f
+            labelP.textSize = 3.4f * u
+            labelP.isFakeBoldText = true
+            labelP.color = ink
+            labelP.alpha = (255 * a * Studio.appear(tMs, (times.maxOrNull() ?: 0L) + 300, 300) * p).toInt()
+            val gx = rects.map { it.centerX() }.average().toFloat()
+            val gy = rects.map { it.centerY() }.average().toFloat()
+            c.drawText(s.center, gx, gy + labelP.textSize * 0.35f, labelP)
+            labelP.isFakeBoldText = false
+        }
+    }
+
+    /** Point on the edge of a node towards ([tx], [ty]). */
+    private fun edge(r: RectF, shape: String, tx: Float, ty: Float): Pair<Float, Float> {
+        val dx = tx - r.centerX()
+        val dy = ty - r.centerY()
+        val len = kotlin.math.hypot(dx, dy).coerceAtLeast(0.001f)
+        val k = if (shape == "circle") min(r.width(), r.height()) / 2 / len
+        else min(if (dx != 0f) r.width() / 2 / kotlin.math.abs(dx) else Float.MAX_VALUE, if (dy != 0f) r.height() / 2 / kotlin.math.abs(dy) else Float.MAX_VALUE)
+        return r.centerX() + dx * k to r.centerY() + dy * k
+    }
+
+    /** An arrow growing from node [a1] to [b1] with an optional small label in the middle. */
+    private fun arrow(c: Canvas, a1: RectF, sa: String, b1: RectF, sb: String, p: Float, a: Float, label: String) {
+        val (x0, y0) = edge(a1, sa, b1.centerX(), b1.centerY())
+        val (x1e, y1e) = edge(b1, sb, a1.centerX(), a1.centerY())
+        val gap = 1.2f * u
+        val len = kotlin.math.hypot(x1e - x0, y1e - y0)
+        if (len < gap * 3) return
+        val ux = (x1e - x0) / len
+        val uy = (y1e - y0) / len
+        val sx = x0 + ux * gap
+        val sy = y0 + uy * gap
+        val ex = sx + (x1e - x0 - 2 * ux * gap) * p
+        val ey = sy + (y1e - y0 - 2 * uy * gap) * p
+        line.color = muted
+        line.alpha = (255 * a * p).toInt()
+        line.strokeWidth = max(1.5f, 0.55f * u)
+        c.drawLine(sx, sy, ex, ey, line)
+        val hd = 1.8f * u
+        c.drawPath(Path().apply {
+            moveTo(ex - ux * hd - uy * hd * 0.6f, ey - uy * hd + ux * hd * 0.6f)
+            lineTo(ex, ey)
+            lineTo(ex - ux * hd + uy * hd * 0.6f, ey - uy * hd - ux * hd * 0.6f)
+        }, line)
+        if (label.isNotBlank() && p >= 1f) {
+            labelP.textSize = 2.8f * u
+            labelP.color = muted
+            labelP.alpha = (255 * a).toInt()
+            c.drawText(label, (sx + ex) / 2 - uy * 2.2f * u, (sy + ey) / 2 + ux * 2.2f * u + labelP.textSize * 0.35f, labelP)
+        }
+    }
+
+    /** One block of a scheme: a card, a band (funnel, pyramid) or a circle (venn) with emoji, label and value. */
+    private fun schemeNode(c: Canvas, n: SchNode, r: RectF, shape: String, p: Float, a: Float) {
+        if (p <= 0f) return
+        val al = p * a
+        c.save()
+        val k = 0.86f + 0.14f * p
+        c.scale(k, k, r.centerX(), r.centerY())
+        val border = if (n.accent) accent else stroke
+        when (shape) {
+            "circle" -> {
+                val rad = min(r.width(), r.height()) / 2
+                fill.color = accent
+                fill.alpha = (46 * al).toInt()
+                c.drawCircle(r.centerX(), r.centerY(), rad, fill)
+                line.color = accent
+                line.alpha = (220 * al).toInt()
+                line.strokeWidth = max(1.5f, 0.5f * u)
+                c.drawCircle(r.centerX(), r.centerY(), rad, line)
+                // the label sits away from the middle, where the circles overlap
+                val ty = r.centerY() - rad * 0.45f
+                if (n.icon.isNotBlank()) emoji(c, n.icon, r.centerX(), ty, rad * 0.3f, al)
+                nodeText(c, n.label, n.value, r.centerX(), ty + rad * 0.22f, rad * 1.2f, rad * 0.16f, al, false)
+            }
+            "band" -> {
+                roundCard(c, r, min(r.height() * 0.3f, 3f * u), al, border)
+                val fs = min(r.height() * 0.34f, 4.2f * u)
+                var x = r.left + fs * 0.9f
+                if (n.icon.isNotBlank()) {
+                    emoji(c, n.icon, x, r.centerY() + fs * 0.38f, fs * 1.1f, al)
+                    x += fs * 1.2f
+                }
+                labelP.textAlign = Paint.Align.LEFT
+                labelP.textSize = fs
+                labelP.color = ink
+                labelP.alpha = (255 * al).toInt()
+                c.drawText(wrap(n.label, labelP, r.right - x - fs * 4, 1).firstOrNull() ?: "", x, r.centerY() + fs * 0.36f, labelP)
+                if (n.value.isNotBlank()) {
+                    labelP.textAlign = Paint.Align.RIGHT
+                    labelP.isFakeBoldText = true
+                    labelP.color = accent
+                    labelP.alpha = (255 * al).toInt()
+                    c.drawText(n.value, r.right - fs * 0.7f, r.centerY() + fs * 0.36f, labelP)
+                    labelP.isFakeBoldText = false
+                }
+                labelP.textAlign = Paint.Align.CENTER
+            }
+            else -> {
+                roundCard(c, r, min(r.width(), r.height()) * 0.18f, al, border)
+                val fs = min(r.height() * 0.15f, r.width() * 0.13f).coerceAtMost(4.4f * u)
+                val hasText = n.label.isNotBlank() || n.value.isNotBlank()
+                val icon = min(r.height() * (if (hasText) 0.34f else 0.5f), r.width() * 0.4f)
+                val iy = if (hasText) r.top + r.height() * 0.12f + icon * 0.85f else r.centerY() + icon * 0.35f
+                if (n.icon.isNotBlank()) emoji(c, n.icon, r.centerX(), iy, icon, al)
+                val ty = if (n.icon.isNotBlank()) iy + icon * 0.25f + fs else r.centerY() - fs * 0.2f
+                nodeText(c, n.label, n.value, r.centerX(), ty, r.width() * 0.9f, fs, al, true)
+            }
+        }
+        c.restore()
+    }
+
+    /** Label (up to 2 lines) and the value under it in the accent colour. */
+    private fun nodeText(c: Canvas, label: String, value: String, x: Float, y: Float, maxW: Float, fs: Float, al: Float, twoLines: Boolean) {
+        labelP.textAlign = Paint.Align.CENTER
+        labelP.textSize = fs
+        labelP.color = ink
+        labelP.alpha = (255 * al).toInt()
+        val lines = wrap(label, labelP, maxW, if (twoLines) 2 else 1)
+        lines.forEachIndexed { li, s -> c.drawText(s, x, y + li * fs * 1.15f, labelP) }
+        if (value.isNotBlank()) {
+            labelP.textSize = fs * 1.15f
+            labelP.isFakeBoldText = true
+            labelP.color = accent
+            labelP.alpha = (255 * al).toInt()
+            c.drawText(value, x, y + lines.size * fs * 1.15f + fs * 0.2f, labelP)
+            labelP.isFakeBoldText = false
         }
     }
 

@@ -568,6 +568,7 @@ class StudioActivity : LumenBase() {
         "analyse" -> t("озвучка и разметка", "voice and timing")
         "ai_direct" -> t("AI-режиссёр", "AI director")
         "broll" -> t("поиск B-roll", "finding B-roll")
+        "schemes" -> t("AI составляет инфосхемы", "AI composes info-schemes")
         "board" -> t("раскадровка", "storyboard")
         "music" -> t("музыка", "music")
         "bg" -> t("клипы фона", "background clips")
@@ -937,6 +938,9 @@ class StudioActivity : LumenBase() {
                 "zooms $zooms · stickers $pops · sounds $sounds · shapes $figures" + (if (asked > 0) " · photos $got of $asked" else "")) +
                 sc.scenes.count { StudioStock.isVideo(it.media) }.let { n -> if (n > 0) t(" (клипов $n)", " ($n clips)") else "" })
             if (busy.isEmpty() && got < asked) button(t("🖼 Подобрать B-roll", "🖼 Find B-roll"), style = BtnStyle.TEXT) { fetchBroll() }
+            progress("schemes", t("AI составляет инфосхемы…", "AI composes info-schemes…"))
+            if (busy.isEmpty()) button(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes") +
+                sc.scenes.count { it.scheme != null }.let { if (it > 0) " ($it)" else "" }, style = BtnStyle.TEXT) { schemesSheet() }
             if (got > 0) button(t("⧉ Источники B-roll для описания", "⧉ B-roll credits for the description"), style = BtnStyle.TEXT) { copyText(StudioDirector.credits(sc)) }
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -981,6 +985,7 @@ class StudioActivity : LumenBase() {
         "quote" -> t("цитата", "quote")
         "chart" -> t("диаграмма", "chart")
         "compare" -> t("сравнение", "compare")
+        "scheme" -> t("🧩 инфосхема", "🧩 info-scheme")
         else -> t("текст", "text")
     }
 
@@ -2773,6 +2778,99 @@ class StudioActivity : LumenBase() {
             if (ap.dropped > 0) toast(t("AI-режиссёр вырезал слов: ${ap.dropped}", "The AI director cut ${ap.dropped} words"))
             else lastTokens?.let { (i, o) -> toast(t("AI: $i → $o токенов", "AI: $i → $o tokens")) }
             if (StudioPrefs.broll && StudioDirector.needBroll(ap.script).isNotEmpty()) fetchBroll() else autoFinish()
+        }
+    }
+
+    // ---------- info-schemes (protocol lumen.scheme) ----------
+
+    private fun schemesSheet() {
+        val sc = script ?: return
+        val have = sc.scenes.count { it.scheme != null }
+        bottomSheet(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes")) { dismiss ->
+            muted(t("AI выберет сцены, где схема объяснит лучше слов: цепочка, центр и связи, дерево, шкала времени, воронка, пирамида, матрица 2×2, пересечения. " +
+                "Он описывает схему по протоколу lumen.scheme, Lumen проверяет её и при ошибках просит AI исправить. Блоки появляются на своих словах.",
+                "AI picks the scenes where a scheme explains better than words: chain, hub, tree, timeline, funnel, pyramid, 2×2 matrix, overlaps. " +
+                    "It describes it in the lumen.scheme protocol; Lumen checks it and asks the AI to fix mistakes. Blocks appear on their words."))
+            val wish = edit(t("Пожелание (необязательно): например «этапы покажи воронкой»", "Wish (optional): e.g. “show the stages as a funnel”"))
+            button(t("Составить", "Compose"), primary = true) {
+                dismiss()
+                composeSchemes(wish.text.toString().trim())
+            }
+            if (have > 0) button(t("Убрать инфосхемы ($have)", "Remove info-schemes ($have)"), style = BtnStyle.TEXT) {
+                dismiss()
+                removeSchemes()
+            }
+            button(t("📄 Протокол lumen.scheme", "📄 lumen.scheme protocol"), style = BtnStyle.TEXT) {
+                showText("lumen.scheme v1", StudioScheme.PROTOCOL)
+            }
+        }
+    }
+
+    private fun removeSchemes() {
+        val cur = script ?: return
+        script = cur.copy(scenes = cur.scenes.map { s ->
+            if (s.scheme == null) s else s.copy(kind = if (s.items.isNotEmpty()) "icons" else "text", scheme = null)
+        })
+        saveAnalysis()
+        board = emptyList()
+        render()
+    }
+
+    /** The AI writes schemes for the scenes that need them; broken ones go back to it once with the list of problems. */
+    private fun composeSchemes(wish: String) {
+        val sc0 = script ?: return
+        val plan = currentPlan() ?: return
+        if (busy.isNotEmpty()) return
+        val ranges = sc0.scenes.indices.map { i -> plan.times.firstOrNull { it.scene == i }?.words ?: IntRange.EMPTY }
+        val vars = mapOf(
+            "format" to formatText(), "lang" to aiLang(), "max" to StudioScheme.maxSchemes(sc0.scenes.size).toString(),
+            "wish" to if (wish.isNotEmpty()) "Пожелание автора: $wish" else "", "protocol" to StudioScheme.PROTOCOL,
+            "scenes" to StudioScheme.scenesBlock(sc0.scenes, words, ranges)
+        )
+        val system = "You are an infographic designer for videos. Answer with JSON only."
+        busy = "schemes"
+        cancel = false
+        render()
+        job("schemes", {
+            val ok = HashMap<Int, SScheme>()
+            val bad = mutableListOf<Pair<org.json.JSONObject, List<String>>>()
+            fun take(list: List<Pair<Int, org.json.JSONObject>>) {
+                bad.clear()
+                for ((n, o) in list) {
+                    val i = n - 1
+                    if (i !in sc0.scenes.indices) continue
+                    val s = StudioScheme.fromJson(o)
+                    val pr = StudioScheme.problems(s, ranges[i])
+                    if (s != null && pr.isEmpty()) ok[i] = StudioScheme.repair(s, ranges[i]) else bad += o to pr
+                }
+            }
+            take(aiJson("studio_schemes", vars, system, 900 + sc0.scenes.size * 80) { StudioScheme.parseAnswer(it) })
+            if (bad.isNotEmpty() && !cancel) {
+                report("schemes", t("Исправляю схемы: ${bad.size}", "Fixing schemes: ${bad.size}"))
+                val errors = bad.joinToString("\n") { (o, pr) -> "Сцена ${o.optInt("scene")}: " + pr.joinToString("; ") }
+                val json = org.json.JSONArray().apply { bad.forEach { put(it.first) } }.toString()
+                runCatching {
+                    aiJson("studio_scheme_fix", mapOf("errors" to errors, "protocol" to StudioScheme.PROTOCOL, "json" to json), system, 600 + bad.size * 400) {
+                        StudioScheme.parseAnswer(it)
+                    }
+                }.onSuccess { take(it) }.onFailure { if (it is java.util.concurrent.CancellationException) throw it }
+            }
+            HashMap(ok) to bad.size
+        }, { e ->
+            busy = ""
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) { (found, failed) ->
+            busy = ""
+            val cur = script
+            if (cur != null && cur.scenes.size == sc0.scenes.size) {
+                script = cur.copy(scenes = cur.scenes.mapIndexed { i, s -> found[i]?.let { s.copy(kind = "scheme", scheme = it) } ?: s })
+                saveAnalysis()
+            }
+            board = emptyList()
+            render()
+            toast(if (found.isEmpty()) t("AI не нашёл сцен для схем", "AI found no scenes for schemes")
+            else t("Инфосхем: ${found.size}", "Info-schemes: ${found.size}") + if (failed > 0) t(" · не удалось: $failed", " · failed: $failed") else "")
         }
     }
 

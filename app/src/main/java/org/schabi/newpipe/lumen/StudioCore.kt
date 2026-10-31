@@ -62,7 +62,9 @@ data class SScene(
     /** Id of the YouTube clip shown instead of the graphics (Cuts task, see [StudioCuts]); empty = none. */
     val clip: String = "",
     /** Cartoon task: name of the character saying the line ("" = narrator) and its mood ([StudioToon.MOODS]). */
-    val who: String = "", val mood: String = ""
+    val who: String = "", val mood: String = "",
+    /** Info-scheme of the scene (kind "scheme", protocol lumen.scheme, see [StudioScheme]). */
+    val scheme: SScheme? = null
 )
 
 data class SScript(val title: String, val scenes: List<SScene>)
@@ -128,7 +130,8 @@ object Studio {
     fun sceneOf(o: JSONObject): SScene? {
         val say = o.optString("say").ifBlank { o.optString("text") }.trim()
         if (say.isEmpty()) return null
-        val kind = o.optString("kind").trim().lowercase().takeIf { it in KINDS || isTpl(it) } ?: "text"
+        val scheme = o.optJSONObject("scheme")?.let { StudioScheme.fromJson(it) }?.takeIf { StudioScheme.problems(it).isEmpty() }
+        val kind = o.optString("kind").trim().lowercase().takeIf { it in KINDS || isTpl(it) || it == "scheme" && scheme != null } ?: "text"
         val items = o.optJSONArray("items")?.let { a ->
             (0 until a.length()).mapNotNull { j ->
                 val it = a.opt(j)
@@ -157,7 +160,8 @@ object Studio {
             shapes, broll, if (mode == "card") "card" else if (broll.isNotEmpty() || o.optString("media").isNotEmpty()) "full" else "",
             o.optString("media").trim(), o.optString("credit").trim(),
             o.optString("clip").trim().take(16),
-            StudioToon.cleanName(o.optString("who")), o.optString("mood").trim().lowercase().takeIf { it in StudioToon.MOODS } ?: "")
+            StudioToon.cleanName(o.optString("who")), o.optString("mood").trim().lowercase().takeIf { it in StudioToon.MOODS } ?: "",
+            scheme?.takeIf { kind == "scheme" })
     }
 
     const val MAX_ITEMS = 6
@@ -180,6 +184,7 @@ object Studio {
             if (sc.clip.isNotEmpty()) o.put("clip", sc.clip)
             if (sc.who.isNotEmpty()) o.put("who", sc.who)
             if (sc.mood.isNotEmpty()) o.put("mood", sc.mood)
+            sc.scheme?.let { o.put("scheme", StudioScheme.toJson(it)) }
             put(o)
         }
     }).toString()
@@ -1260,6 +1265,19 @@ val STUDIO_PROMPTS = linkedMapOf(
     "studio_stt" to (
         "Дословно расшифруй речь в этой записи на языке оригинала. Без таймкодов, имён говорящих, пояснений и описаний звуков. " +
             "Если речи нет — верни пустой ответ."
+        ),
+    "studio_schemes" to (
+        "Ты инфографист роликов {format}. Язык подписей: {lang}. Ниже сцены ролика: номер сцены, номера её слов и текст, каждое слово с номером [N].\n" +
+            "Выбери сцены, где схема объяснит лучше слов: процесс, причины и следствия, иерархия, этапы, воронка, сравнение по двум признакам, пересечение понятий. " +
+            "Не больше {max} сцен; вступление, призыв и выводы без структуры не бери. Чередуй layout, не ставь один и тот же два раза подряд. " +
+            "Схема передаёт только то, что сказано в сцене, без новых фактов и чисел.\n{wish}\n" +
+            "{protocol}\n" +
+            "Верни строго JSON: {\"schemes\":[{\"scene\":номер сцены,\"layout\":\"...\",\"title\":\"\",\"nodes\":[...]}]}\n\n" +
+            "Сцены:\n{scenes}"
+        ),
+    "studio_scheme_fix" to (
+        "Проверка схем по протоколу нашла ошибки:\n{errors}\n{protocol}\n" +
+            "Исправь только эти схемы и верни их целиком, поле scene не меняй. Строго JSON: {\"schemes\":[...]}\n\nСхемы:\n{json}"
         ),
     "studio_tpl_fix" to (
         "Исправь шаблон {kind}: проверка нашла ошибки:\n{errors}\nИсправь только их и верни весь шаблон, только JSON.\n\nШаблон:\n{data}"

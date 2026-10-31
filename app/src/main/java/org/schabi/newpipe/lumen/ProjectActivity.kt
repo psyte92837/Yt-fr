@@ -202,7 +202,7 @@ class ProjectActivity : LumenBase() {
         page(
             project.name, c.root,
             header = header,
-            actions = listOf("⋮" to { projectMenu() }),
+            actions = listOf("🗺" to { KnowledgeMapActivity.open(this, project.id) }, "⋮" to { projectMenu() }),
             fab = fab,
             footer = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
@@ -219,11 +219,15 @@ class ProjectActivity : LumenBase() {
     }
 
     private fun projectMenu() {
-        val items = arrayOf(t("Импорт видео", "Import videos"), t("Фильтры поиска проекта", "Project search filters"))
+        val items = arrayOf(t("Импорт видео", "Import videos"), t("Фильтры поиска проекта", "Project search filters"), t("🗺 Карта знаний", "🗺 Knowledge map"))
         AlertDialog.Builder(this).setTitle(project.name).setItems(items) { _, i ->
-            if (i == 0) importDialog() else {
-                tab = "settings"
-                render()
+            when (i) {
+                0 -> importDialog()
+                2 -> KnowledgeMapActivity.open(this, project.id)
+                else -> {
+                    tab = "settings"
+                    render()
+                }
             }
         }.show()
     }

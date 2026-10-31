@@ -210,6 +210,7 @@ class LumenActivity : LumenBase() {
                     if (p.monitor.enabled && Settings.monitoringAllowed) " · ⏱" else "")
                 val added = p.runs.lastOrNull()?.added ?: 0
                 if (added > 0) add(text(ctx, t("В последнем запуске добавлено: +$added", "Added in the last run: +$added"), 13f, bold = true, color = Palette.ACCENT), 4)
+                add(kmapButton(ctx, p.id), 8).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = ctx.dp(8) }
             }
             card.contentDescription = p.name
             card.setOnClickListener { openProjectScreen(p) }
@@ -269,24 +270,25 @@ class LumenActivity : LumenBase() {
 
     private fun projectMenu(p: Project) {
         val items = arrayOf(
-            t("Открыть", "Open"), t("Дублировать", "Duplicate"),
+            t("Открыть", "Open"), t("🗺 Карта знаний", "🗺 Knowledge map"), t("Дублировать", "Duplicate"),
             if (p.archived) t("Вернуть из архива", "Unarchive") else t("В архив", "Archive"),
             t("Удалить", "Delete")
         )
         AlertDialog.Builder(this).setTitle(p.name).setItems(items) { _, which ->
             when (which) {
                 0 -> openProjectScreen(p)
-                1 -> {
+                1 -> KnowledgeMapActivity.open(this, p.id)
+                2 -> {
                     Store.duplicate(p.id)
                     render()
                 }
-                2 -> {
+                3 -> {
                     p.archived = !p.archived
                     Store.save(p)
                     Monitoring.apply(this, p)
                     render()
                 }
-                3 -> confirm(t("Удалить проект?", "Delete project?"), p.name, t("Удалить", "Delete")) {
+                4 -> confirm(t("Удалить проект?", "Delete project?"), p.name, t("Удалить", "Delete")) {
                     Monitoring.cancel(this, p.id)
                     Store.delete(p.id)
                     render()

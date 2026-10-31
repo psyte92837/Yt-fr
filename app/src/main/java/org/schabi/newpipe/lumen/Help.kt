@@ -12,7 +12,7 @@ import android.os.Bundle
 object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
-        "about", "home", "wizard", "new_project", "project", "video", "channel", "quick", "graph", "audit",
+        "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
         "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "settings"
     )
 
@@ -21,6 +21,7 @@ object HelpMap {
         "WizardActivity" to "wizard",
         "NewProjectActivity" to "new_project",
         "ProjectActivity" to "project",
+        "KnowledgeMapActivity" to "kmap",
         "VideoActivity" to "video",
         "ChannelActivity" to "channel",
         "LinkActivity" to "quick",
@@ -119,6 +120,20 @@ object Help {
                 t("Результат открывается отдельной карточкой в «Недавних».", "The result opens as its own card in Recents.")
             ),
             listOf(t("Объёмы (100 видео, 100 каналов) меняются в Настройки → Быстрый анализ.", "Amounts (100 videos, 100 channels) are set in Settings → Quick analysis."))),
+        HelpTopic("kmap", t("Карта знаний", "Knowledge map"),
+            t("Всё, что собрано по проекту, деревом аспектов: тема, каналы, метки, теги, хронология, форматы, аудитория, комментарии, рекомендации, выводы AI. Ветки раскрываются до видео и комментариев.",
+                "Everything collected in a project as a tree of aspects: topic, channels, labels, tags, timeline, formats, audience, comments, recommendations, AI findings. Branches open down to videos and comments."),
+            listOf(
+                t("Откройте кнопкой «🗺 Карта знаний» на карточке проекта или в шапке проекта.", "Open it with \"🗺 Knowledge map\" on a project card or in the project's top bar."),
+                t("Нажмите на узел, чтобы раскрыть или свернуть его.", "Tap a node to open or close it."),
+                t("✨ у узла — AI-сводка именно по этой ветке; ✨✓ — сводка уже есть.", "✨ on a node makes an AI summary of that branch; ✨✓ means one exists."),
+                t("Долгое нажатие на видео или канал открывает его.", "Long press on a video or channel opens it.")
+            ),
+            listOf(
+                t("Сводка берёт обзор всех подветок, а не детали первых: чем выше узел, тем шире взгляд.", "A summary takes an overview of all sub-branches rather than details of the first ones: the higher the node, the wider the view."),
+                t("Повтор с теми же данными бесплатный — из кэша. «Обновить» запрашивает заново.", "A repeat with the same data is free from the cache. \"Refresh\" asks again."),
+                t("⋮ → «Все сводки карты» собирает их в один текст.", "⋮ → \"All map summaries\" puts them into one text.")
+            )),
         HelpTopic("graph", t("Граф рекомендаций", "Recommendation graph"),
             t("Как YouTube связывает видео и каналы темы. Размер узла — важность (PageRank), цвет — кластер.", "How YouTube links videos and channels of the topic. Node size is importance (PageRank), colour is the cluster."),
             listOf(t("Двигайте и масштабируйте двумя пальцами.", "Pan and zoom with two fingers."), t("Нажмите на узел, чтобы открыть видео или канал.", "Tap a node to open the video or channel."), t("⤢ — вписать граф в экран.", "⤢ fits the graph to the screen."))),

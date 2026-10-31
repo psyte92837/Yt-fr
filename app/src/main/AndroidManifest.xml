@@ -94,6 +94,11 @@
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name=".lumen.KnowledgeMapActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name=".lumen.GraphActivity"
             android:exported="false"
             android:theme="@style/LumenTheme" />

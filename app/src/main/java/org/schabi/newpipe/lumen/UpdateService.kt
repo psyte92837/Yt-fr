@@ -144,6 +144,8 @@ object Updates {
         val dir = File(ctx.cacheDir, "updates").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
         val f = File(dir, "lumen-${info.build}.apk")
+        // update.json always carries the hash; an update without one is refused rather than installed unchecked
+        if (!Regex("[0-9a-f]{64}").matches(info.sha256)) error(t("в описании обновления нет контрольной суммы", "the update has no checksum"))
         val c = get(info.apk, 60_000)
         if (c.responseCode !in 200..299) error("HTTP ${c.responseCode}")
         val total = c.getHeaderField("Content-Length")?.toLongOrNull()?.takeIf { it > 0 } ?: info.size
@@ -171,7 +173,7 @@ object Updates {
             f.delete()
             error(t("файл скачан не полностью", "download incomplete"))
         }
-        if (info.sha256.isNotBlank() && UpdateLogic.hex(md.digest()) != info.sha256) {
+        if (UpdateLogic.hex(md.digest()) != info.sha256) {
             f.delete()
             error(t("контрольная сумма не совпала", "checksum mismatch"))
         }

@@ -74,8 +74,15 @@ class StudioPlan(
     /** Cartoon task: the characters on the stage (null = not a cartoon). */
     val cast: List<SChar>? = null,
     /** Saved motion templates by id, for scenes of kind "tpl:id". */
-    val templates: Map<String, MotionTpl> = emptyMap()
+    val templates: Map<String, MotionTpl> = emptyMap(),
+    /** What is drawn over the picture: subtitles and/or schemes. */
+    val layers: StudioLayers = StudioLayers.ALL,
+    /** Size of a scheme over a background (video, clip, photo), fraction of its full-screen size. */
+    val overScale: Float = 0.6f
 ) {
+    val subs get() = layers.subs
+    val graphics get() = layers.graphics
+
     val steps = Studio.stepNumbers(script.scenes)
 
     /** Time of cue [c] of the scene at [st]: the start of its word. */
@@ -116,14 +123,14 @@ class StudioPlan(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
-            templates: Map<String, MotionTpl> = emptyMap()
+            templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.6f
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK && cast == null
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale)
         }
     }
 }
@@ -207,7 +214,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     private fun insert(i: Int): Boolean {
         if (plan.style != StudioStyle.VIDEO) return false
         plan.clipScenes?.let { return i !in it }
-        return (!plan.overlay && plan.script.scenes[i].kind != "text") || (plan.script.scenes[i].brollMode != "card" && hasMedia(i))
+        return (!plan.overlay && plan.graphics && plan.script.scenes[i].kind != "text") || (plan.script.scenes[i].brollMode != "card" && hasMedia(i))
     }
 
     /** B-roll photo of scene [i] (null when it has none or it cannot be read). */
@@ -313,6 +320,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** Shapes of the AI director animated on their key frames (arrows draw themselves, rings circle, a spotlight dims the rest). */
     private fun shapes(c: Canvas, i: Int, tMs: Long, a: Float) {
+        if (!plan.graphics) return
         drawShapes(c, plan.shapes.getOrNull(i) ?: return, tMs, a)
     }
 
@@ -537,6 +545,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             palette(true)
         }
         if (plan.cast != null) cartoonScene(c, i, tMs, full != null) else drawScene(c, i, tMs, full != null)
+        if (full != null && plan.cast == null && plan.overlay) overVisual(c, plan.script.scenes[i], i, tMs - st.startMs, st.endMs - st.startMs, a)
         shapes(c, i, tMs, a)
         pops(c, i, tMs, a)
         if (full != null) palette(plan.style == StudioStyle.DARK)
@@ -574,7 +583,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val local = tMs - st.startMs
         val sceneMs = st.endMs - st.startMs
         val card = if (onPhoto) null else photo(i)
-        val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && !Studio.isTpl(sc.kind) && sc.kind !in listOf("step", "stat", "big", "quote"))))
+        val textOnly = onPhoto || (card == null && (!plan.graphics || !StudioLayers.hasScheme(sc.kind, sc.items.size)))
         val vx = w / 2f
         val vy = if (wide) h * 0.42f else h * 0.37f
         if (wide) caption(c, i, tMs, a, if (textOnly) h * 0.30f else h * 0.78f, if (textOnly) 7f * u else 5.2f * u, w * (if (textOnly) 0.56f else 0.5f))
@@ -651,6 +660,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** Stickers of the AI director: a tilted pill with an emoji and a few words that springs in on its word. */
     private fun pops(c: Canvas, i: Int, tMs: Long, a: Float) {
+        if (!plan.graphics) return
         val list = plan.pops.getOrNull(i) ?: return
         if (a <= 0f) return
         list.forEachIndexed { k, (ms, cue) ->
@@ -691,8 +701,8 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val sceneMs = st.endMs - st.startMs
         val card = if (onPhoto) null else photo(i)
         if (plan.style == StudioStyle.DARK) {
-            val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && !Studio.isTpl(sc.kind) && sc.kind !in listOf("step", "stat", "big", "quote"))))
-            caption(c, i, tMs, a, if (onPhoto) h * 0.62f else if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
+            val textOnly = onPhoto || (card == null && (!plan.graphics || !StudioLayers.hasScheme(sc.kind, sc.items.size)))
+            caption(c, i, tMs, a, if (onPhoto && plan.overlay && plan.graphics && StudioLayers.hasScheme(sc.kind, sc.items.size)) h * 0.74f else if (onPhoto) h * 0.62f else if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
             if (card != null) photoCard(c, card, i, w / 2f, h * 0.57f, local, sceneMs, a)
             else if (!textOnly) visual(c, sc, i, w / 2f, h * 0.57f, local, sceneMs, a)
         } else {
@@ -730,6 +740,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 drawPhoto(c, full, RectF(0f, 0f, w.toFloat(), h.toFloat()), i, local, sceneMs, if (slide) 1f else fade)
                 c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
                 if (a > 0f) {
+                    if (plan.overlay) overVisual(c, sc, i, local, sceneMs, a)
                     spokenWord(c, i, tMs, a, h * 0.80f)
                     shapes(c, i, tMs, a)
                     pops(c, i, tMs, a)
@@ -754,9 +765,10 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             return
         }
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
-        val graphic = plan.overlay && sc.kind != "text"
-        if (graphic || sc.title.isNotBlank()) {
-            topShade.alpha = (255 * a).toInt()
+        val graphic = plan.overlay && plan.graphics && StudioLayers.hasScheme(sc.kind, sc.items.size)
+        if (graphic || plan.graphics && sc.title.isNotBlank()) {
+            // a light shade only: the video stays visible behind the scheme
+            topShade.alpha = (255 * a * (if (graphic) 0.35f + 0.5f * plan.overScale else 1f).coerceAtMost(1f)).toInt()
             c.drawRect(0f, 0f, w.toFloat(), h * 0.7f, topShade)
             topShade.alpha = 255
         }
@@ -764,7 +776,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         if (sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote")) headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
         val card = photo(i)
         if (card != null) photoCard(c, card, i, w / 2f, h * 0.36f, local, sceneMs, a)
-        else if (graphic) visual(c, sc, i, w / 2f, h * 0.36f, local, sceneMs, a)
+        else if (graphic) overVisual(c, sc, i, local, sceneMs, a)
         spokenWord(c, i, tMs, a, h * 0.80f)
         shapes(c, i, tMs, a)
         pops(c, i, tMs, a)
@@ -772,6 +784,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** One word on the video: white bold with a shadow and an accent underline. */
     private fun spokenWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float) {
+        if (!plan.subs) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
         val word = plan.words[g.first]
@@ -803,6 +816,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** Word group with each word blurring in when it is spoken (DARK style). */
     private fun caption(c: Canvas, scene: Int, tMs: Long, a: Float, top: Float, size: Float, maxW: Float = w * 0.84f) {
+        if (!plan.subs) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 90 <= tMs } ?: return
         textP.textSize = size
@@ -834,6 +848,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** One big word at a time, italic serif in capitals (LIGHT style). */
     private fun singleWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float) {
+        if (!plan.subs) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
         val word = plan.words[g.first]
@@ -853,6 +868,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** Condensed capitals; the last word in the accent colour (LIGHT style). */
     private fun headline(c: Canvas, s: String, y: Float, a: Float, local: Long, color: Int = ink) {
+        if (!plan.graphics) return
         val words = s.uppercase().split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) return
         headP.textSize = 8.6f * u
@@ -875,7 +891,22 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     // ---------- visuals ----------
 
+    /**
+     * A scheme over a background (playing video, clip or photo): scaled to [StudioPlan.overScale], no screen behind it,
+     * so the background stays visible around it; the subtitles keep the bottom.
+     */
+    private fun overVisual(c: Canvas, sc: SScene, i: Int, local: Long, sceneMs: Long, a: Float) {
+        if (!plan.graphics || a <= 0f || !StudioLayers.hasScheme(sc.kind, sc.items.size)) return
+        val k = plan.overScale
+        val cy = h * StudioLayers.overY(k, plan.subs)
+        c.save()
+        c.scale(k, k, w / 2f, cy)
+        visual(c, sc, i, w / 2f, cy, local, sceneMs, a)
+        c.restore()
+    }
+
     private fun visual(c: Canvas, sc: SScene, index: Int, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        if (!plan.graphics) return
         if (Studio.isTpl(sc.kind)) {
             val list = plan.tplShapes.getOrNull(index).orEmpty()
             if (list.isNotEmpty()) {

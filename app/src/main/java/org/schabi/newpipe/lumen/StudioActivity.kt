@@ -130,8 +130,16 @@ object StudioPrefs {
         set(v) = p.edit().putBoolean("studio_prompter", v).apply()
     /** VIDEO style: graphics as cards over the speaker instead of full-screen inserts. */
     var overlay: Boolean
-        get() = p.getBoolean("studio_overlay", false)
+        get() = p.getBoolean("studio_overlay", true)
         set(v) = p.edit().putBoolean("studio_overlay", v).apply()
+    /** What is drawn over the picture: [StudioLayers.id]. */
+    var layers: String
+        get() = p.getString("studio_layers", StudioLayers.ALL.id) ?: StudioLayers.ALL.id
+        set(v) = p.edit().putString("studio_layers", v).apply()
+    /** Size of a scheme over a background, % of its full-screen size. */
+    var overSize: Int
+        get() = p.getInt("studio_over_size", 60)
+        set(v) = p.edit().putInt("studio_over_size", v).apply()
     var musicName: String
         get() = p.getString("studio_music_name", "") ?: ""
         set(v) = p.edit().putString("studio_music_name", v).apply()
@@ -992,12 +1000,37 @@ class StudioActivity : LumenBase() {
             StudioStyle.VIDEO -> if (videoReady()) t("Ваше видео, слово под голос внизу, графика вставками.", "Your video, the spoken word below, graphics cut in.")
             else t("Фоновые клипы по кругу под озвучку, слово внизу, графика вставками.", "Background clips loop under the voice-over, the word below, graphics cut in.")
         })
-        if (currentStyle() == StudioStyle.VIDEO) {
-            add(segBar(ctx, listOf(t("Вставки на весь экран", "Full-screen inserts"), t("Карточки поверх видео", "Cards over video")),
-                if (StudioPrefs.overlay) 1 else 0) {
-                StudioPrefs.overlay = it == 1
+        add(text(ctx, t("Что накладывать", "What to overlay"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(segBar(ctx, listOf(t("Всё", "All"), t("Субтитры", "Subtitles"), t("Схемы", "Schemes"), t("Ничего", "Nothing")),
+            StudioLayers.of(StudioPrefs.layers).ordinal) {
+            StudioPrefs.layers = StudioLayers.entries[it].id
+            board = emptyList()
+            render()
+        }, 4)
+        muted(when (StudioLayers.of(StudioPrefs.layers)) {
+            StudioLayers.ALL -> t("Субтитры под голос и инфосхемы, заголовки, стикеры.", "Subtitles with the voice plus schemes, headlines, stickers.")
+            StudioLayers.SUBS -> t("Только субтитры: без схем, заголовков и стикеров.", "Subtitles only: no schemes, headlines or stickers.")
+            StudioLayers.GRAPHICS -> t("Только схемы, заголовки и стикеры: без субтитров.", "Schemes, headlines and stickers only: no subtitles.")
+            StudioLayers.NONE -> t("Чистая картинка: ни субтитров, ни схем.", "A clean picture: no subtitles, no schemes.")
+        })
+        if (StudioLayers.of(StudioPrefs.layers).graphics) {
+            check(t("🖼 Схемы поверх фона: видео, клипов и картинок, фон остаётся виден", "🖼 Schemes over the background: video, clips and pictures stay visible"), StudioPrefs.overlay) {
+                StudioPrefs.overlay = it
+                board = emptyList()
                 render()
-            }, 8)
+            }
+            if (StudioPrefs.overlay) {
+                add(text(ctx, t("Размер схемы поверх фона", "Size of a scheme over the background"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
+                chips(StudioLayers.SIZES.map { pc ->
+                    chip(ctx, "$pc%", pc == StudioPrefs.overSize) {
+                        StudioPrefs.overSize = pc
+                        board = emptyList()
+                        render()
+                    }
+                })
+            } else if (currentStyle() == StudioStyle.VIDEO) muted(t("Схемы будут вставками на весь экран вместо видео.", "Schemes become full-screen inserts instead of the video."))
+        }
+        if (currentStyle() == StudioStyle.VIDEO) {
             add(text(ctx, t("Автомонтаж", "Auto-edit"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             check(t("🔍 Зумы и наезды камеры по сценам", "🔍 Camera zooms and push-ins per scene"), StudioPrefs.zooms) {
                 StudioPrefs.zooms = it
@@ -1098,7 +1131,7 @@ class StudioActivity : LumenBase() {
 
     /** Storyboard: a small frame of every scene; a tap shows that scene in the preview. */
     private fun storyboard(c: Col, plan: StudioPlan) {
-        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
+        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.layers}:${plan.overScale}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
             plan.script.scenes.joinToString(",") { it.clip } + ":" + readyIds().joinToString(",")
         if (board.isNotEmpty() && boardKey == key) {
             c.add(text(this, t("Раскадровка", "Storyboard"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -1908,7 +1941,8 @@ class StudioActivity : LumenBase() {
             StudioPrefs.zooms, StudioPrefs.transitions,
             if (StudioPrefs.pulse) pulseOf(voice) else null,
             if (StudioPrefs.liveEmoji) emojiDir else null,
-            clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls)
+            clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls,
+            StudioLayers.of(StudioPrefs.layers), StudioLayers.scale(StudioPrefs.overSize))
     }
 
     private val emojiDir get() = File(dir, "emoji")

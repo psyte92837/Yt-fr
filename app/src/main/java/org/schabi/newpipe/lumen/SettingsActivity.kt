@@ -372,7 +372,9 @@ class SettingsActivity : LumenBase() {
             "diagram_flow" to t("Схема · блок-схема процесса", "Diagram · process flowchart"),
             "diagram_mind" to t("Схема · карта идей", "Diagram · mind map"),
             "diagram_video" to t("Схема · структура видео", "Diagram · video structure"),
-            "pains" to t("Боли и кейсы людей", "Pains and cases of people")
+            "pains" to t("Боли и кейсы людей", "Pains and cases of people"),
+            "lens_feed" to t("Поверх YouTube · разбор ленты", "Over YouTube · feed review"),
+            "lens_screen" to t("Поверх YouTube · что на экране", "Over YouTube · what is on screen")
         )
         for ((k, label) in names) {
             val card = c.card {

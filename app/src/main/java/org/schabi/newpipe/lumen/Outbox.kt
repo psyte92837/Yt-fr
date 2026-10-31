@@ -231,7 +231,9 @@ object SendGate {
 
     private fun show() {
         // the screen opens by itself while the app is visible; the notification covers background jobs
-        if (LumenBase.visible > 0) {
+        if (LumenBase.visible > 0 || LensState.panelOpen) {
+            // the panel over YouTube steps aside so the review screen can be seen
+            LensState.service?.stepAside()
             try {
                 Lumen.app.startActivity(intent())
             } catch (e: Exception) {

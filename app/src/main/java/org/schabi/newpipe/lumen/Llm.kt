@@ -325,6 +325,7 @@ object Prompts {
         defaults.putAll(CUSTOM_REPORT_PROMPTS)
         defaults.putAll(DIAGRAM_PROMPTS)
         defaults.putAll(STUDIO_PROMPTS)
+        defaults.putAll(LENS_PROMPTS)
     }
 
     fun get(key: String): String = Lumen.prefs.getString("prompt_$key", null) ?: defaults[key].orEmpty()

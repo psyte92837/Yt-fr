@@ -260,6 +260,7 @@ class LumenActivity : LumenBase() {
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
         })
         items.add("🎬 Lumen Studio" to { StudioActivity.open(this) })
+        items.add(t("🫧 Кнопка поверх YouTube", "🫧 Button over YouTube") to { LensActivity.open(this) })
         items.add(t("Справка и о проекте", "Help and about") to { HelpActivity.open(this, "about") })
         items.add(t("Журнал и отчёт об ошибке", "Logs and bug report") to {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))

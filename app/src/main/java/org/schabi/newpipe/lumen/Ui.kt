@@ -507,9 +507,12 @@ fun iconBtn(ctx: Context, glyph: String, color: Int = Palette.ON_SURFACE, onClic
 
 enum class BtnStyle { FILLED, TONAL, OUTLINED, TEXT }
 
+/** Размер шрифта с учётом настройки «Размер текста». */
+fun sp(size: Float): Float = size * (if (LumenEnv.ready) Settings.textScale / 100f else 1f)
+
 fun text(ctx: Context, s: String, size: Float = Type.BODY, bold: Boolean = false, color: Int = Palette.ON_SURFACE) = TextView(ctx).apply {
     text = s
-    textSize = size * (if (LumenEnv.ready) Settings.textScale / 100f else 1f)
+    textSize = sp(size)
     setTextColor(color)
     setLineSpacing(0f, 1.15f)
     if (bold) typeface = Type.medium
@@ -520,7 +523,7 @@ fun btn(ctx: Context, s: String, primary: Boolean = false, style: BtnStyle? = nu
     val st = style ?: if (primary) BtnStyle.FILLED else BtnStyle.TONAL
     text = s
     isAllCaps = false
-    textSize = 14f
+    textSize = sp(14f)
     typeface = Type.medium
     stateListAnimator = null
     minHeight = ctx.dp(48)
@@ -542,7 +545,7 @@ fun btn(ctx: Context, s: String, primary: Boolean = false, style: BtnStyle? = nu
 
 fun chk(ctx: Context, s: String, value: Boolean, onChange: (Boolean) -> Unit) = CheckBox(ctx).apply {
     text = s
-    textSize = Type.BODY
+    textSize = sp(Type.BODY)
     setTextColor(Palette.ON_SURFACE)
     buttonTintList = ColorStateList.valueOf(Palette.ACCENT)
     minHeight = ctx.dp(48)
@@ -554,7 +557,7 @@ fun chk(ctx: Context, s: String, value: Boolean, onChange: (Boolean) -> Unit) = 
 fun edt(ctx: Context, hint: String, value: String = "", multiline: Boolean = false, number: Boolean = false) = EditText(ctx).apply {
     this.hint = hint
     setText(value)
-    textSize = 16f
+    textSize = sp(16f)
     setTextColor(Palette.ON_SURFACE)
     setHintTextColor(Palette.MUTED)
     background = roundBg(0x00000000, 4f, ctx, Palette.OUTLINE)
@@ -581,7 +584,9 @@ fun edt(ctx: Context, hint: String, value: String = "", multiline: Boolean = fal
 fun <T> spin(ctx: Context, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit) = Spinner(ctx).apply {
     adapter = object : ArrayAdapter<String>(ctx, android.R.layout.simple_spinner_dropdown_item, options.map { it.second }) {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View =
-            super.getView(position, convertView, parent).also { (it as? TextView)?.setTextColor(Palette.ON_SURFACE) }
+            super.getView(position, convertView, parent).also { (it as? TextView)?.apply { setTextColor(Palette.ON_SURFACE); textSize = sp(16f) } }
+        override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
+            super.getDropDownView(position, convertView, parent).also { (it as? TextView)?.textSize = sp(16f) }
     }
     background = roundBg(0x00000000, 4f, ctx, Palette.OUTLINE)
     minimumHeight = ctx.dp(56)
@@ -596,7 +601,7 @@ fun <T> spin(ctx: Context, options: List<Pair<T, String>>, selected: T, onSelect
 /** M3 filter/assist chip. */
 fun chip(ctx: Context, s: String, selected: Boolean = false, onClick: (() -> Unit)? = null) = TextView(ctx).apply {
     text = s
-    textSize = 14f
+    textSize = sp(14f)
     typeface = Type.medium
     gravity = Gravity.CENTER
     minHeight = ctx.dp(32)

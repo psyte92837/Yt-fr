@@ -52,6 +52,9 @@ fun ProjectActivity.overviewTab(c: Col) {
         }
     }
 
+    // ---- comment digest + AI chat (Share → "Comment digest")
+    if (project.quickMode == CommentDigest.MODE || CommentDigest.latest(project.id) != null) digestCard(c)
+
     // ---- pains and cases of people (Share → "Pains and cases")
     if (project.quickMode == "pains" || Pains.latest(project.id) != null) painsCard(c)
 
@@ -329,4 +332,43 @@ private fun ProjectActivity.sharePains(pdf: Boolean) {
         f.outputStream().use { Pains.write(project.id, pdf, it) }
         f
     }, { err(it) }) { f -> ReportKit.share(this, f, pdf, project.name) }
+}
+
+/** Share → "Comment digest": the AI digest of all comments of the video and a chat about them. */
+fun ProjectActivity.digestCard(c: Col) {
+    c.h2("💬 " + t("Сводка комментариев", "Comment digest"))
+    val msgs = Pains.projectMessages(project.id)
+    val running = CollectState.running && CollectState.projectId == project.id
+    if (msgs.isEmpty()) {
+        c.muted(if (running) t("Собираю комментарии…", "Collecting comments…")
+        else t("Комментариев пока нет: дождитесь сбора или перезапустите анализ.", "No comments yet: wait for the collection or restart."))
+        return
+    }
+    val ai = CommentDigest.latest(project.id)
+    c.muted(t("комментариев: ", "comments: ") + msgs.size + if (ai != null) " · " + ai.model + " · " + Fmt.dateTime(ai.at) else "")
+    when {
+        ai != null -> c.card { add(text(ctx, CommentDigest.plain(ai.text), 14f).apply { setTextIsSelectable(true) }, 0) }
+        running -> c.muted(t("AI делает сводку…", "AI is writing the digest…"))
+        Provider.active() == null -> c.muted(t("Подключите AI-ключ в настройках, чтобы получить сводку и чат.", "Connect an AI key in Settings to get the digest and the chat."))
+    }
+    if (Provider.active() != null) {
+        c.button(t("💬 Спросить AI об этих комментариях", "💬 Ask AI about these comments"), primary = true) {
+            askAiSheet(project, videos.values.toList(), CommentDigest.TAB)
+        }
+    }
+    if (ai != null) c.row(
+        btn(this, t("Текст ↗", "Text ↗"), style = BtnStyle.TONAL) { shareText(project.name, CommentDigest.text(project.id)) },
+        btn(this, t("🔊 Озвучить", "🔊 Read aloud"), style = BtnStyle.TEXT) { TtsActivity.open(this, CommentDigest.text(project.id), project.name) }
+    )
+    if (Provider.active() != null && !CollectState.running) {
+        c.button(if (ai == null) t("Сделать сводку через AI", "Make the digest with AI") else t("Обновить сводку", "Refresh the digest"), style = BtnStyle.OUTLINED) {
+            toast(t("AI делает сводку комментариев…", "AI summarises the comments…"))
+            Lumen.async({ CommentDigest.ai(project, force = true) }, { err(it) }) {
+                if (!isFinishing) {
+                    reload()
+                    render()
+                }
+            }
+        }
+    }
 }

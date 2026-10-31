@@ -375,6 +375,7 @@ class SettingsActivity : LumenBase() {
             "diagram_mind" to t("Схема · карта идей", "Diagram · mind map"),
             "diagram_video" to t("Схема · структура видео", "Diagram · video structure"),
             "pains" to t("Боли и кейсы людей", "Pains and cases of people"),
+            CommentDigest.KIND to t("Сводка комментариев видео", "Video comment digest"),
             "kmap_aspect" to t("Карта знаний · сводка по ветке", "Knowledge map · branch summary"),
             "ideas_queries" to t("Идеи для бизнеса · подбор запросов", "Business ideas · queries"),
             "ideas_digest" to t("Идеи для бизнеса · сводка", "Business ideas · digest"),

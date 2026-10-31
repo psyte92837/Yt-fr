@@ -35,12 +35,14 @@ object AskAi {
         "ai" -> t("Пользователь на вкладке AI: сводки, кластеры, тональность.", "The user is on the AI tab: summaries, clusters, sentiment.")
         "export" -> t("Пользователь на вкладке «Экспорт»: выгрузка данных и отчётов.", "The user is on the Export tab: exporting data and reports.")
         "schemes" -> t("Пользователь на вкладке «Схемы»: диаграммы по проекту.", "The user is on the Diagrams tab: project diagrams.")
+        CommentDigest.TAB -> t("Пользователь спрашивает о комментариях к видео: отвечай по сводке и самим комментариям, приводи цитаты с id.", "The user asks about the video's comments: answer from the digest and the comments themselves, quote with ids.")
         "settings" -> t("Пользователь на вкладке «Настройки» проекта: запросы и фильтры поиска.", "The user is on the project Settings tab: queries and search filters.")
         else -> ""
     }
 
     /** Short input hint for the bar, so it is clear the chat knows where the user is. */
     fun hint(tab: String): String = when (tab) {
+        CommentDigest.TAB -> t("Спросить AI о комментариях…", "Ask AI about the comments…")
         "recs" -> t("Спросить AI о рекомендациях…", "Ask AI about recommendations…")
         "audience" -> t("Спросить AI об аудитории…", "Ask AI about the audience…")
         "seo" -> t("Спросить AI о SEO…", "Ask AI about SEO…")

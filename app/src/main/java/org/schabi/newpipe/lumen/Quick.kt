@@ -118,6 +118,7 @@ object QuickState {
         "style_data" -> t("Стиль: раскадровка, главы, речь, обложка", "Style: storyboard, chapters, speech, thumbnail")
         "style_ai" -> t("Стиль: описание и шаблон через AI", "Style: AI description and template")
         "pains" -> t("Боли и кейсы людей", "Pains and cases of people")
+        "digest" -> t("AI-сводка комментариев", "AI comment digest")
         else -> key
     }
 }
@@ -155,9 +156,10 @@ object QuickAnalysis {
         val p = Project(name = when (mode) {
             "style" -> t("Стиль: ", "Style: ")
             "pains" -> t("Боли: ", "Pains: ")
+            CommentDigest.MODE -> t("Комментарии: ", "Comments: ")
             else -> t("Анализ: ", "Analysis: ")
         } + link.type, phrase = "", queries = mutableListOf())
-        if (mode == "pains") {
+        if (mode == "pains" || mode == CommentDigest.MODE) {
             // more comments and the replies: stories are often in the threads
             p.collect.commentsLimit = if (link.type == "video") 1000 else 300
             p.collect.replies = true
@@ -180,7 +182,10 @@ object QuickAnalysis {
         val keys = mutableListOf("source")
         val style = p0.quickMode == "style" && type == "video"
         val pains = p0.quickMode == "pains"
-        if (style) keys += listOf("style_data", "style_ai") else if (pains) {
+        val digest = p0.quickMode == CommentDigest.MODE
+        if (style) keys += listOf("style_data", "style_ai") else if (digest) {
+            keys += listOf("collect", "digest")
+        } else if (pains) {
             keys += listOf("collect", "pains")
         } else when (type) {
             "video" -> {
@@ -197,7 +202,7 @@ object QuickAnalysis {
                 if (cfg.channelStats) keys += "channels"
             }
         }
-        if (!style && !pains) {
+        if (!style && !pains && !digest) {
             if (cfg.recs) keys += "recs"
             if (cfg.channelGraph) keys += "chgraph"
             if (cfg.aiChannelSummary && type != "playlist") keys += "channel_ai"
@@ -373,6 +378,18 @@ object QuickAnalysis {
                             }
                         }
                     }
+                    "digest" -> {
+                        val n = Pains.projectMessages(pid).size
+                        if (n == 0) throw IllegalStateException(t("Комментарии не собраны (отключены или недоступны)", "No comments collected (disabled or unavailable)"))
+                        if (Provider.active() == null) {
+                            st.status = "warn"
+                            t("комментариев: $n · AI не подключён — сводки нет", "comments: $n · AI not connected — no digest")
+                        } else {
+                            progress(t("AI делает сводку комментариев…", "AI summarises the comments…"))
+                            val r = CommentDigest.ai(p, force = true)
+                            t("комментариев: $n · ", "comments: $n · ") + r.model
+                        }
+                    }
                     "project_ai" -> {
                         if (Provider.active() == null) {
                             st.status = "skipped"
@@ -404,7 +421,7 @@ object QuickAnalysis {
     private fun rename(pid: String, title: String, channel: String) {
         Store.project(pid)?.let {
             if (title.isNotBlank()) {
-                it.name = (when (it.quickMode) { "style" -> "🎨 "; "pains" -> "😣 "; else -> "" }) + title.take(80)
+                it.name = (when (it.quickMode) { "style" -> "🎨 "; "pains" -> "😣 "; CommentDigest.MODE -> "💬 "; else -> "" }) + title.take(80)
                 it.phrase = title.take(120)
             }
             if (channel.isNotBlank()) it.domain = channel
@@ -436,8 +453,9 @@ object QuickAnalysis {
             a.toast(t("Это не ссылка на видео, канал или плейлист YouTube", "Not a YouTube video, channel or playlist link"))
             return false
         }
-        if (mode == "style" && link.type != "video") {
-            a.toast(t("Стиль определяется только для видео", "Style works for videos only"))
+        if ((mode == "style" || mode == CommentDigest.MODE) && link.type != "video") {
+            a.toast(if (mode == "style") t("Стиль определяется только для видео", "Style works for videos only")
+            else t("Сводка комментариев — только для ссылки на видео", "Comment digest works for video links only"))
             return false
         }
         if (CollectState.running) {
@@ -469,6 +487,7 @@ fun Activity.chooseLinkAction(text: String, onDone: () -> Unit = {}) {
         t("😣 Боли и кейсы зрителей канала", "😣 Pains and cases of the channel's viewers") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },
         t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) }
     ) else listOf(
+        t("💬 Сводка комментариев + чат с AI", "💬 Comment digest + AI chat") to { QuickAnalysis.start(this, link.url, CommentDigest.MODE); onDone() },
         t("📊 Полный анализ", "📊 Full analysis") to { QuickAnalysis.start(this, link.url); onDone() },
         t("😣 Боли и кейсы людей (отчёт)", "😣 Pains and cases of people (report)") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },
         t("🎨 Определить стиль видео", "🎨 Detect video style") to { QuickAnalysis.start(this, link.url, "style"); onDone() },
@@ -508,6 +527,10 @@ class LinkActivity : LumenBase() {
             finish()
         } else if (text.isNotBlank() && YtLink.extractUrl(text) == null) {
             TtsActivity.open(this, text)
+            finish()
+        } else if (intent.component?.className?.endsWith(".CommentsLink") == true) {
+            // share target "Lumen: comments": collect and summarise this video's comments right away, no menu
+            QuickAnalysis.start(this, text, CommentDigest.MODE)
             finish()
         } else {
             // a video link: choose analysis or video style

@@ -170,6 +170,18 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+        <!-- Share a YouTube video → collect its comments right away, AI digest + chat (no menu) -->
+        <activity-alias
+            android:name=".lumen.CommentsLink"
+            android:exported="true"
+            android:label="Lumen: комментарии"
+            android:targetActivity=".lumen.LinkActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
         <!-- Focused collection from Share: each result opens as its own task in Recents -->
         <activity
             android:name=".lumen.HarvestActivity"

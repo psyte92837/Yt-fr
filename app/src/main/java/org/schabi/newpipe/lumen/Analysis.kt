@@ -269,6 +269,7 @@ object AiTasks {
         }
         "audience", "seo" -> Seo.insights(p.id).take(80).joinToString("\n") { "- [${it.optString("type")}] ${it.optString("statement")}" }
             .let { if (it.isBlank()) "" else "Audience insights:\n$it" }
+        CommentDigest.TAB -> CommentDigest.chatContext(p.id)
         "channels", "analytics", "overview" -> videos.groupBy { it.channel }.entries.sortedByDescending { it.value.size }.take(20)
             .joinToString("\n") { (c, l) -> "- $c: ${l.size} videos, ${l.sumOf { maxOf(it.views, 0L) }} views" }
             .let { if (it.isBlank()) "" else "Top channels:\n$it" }
@@ -277,8 +278,10 @@ object AiTasks {
 
     fun chat(p: Project, videos: List<Video>, question: String, tab: String = ""): AiResult {
         val prov = requireProvider()
-        val extra = tabData(p, videos, tab).take(Settings.chunkChars)
-        val data = if (extra.isBlank()) boundedCorpus(p, videos) else extra + "\n\n" + boundedCorpus(p, videos)
+        val data = if (tab == CommentDigest.TAB) tabData(p, videos, tab) else {
+            val extra = tabData(p, videos, tab).take(Settings.chunkChars)
+            if (extra.isBlank()) boundedCorpus(p, videos) else extra + "\n\n" + boundedCorpus(p, videos)
+        }
         val r = Llm.complete(
             prov, prov.smartModel, Prompts.SYSTEM,
             Prompts.fill("chat", vars(p, data, AskAi.framed(tab, question))), maxTokens = 2500, task = "chat", pid = p.id

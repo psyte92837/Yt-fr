@@ -342,6 +342,7 @@ object Prompts {
         defaults.putAll(MINIAPP_PROMPTS)
         defaults.putAll(POST_PROMPTS)
         defaults.putAll(IDEAS_PROMPTS)
+        defaults.putAll(COMMENT_DIGEST_PROMPTS)
     }
 
     fun get(key: String): String = Lumen.prefs.getString("prompt_$key", null) ?: defaults[key].orEmpty()

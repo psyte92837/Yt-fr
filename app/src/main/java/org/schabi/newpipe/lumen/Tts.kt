@@ -155,10 +155,11 @@ object EdgeTts {
     fun timestamp(ms: Long): String = SimpleDateFormat("EEE MMM dd yyyy HH:mm:ss", Locale.US)
         .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms)) + " GMT+0000 (Coordinated Universal Time)"
 
-    fun configMessage(ts: String): String =
+    /** [words] asks the service for WordBoundary events (time of every word, used by Lumen Studio captions). */
+    fun configMessage(ts: String, words: Boolean = false): String =
         "X-Timestamp:$ts\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n" +
             "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"true\"," +
-            "\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"$FORMAT\"}}}}\r\n"
+            "\"wordBoundaryEnabled\":\"$words\"},\"outputFormat\":\"$FORMAT\"}}}}\r\n"
 
     fun ssmlMessage(requestId: String, ts: String, ssml: String): String =
         "X-RequestId:$requestId\r\nContent-Type:application/ssml+xml\r\nX-Timestamp:${ts}Z\r\nPath:ssml\r\n\r\n$ssml"
@@ -354,6 +355,23 @@ object EdgeTts {
         return if (cancelled() || files.indices.any { !has(it) }) null else files
     }
 
+    /**
+     * Synthesises [text] with word timings (Lumen Studio). Long text goes in several requests:
+     * each piece is MP3 bytes plus its words, timed from the start of that piece. Null when cancelled.
+     */
+    fun synthesizeWords(text: String, o: TtsOptions, cancelled: () -> Boolean): List<Pair<ByteArray, List<SWord>>>? {
+        val pieces = split(text)
+        if (pieces.isEmpty()) throw TtsException(t("Нет текста для озвучки", "No text to speak"))
+        return pieces.mapIndexed { i, escaped ->
+            val words = mutableListOf<SWord>()
+            val audio = withRetry(i, pieces.size, cancelled, { i }) {
+                synchronized(words) { words.clear() }
+                connect(escaped, o, cancelled, words)
+            } ?: return null
+            audio to synchronized(words) { words.sortedBy { it.startMs } }
+        }
+    }
+
     /** Runs [block]; on network errors waits for the network and retries with growing pauses. null = cancelled. */
     private fun withRetry(i: Int, total: Int, cancelled: () -> Boolean, ready: () -> Int, block: () -> ByteArray): ByteArray? {
         var attempt = 0
@@ -413,7 +431,7 @@ object EdgeTts {
         try { return connect(escaped, o, cancelled) } finally { serialLock.unlock() }
     }
 
-    private fun connect(escaped: String, o: TtsOptions, cancelled: () -> Boolean): ByteArray {
+    private fun connect(escaped: String, o: TtsOptions, cancelled: () -> Boolean, words: MutableList<SWord>? = null): ByteArray {
         val url = "wss://$BASE/edge/v1?TrustedClientToken=$TOKEN&Sec-MS-GEC=${gecToken(now())}" +
             "&Sec-MS-GEC-Version=$GEC_VERSION&ConnectionId=${UUID.randomUUID().toString().replace("-", "")}"
         val req = Request.Builder().url(url)
@@ -433,13 +451,18 @@ object EdgeTts {
         val ws = http.newWebSocket(req, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val ts = timestamp(System.currentTimeMillis())
-                webSocket.send(configMessage(ts))
+                webSocket.send(configMessage(ts, words != null))
                 webSocket.send(ssmlMessage(UUID.randomUUID().toString().replace("-", ""), ts, ssml(escaped, o)))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 lastData.set(System.currentTimeMillis())
-                if (path(text.substringBefore("\r\n\r\n")) == "turn.end") {
+                val p = path(text.substringBefore("\r\n\r\n"))
+                if (words != null && p == "audio.metadata") {
+                    val found = Studio.parseBoundaries(text.substringAfter("\r\n\r\n"))
+                    synchronized(words) { words.addAll(found) }
+                }
+                if (p == "turn.end") {
                     finished = true
                     webSocket.close(1000, null)
                     done.countDown()

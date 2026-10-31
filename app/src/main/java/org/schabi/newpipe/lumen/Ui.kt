@@ -250,7 +250,7 @@ fun ripple(ctx: Context, content: Drawable, onColor: Int): RippleDrawable {
 }
 
 /** Line icons for the top app bar, drawn in code on a 24-unit grid (Material Symbols Outlined look). */
-enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER, HOME, LIST, CHART, SPARK, SEARCH }
+enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER, HOME, LIST, CHART, SPARK, SEARCH, HELP, MOVIE }
 
 /** App-bar actions are passed as short glyphs; this maps them to an icon (null = draw the glyph as text). */
 fun glyphIcon(glyph: String): Ic? = when (glyph) {
@@ -267,6 +267,8 @@ fun glyphIcon(glyph: String): Ic? = when (glyph) {
     "🧾" -> Ic.JOURNAL
     "🌐" -> Ic.WEB
     "🔊" -> Ic.SPEAKER
+    "?" -> Ic.HELP
+    "🎬" -> Ic.MOVIE
     else -> null
 }
 
@@ -285,6 +287,8 @@ fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
     Ic.JOURNAL -> t("Ответы AI", "AI answers")
     Ic.WEB -> t("Браузер", "Browser")
     Ic.SPEAKER -> t("Озвучить текст", "Read text aloud")
+    Ic.HELP -> t("Справка", "Help")
+    Ic.MOVIE -> "Lumen Studio"
     Ic.HOME, Ic.LIST, Ic.CHART, Ic.SPARK, Ic.SEARCH -> glyph
     null -> glyph
 }
@@ -410,6 +414,19 @@ class IconDrawable(private val ic: Ic, color: Int) : Drawable() {
             Ic.SEARCH -> {
                 canvas.drawCircle(11f, 11f, 6f, stroke)
                 line(15.5f, 15.5f, 20f, 20f)
+            }
+            Ic.HELP -> {
+                canvas.drawCircle(12f, 12f, 9f, stroke)
+                canvas.drawArc(RectF(9f, 6.5f, 15f, 12.5f), 180f, 270f, false, stroke)
+                line(12f, 12.5f, 12f, 14f)
+                canvas.drawCircle(12f, 17.2f, 1.1f, fill)
+            }
+            Ic.MOVIE -> {
+                canvas.drawRoundRect(RectF(3f, 8f, 21f, 20f), 2f, 2f, stroke)
+                line(3f, 8f, 20f, 4f)
+                line(8f, 6.9f, 10f, 9.5f)
+                line(14f, 5.5f, 16f, 8.2f)
+                line(10f, 11f, 10f, 17f, 15f, 14f, 10f, 11f)
             }
         }
         canvas.restore()
@@ -939,6 +956,9 @@ abstract class LumenBase : Activity() {
     /** The app-bar arrow; screens with inner levels override it. */
     open fun navigateUp() = finish()
 
+    /** Help section opened by the "?" in the top bar of this screen. */
+    open val helpTopic: String get() = HelpMap.topicFor(javaClass.simpleName)
+
     /** M3 small top app bar: navigation icon, title, trailing action icons. */
     private fun appBar(title: String, back: Boolean, actions: List<Pair<String, () -> Unit>>): LinearLayout {
         val bar = LinearLayout(this).apply {
@@ -957,6 +977,10 @@ abstract class LumenBase : Activity() {
         }
         bar.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         actions.forEach { (glyph, cb) -> bar.addView(iconBtn(this, glyph, onClick = cb), LinearLayout.LayoutParams(size, size)) }
+        // every screen gets its help; the help screen itself does not need one
+        if (this !is HelpActivity && actions.none { it.first == "?" }) {
+            bar.addView(iconBtn(this, "?") { HelpActivity.open(this, helpTopic) }, LinearLayout.LayoutParams(size, size))
+        }
         return bar
     }
 

@@ -212,12 +212,14 @@ class LumenActivity : LumenBase() {
             fab = t("＋  Новый проект", "＋  New project") to { startActivity(Intent(this, NewProjectActivity::class.java)) },
             footer = bottomNav(this, listOf(
                 Ic.HOME to t("Проекты", "Projects"), Ic.WEB to t("Браузер", "Browser"),
-                Ic.SPEAKER to t("Озвучка", "Read aloud"), Ic.SETTINGS to t("Настройки", "Settings")
+                Ic.SPEAKER to t("Озвучка", "Read aloud"), Ic.MOVIE to t("Студия", "Studio"),
+                Ic.SETTINGS to t("Настройки", "Settings")
             ), 0) {
                 when (it) {
                     1 -> BrowserActivity.open(this)
                     2 -> TtsActivity.open(this)
-                    3 -> startActivity(Intent(this, SettingsActivity::class.java))
+                    3 -> StudioActivity.open(this)
+                    4 -> startActivity(Intent(this, SettingsActivity::class.java))
                     else -> Unit
                 }
             }
@@ -244,6 +246,8 @@ class LumenActivity : LumenBase() {
             @Suppress("DEPRECATION")
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
         })
+        items.add("🎬 Lumen Studio" to { StudioActivity.open(this) })
+        items.add(t("Справка и о проекте", "Help and about") to { HelpActivity.open(this, "about") })
         items.add(t("Журнал и отчёт об ошибке", "Logs and bug report") to {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))
         })

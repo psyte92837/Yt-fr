@@ -1,0 +1,644 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Lumen contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+package org.schabi.newpipe.lumen
+
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
+import kotlin.math.sqrt
+
+/*
+ * Lumen Studio: short vertical explainer videos (kinetic captions + simple infographics) from a script
+ * and a voice (Microsoft Edge voice, own microphone or an audio file). Everything here is pure logic
+ * without Android classes, so it is covered by unit tests; drawing and encoding live in StudioRender.kt.
+ */
+
+/** A spoken word and where it sounds in the audio. */
+data class SWord(val text: String, val startMs: Long, val endMs: Long)
+
+/** A tile of a scene visual: an emoji and a short label. */
+data class SItem(val icon: String, val label: String)
+
+/**
+ * One screen of the video. [say] is spoken (and shown as captions); [kind] picks the visual
+ * (see [Studio.KINDS]); [title] is used by "step" and "stat"; [items] by the tile layouts.
+ */
+data class SScene(val say: String, val kind: String = "text", val title: String = "", val items: List<SItem> = emptyList())
+
+data class SScript(val title: String, val scenes: List<SScene>)
+
+/** A span of the audio in milliseconds. */
+data class Span(val startMs: Long, val endMs: Long) {
+    val ms: Long get() = endMs - startMs
+}
+
+/** Where a scene sits in the video: its time and its words (indices into the word list). */
+data class SceneTime(val scene: Int, val startMs: Long, val endMs: Long, val words: IntRange)
+
+/** Speech statistics shown after the recording is analysed. */
+data class VoiceStats(val totalMs: Long, val speechMs: Long, val pauses: Int, val longestPauseMs: Long, val words: Int) {
+    val wordsPerMinute: Int get() = if (speechMs <= 0) 0 else (words * 60_000L / speechMs).toInt()
+}
+
+object Studio {
+    /** Visual layouts a scene can use. */
+    val KINDS = listOf("text", "step", "icons", "list", "flow", "cycle", "big", "stat")
+
+    // ---------- script: JSON from AI ----------
+
+    /** Script from an AI reply (tolerates prose and ```json fences around the object). Null if nothing usable. */
+    fun parseScript(reply: String): SScript? {
+        // a reply cut off by the token limit has no closing brace: keep its complete scenes
+        val o = JsonText.firstObject(reply)?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?: JsonSalvage.array(reply, "scenes")?.let { runCatching { JSONObject(it) }.getOrNull() }
+            ?: return null
+        val arr = o.optJSONArray("scenes") ?: return null
+        val scenes = (0 until arr.length()).mapNotNull { i -> arr.optJSONObject(i)?.let(::sceneOf) }
+        if (scenes.isEmpty()) return null
+        return SScript(o.optString("title").trim(), scenes)
+    }
+
+    private fun sceneOf(o: JSONObject): SScene? {
+        val say = o.optString("say").ifBlank { o.optString("text") }.trim()
+        if (say.isEmpty()) return null
+        val kind = o.optString("kind").trim().lowercase().takeIf { it in KINDS } ?: "text"
+        val items = o.optJSONArray("items")?.let { a ->
+            (0 until a.length()).mapNotNull { j ->
+                val it = a.opt(j)
+                when (it) {
+                    is JSONObject -> SItem(it.optString("icon").trim(), it.optString("label").trim())
+                    is String -> itemOf(it)
+                    else -> null
+                }?.takeIf { s -> s.icon.isNotEmpty() || s.label.isNotEmpty() }
+            }
+        } ?: emptyList()
+        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS))
+    }
+
+    const val MAX_ITEMS = 6
+
+    fun toJson(s: SScript): String = JSONObject().put("title", s.title).put("scenes", JSONArray().apply {
+        s.scenes.forEach { sc ->
+            put(JSONObject().put("say", sc.say).put("kind", sc.kind).put("title", sc.title).put("items", JSONArray().apply {
+                sc.items.forEach { put(JSONObject().put("icon", it.icon).put("label", it.label)) }
+            }))
+        }
+    }).toString()
+
+    // ---------- script: editable plain text ----------
+    //
+    // One scene per block, blocks separated by a blank line:
+    //   [icons] Spoken text of the scene
+    //   🔍 research | 📚 context | ⚙️ process
+    // The first line may start with [kind] or [kind: title]; a line with "|" (or starting with an emoji) lists tiles.
+
+    private val head = Regex("""^\[([a-zA-Z]+)\s*(?::\s*([^\]]*))?]\s*(.*)$""")
+
+    fun parseText(text: String): SScript {
+        val blocks = text.replace("\r", "").split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }
+        var title = ""
+        val scenes = mutableListOf<SScene>()
+        for (b in blocks) {
+            val lines = b.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.size == 1 && lines[0].startsWith("# ")) {
+                title = lines[0].removePrefix("# ").trim()
+                continue
+            }
+            var kind = "text"
+            var sceneTitle = ""
+            val say = StringBuilder()
+            val items = mutableListOf<SItem>()
+            lines.forEachIndexed { i, raw ->
+                var line = raw
+                if (i == 0) {
+                    head.find(line)?.let { m ->
+                        val k = m.groupValues[1].lowercase()
+                        if (k in KINDS) {
+                            kind = k
+                            sceneTitle = m.groupValues[2].trim()
+                            line = m.groupValues[3].trim()
+                        }
+                    }
+                }
+                if (i > 0 && isItemLine(line)) {
+                    items += line.split('|').map { itemOf(it) }.filter { it.icon.isNotEmpty() || it.label.isNotEmpty() }
+                } else if (line.isNotEmpty()) {
+                    if (say.isNotEmpty()) say.append(' ')
+                    say.append(line)
+                }
+            }
+            if (say.isNotBlank()) scenes += SScene(say.toString(), kind, sceneTitle, items.take(MAX_ITEMS))
+        }
+        return SScript(title, scenes)
+    }
+
+    fun toText(s: SScript): String = buildString {
+        if (s.title.isNotBlank()) append("# ").append(s.title).append("\n\n")
+        s.scenes.forEachIndexed { i, sc ->
+            if (i > 0) append("\n\n")
+            if (sc.kind != "text" || sc.title.isNotBlank()) {
+                append('[').append(sc.kind)
+                if (sc.title.isNotBlank()) append(": ").append(sc.title)
+                append("] ")
+            }
+            append(sc.say)
+            if (sc.items.isNotEmpty()) append('\n').append(sc.items.joinToString(" | ") { (it.icon + " " + it.label).trim() })
+        }
+    }
+
+    private fun isItemLine(line: String) = line.contains('|') || (line.isNotEmpty() && startsWithEmoji(line) && line.length <= 40)
+
+    /** "🔍 research" → icon + label; a plain word becomes a label without an icon. */
+    fun itemOf(s: String): SItem {
+        val t = s.trim()
+        if (t.isEmpty()) return SItem("", "")
+        if (!startsWithEmoji(t)) return SItem("", t)
+        val sp = t.indexOf(' ')
+        return if (sp < 0) SItem(t, "") else SItem(t.substring(0, sp), t.substring(sp + 1).trim())
+    }
+
+    fun startsWithEmoji(s: String): Boolean {
+        if (s.isEmpty()) return false
+        val cp = s.codePointAt(0)
+        return cp >= 0x2190 && !Character.isLetterOrDigit(cp)
+    }
+
+    // ---------- words ----------
+
+    /** Spoken words of a text: whitespace-separated pieces that contain a letter or a digit. */
+    fun tokens(text: String): List<String> =
+        text.split(Regex("\\s+")).map { it.trim() }.filter { w -> w.any { it.isLetterOrDigit() } }
+
+    /** Letters and digits only, lower case: used to compare spoken and written words. */
+    fun norm(w: String): String = w.filter { it.isLetterOrDigit() }.lowercase()
+
+    /**
+     * WordBoundary events from an Edge "audio.metadata" frame body. Offsets are in 100 ns ticks
+     * from the start of that request's audio; [shiftMs] moves them to the place of the piece in the whole track.
+     */
+    fun parseBoundaries(json: String, shiftMs: Long = 0): List<SWord> {
+        val arr = try {
+            JSONObject(json).optJSONArray("Metadata")
+        } catch (e: Exception) {
+            null
+        } ?: return emptyList()
+        val out = mutableListOf<SWord>()
+        for (i in 0 until arr.length()) {
+            val m = arr.optJSONObject(i) ?: continue
+            if (m.optString("Type") != "WordBoundary") continue
+            val d = m.optJSONObject("Data") ?: continue
+            val text = d.optJSONObject("text")?.optString("Text").orEmpty().trim()
+            if (text.isEmpty() || text.none { it.isLetterOrDigit() }) continue
+            val start = d.optLong("Offset") / 10_000 + shiftMs
+            val dur = max(1L, d.optLong("Duration") / 10_000)
+            out += SWord(text, start, start + dur)
+        }
+        return out
+    }
+
+    /**
+     * Splits [words] between scenes in proportion to the number of words each scene says.
+     * When the texts match (Edge voice, or a recording of the same script) the split is exact.
+     */
+    fun assignScenes(wordCount: Int, sceneWordCounts: List<Int>): List<IntRange> {
+        if (sceneWordCounts.isEmpty()) return emptyList()
+        val total = sceneWordCounts.sum()
+        val out = ArrayList<IntRange>(sceneWordCounts.size)
+        var cum = 0
+        var prevEnd = 0
+        sceneWordCounts.forEachIndexed { i, n ->
+            cum += n
+            val end = if (i == sceneWordCounts.lastIndex) wordCount
+            else if (total == 0) prevEnd else (cum.toLong() * wordCount / total).toInt().coerceIn(prevEnd, wordCount)
+            out += prevEnd until end
+            prevEnd = end
+        }
+        return out
+    }
+
+    /**
+     * Scene times. A scene starts a little before its first word (or where the previous one ended
+     * when it has no words) and lasts until the next scene starts; the last one until [totalMs].
+     */
+    fun sceneTimes(words: List<SWord>, ranges: List<IntRange>, totalMs: Long, leadMs: Long = 120): List<SceneTime> {
+        val starts = LongArray(ranges.size)
+        var last = 0L
+        ranges.forEachIndexed { i, r ->
+            val s = if (r.isEmpty() || r.first >= words.size) last else max(last, words[r.first].startMs - leadMs)
+            starts[i] = if (i == 0) 0L else s.coerceAtLeast(0)
+            if (!r.isEmpty() && r.last < words.size) last = words[r.last].endMs
+        }
+        return ranges.indices.map { i ->
+            val end = if (i == ranges.lastIndex) max(totalMs, starts[i] + 1) else max(starts[i + 1], starts[i] + 1)
+            SceneTime(i, starts[i], end, ranges[i])
+        }
+    }
+
+    /**
+     * Caption groups inside a scene: up to [maxWords] words and [maxChars] letters on screen at once;
+     * a pause longer than [gapMs] or a sentence end starts a new group. Returns index ranges into [words].
+     */
+    fun captions(words: List<SWord>, range: IntRange, maxWords: Int = 4, maxChars: Int = 26, gapMs: Long = 650): List<IntRange> {
+        if (range.isEmpty()) return emptyList()
+        val out = mutableListOf<IntRange>()
+        var start = range.first
+        var chars = 0
+        for (i in range) {
+            val w = words[i]
+            val n = i - start
+            val gap = if (i > start) w.startMs - words[i - 1].endMs else 0
+            val sentence = i > start && words[i - 1].text.trimEnd().lastOrNull()?.let { it in ".!?…" } == true
+            if (n > 0 && (n >= maxWords || chars + 1 + w.text.length > maxChars || gap > gapMs || sentence)) {
+                out += start until i
+                start = i
+                chars = 0
+            }
+            chars += (if (chars > 0) 1 else 0) + w.text.length
+        }
+        out += start..range.last
+        return out
+    }
+
+    /** Written words of the script with punctuation, matched to the spoken ones (Edge drops punctuation). */
+    fun dress(spoken: List<SWord>, written: List<String>): List<SWord> {
+        var j = 0
+        return spoken.map { w ->
+            val n = norm(w.text)
+            var k = j
+            while (k < written.size && k < j + 3 && norm(written[k]) != n) k++
+            if (k < written.size && norm(written[k]) == n) {
+                j = k + 1
+                w.copy(text = written[k])
+            } else w
+        }
+    }
+
+    // ---------- animation ----------
+
+    /** 0 → 1 over [durMs] from [startMs], ease-out cubic. */
+    fun appear(tMs: Long, startMs: Long, durMs: Long = 280): Float {
+        if (tMs <= startMs) return 0f
+        if (tMs >= startMs + durMs) return 1f
+        val x = (tMs - startMs).toFloat() / durMs
+        val r = 1 - x
+        return 1 - r * r * r
+    }
+
+    /** When tile [i] of [n] shows up in a scene lasting [sceneMs]: spread over the first 60 %, at most 450 ms apart. */
+    fun itemDelay(i: Int, n: Int, sceneMs: Long): Long {
+        if (n <= 1) return 150
+        val step = min(450L, max(80L, sceneMs * 6 / 10 / n))
+        return 150 + i * step
+    }
+
+    // ---------- own voice: analysis ----------
+
+    /** RMS loudness per [frameMs] frame, 0..1. */
+    fun frameRms(pcm: ShortArray, rate: Int, frameMs: Int = 20): FloatArray {
+        val n = max(1, rate * frameMs / 1000)
+        val frames = (pcm.size + n - 1) / n
+        return FloatArray(frames) { f ->
+            var sum = 0.0
+            val from = f * n
+            val to = min(pcm.size, from + n)
+            for (i in from until to) {
+                val v = pcm[i] / 32768.0
+                sum += v * v
+            }
+            sqrt(sum / max(1, to - from)).toFloat()
+        }
+    }
+
+    /**
+     * Speech parts of a recording (simple voice activity detection): the threshold follows the noise floor
+     * and the peak of the take; pauses shorter than [minPauseMs] are bridged, blips under [minSpeechMs] dropped.
+     */
+    fun speechSpans(pcm: ShortArray, rate: Int, minPauseMs: Int = 280, minSpeechMs: Int = 120, frameMs: Int = 20): List<Span> {
+        val rms = frameRms(pcm, rate, frameMs)
+        if (rms.isEmpty()) return emptyList()
+        val sorted = rms.sortedArray()
+        val floor = sorted[(sorted.size * 0.15).toInt().coerceAtMost(sorted.lastIndex)]
+        val peak = sorted[(sorted.size * 0.98).toInt().coerceAtMost(sorted.lastIndex)]
+        val thr = max(max(floor * 2.5f, floor + (peak - floor) * 0.12f), 0.006f)
+        val raw = mutableListOf<Span>()
+        var start = -1
+        for (f in rms.indices) {
+            val on = rms[f] >= thr
+            if (on && start < 0) start = f
+            if (!on && start >= 0) {
+                raw += Span(start.toLong() * frameMs, f.toLong() * frameMs)
+                start = -1
+            }
+        }
+        if (start >= 0) raw += Span(start.toLong() * frameMs, rms.size.toLong() * frameMs)
+        val merged = mutableListOf<Span>()
+        for (s in raw) {
+            val prev = merged.lastOrNull()
+            if (prev != null && s.startMs - prev.endMs < minPauseMs) merged[merged.lastIndex] = Span(prev.startMs, s.endMs)
+            else merged += s
+        }
+        val totalMs = pcm.size * 1000L / rate
+        return merged.filter { it.ms >= minSpeechMs }.map { Span(it.startMs, min(it.endMs, totalMs)) }
+    }
+
+    /**
+     * Places written words on the speech parts of a recording: speaking time is shared between words
+     * in proportion to their length, so no word lands in a pause. Good enough for captions without a recogniser.
+     */
+    fun alignWords(words: List<String>, speech: List<Span>): List<SWord> {
+        if (words.isEmpty() || speech.isEmpty()) return emptyList()
+        val weights = words.map { max(2, norm(it).length) + 1 }
+        val total = weights.sum().toDouble()
+        val speechMs = speech.sumOf { it.ms }.toDouble()
+        // cumulative position (0..1 of all letters) → time on the speech parts
+        fun at(p: Double, preferNext: Boolean): Long {
+            var left = p * speechMs
+            for ((i, s) in speech.withIndex()) {
+                val last = i == speech.lastIndex
+                if (left < s.ms || (left <= s.ms && (!preferNext || last))) return s.startMs + left.roundToInt()
+                left -= s.ms
+            }
+            return speech.last().endMs
+        }
+        var cum = 0
+        return words.mapIndexed { i, w ->
+            val a = at(cum / total, true)
+            cum += weights[i]
+            val b = at(cum / total, false)
+            SWord(w, a, max(a + 1, b))
+        }
+    }
+
+    fun stats(totalMs: Long, speech: List<Span>, words: Int): VoiceStats {
+        val gaps = speech.zipWithNext { a, b -> b.startMs - a.endMs }
+        return VoiceStats(totalMs, speech.sumOf { it.ms }, gaps.size, gaps.maxOrNull() ?: 0, words)
+    }
+
+    /** Joins neighbouring speech parts into pieces of at most [maxMs] (for a recogniser with a length limit). */
+    fun groupSpans(speech: List<Span>, maxMs: Long = 12_000): List<Span> {
+        val out = mutableListOf<Span>()
+        for (s in speech) {
+            val prev = out.lastOrNull()
+            if (prev != null && s.endMs - prev.startMs <= maxMs) out[out.lastIndex] = Span(prev.startMs, s.endMs)
+            else out += s
+        }
+        return out
+    }
+
+    /**
+     * Words of a recognised recording: every piece's text is placed on the speech inside that piece,
+     * so a recogniser error in one piece does not shift the rest.
+     */
+    fun alignPieces(pieces: List<Pair<Span, String>>, speech: List<Span>): List<SWord> = pieces.flatMap { (piece, text) ->
+        val inside = speech.mapNotNull { s ->
+            val a = max(s.startMs, piece.startMs)
+            val b = min(s.endMs, piece.endMs)
+            if (b > a) Span(a, b) else null
+        }.ifEmpty { listOf(piece) }
+        alignWords(tokens(text), inside)
+    }
+
+    /**
+     * Scenes from a recognised take without AI: a new scene after a long pause, a sentence end
+     * once the scene has some words, or at [maxWords].
+     */
+    fun autoScenes(words: List<SWord>, maxWords: Int = 14, pauseMs: Long = 700): SScript {
+        val scenes = mutableListOf<SScene>()
+        var cur = mutableListOf<String>()
+        words.forEachIndexed { i, w ->
+            val gap = if (i > 0) w.startMs - words[i - 1].endMs else 0
+            val sentence = cur.size >= 5 && cur.last().trimEnd().lastOrNull()?.let { it in ".!?…" } == true
+            if (cur.isNotEmpty() && (gap > pauseMs || sentence || cur.size >= maxWords)) {
+                scenes += SScene(cur.joinToString(" "))
+                cur = mutableListOf()
+            }
+            cur += w.text
+        }
+        if (cur.isNotEmpty()) scenes += SScene(cur.joinToString(" "))
+        return SScript("", scenes)
+    }
+
+    // ---------- drawing helpers ----------
+
+    /** Index of the scene shown at [tMs]. */
+    fun sceneAt(times: List<SceneTime>, tMs: Long): Int {
+        if (times.isEmpty()) return -1
+        var lo = 0
+        var hi = times.lastIndex
+        while (lo < hi) {
+            val mid = (lo + hi + 1) / 2
+            if (times[mid].startMs <= tMs) lo = mid else hi = mid - 1
+        }
+        return lo
+    }
+
+    /** Number shown on the badge of each "step" scene (1, 2, 3…); 0 for other scenes. */
+    fun stepNumbers(scenes: List<SScene>): IntArray {
+        var n = 0
+        return IntArray(scenes.size) { if (scenes[it].kind == "step") ++n else 0 }
+    }
+
+    /** Greedy line breaking: [widths] of words, [space] between them → word index ranges per line. */
+    fun lines(widths: List<Float>, space: Float, maxWidth: Float): List<IntRange> {
+        if (widths.isEmpty()) return emptyList()
+        val out = mutableListOf<IntRange>()
+        var start = 0
+        var w = widths[0]
+        for (i in 1 until widths.size) {
+            if (w + space + widths[i] > maxWidth) {
+                out += start until i
+                start = i
+                w = widths[i]
+            } else {
+                w += space + widths[i]
+            }
+        }
+        out += start until widths.size
+        return out
+    }
+
+    private val number = Regex("""\d+(?:[.,]\d+)?""")
+
+    /** "80%" counted up: at [p] = 0.5 gives "40%". Text without a number is returned as is. */
+    fun countUp(s: String, p: Float): String {
+        val m = number.find(s) ?: return s
+        val raw = m.value.replace(',', '.')
+        val v = raw.toDoubleOrNull() ?: return s
+        val k = p.coerceIn(0f, 1f)
+        val decimals = raw.substringAfter('.', "").length
+        val cur = v * k
+        val txt = if (decimals == 0) cur.roundToInt().toString()
+        else String.format(java.util.Locale.US, "%.${decimals}f", cur).let { if (m.value.contains(',')) it.replace('.', ',') else it }
+        return s.substring(0, m.range.first) + txt + s.substring(m.range.last + 1)
+    }
+
+    // ---------- audio ----------
+
+    fun durationMs(samples: Int, rate: Int): Long = if (rate <= 0) 0 else samples * 1000L / rate
+
+    /** Interleaved PCM → mono. */
+    fun downmix(pcm: ShortArray, channels: Int): ShortArray {
+        if (channels <= 1) return pcm
+        val n = pcm.size / channels
+        return ShortArray(n) { i ->
+            var s = 0
+            for (c in 0 until channels) s += pcm[i * channels + c]
+            (s / channels).toShort()
+        }
+    }
+
+    /** Linear resampling (speech quality is enough for a voice-over). */
+    fun resample(pcm: ShortArray, from: Int, to: Int): ShortArray {
+        if (from == to || pcm.isEmpty()) return pcm
+        val n = max(1, (pcm.size.toLong() * to / from).toInt())
+        return ShortArray(n) { i ->
+            val pos = i.toDouble() * from / to
+            val a = pos.toInt().coerceAtMost(pcm.lastIndex)
+            val b = min(a + 1, pcm.lastIndex)
+            val f = pos - a
+            (pcm[a] * (1 - f) + pcm[b] * f).roundToInt().toShort()
+        }
+    }
+
+    /** Scales the take so its loudest part reaches [peak] of full scale (quiet phone recordings). Never boosts more than ×8. */
+    fun normalize(pcm: ShortArray, peak: Double = 0.89): ShortArray {
+        var m = 0
+        for (s in pcm) m = max(m, abs(s.toInt()))
+        if (m == 0) return pcm
+        val k = min(8.0, peak * 32767 / m)
+        if (abs(k - 1) < 0.02) return pcm
+        return ShortArray(pcm.size) { (pcm[it] * k).roundToInt().coerceIn(-32768, 32767).toShort() }
+    }
+
+    fun silence(ms: Long, rate: Int) = ShortArray((ms * rate / 1000).toInt())
+
+    /** 44-byte header of a 16-bit PCM WAV file. */
+    fun wavHeader(dataBytes: Int, rate: Int, channels: Int = 1): ByteArray {
+        val b = java.nio.ByteBuffer.allocate(44).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()).putInt(36 + dataBytes).put("WAVE".toByteArray())
+        b.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(channels.toShort()).putInt(rate)
+            .putInt(rate * channels * 2).putShort((channels * 2).toShort()).putShort(16)
+        b.put("data".toByteArray()).putInt(dataBytes)
+        return b.array()
+    }
+
+    /** Mono PCM and sample rate of a 16-bit WAV written by [wavHeader]; null for other files. */
+    fun readWav(bytes: ByteArray): Pair<ShortArray, Int>? {
+        if (bytes.size < 44 || String(bytes, 0, 4) != "RIFF" || String(bytes, 8, 4) != "WAVE") return null
+        val b = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val channels = b.getShort(22).toInt()
+        val rate = b.getInt(24)
+        if (b.getShort(34).toInt() != 16) return null
+        var p = 12
+        while (p + 8 <= bytes.size) {
+            val id = String(bytes, p, 4)
+            val len = b.getInt(p + 4)
+            if (id == "data") {
+                val n = min(len, bytes.size - p - 8) / 2
+                val pcm = ShortArray(n) { b.getShort(p + 8 + it * 2) }
+                return downmix(pcm, channels) to rate
+            }
+            p += 8 + len + (len and 1)
+        }
+        return null
+    }
+
+    // ---------- video ----------
+
+    /**
+     * ARGB pixels → planar YUV 4:2:0 (BT.601, limited range), as video encoders expect.
+     * [y] holds w×h bytes, [u] and [v] (w/2)×(h/2) each.
+     */
+    fun argbToYuv420(argb: IntArray, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
+        val cw = w / 2
+        for (j in 0 until h) {
+            val row = j * w
+            for (i in 0 until w) {
+                val c = argb[row + i]
+                val r = (c shr 16) and 0xFF
+                val g = (c shr 8) and 0xFF
+                val b = c and 0xFF
+                y[row + i] = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).toByte()
+            }
+        }
+        for (j in 0 until h / 2) {
+            for (i in 0 until cw) {
+                // average of the 2×2 block
+                var r = 0
+                var g = 0
+                var b = 0
+                for (dy in 0..1) for (dx in 0..1) {
+                    val c = argb[(j * 2 + dy) * w + i * 2 + dx]
+                    r += (c shr 16) and 0xFF
+                    g += (c shr 8) and 0xFF
+                    b += c and 0xFF
+                }
+                r /= 4; g /= 4; b /= 4
+                u[j * cw + i] = (((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128).toByte()
+                v[j * cw + i] = (((112 * r - 94 * g - 18 * b + 128) shr 8) + 128).toByte()
+            }
+        }
+    }
+
+    /** Frames needed for [ms] at [fps] (at least one). */
+    fun frameCount(ms: Long, fps: Int): Int = max(1, ((ms * fps + 999) / 1000).toInt())
+
+    fun frameTimeUs(i: Int, fps: Int): Long = i * 1_000_000L / fps
+
+    /** Video bitrate for the size: ~0.1 bit per pixel per frame, at least 2 Mbit/s. */
+    fun bitrate(w: Int, h: Int, fps: Int): Int = max(2_000_000, (w.toLong() * h * fps / 10).toInt())
+
+    /** Rough script length: 2.4 spoken words per second. */
+    fun wordsFor(seconds: Int): Int = (seconds * 2.4).roundToInt()
+
+    /** "1:05" */
+    fun clock(ms: Long): String {
+        val s = (ms / 1000).coerceAtLeast(0)
+        return "${s / 60}:" + (s % 60).toString().padStart(2, '0')
+    }
+
+    fun fileName(title: String, day: String): String {
+        val base = title.trim().replace(Regex("[^\\p{L}\\p{Nd}]+"), "_").trim('_').take(40).ifBlank { "video" }
+        return "Lumen_Studio_${base}_$day.mp4"
+    }
+}
+
+/** Editable prompts of Lumen Studio (added to [Prompts.defaults]). */
+val STUDIO_PROMPTS = linkedMapOf(
+    "studio_script" to (
+        "Ты сценарист коротких вертикальных видео-объяснялок (Shorts, Reels) в стиле анимированной инфографики: " +
+            "крупные слова на тёмном фоне появляются под голос, рядом простые схемы из эмодзи-плиток.\n" +
+            "Тема: \"{topic}\". Длительность около {seconds} секунд (примерно {words} слов). Язык: {lang}.\n{extra}\n" +
+            "Разбей текст на 8-25 сцен, в сцене 1-2 коротких предложения (до 18 слов). Пиши разговорно, без канцелярита.\n" +
+            "{visuals}\n" +
+            "Первая сцена — цепляющий вопрос или обещание пользы. Последняя — вывод или призыв.\n" +
+            "Верни строго JSON: {\"title\":\"...\",\"scenes\":[{\"say\":\"текст для озвучки\",\"kind\":\"icons\",\"title\":\"\"," +
+            "\"items\":[{\"icon\":\"🔍\",\"label\":\"исследование\"}]}]}"
+        ),
+    "studio_scenes" to (
+        "Ниже расшифровка речи автора для короткого вертикального видео. Разбей её на сцены по порядку, " +
+            "НЕ меняя, не переставляя и не пропуская слова: поле say каждой сцены — точный фрагмент расшифровки, " +
+            "вместе они дают весь текст. В сцене 1-2 предложения.\n" +
+            "{visuals}\n" +
+            "Подписи плиток на языке {lang}.\n" +
+            "Верни строго JSON: {\"title\":\"короткое название\",\"scenes\":[{\"say\":\"...\",\"kind\":\"text\",\"title\":\"\",\"items\":[]}]}\n\n" +
+            "Расшифровка:\n{data}"
+        )
+)
+
+/** Shared description of the visuals for both prompts. */
+const val STUDIO_VISUALS = "Для каждой сцены выбери визуал kind: " +
+    "text — только крупный текст (когда картинка не нужна); " +
+    "step — номер этапа или раздела, в title короткий заголовок (2-4 слова); " +
+    "icons — 3-6 плиток (эмодзи + подпись 1-2 слова) для перечня понятий; " +
+    "list — 2-5 пунктов с галочками (подписи до 4 слов); " +
+    "flow — 3-5 шагов процесса по порядку; " +
+    "cycle — 3-5 этапов повторяющегося цикла; " +
+    "big — один крупный эмодзи и подпись; " +
+    "stat — крупное число или факт в title (например \"×3\" или \"80%\") и подпись в items[0].label. " +
+    "Чередуй визуалы, не ставь один и тот же больше двух раз подряд. Эмодзи подбирай по смыслу."

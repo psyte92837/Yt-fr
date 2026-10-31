@@ -1,0 +1,953 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Lumen contributors
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+package org.schabi.newpipe.lumen
+
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RadialGradient
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.Image
+import android.media.MediaCodec
+import android.media.MediaCodecInfo
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
+import android.media.MediaRecorder
+import android.net.Uri
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.ParcelFileDescriptor
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.concurrent.CancellationException
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.sin
+
+/** Look of the video. DARK: kinetic word groups on a dark screen; LIGHT: headline + one big word at a time on a light screen. */
+enum class StudioStyle { DARK, LIGHT }
+
+/** Everything needed to draw any frame of the video. */
+class StudioPlan(
+    val script: SScript,
+    val words: List<SWord>,
+    val times: List<SceneTime>,
+    val captions: List<List<IntRange>>,
+    val totalMs: Long,
+    val style: StudioStyle,
+    val accent: Int
+) {
+    val steps = Studio.stepNumbers(script.scenes)
+
+    companion object {
+        /** [ranges] = words of every scene when known exactly (Edge voice per scene); otherwise split by word counts. */
+        fun build(script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int, ranges: List<IntRange>? = null): StudioPlan {
+            val ranges = ranges?.takeIf { it.size == script.scenes.size }
+                ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
+            val times = Studio.sceneTimes(words, ranges, totalMs)
+            val single = style == StudioStyle.LIGHT
+            val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
+            return StudioPlan(script, words, times, caps, totalMs, style, accent)
+        }
+    }
+}
+
+/** Draws frames of a [StudioPlan] on a Canvas (software canvas, so blur and shadows work). */
+class StudioPainter(private val w: Int, private val h: Int, private val plan: StudioPlan) {
+    private val dark = plan.style == StudioStyle.DARK
+    private val bg = if (dark) 0xFF131417.toInt() else 0xFFF1F3F8.toInt()
+    private val card = if (dark) 0xFF1D1F24.toInt() else 0xFFFFFFFF.toInt()
+    private val stroke = if (dark) 0xFF2E3138.toInt() else 0xFFE2E5EC.toInt()
+    private val ink = if (dark) 0xFFF3F4F6.toInt() else 0xFF14161B.toInt()
+    private val muted = if (dark) 0xFF9AA0A9.toInt() else 0xFF6B7280.toInt()
+    private val green = 0xFF34C759.toInt()
+    private val accent = plan.accent
+    private val u = w / 100f // 1 % of the width
+
+    private val textP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        textAlign = Paint.Align.LEFT
+    }
+    private val bigWordP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD_ITALIC)
+        textAlign = Paint.Align.CENTER
+    }
+    private val headP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("sans-serif-condensed", Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+    }
+    private val emojiP = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val labelP = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        textAlign = Paint.Align.CENTER
+    }
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val glow = Paint().apply {
+        shader = RadialGradient(w / 2f, h * 0.56f, w * 0.75f, (accent and 0x00FFFFFF) or (if (dark) 0x26000000 else 0x14000000), 0, Shader.TileMode.CLAMP)
+    }
+    private val layouts = HashMap<IntRange, List<Pair<Int, Pair<Float, Float>>>>()
+
+    fun draw(c: Canvas, tMs: Long) {
+        c.drawColor(bg)
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glow)
+        val i = Studio.sceneAt(plan.times, tMs)
+        if (i < 0) return
+        val st = plan.times[i]
+        val sc = plan.script.scenes[i]
+        val last = i == plan.times.lastIndex
+        val a = Studio.appear(tMs, st.startMs - 1, 260) * (if (last) 1f else 1f - Studio.appear(tMs, st.endMs - 200, 200))
+        if (a <= 0f) return
+        val local = tMs - st.startMs
+        val sceneMs = st.endMs - st.startMs
+        if (dark) {
+            val textOnly = sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big"))
+            caption(c, i, tMs, a, if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
+            if (!textOnly) visual(c, sc, i, w / 2f, h * 0.57f, local, sceneMs, a)
+        } else {
+            val head = sc.title.takeIf { it.isNotBlank() && sc.kind in listOf("step", "text", "icons", "list", "flow", "cycle") }
+            if (head != null) headline(c, head, h * 0.15f, a, local)
+            if (sc.kind != "text") visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
+            singleWord(c, i, tMs, a, h * 0.80f)
+        }
+    }
+
+    // ---------- captions ----------
+
+    /** Word group with each word blurring in when it is spoken (DARK style). */
+    private fun caption(c: Canvas, scene: Int, tMs: Long, a: Float, top: Float, size: Float) {
+        val groups = plan.captions.getOrNull(scene) ?: return
+        val g = groups.lastOrNull { plan.words[it.first].startMs - 90 <= tMs } ?: return
+        textP.textSize = size
+        val pos = layouts.getOrPut(g) {
+            val ws = g.map { textP.measureText(plan.words[it].text) }
+            val space = textP.measureText(" ")
+            val lines = Studio.lines(ws, space, w * 0.84f)
+            val out = mutableListOf<Pair<Int, Pair<Float, Float>>>()
+            lines.forEachIndexed { li, r ->
+                val lineW = r.sumOf { ws[it].toDouble() }.toFloat() + space * (r.count() - 1)
+                var x = (w - lineW) / 2
+                for (k in r) {
+                    out += (g.first + k) to (x to top + size * 1.25f * li)
+                    x += ws[k] + space
+                }
+            }
+            out
+        }
+        for ((wi, xy) in pos) {
+            val wa = Studio.appear(tMs, plan.words[wi].startMs - 90, 240)
+            if (wa <= 0f) continue
+            textP.color = ink
+            textP.alpha = (255 * wa * a).toInt()
+            textP.maskFilter = if (wa < 0.98f) BlurMaskFilter(max(0.5f, (1 - wa) * size * 0.28f), BlurMaskFilter.Blur.NORMAL) else null
+            c.drawText(plan.words[wi].text, xy.first, xy.second + size + (1 - wa) * size * 0.35f, textP)
+        }
+        textP.maskFilter = null
+    }
+
+    /** One big word at a time, italic serif in capitals (LIGHT style). */
+    private fun singleWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float) {
+        val groups = plan.captions.getOrNull(scene) ?: return
+        val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
+        val word = plan.words[g.first]
+        val p = Studio.appear(tMs, word.startMs - 60, 160)
+        val txt = word.text.trim { !it.isLetterOrDigit() }.uppercase()
+        bigWordP.textSize = 8.4f * u
+        while (bigWordP.measureText(txt) > w * 0.9f && bigWordP.textSize > 3 * u) bigWordP.textSize *= 0.9f
+        val accentWord = Studio.norm(word.text).length >= 7 && (g.first % 3 == 0)
+        bigWordP.color = if (accentWord) accent else ink
+        bigWordP.alpha = (255 * p * a).toInt()
+        c.save()
+        val k = 1.12f - 0.12f * p
+        c.scale(k, k, w / 2f, y)
+        c.drawText(txt, w / 2f, y, bigWordP)
+        c.restore()
+    }
+
+    /** Condensed capitals; the last word in the accent colour (LIGHT style). */
+    private fun headline(c: Canvas, s: String, y: Float, a: Float, local: Long) {
+        val words = s.uppercase().split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return
+        headP.textSize = 8.6f * u
+        val space = headP.measureText(" ")
+        val widths = words.map { headP.measureText(it) }
+        val lines = Studio.lines(widths, space, w * 0.88f)
+        val p = Studio.appear(local, 0, 320)
+        lines.forEachIndexed { li, r ->
+            val lineW = r.sumOf { widths[it].toDouble() }.toFloat() + space * (r.count() - 1)
+            var x = (w - lineW) / 2
+            for (k in r) {
+                headP.textAlign = Paint.Align.LEFT
+                headP.color = if (k == words.lastIndex && words.size > 1) accent else ink
+                headP.alpha = (255 * a * p).toInt()
+                c.drawText(words[k], x, y + headP.textSize * 1.05f * li + (1 - p) * 3 * u, headP)
+                x += widths[k] + space
+            }
+        }
+    }
+
+    // ---------- visuals ----------
+
+    private fun visual(c: Canvas, sc: SScene, index: Int, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        when (sc.kind) {
+            "step" -> step(c, plan.steps[index], if (dark) sc.title else "", cx, cy, local, a)
+            "icons" -> grid(c, sc.items, cx, cy, local, sceneMs, a)
+            "list" -> list(c, sc, cx, cy, local, sceneMs, a)
+            "flow" -> flow(c, sc.items, cx, cy, local, sceneMs, a)
+            "cycle" -> cycle(c, sc.items, cx, cy, local, sceneMs, a)
+            "big" -> big(c, sc.items.firstOrNull() ?: SItem("💡", sc.title), cx, cy, local, a)
+            "stat" -> stat(c, sc, cx, cy, local, a)
+            else -> if (sc.items.isNotEmpty()) grid(c, sc.items, cx, cy, local, sceneMs, a)
+        }
+    }
+
+    private fun cardPaint(alpha: Float) = fill.apply {
+        color = card
+        this.alpha = (255 * alpha).toInt()
+        if (!dark) setShadowLayer(2.4f * u, 0f, 0.8f * u, ((0x22 * alpha).toInt() shl 24)) else clearShadowLayer()
+    }
+
+    private fun roundCard(c: Canvas, r: RectF, radius: Float, alpha: Float, border: Int = stroke) {
+        c.drawRoundRect(r, radius, radius, cardPaint(alpha))
+        fill.clearShadowLayer()
+        line.color = border
+        line.alpha = (255 * alpha).toInt()
+        line.strokeWidth = max(1f, 0.25f * u)
+        c.drawRoundRect(r, radius, radius, line)
+    }
+
+    /** Emoji tile with a label under the emoji; pops in with [p]. */
+    private fun tile(c: Canvas, x: Float, y: Float, size: Float, item: SItem, p: Float, a: Float, highlight: Boolean = false) {
+        if (p <= 0f) return
+        val al = p * a
+        c.save()
+        val k = 0.86f + 0.14f * p
+        c.scale(k, k, x, y)
+        val r = RectF(x - size / 2, y - size / 2, x + size / 2, y + size / 2)
+        roundCard(c, r, size * 0.2f, al, if (highlight) accent else stroke)
+        val hasLabel = item.label.isNotBlank()
+        if (item.icon.isNotBlank()) {
+            emojiP.textSize = size * (if (hasLabel) 0.36f else 0.5f)
+            emojiP.alpha = (255 * al).toInt()
+            c.drawText(item.icon, x, y + (if (hasLabel) -size * 0.04f else size * 0.17f), emojiP)
+        }
+        if (hasLabel) {
+            labelP.color = ink
+            labelP.alpha = (255 * al).toInt()
+            labelP.textSize = size * 0.12f
+            val lines = wrap(item.label, labelP, size * 0.88f, 2)
+            val base = if (item.icon.isNotBlank()) y + size * 0.24f else y - (lines.size - 1) * labelP.textSize * 0.6f + labelP.textSize * 0.35f
+            lines.forEachIndexed { li, s -> c.drawText(s, x, base + li * labelP.textSize * 1.15f, labelP) }
+        }
+        c.restore()
+    }
+
+    private fun wrap(s: String, p: Paint, maxW: Float, maxLines: Int): List<String> {
+        val words = s.split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        val ranges = Studio.lines(words.map { p.measureText(it) }, p.measureText(" "), maxW)
+        val out = ranges.take(maxLines).map { r -> r.joinToString(" ") { words[it] } }.toMutableList()
+        if (ranges.size > maxLines) out[out.lastIndex] = out.last().trimEnd() + "…"
+        return out.map { line ->
+            var t = line
+            while (p.measureText(t) > maxW && t.length > 2) t = t.dropLast(2) + "…"
+            t
+        }
+    }
+
+    private fun itemP(i: Int, n: Int, local: Long, sceneMs: Long) = Studio.appear(local, Studio.itemDelay(i, n, sceneMs), 300)
+
+    private fun grid(c: Canvas, items: List<SItem>, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        val n = items.size
+        if (n == 0) return
+        val cols = if (n <= 3) n else if (n == 4) 2 else 3
+        val rows = (n + cols - 1) / cols
+        val gap = 3f * u
+        val size = min((w * 0.86f - gap * (cols - 1)) / cols, 26f * u)
+        val top = cy - (rows * size + (rows - 1) * gap) / 2 + size / 2
+        items.forEachIndexed { i, it ->
+            val r = i / cols
+            val inRow = if (r == rows - 1) n - r * cols else cols
+            val left = cx - (inRow * size + (inRow - 1) * gap) / 2 + size / 2
+            tile(c, left + (i % cols) * (size + gap), top + r * (size + gap), size, it, itemP(i, n, local, sceneMs), a)
+        }
+    }
+
+    private fun flow(c: Canvas, items: List<SItem>, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        val n = items.size
+        if (n == 0) return
+        val arrow = 5f * u
+        val size = min((w * 0.9f - arrow * (n - 1)) / n, 24f * u)
+        val total = n * size + (n - 1) * arrow
+        var x = cx - total / 2 + size / 2
+        items.forEachIndexed { i, it ->
+            val p = itemP(i, n, local, sceneMs)
+            tile(c, x, cy, size, it, p, a)
+            if (i < n - 1) {
+                val pa = Studio.appear(local, Studio.itemDelay(i, n, sceneMs) + 150, 250)
+                if (pa > 0) {
+                    line.color = muted
+                    line.alpha = (255 * pa * a).toInt()
+                    line.strokeWidth = 0.6f * u
+                    val ax = x + size / 2 + arrow / 2
+                    c.drawPath(Path().apply {
+                        moveTo(ax - 0.8f * u, cy - 1.4f * u)
+                        lineTo(ax + 0.8f * u, cy)
+                        lineTo(ax - 0.8f * u, cy + 1.4f * u)
+                    }, line)
+                }
+            }
+            x += size + arrow
+        }
+    }
+
+    private fun cycle(c: Canvas, items: List<SItem>, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        val n = items.size
+        if (n == 0) return
+        val radius = 27f * u
+        val size = min(20f * u, radius * 1.9f * sin(PI / max(n, 3)).toFloat() * 0.8f)
+        val ring = Studio.appear(local, 100, 600)
+        line.color = accent
+        line.alpha = (180 * a * ring).toInt()
+        line.strokeWidth = 0.5f * u
+        val step = 360f / n
+        val gapDeg = (size * 0.75f / radius) * (180f / PI.toFloat())
+        val oval = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+        for (i in 0 until n) {
+            val from = -90f + i * step + gapDeg
+            val sweep = (step - 2 * gapDeg) * ring
+            if (sweep <= 0) continue
+            c.drawArc(oval, from, sweep, false, line)
+            // arrow head at the end of the arc
+            val end = Math.toRadians((from + sweep).toDouble())
+            val ex = cx + radius * cos(end).toFloat()
+            val ey = cy + radius * sin(end).toFloat()
+            val dir = end + PI / 2
+            val hx = cos(dir).toFloat()
+            val hy = sin(dir).toFloat()
+            val nx = -hy
+            val ny = hx
+            c.drawPath(Path().apply {
+                moveTo(ex - hx * 1.6f * u + nx * 1.1f * u, ey - hy * 1.6f * u + ny * 1.1f * u)
+                lineTo(ex, ey)
+                lineTo(ex - hx * 1.6f * u - nx * 1.1f * u, ey - hy * 1.6f * u - ny * 1.1f * u)
+            }, line)
+        }
+        val active = if (local > 900) ((local - 900) / 700 % n).toInt() else -1
+        items.forEachIndexed { i, it ->
+            val ang = Math.toRadians((-90.0 + i * step))
+            tile(c, cx + radius * cos(ang).toFloat(), cy + radius * sin(ang).toFloat(), size, it, itemP(i, n, local, sceneMs), a, i == active)
+        }
+    }
+
+    private fun list(c: Canvas, sc: SScene, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        val items = sc.items
+        val n = items.size
+        if (n == 0) return
+        val rowH = 9.5f * u
+        val head = if (dark && sc.title.isNotBlank()) 8f * u else 0f
+        val cw = w * 0.84f
+        val ch = head + n * rowH + 3f * u
+        val r = RectF(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
+        val pa = Studio.appear(local, 0, 300)
+        roundCard(c, r, 3f * u, pa * a)
+        if (head > 0) {
+            labelP.textAlign = Paint.Align.LEFT
+            labelP.color = muted
+            labelP.alpha = (255 * pa * a).toInt()
+            labelP.textSize = 3.4f * u
+            c.drawText(sc.title, r.left + 4f * u, r.top + 6f * u, labelP)
+        }
+        items.forEachIndexed { i, it ->
+            val p = itemP(i, n, local, sceneMs)
+            if (p <= 0f) return@forEachIndexed
+            val y = r.top + 1.5f * u + head + rowH * i + rowH / 2
+            val al = (255 * p * a).toInt()
+            val dx = (1 - p) * 4 * u
+            emojiP.textSize = 4.6f * u
+            emojiP.alpha = al
+            if (it.icon.isNotBlank()) c.drawText(it.icon, r.left + 7f * u + dx, y + 1.6f * u, emojiP)
+            labelP.textAlign = Paint.Align.LEFT
+            labelP.color = ink
+            labelP.alpha = al
+            labelP.textSize = 4.1f * u
+            val tx = r.left + (if (it.icon.isNotBlank()) 13f else 5f) * u + dx
+            val lbl = wrap(it.label, labelP, r.right - 12f * u - tx, 1).firstOrNull().orEmpty()
+            c.drawText(lbl, tx, y + 1.4f * u, labelP)
+            val pc = Studio.appear(local, Studio.itemDelay(i, n, sceneMs) + 260, 260)
+            if (pc > 0) {
+                fill.color = green
+                fill.alpha = (255 * pc * a).toInt()
+                val ccx = r.right - 6f * u
+                c.drawCircle(ccx, y, 2.6f * u * (0.6f + 0.4f * pc), fill)
+                line.color = 0xFFFFFFFF.toInt()
+                line.alpha = (255 * pc * a).toInt()
+                line.strokeWidth = 0.6f * u
+                c.drawPath(Path().apply {
+                    moveTo(ccx - 1.2f * u, y)
+                    lineTo(ccx - 0.3f * u, y + 1f * u)
+                    lineTo(ccx + 1.3f * u, y - 1f * u)
+                }, line)
+            }
+        }
+        labelP.textAlign = Paint.Align.CENTER
+    }
+
+    private fun step(c: Canvas, n: Int, title: String, cx: Float, cy: Float, local: Long, a: Float) {
+        val p = Studio.appear(local, 0, 380)
+        val size = 16f * u
+        val y = if (title.isBlank()) cy else cy - 6f * u
+        c.save()
+        val k = 0.7f + 0.3f * p
+        c.scale(k, k, cx, y)
+        fill.color = accent
+        fill.alpha = (255 * p * a).toInt()
+        c.drawRoundRect(RectF(cx - size / 2, y - size / 2, cx + size / 2, y + size / 2), size * 0.22f, size * 0.22f, fill)
+        headP.textAlign = Paint.Align.CENTER
+        headP.color = 0xFFFFFFFF.toInt()
+        headP.alpha = (255 * p * a).toInt()
+        headP.textSize = size * 0.62f
+        c.drawText(if (n > 0) n.toString() else "•", cx, y + size * 0.22f, headP)
+        c.restore()
+        if (title.isNotBlank()) {
+            textP.maskFilter = null
+            textP.textAlign = Paint.Align.CENTER
+            textP.color = ink
+            textP.alpha = (255 * a * Studio.appear(local, 150, 300)).toInt()
+            textP.textSize = 6.4f * u
+            wrap(title, textP, w * 0.84f, 2).forEachIndexed { i, s -> c.drawText(s, cx, y + size * 0.5f + 9f * u + i * 7.6f * u, textP) }
+            textP.textAlign = Paint.Align.LEFT
+        }
+    }
+
+    private fun big(c: Canvas, item: SItem, cx: Float, cy: Float, local: Long, a: Float) {
+        val p = Studio.appear(local, 0, 420)
+        val pulse = 1f + 0.03f * sin(local / 380.0).toFloat()
+        fill.color = accent
+        fill.alpha = (46 * p * a).toInt()
+        c.drawCircle(cx, cy - 4f * u, 22f * u * pulse * (0.7f + 0.3f * p), fill)
+        emojiP.textSize = 22f * u * (0.8f + 0.2f * p)
+        emojiP.alpha = (255 * p * a).toInt()
+        c.drawText(item.icon.ifBlank { "💡" }, cx, cy + 3.5f * u, emojiP)
+        if (item.label.isNotBlank()) {
+            labelP.color = ink
+            labelP.alpha = (255 * a * Studio.appear(local, 200, 300)).toInt()
+            labelP.textSize = 5f * u
+            c.drawText(item.label, cx, cy + 27f * u, labelP)
+        }
+    }
+
+    private fun stat(c: Canvas, sc: SScene, cx: Float, cy: Float, local: Long, a: Float) {
+        val p = Studio.appear(local, 0, 300)
+        val v = Studio.countUp(sc.title.ifBlank { sc.items.firstOrNull()?.icon ?: "" }, Studio.appear(local, 100, 900))
+        headP.textAlign = Paint.Align.CENTER
+        headP.color = accent
+        headP.alpha = (255 * p * a).toInt()
+        headP.textSize = 24f * u
+        while (headP.measureText(v) > w * 0.86f && headP.textSize > 8 * u) headP.textSize *= 0.9f
+        c.drawText(v, cx, cy + 4f * u, headP)
+        val label = sc.items.firstOrNull()?.label.orEmpty()
+        if (label.isNotBlank()) {
+            labelP.color = muted
+            labelP.alpha = (255 * a * Studio.appear(local, 250, 300)).toInt()
+            labelP.textSize = 4.6f * u
+            wrap(label, labelP, w * 0.8f, 2).forEachIndexed { i, s -> c.drawText(s, cx, cy + 14f * u + i * 5.6f * u, labelP) }
+        }
+    }
+}
+
+/** Audio: decoding any file Android can read, and encoding the final AAC track. */
+object StudioAudio {
+    private const val TIMEOUT = 10_000L
+
+    class Pcm(val data: ShortArray, val rate: Int) {
+        val ms: Long get() = Studio.durationMs(data.size, rate)
+    }
+
+    fun decode(file: File, maxMs: Long = 15 * 60_000L): Pcm = decodeWith(maxMs) { it.setDataSource(file.absolutePath) }
+
+    fun decode(ctx: Context, uri: Uri, maxMs: Long = 15 * 60_000L): Pcm = decodeWith(maxMs) { it.setDataSource(ctx, uri, null) }
+
+    private fun decodeWith(maxMs: Long, open: (MediaExtractor) -> Unit): Pcm {
+        val ex = MediaExtractor()
+        try {
+            open(ex)
+            val track = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?: error("no audio track")
+            ex.selectTrack(track)
+            val fmt = ex.getTrackFormat(track)
+            var rate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var channels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val dec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+            dec.configure(fmt, null, null, 0)
+            dec.start()
+            val out = ShortBuilder()
+            val info = MediaCodec.BufferInfo()
+            var inDone = false
+            try {
+                while (true) {
+                    if (!inDone) {
+                        val i = dec.dequeueInputBuffer(TIMEOUT)
+                        if (i >= 0) {
+                            val buf = dec.getInputBuffer(i)!!
+                            val n = ex.readSampleData(buf, 0)
+                            if (n < 0 || ex.sampleTime > maxMs * 1000) {
+                                dec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inDone = true
+                            } else {
+                                dec.queueInputBuffer(i, 0, n, ex.sampleTime, 0)
+                                ex.advance()
+                            }
+                        }
+                    }
+                    val o = dec.dequeueOutputBuffer(info, TIMEOUT)
+                    if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        rate = dec.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        channels = dec.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                    } else if (o >= 0) {
+                        if (info.size > 0) {
+                            val b = dec.getOutputBuffer(o)!!
+                            b.position(info.offset)
+                            b.limit(info.offset + info.size)
+                            out.add(b.slice().order(ByteOrder.nativeOrder()).asShortBuffer())
+                        }
+                        dec.releaseOutputBuffer(o, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                    }
+                }
+            } finally {
+                runCatching { dec.stop() }
+                dec.release()
+            }
+            return Pcm(Studio.downmix(out.build(), channels), rate)
+        } finally {
+            ex.release()
+        }
+    }
+
+    class Sample(val data: ByteArray, val ptsUs: Long, val flags: Int)
+
+    /** Mono PCM → AAC-LC samples and the track format for the muxer. */
+    fun encodeAac(pcm: ShortArray, rate: Int, cancelled: () -> Boolean, progress: (Float) -> Unit): Pair<MediaFormat, List<Sample>> {
+        val fmt = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, rate, 1).apply {
+            setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            setInteger(MediaFormat.KEY_BIT_RATE, 128_000)
+            setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16_384)
+        }
+        val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+        enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        enc.start()
+        val out = mutableListOf<Sample>()
+        var outFmt: MediaFormat? = null
+        val info = MediaCodec.BufferInfo()
+        var pos = 0
+        var inDone = false
+        try {
+            while (true) {
+                if (cancelled()) throw CancellationException()
+                if (!inDone) {
+                    val i = enc.dequeueInputBuffer(TIMEOUT)
+                    if (i >= 0) {
+                        val buf = enc.getInputBuffer(i)!!
+                        buf.clear()
+                        val n = min(buf.capacity() / 2, pcm.size - pos)
+                        val pts = pos * 1_000_000L / rate
+                        if (n <= 0) {
+                            enc.queueInputBuffer(i, 0, 0, pts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inDone = true
+                        } else {
+                            buf.order(ByteOrder.nativeOrder()).asShortBuffer().put(pcm, pos, n)
+                            enc.queueInputBuffer(i, 0, n * 2, pts, 0)
+                            pos += n
+                            progress(pos.toFloat() / max(1, pcm.size))
+                        }
+                    }
+                }
+                val o = enc.dequeueOutputBuffer(info, TIMEOUT)
+                if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    outFmt = enc.outputFormat
+                } else if (o >= 0) {
+                    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 && info.size > 0) {
+                        val b = enc.getOutputBuffer(o)!!
+                        val bytes = ByteArray(info.size)
+                        b.position(info.offset)
+                        b.get(bytes)
+                        out += Sample(bytes, info.presentationTimeUs, info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM.inv())
+                    }
+                    enc.releaseOutputBuffer(o, false)
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                }
+            }
+        } finally {
+            runCatching { enc.stop() }
+            enc.release()
+        }
+        return (outFmt ?: error("AAC encoder gave no format")) to out
+    }
+
+    /** Growable short array (decoded audio of unknown length). */
+    private class ShortBuilder {
+        private var a = ShortArray(1 shl 16)
+        private var n = 0
+        fun add(b: java.nio.ShortBuffer) {
+            val k = b.remaining()
+            if (n + k > a.size) a = a.copyOf(max(a.size * 2, n + k))
+            b.get(a, n, k)
+            n += k
+        }
+        fun build(): ShortArray = a.copyOf(n)
+    }
+}
+
+/** Renders a [StudioPlan] and a voice track into an MP4 (H.264 + AAC) with the platform encoders. */
+object StudioVideo {
+    private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
+    private const val TIMEOUT = 10_000L
+
+    /** [progress] gets a message with "done/total" (drives the determinate progress bars). */
+    fun render(
+        plan: StudioPlan, voice: StudioAudio.Pcm, out: File, w: Int, h: Int, fps: Int,
+        cancelled: () -> Boolean, progress: (String) -> Unit
+    ) {
+        out.parentFile?.mkdirs()
+        progress(t("Звук: кодирование 0/100", "Audio: encoding 0/100"))
+        val (audioFmt, audio) = StudioAudio.encodeAac(voice.data, voice.rate, cancelled) { f ->
+            progress(t("Звук: кодирование ${(f * 100).toInt()}/100", "Audio: encoding ${(f * 100).toInt()}/100"))
+        }
+        val frames = Studio.frameCount(plan.totalMs, fps)
+        val fmt = MediaFormat.createVideoFormat(MIME, w, h).apply {
+            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+            setInteger(MediaFormat.KEY_BIT_RATE, Studio.bitrate(w, h, fps))
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+        }
+        val enc = MediaCodec.createEncoderByType(MIME)
+        enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        enc.start()
+        val muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        var ok = false
+        var started = false
+        var vTrack = -1
+        var aTrack = -1
+        var aNext = 0
+        val info = MediaCodec.BufferInfo()
+        val aInfo = MediaCodec.BufferInfo()
+
+        fun writeAudio(untilUs: Long) {
+            while (started && aNext < audio.size && audio[aNext].ptsUs <= untilUs) {
+                val s = audio[aNext++]
+                aInfo.set(0, s.data.size, s.ptsUs, s.flags)
+                muxer.writeSampleData(aTrack, ByteBuffer.wrap(s.data), aInfo)
+            }
+        }
+
+        /** Moves encoded frames to the file; with [end] waits for the end of stream. */
+        fun drain(end: Boolean) {
+            var idle = 0
+            while (true) {
+                val o = enc.dequeueOutputBuffer(info, if (end) TIMEOUT else 0)
+                when {
+                    o == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                        if (!end) return
+                        if (++idle > 300) error("video encoder stalled")
+                    }
+                    o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        vTrack = muxer.addTrack(enc.outputFormat)
+                        aTrack = muxer.addTrack(audioFmt)
+                        muxer.start()
+                        started = true
+                    }
+                    o >= 0 -> {
+                        val b = enc.getOutputBuffer(o)!!
+                        if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
+                        if (info.size > 0 && started) {
+                            writeAudio(info.presentationTimeUs)
+                            b.position(info.offset)
+                            b.limit(info.offset + info.size)
+                            muxer.writeSampleData(vTrack, b, info)
+                        }
+                        enc.releaseOutputBuffer(o, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
+                    }
+                }
+            }
+        }
+
+        try {
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            val painter = StudioPainter(w, h, plan)
+            val argb = IntArray(w * h)
+            val y = ByteArray(w * h)
+            val u = ByteArray(w * h / 4)
+            val v = ByteArray(w * h / 4)
+            val size = w * h * 3 / 2
+            for (f in 0 until frames) {
+                if (cancelled()) throw CancellationException()
+                val pts = Studio.frameTimeUs(f, fps)
+                painter.draw(canvas, pts / 1000)
+                bmp.getPixels(argb, 0, w, 0, 0, w, h)
+                Studio.argbToYuv420(argb, w, h, y, u, v)
+                var idx: Int
+                while (true) {
+                    idx = enc.dequeueInputBuffer(TIMEOUT)
+                    if (idx >= 0) break
+                    drain(false)
+                    if (cancelled()) throw CancellationException()
+                }
+                val img = enc.getInputImage(idx)
+                if (img != null) writeImage(img, w, h, y, u, v) else writeNv12(enc.getInputBuffer(idx)!!, w, h, y, u, v)
+                enc.queueInputBuffer(idx, 0, size, pts, 0)
+                drain(false)
+                if (f % 15 == 0 || f == frames - 1) progress(t("Кадры ${f + 1}/$frames", "Frames ${f + 1}/$frames"))
+            }
+            while (true) {
+                val idx = enc.dequeueInputBuffer(TIMEOUT)
+                if (idx >= 0) {
+                    enc.queueInputBuffer(idx, 0, 0, Studio.frameTimeUs(frames, fps), MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    break
+                }
+                drain(false)
+            }
+            drain(true)
+            writeAudio(Long.MAX_VALUE)
+            bmp.recycle()
+            ok = true
+        } finally {
+            runCatching { enc.stop() }
+            enc.release()
+            if (started) runCatching { muxer.stop() }
+            runCatching { muxer.release() }
+            if (!ok) out.delete()
+        }
+    }
+
+    private fun writeImage(img: Image, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
+        val planes = img.planes
+        fun plane(i: Int, src: ByteArray, pw: Int, ph: Int) {
+            val p = planes[i]
+            val buf = p.buffer
+            val rs = p.rowStride
+            val ps = p.pixelStride
+            for (row in 0 until ph) {
+                if (ps == 1) {
+                    buf.position(row * rs)
+                    buf.put(src, row * pw, pw)
+                } else {
+                    val base = row * rs
+                    val s = row * pw
+                    for (col in 0 until pw) buf.put(base + col * ps, src[s + col])
+                }
+            }
+        }
+        plane(0, y, w, h)
+        plane(1, u, w / 2, h / 2)
+        plane(2, v, w / 2, h / 2)
+    }
+
+    /** Fallback when the encoder gives no Image: semi-planar NV12, the most common layout. */
+    private fun writeNv12(buf: ByteBuffer, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
+        buf.clear()
+        buf.put(y)
+        for (i in u.indices) {
+            buf.put(u[i])
+            buf.put(v[i])
+        }
+    }
+
+    /** A still frame for the preview on screen. */
+    fun preview(plan: StudioPlan, tMs: Long, w: Int, h: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        StudioPainter(w, h, plan).draw(Canvas(bmp), tMs)
+        return bmp
+    }
+}
+
+/** Microphone recording into memory (16-bit mono PCM). */
+class StudioRecorder(private val onLevel: (Float, Long) -> Unit) {
+    val rate = 44_100
+    @Volatile private var running = false
+    private var thread: Thread? = null
+    private val chunks = mutableListOf<ShortArray>()
+    private var samples = 0
+
+    @Volatile var failure: Throwable? = null
+        private set
+
+    val recording: Boolean get() = running
+
+    @android.annotation.SuppressLint("MissingPermission")
+    fun start() {
+        val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+        val rec = AudioRecord(MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, max(min, rate) * 2)
+        if (rec.state != AudioRecord.STATE_INITIALIZED) {
+            rec.release()
+            throw IllegalStateException(t("Микрофон занят другим приложением", "The microphone is busy"))
+        }
+        synchronized(chunks) {
+            chunks.clear()
+            samples = 0
+        }
+        running = true
+        rec.startRecording()
+        thread = Thread {
+            val buf = ShortArray(rate / 10)
+            var last = 0L
+            try {
+                while (running) {
+                    val n = rec.read(buf, 0, buf.size)
+                    if (n <= 0) continue
+                    synchronized(chunks) {
+                        chunks += buf.copyOf(n)
+                        samples += n
+                    }
+                    val now = System.currentTimeMillis()
+                    if (now - last > 80) {
+                        last = now
+                        val lvl = Studio.frameRms(buf.copyOf(n), rate, 100).maxOrNull() ?: 0f
+                        val ms = Studio.durationMs(samples, rate)
+                        Lumen.ui { onLevel(lvl, ms) }
+                    }
+                    if (samples > rate * 60 * MAX_MIN) running = false
+                }
+            } catch (t: Throwable) {
+                failure = t
+            } finally {
+                runCatching { rec.stop() }
+                rec.release()
+            }
+        }.apply { name = "studio-mic"; start() }
+    }
+
+    /** Stops and returns the take. */
+    fun stop(): ShortArray {
+        running = false
+        thread?.join(2000)
+        thread = null
+        return synchronized(chunks) {
+            val out = ShortArray(samples)
+            var p = 0
+            for (c in chunks) {
+                c.copyInto(out, p)
+                p += c.size
+            }
+            out
+        }
+    }
+
+    companion object {
+        const val MAX_MIN = 10
+    }
+}
+
+/**
+ * Speech recognition of a recorded take, piece by piece (Android 13+: the recogniser reads audio from a pipe).
+ * Prefers the on-device recogniser. All callbacks come on the main thread.
+ */
+object StudioRecognizer {
+    const val RATE = 16_000
+
+    fun available(ctx: Context): Boolean = Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isRecognitionAvailable(ctx)
+
+    fun recognize(
+        ctx: Context, pcm: ShortArray, rate: Int, pieces: List<Span>, lang: String,
+        progress: (Int, Int) -> Unit, cancelled: () -> Boolean, done: (List<Pair<Span, String>>) -> Unit
+    ) {
+        if (Build.VERSION.SDK_INT < 33) {
+            done(emptyList())
+            return
+        }
+        val main = Handler(Looper.getMainLooper())
+        val results = mutableListOf<Pair<Span, String>>()
+        fun next(i: Int) {
+            if (i >= pieces.size || cancelled()) {
+                done(results)
+                return
+            }
+            progress(i, pieces.size)
+            val piece = pieces[i]
+            val from = (piece.startMs * rate / 1000).toInt().coerceIn(0, pcm.size)
+            val to = (piece.endMs * rate / 1000).toInt().coerceIn(from, pcm.size)
+            // a little silence around the piece helps the recogniser to start and stop
+            val slice = Studio.silence(300, RATE) + Studio.resample(pcm.copyOfRange(from, to), rate, RATE) + Studio.silence(600, RATE)
+            val onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
+            val sr = if (onDevice) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
+            val pipe = ParcelFileDescriptor.createPipe()
+            var finished = false
+            fun finish(text: String?) {
+                if (finished) return
+                finished = true
+                runCatching { sr.destroy() }
+                runCatching { pipe[0].close() }
+                if (!text.isNullOrBlank()) results += piece to text
+                L.i("studio", "recognised piece ${i + 1}/${pieces.size}: ${text?.length ?: -1} chars")
+                main.post { next(i + 1) }
+            }
+            sr.setRecognitionListener(object : RecognitionListener {
+                override fun onResults(b: android.os.Bundle?) =
+                    finish(b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull())
+                override fun onError(error: Int) {
+                    L.w("studio", "recogniser error $error on piece ${i + 1}")
+                    finish(null)
+                }
+                override fun onReadyForSpeech(params: android.os.Bundle?) {}
+                override fun onBeginningOfSpeech() {}
+                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onBufferReceived(buffer: ByteArray?) {}
+                override fun onEndOfSpeech() {}
+                override fun onPartialResults(partialResults: android.os.Bundle?) {}
+                override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+            })
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, RATE)
+            try {
+                sr.startListening(intent)
+            } catch (e: Exception) {
+                L.w("studio", "recogniser start: ${e.message}")
+                runCatching { pipe[1].close() }
+                finish(null)
+                return
+            }
+            Thread {
+                try {
+                    ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { os ->
+                        val bytes = ByteBuffer.allocate(slice.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+                        bytes.asShortBuffer().put(slice)
+                        os.write(bytes.array())
+                    }
+                } catch (e: Exception) {
+                    L.w("studio", "pipe: ${e.message}")
+                }
+            }.start()
+            main.postDelayed({ finish(null) }, 15_000 + piece.ms * 2)
+        }
+        next(0)
+    }
+}

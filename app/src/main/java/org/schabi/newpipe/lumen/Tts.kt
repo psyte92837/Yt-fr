@@ -366,7 +366,7 @@ object EdgeTts {
             val words = mutableListOf<SWord>()
             val audio = withRetry(i, pieces.size, cancelled, { i }) {
                 synchronized(words) { words.clear() }
-                connect(escaped, o, cancelled, words)
+                one(escaped, o, cancelled, words)
             } ?: return null
             audio to synchronized(words) { words.sortedBy { it.startMs } }
         }
@@ -425,10 +425,11 @@ object EdgeTts {
     @Volatile private var serialUntil = 0L
     private val serialLock = java.util.concurrent.locks.ReentrantLock()
 
-    private fun one(escaped: String, o: TtsOptions, cancelled: () -> Boolean): ByteArray {
-        if (System.currentTimeMillis() >= serialUntil) return connect(escaped, o, cancelled)
+    /** One connection; for [TtsRetry.SERIAL_MS] after a network error all parallel parts and scenes go one at a time. */
+    private fun one(escaped: String, o: TtsOptions, cancelled: () -> Boolean, words: MutableList<SWord>? = null): ByteArray {
+        if (System.currentTimeMillis() >= serialUntil) return connect(escaped, o, cancelled, words)
         serialLock.lock()
-        try { return connect(escaped, o, cancelled) } finally { serialLock.unlock() }
+        try { return connect(escaped, o, cancelled, words) } finally { serialLock.unlock() }
     }
 
     private fun connect(escaped: String, o: TtsOptions, cancelled: () -> Boolean, words: MutableList<SWord>? = null): ByteArray {
@@ -749,7 +750,7 @@ object TtsPrefs {
 
 /** Retry policy and readable network errors for the online voice (pure, unit-tested). */
 object TtsRetry {
-    private val delays = listOf(2000L, 4000L, 8000L, 15000L, 30000L, 60000L)
+    private val delays = listOf(2000L, 4000L, 8000L, 15000L, 30000L, 60000L, 90000L, 120000L)
 
     /** Pause before retry number [attempt] (0-based), null = give up. */
     fun delayMs(attempt: Int): Long? = delays.getOrNull(attempt)

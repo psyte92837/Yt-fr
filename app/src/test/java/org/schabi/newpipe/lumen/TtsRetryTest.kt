@@ -12,8 +12,8 @@ import org.junit.Test
 class TtsRetryTest {
     @Test
     fun delaysGrowThenGiveUp() {
-        assertEquals(listOf(2000L, 4000L, 8000L, 15000L, 30000L, 60000L), (0..5).map { TtsRetry.delayMs(it) })
-        assertNull(TtsRetry.delayMs(6))
+        assertEquals(listOf(2000L, 4000L, 8000L, 15000L, 30000L, 60000L, 90000L, 120000L), (0..7).map { TtsRetry.delayMs(it) })
+        assertNull(TtsRetry.delayMs(8))
         assertEquals(1500L, TtsRetry.jitter(2000, 0.0))
         assertEquals(2500L, TtsRetry.jitter(2000, 1.0))
     }

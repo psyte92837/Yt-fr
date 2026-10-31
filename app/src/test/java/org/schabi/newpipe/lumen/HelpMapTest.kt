@@ -31,4 +31,11 @@ class HelpMapTest {
         assertEquals("studio", HelpMap.topicFor("StudioActivity"))
         assertEquals(HelpMap.ids.size, HelpMap.ids.toSet().size)
     }
+
+    @Test
+    fun everyTopicIdHasContent() {
+        val ids = Help.topics().map { it.id }
+        assertEquals(HelpMap.ids.toSet(), ids.toSet())
+        assertTrue(Help.topic("bot_posts").steps.size >= 8)
+    }
 }

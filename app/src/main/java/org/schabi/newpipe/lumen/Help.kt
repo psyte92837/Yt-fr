@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "bots", "settings"
+        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -235,7 +235,61 @@ object Help {
                 t("Ответы ИИ работающих ботов уходят без окна проверки и ограничены лимитами в настройках бота, чтобы чужие люди не израсходовали ключ.", "AI answers of running bots are sent without the review screen and are capped by the bot's limits so strangers cannot burn your key."),
                 t("Мини-апп (вкладка «Мини-апп»): опишите страницу — ИИ сделает её одним HTML-файлом (форма, каталог, опрос, игра). «👁 Предпросмотр» показывает её как в Telegram, данные из неё уходят в тест-чат. «🔗 Подключить к боту» — ИИ добавит кнопку открытия и обработку данных. Telegram открывает мини-апп только по https: Lumen бесплатно публикует его на GitHub Pages (нужен токен GitHub с правом public_repo) или используйте свой адрес.",
                     "Mini app (the Mini app tab): describe the page — AI makes it as one HTML file (a form, catalog, survey, game). \"👁 Preview\" shows it like Telegram does; its data goes to the test chat. \"🔗 Connect to the bot\" — AI adds an opening button and data handling. Telegram opens mini apps only over https: Lumen publishes for free to GitHub Pages (a GitHub token with public_repo) or use your own address."),
+                t("Вкладка «Посты» — публикация в ваши каналы и группы и автонаполнение из RSS, YouTube и тем для ИИ. Подробно — раздел «Боты: посты в каналы и группы».",
+                    "The Posts tab publishes to your channels and groups and auto-fills them from RSS, YouTube and AI topics. Details: “Bots: posts to channels and groups”."),
                 t("Один токен может обслуживать только один сервер. Если бот уже работает где-то ещё, Lumen покажет «Токен занят».", "One token can be served by one server only. If the bot already runs elsewhere, Lumen shows \"Token in use\".")
+            )),
+        HelpTopic("bot_posts", t("Боты: посты в каналы и группы", "Bots: posts to channels and groups"),
+            t("Вкладка «Посты» в экране бота: бот публикует посты в ваши Telegram-каналы и группы — вручную, по времени или сам по расписанию " +
+                "(автонаполнение из RSS-лент, YouTube и тем для ИИ). Публикует сам телефон, сервер не нужен.",
+                "The Posts tab of a bot: the bot publishes to your Telegram channels and groups — by hand, at a set time or by itself on a schedule " +
+                    "(auto-filling from RSS feeds, YouTube and AI topics). The phone posts by itself, no server is needed."),
+            listOf(
+                t("1. Канал: в Telegram откройте канал → ✏️ / «Управление каналом» → «Администраторы» → «Добавить администратора» → найдите @имя_бота → оставьте право «Публикация сообщений» → «Готово».",
+                    "1. Channel: in Telegram open the channel → ✏️ / Manage channel → Administrators → Add admin → find @your_bot → keep “Post messages” → Done."),
+                t("   Группа: «Добавить участника» → @имя_бота. Если в группе писать могут не все, сделайте бота администратором.",
+                    "   Group: Add member → @your_bot. If not everyone may write in the group, make the bot an admin."),
+                t("2. Во вкладке «Посты» нажмите «＋ Канал или группа» и введите @имя канала или ссылку t.me/имя. Lumen проверит, что бот может там писать.",
+                    "2. In the Posts tab tap “＋ Channel or group” and enter the channel @name or a t.me/name link. Lumen checks that the bot can post there."),
+                t("   Закрытая группа или канал без @имени: запустите бота (▶ Запуск) и добавьте его в чат — чат сам появится в списке. Можно ввести и id (-100…) или ссылку на любое сообщение вида t.me/c/123…/45.",
+                    "   A private group or channel without an @name: start the bot (▶ Start) and add it to the chat — the chat appears in the list by itself. You can also enter the id (-100…) or a message link like t.me/c/123…/45."),
+                t("3. «Новый пост»: напишите текст, при желании добавьте ссылку на картинку и кнопку (текст + https-ссылка), отметьте чаты.",
+                    "3. New post: write the text, optionally add a picture link and a button (text + https link), tick the chats."),
+                t("   «✨ Написать ИИ» — пост по теме или новости; «✨ Улучшить» — правка готового текста словами («короче», «добавь призыв»).",
+                    "   “✨ Write with AI” — a post on a topic or news; “✨ Improve” — edit the text in words (“shorter”, “add a call to action”)."),
+                t("4. «Тест мне» — пост придёт вам в личку от бота (нужно стать владельцем: вкладка «Настройки»). «Опубликовать» — сразу во все отмеченные чаты.",
+                    "4. “Test to me” — the bot sends the post to your private chat (become the owner first: Settings tab). “Publish” — to all ticked chats now."),
+                t("5. «⏰ Позже» — по времени: 18:30 (сегодня или завтра), 25.12 09:00, +30м, +2ч, +1д. Отложенные посты уходят, пока бот запущен.",
+                    "5. “⏰ Later” — at a time: 18:30 (today or tomorrow), 25.12 09:00, +30m, +2h, +1d. Scheduled posts go out while the bot runs."),
+                t("6. «＋ Новое автонаполнение»: укажите источники (по одному в строке), куда, как часто, сколько постов за раз и часы работы. Затем «Запустить сейчас», чтобы проверить, и ▶ Запуск бота.",
+                    "6. “＋ New auto-filling”: set sources (one per line), where, how often, posts per run and active hours. Then “Run now” to check it, and ▶ Start the bot."),
+                t("   Источники: https://сайт/rss — RSS/Atom-лента новостей или блога; yt: запрос — свежие видео YouTube; ai: тема — ИИ сам пишет пост на тему.",
+                    "   Sources: https://site/rss — an RSS/Atom feed of news or a blog; yt: query — fresh YouTube videos; ai: topic — AI writes a post on the topic."),
+                t("7. «Присылать на проверку» — готовые посты не уходят сразу, а ждут в блоке «На проверку»: опубликуйте, поправьте («В редактор») или удалите. Придёт уведомление.",
+                    "7. “Send for review” — ready posts wait in “To review” instead of going out: publish, fix (“To editor”) or delete. You get a notification."),
+                t("8. «История» — каждая публикация: куда, когда и ошибка, если что-то не так.", "8. History — every publication: where, when and the error if something went wrong.")
+            ),
+            listOf(
+                t("Где взять RSS: у многих сайтов лента по адресу /rss, /feed или /rss.xml (например, https://habr.com/ru/rss/articles/). Лента YouTube-канала: https://www.youtube.com/feeds/videos.xml?channel_id=UC…",
+                    "Finding RSS: many sites have a feed at /rss, /feed or /rss.xml. A YouTube channel feed: https://www.youtube.com/feeds/videos.xml?channel_id=UC…"),
+                t("Разметка текста: <b>жирный</b>, <i>курсив</i>, <u>подчёркнутый</u>, <s>зачёркнутый</s>, <a href=\"https://…\">ссылка</a>, <blockquote>цитата</blockquote>. Если Telegram не примет разметку, пост уйдёт простым текстом.",
+                    "Formatting: <b>bold</b>, <i>italic</i>, <u>underline</u>, <s>strike</s>, <a href=\"https://…\">link</a>, <blockquote>quote</blockquote>. If Telegram rejects the markup, the post goes as plain text."),
+                t("Подпись к картинке — до 1024 символов. Длиннее — картинка уйдёт отдельным сообщением, текст следом.", "A picture caption is up to 1024 characters. Longer — the picture goes separately, then the text."),
+                t("«Стиль для ИИ» задаёт голос канала: тон, длину, эмодзи, хэштеги, подпись в конце («— Канал @mychannel»). ИИ не выдумывает факты и пишет на языке приложения.",
+                    "“Style for AI” sets the channel voice: tone, length, emoji, hashtags, a signature (“— @mychannel”). AI does not invent facts."),
+                t("Повторов не будет: Lumen помнит, что уже публиковал из каждого источника. Для ai:-тем ИИ видит последние посты и не повторяет их.",
+                    "No repeats: Lumen remembers what it already posted from each source. For ai: topics AI sees the recent posts and avoids them."),
+                t("Каждый пост с «ИИ переписывает» — один запрос к вашему AI-ключу. Раз в 30 минут × 3 поста = до 144 запросов в сутки: ставьте разумный интервал и часы работы.",
+                    "Every post with “AI rewrites” is one request to your AI key. Every 30 min × 3 posts = up to 144 requests a day: choose a sensible interval and hours."),
+                t("Не спамьте: Telegram ограничивает частоту (около 20 сообщений в минуту в одну группу) и может заблокировать бота за жалобы. Публикуйте только то, на что у вас есть права.",
+                    "Do not spam: Telegram limits the rate (about 20 messages a minute per group) and may block a bot after complaints. Post only what you have the rights to."),
+                t("«Нет прав на публикацию» — бот не админ или у него снято право «Публикация сообщений». «Чат не найден» — бот не добавлен в чат или адрес неверный. «Проверить права» покажет состояние всех чатов.",
+                    "“Cannot post” — the bot is not an admin or lacks “Post messages”. “Chat not found” — the bot is not in the chat or the address is wrong. “Check rights” shows all chats."),
+                t("«В ленте нет записей» — ссылка ведёт на обычную страницу, а не на RSS. Откройте её в браузере: лента выглядит как XML-текст.",
+                    "“No items in the feed” — the link is a normal page, not RSS. Open it in a browser: a feed looks like XML text."),
+                t("Автонаполнение работает, только пока бот запущен (▶ Запуск) и телефон в сети. Разрешите работу в фоне в настройках бота.",
+                    "Auto-filling works only while the bot runs (▶ Start) and the phone is online. Allow background work in the bot settings."),
+                t("Промпты постов (bot_post, bot_post_topic, bot_post_edit) можно изменить: Настройки → Промпты.", "Post prompts (bot_post, bot_post_topic, bot_post_edit) can be edited: Settings → Prompts.")
             )),
         HelpTopic("settings", t("Настройки", "Settings"),
             t("Язык, тема, режим, AI-провайдеры и модели, промпты, мониторинг, резервные копии, журнал ошибок.", "Language, theme, mode, AI providers and models, prompts, monitoring, backups, error log."),

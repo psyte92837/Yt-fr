@@ -23,6 +23,7 @@ class BotPostsTab(private val a: LumenBase, private val botId: String, private v
     private var chosen: MutableSet<String>? = null
     private var busy: String? = null
     private var showHistory = false
+    private var showGuide: Boolean? = null
 
     private fun EditText.bind(set: (String) -> Unit): EditText = apply {
         addTextChangedListener(object : TextWatcher {
@@ -68,6 +69,7 @@ class BotPostsTab(private val a: LumenBase, private val botId: String, private v
         val d = BotPosts.load(botId)
         val b = Bots.get(botId)
         busy?.let { c.working(it) }
+        guide(c, d)
 
         // ---- targets ----
         c.h2(t("Куда публиковать", "Where to post"))
@@ -166,6 +168,29 @@ class BotPostsTab(private val a: LumenBase, private val botId: String, private v
             }
         }
         return c
+    }
+
+    /** Short "how to start" inside the tab; open by itself until the first chat is added. */
+    private fun guide(c: Col, d: PostsData) {
+        val open = showGuide ?: d.targets.isEmpty()
+        c.card {
+            section(t("📖 С чего начать", "📖 Getting started"), t("4 шага и ответы на частые вопросы", "4 steps and common questions"), open, { showGuide = it; rerender() }) {
+                listOf(
+                    t("1️⃣ Добавьте бота в Telegram-канал администратором с правом «Публикация сообщений» (канал → Управление → Администраторы → Добавить → @имя бота). В группу — участником.",
+                        "1️⃣ Add the bot to a Telegram channel as an admin with “Post messages” (channel → Manage → Administrators → Add → @bot name). To a group — as a member."),
+                    t("2️⃣ Здесь: «＋ Канал или группа» → @имя канала или ссылка t.me/… Закрытый чат без @имени появится сам, если добавить бота, пока он запущен.",
+                        "2️⃣ Here: “＋ Channel or group” → the channel @name or a t.me/… link. A private chat without an @name appears by itself if you add the bot while it runs."),
+                    t("3️⃣ «Новый пост»: текст (или «✨ Написать ИИ»), картинка и кнопка по желанию → «Тест мне» для проверки → «Опубликовать» или «⏰ Позже».",
+                        "3️⃣ New post: text (or “✨ Write with AI”), picture and button if you like → “Test to me” to check → “Publish” or “⏰ Later”."),
+                    t("4️⃣ Чтобы канал наполнялся сам: «＋ Новое автонаполнение» → источники (RSS-ссылка, yt: запрос, ai: тема) → «Запустить сейчас» для проверки → ▶ Запуск бота.",
+                        "4️⃣ To fill the channel automatically: “＋ New auto-filling” → sources (RSS link, yt: query, ai: topic) → “Run now” to check → ▶ Start the bot.")
+                ).forEach { p(it, 14f) }
+                muted(t("Время для «Позже»: 18:30 · 25.12 09:00 · +30м · +2ч. Разметка: <b>жирный</b>, <i>курсив</i>, <a href=\"https://…\">ссылка</a>.",
+                    "Time for “Later”: 18:30 · 25.12 09:00 · +30m · +2h. Markup: <b>bold</b>, <i>italic</i>, <a href=\"https://…\">link</a>."))
+                muted(t("⚠️ Отложенные посты и автонаполнение работают, только пока бот запущен и телефон в сети.", "⚠️ Scheduled posts and auto-filling work only while the bot runs and the phone is online."))
+                button(t("Подробная справка и решение проблем", "Full help and troubleshooting"), style = BtnStyle.TONAL) { HelpActivity.open(a, "bot_posts") }
+            }
+        }
     }
 
     private fun names(d: PostsData, chats: List<String>) = chats.joinToString(", ") { ch -> d.target(ch)?.label ?: ch }.ifBlank { t("чаты не выбраны", "no chats") }

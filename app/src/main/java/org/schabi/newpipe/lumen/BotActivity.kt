@@ -66,6 +66,8 @@ class BotActivity : LumenBase() {
 
     private fun info() = Bots.get(botId)
 
+    override val helpTopic: String get() = if (tab == TAB_POSTS) "bot_posts" else "bots"
+
     private val postsTab by lazy { BotPostsTab(this, botId) { render() } }
 
     private fun render() {

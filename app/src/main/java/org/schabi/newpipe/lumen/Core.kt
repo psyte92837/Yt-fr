@@ -37,6 +37,7 @@ object Lumen {
         LumenEnv.ready = true
         L.init(app)
         BgTasks.hook(app)
+        Nav.hook(app)
     }
 
     fun ui(block: () -> Unit) {

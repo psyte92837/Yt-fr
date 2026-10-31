@@ -52,7 +52,9 @@ object Notify {
 
     fun openProject(ctx: Context, projectId: String): PendingIntent {
         val harvest = Store.project(projectId)?.quickMode == "harvest"
-        val i = (if (harvest) Intent(ctx, HarvestActivity::class.java).setData(android.net.Uri.parse("lumen://harvest/$projectId")) else Intent(ctx, ProjectActivity::class.java))
+        // a harvest is a document task of its own (found by its uri); a project returns to Lumen's task
+        if (!harvest) return Nav.pending(ctx, projectId.hashCode(), Intent(ctx, ProjectActivity::class.java).putExtra("id", projectId))
+        val i = Intent(ctx, HarvestActivity::class.java).setData(android.net.Uri.parse("lumen://harvest/$projectId"))
             .putExtra("id", projectId).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         return PendingIntent.getActivity(ctx, projectId.hashCode(), i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }

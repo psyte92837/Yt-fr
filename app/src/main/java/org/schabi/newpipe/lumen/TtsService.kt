@@ -501,11 +501,7 @@ class TtsService : Service() {
 
     // ---------- notifications ----------
 
-    private fun open(): PendingIntent = PendingIntent.getActivity(
-        this, 0,
-        Intent(this, TtsActivity::class.java).putExtra("cached", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+    private fun open(): PendingIntent = Nav.pending(this, 7304, Intent(this, TtsActivity::class.java).putExtra("cached", true))
 
     private fun action(code: Int, act: String, icon: Int, label: String): Notification.Action {
         val pi = PendingIntent.getService(

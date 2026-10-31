@@ -66,7 +66,6 @@
             android:name=".lumen.LumenActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:launchMode="singleTask"
             android:theme="@style/LumenTheme">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -82,7 +81,6 @@
             android:icon="@mipmap/lumen_bots"
             android:roundIcon="@mipmap/lumen_bots"
             android:label="@string/lumen_bots_label"
-            android:launchMode="singleTask"
             android:taskAffinity="${applicationId}.bots"
             android:theme="@style/LumenTheme">
             <intent-filter>
@@ -94,11 +92,13 @@
         <activity
             android:name=".lumen.BotNewActivity"
             android:exported="false"
+            android:taskAffinity="${applicationId}.bots"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.BotActivity"
             android:exported="false"
+            android:taskAffinity="${applicationId}.bots"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
@@ -342,6 +342,14 @@
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <!-- notification tap → back to the screen it belongs to, in its own task (Nav.kt) -->
+        <activity
+            android:name=".lumen.NavRouter"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay" />
         <!-- ===== /Lumen ===== -->
 
         <receiver

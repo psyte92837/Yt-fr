@@ -143,7 +143,7 @@ class StudioService : Service() {
                 StudioJob.changed()
             }
             BgTasks.run(ctx, key, t("Lumen Studio: сборка ролика", "Lumen Studio: building the video"),
-                Intent(ctx, StudioActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), {
+                Intent(ctx, StudioActivity::class.java), {
                     StudioJob.build(ctx, r) { m ->
                         StudioJob.message = m
                         StudioJob.changed()
@@ -217,10 +217,7 @@ class StudioService : Service() {
         }
     }
 
-    private fun openScreen(): PendingIntent = PendingIntent.getActivity(
-        this, 0, Intent(this, StudioActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+    private fun openScreen(): PendingIntent = Nav.pending(this, 7300, Intent(this, StudioActivity::class.java))
 
     private fun build(): Notification {
         val msg = StudioJob.message

@@ -122,7 +122,7 @@ class BotsActivity : LumenBase() {
 
     private fun menu() {
         val items = listOf<Pair<String, () -> Unit>>(
-            t("Открыть Lumen", "Open Lumen") to { startActivity(Intent(this, LumenActivity::class.java)) },
+            t("Открыть Lumen", "Open Lumen") to { Nav.home(this) },
             t("Работа в фоне (батарея)", "Background work (battery)") to { BotManager.askBattery(this) },
             t("Справка", "Help") to { HelpActivity.open(this, "bots") }
         )
@@ -130,7 +130,8 @@ class BotsActivity : LumenBase() {
     }
 
     companion object {
-        fun open(ctx: Context) = ctx.startActivity(Intent(ctx, BotsActivity::class.java))
+        /** The bots task as it was left (it lives apart from Lumen's task, with its own launcher icon). */
+        fun open(ctx: Context) = Nav.show(ctx, Intent(ctx, BotsActivity::class.java))
 
         fun statusLine(b: BotInfo, st: BotRun.Status): Pair<String, Int> = when {
             !b.enabled -> t("⏹ Остановлен", "⏹ Stopped") to Palette.MUTED

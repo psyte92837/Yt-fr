@@ -137,8 +137,7 @@ object BotManager {
 
     fun openBots(ctx: Context, botId: String = ""): PendingIntent {
         val i = (if (botId.isEmpty()) Intent(ctx, BotsActivity::class.java) else Intent(ctx, BotActivity::class.java).putExtra("id", botId))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return PendingIntent.getActivity(ctx, ("bots" + botId).hashCode(), i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        return Nav.pending(ctx, ("bots" + botId).hashCode(), i)
     }
 
     /** A phone notification from a bot (new user, error, notify() from the code). */

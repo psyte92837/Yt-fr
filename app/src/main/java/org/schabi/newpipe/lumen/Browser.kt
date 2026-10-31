@@ -9,7 +9,6 @@ import android.app.AlertDialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.ContentValues
 import android.content.Context
@@ -538,10 +537,8 @@ class RecKeepAlive : Service() {
             getSystemService(NotificationManager::class.java)
                 .createNotificationChannel(NotificationChannel(CH, "Lumen: запись звука / audio recording", NotificationManager.IMPORTANCE_LOW))
         }
-        val flagsPi = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val open = PendingIntent.getActivity(this, 2, Intent(this, BrowserActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), flagsPi)
-        val stop = PendingIntent.getActivity(this, 3, Intent(this, BrowserActivity::class.java)
-            .setAction(BrowserActivity.ACTION_STOP_REC).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), flagsPi)
+        val open = Nav.pending(this, 7302, Intent(this, BrowserActivity::class.java))
+        val stop = Nav.pending(this, 7303, Intent(this, BrowserActivity::class.java).setAction(BrowserActivity.ACTION_STOP_REC))
         @Suppress("DEPRECATION")
         val n: Notification = (if (Build.VERSION.SDK_INT >= 26) Notification.Builder(this, CH) else Notification.Builder(this))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)

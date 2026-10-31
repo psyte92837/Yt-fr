@@ -463,7 +463,9 @@ object QuickAnalysis {
         }
         val p = createProject(link, mode)
         if (!CollectState.running) CollectService.startKind(a, p.id, "quick")
-        a.startActivity(Intent(a, ProjectActivity::class.java).putExtra("id", p.id).putExtra("tab", "overview"))
+        val open = Intent(a, ProjectActivity::class.java).putExtra("id", p.id).putExtra("tab", "overview")
+        // from Share: into Lumen's own task, not the task of the app that shared the link
+        if (a is LinkActivity) Nav.show(a, open) else a.startActivity(open)
         return true
     }
 }

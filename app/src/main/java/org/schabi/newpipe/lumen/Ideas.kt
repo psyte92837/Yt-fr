@@ -4,7 +4,6 @@
  */
 package org.schabi.newpipe.lumen
 
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import org.json.JSONArray
@@ -353,8 +352,7 @@ object Ideas {
     private fun notify(ctx: Context, c: IdeasConfig, d: IdeasLogic.Digest) {
         Notify.channels(ctx)
         val nid = NOTIFY_BASE + (c.id.hashCode() and 0x3FF)
-        val pi = PendingIntent.getActivity(ctx, nid, IdeasActivity.intent(ctx, c.id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val pi = Nav.pending(ctx, nid, IdeasActivity.intent(ctx, c.id))
         val n = Notify.builder(ctx, Notify.CH_MONITOR).setSmallIcon(android.R.drawable.ic_menu_search)
             .setContentTitle(t("💡 Идеи: ", "💡 Ideas: ") + c.business.trim().take(40))
             .setContentText(IdeasLogic.headline(d.text))

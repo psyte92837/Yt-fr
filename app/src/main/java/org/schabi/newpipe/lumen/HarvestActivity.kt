@@ -372,7 +372,7 @@ class HarvestActivity : LumenBase() {
                         .setPrimaryClip(android.content.ClipData.newPlainText("list", HarvestRules.listText(st, sort)))
                     toast(t("Скопировано", "Copied"))
                 }
-                2 -> startActivity(Intent(this, LumenActivity::class.java))
+                2 -> Nav.home(this)
             }
         }.show()
     }

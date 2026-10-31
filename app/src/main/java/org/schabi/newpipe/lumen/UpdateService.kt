@@ -125,9 +125,7 @@ object Updates {
         val body = t("Сборка ${info.build}", "Build ${info.build}") + (if (info.extractor != currentExtractor && info.extractor.isNotBlank())
             t(", новый NewPipeExtractor ", ", new NewPipeExtractor ") + UpdateLogic.extractorLabel(info.extractor) else "") +
             (if (info.notes.isNotBlank()) "\n" + info.notes.take(300) else "")
-        val open = PendingIntent.getActivity(ctx, NOTIFY_ID,
-            Intent(ctx, SettingsActivity::class.java).putExtra("update", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val open = Nav.pending(ctx, 7305, Intent(ctx, SettingsActivity::class.java).putExtra("update", true))
         val n = Notify.builder(ctx, CH_UPDATE).setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(title).setContentText(body)
             .setStyle(android.app.Notification.BigTextStyle().bigText(body))

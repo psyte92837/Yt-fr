@@ -5,7 +5,6 @@
 package org.schabi.newpipe.lumen
 
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Intent
 import android.os.Looper
 import java.io.IOException
@@ -226,14 +225,11 @@ object SendGate {
         }
     }
 
-    private fun intent() = Intent(Lumen.app, SendReviewActivity::class.java)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-
     private fun show() {
         // the screen opens by itself while the app is visible; the notification covers background jobs
         if (LumenBase.visible > 0) {
             try {
-                Lumen.app.startActivity(intent())
+                Nav.show(Lumen.app, Intent(Lumen.app, SendReviewActivity::class.java))
             } catch (e: Exception) {
                 L.w("send", "review screen: ${e.message}")
             }
@@ -241,7 +237,7 @@ object SendGate {
         try {
             Notify.channels(Lumen.app)
             val req = current?.req ?: return
-            val pi = PendingIntent.getActivity(Lumen.app, NOTE_ID, intent(), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            val pi = Nav.pending(Lumen.app, NOTE_ID, Intent(Lumen.app, SendReviewActivity::class.java))
             val n = Notify.builder(Lumen.app, Notify.CH_DONE_QUIET)
                 .setSmallIcon(android.R.drawable.ic_menu_upload)
                 .setContentTitle(t("AI: проверьте, что отправляем", "AI: check what is sent"))

@@ -88,7 +88,7 @@ object BgTasks {
 
     /** Intent that brings [a] back with its extras (for the notification tap). */
     fun reopen(a: Activity): Intent = Intent(a.intent ?: Intent()).setClass(a, a.javaClass)
-        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        .putExtra(Nav.EXTRA_INST, System.identityHashCode(a))
 
     /**
      * Runs [work] in the background with a progress notification; [onDone] / [onError] come on
@@ -157,8 +157,7 @@ object BgTasks {
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setAutoCancel(true)
         task.open?.let {
-            b.setContentIntent(PendingIntent.getActivity(ctx, 7500 + task.id % 400, it,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            b.setContentIntent(Nav.pending(ctx, 7500 + task.id % 400, it))
         }
         try {
             ctx.getSystemService(NotificationManager::class.java).notify(7500 + task.id % 400, b.build())
@@ -240,7 +239,7 @@ class TaskService : Service() {
             .setOngoing(true)
             .setProgress(1000, ((f ?: 0f) * 1000).toInt(), f == null)
         tasks.firstOrNull { it.open != null }?.open?.let {
-            b.setContentIntent(PendingIntent.getActivity(this, 7421, it, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
+            b.setContentIntent(Nav.pending(this, 7421, it))
         }
         if (tasks.any { it.onCancel != null }) {
             val cancel = PendingIntent.getService(this, 7422, Intent(this, TaskService::class.java).setAction(ACTION_CANCEL),

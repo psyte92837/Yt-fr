@@ -2036,7 +2036,8 @@ object StudioRecognizer {
 
     fun recognize(
         ctx: Context, pcm: ShortArray, rate: Int, pieces: List<Span>, lang: String,
-        progress: (Int, Int) -> Unit, cancelled: () -> Boolean, done: (List<Pair<Span, String>>) -> Unit
+        progress: (Int, Int) -> Unit, cancelled: () -> Boolean, status: (String) -> Unit = {},
+        done: (List<Pair<Span, String>>) -> Unit
     ) {
         if (Build.VERSION.SDK_INT < 33) {
             done(emptyList())
@@ -2046,6 +2047,10 @@ object StudioRecognizer {
         val results = mutableListOf<Pair<Span, String>>()
         // the on-device recogniser often lacks the language pack: after its first failure the online one is used
         var onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
+        var downloadTried = false
+        fun langIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
         fun next(i: Int, retry: Boolean = false) {
             if (i >= pieces.size || cancelled()) {
                 done(results)
@@ -2068,6 +2073,20 @@ object StudioRecognizer {
                 runCatching { pipe[0].close() }
                 if (!text.isNullOrBlank()) results += piece to text
                 L.i("studio", "recognised piece ${i + 1}/${pieces.size}: ${text?.length ?: -1} chars")
+                // error 13: the language is known but its pack is not on the phone: download it once, then retry
+                if (text.isNullOrBlank() && !downloadTried && (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
+                        (local && error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED))) {
+                    downloadTried = true
+                    status(t("Загрузка языкового пакета для распознавания ($lang)…", "Downloading the speech pack ($lang)…"))
+                    main.post {
+                        downloadPack(ctx, langIntent(), main, cancelled) { ok ->
+                            L.w("studio", "speech pack $lang: ${if (ok) "ready" else "not ready, online recogniser"}")
+                            onDevice = ok
+                            next(i, retry = true)
+                        }
+                    }
+                    return
+                }
                 // "no match" and "speech timeout" mean silence; any other on-device failure: retry online
                 val retryOnline = local && text.isNullOrBlank() && error != SpeechRecognizer.ERROR_NO_MATCH &&
                     error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && SpeechRecognizer.isRecognitionAvailable(ctx)
@@ -2089,9 +2108,7 @@ object StudioRecognizer {
                 override fun onPartialResults(partialResults: android.os.Bundle?) {}
                 override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
             })
-            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            val intent = langIntent()
                 .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
                 .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
                 .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
@@ -2118,6 +2135,46 @@ object StudioRecognizer {
             main.postDelayed({ finish(null, -2) }, 15_000 + piece.ms * 2)
         }
         next(0)
+    }
+
+    /**
+     * Asks the on-device recogniser to download the language pack of [intent]. On Android 14+ waits for it
+     * (up to 2 minutes); [done] gets true when the pack is ready. Android 13 only starts the download.
+     */
+    private fun downloadPack(ctx: Context, intent: Intent, main: Handler, cancelled: () -> Boolean, done: (Boolean) -> Unit) {
+        val sr = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) }.getOrNull() ?: return done(false)
+        var over = false
+        fun end(ok: Boolean) {
+            if (over) return
+            over = true
+            runCatching { sr.destroy() }
+            done(ok)
+        }
+        if (Build.VERSION.SDK_INT < 34) {
+            runCatching { sr.triggerModelDownload(intent) }.onFailure { L.w("studio", "pack download: ${it.message}") }
+            return end(false)
+        }
+        try {
+            sr.triggerModelDownload(intent, ctx.mainExecutor, object : android.speech.ModelDownloadListener {
+                override fun onProgress(completedPercent: Int) {}
+                override fun onSuccess() = end(true)
+                override fun onScheduled() = end(false) // e.g. waits for Wi-Fi
+                override fun onError(error: Int) {
+                    L.w("studio", "pack download error $error")
+                    end(false)
+                }
+            })
+        } catch (e: Exception) {
+            L.w("studio", "pack download: ${e.message}")
+            return end(false)
+        }
+        val started = System.currentTimeMillis()
+        fun watch() {
+            if (over) return
+            if (cancelled() || System.currentTimeMillis() - started > 120_000) return end(false)
+            main.postDelayed({ watch() }, 500)
+        }
+        watch()
     }
 }
 

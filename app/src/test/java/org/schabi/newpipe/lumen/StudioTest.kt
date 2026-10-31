@@ -207,6 +207,14 @@ class StudioTest {
     }
 
     @Test
+    fun recogLangAddsRegion() {
+        assertEquals("ru-RU", Studio.recogLang("ru"))
+        assertEquals("kk-KZ", Studio.recogLang("kk"))
+        assertEquals("en-US", Studio.recogLang("EN"))
+        assertEquals("pt-PT", Studio.recogLang("pt_PT"))
+    }
+
+    @Test
     fun groupSpansRespectsLimit() {
         val s = listOf(Span(0, 4000), Span(5000, 9000), Span(10_000, 14_000))
         assertEquals(listOf(Span(0, 9000), Span(10_000, 14_000)), Studio.groupSpans(s, 12_000))

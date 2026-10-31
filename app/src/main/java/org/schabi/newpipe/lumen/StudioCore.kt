@@ -528,7 +528,6 @@ object Studio {
         return VoiceStats(totalMs, speech.sumOf { it.ms }, gaps.size, gaps.maxOrNull() ?: 0, words)
     }
 
-    /** Joins neighbouring speech parts into pieces of at most [maxMs] (for a recogniser with a length limit). */
     /** Plain text of an AI transcription: no timecodes ([00:12], 0:12 -), speaker names, sound notes or quotes. */
     fun cleanTranscript(text: String): String = text.lines().joinToString(" ") { line ->
         line.replace(Regex("""^\s*\[?\(?\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\)?]?\s*-?\s*"""), " ")
@@ -536,6 +535,18 @@ object Studio {
             .replace(Regex("""\[[^\]]*]|\([^)]*(музык|music|смех|laugh|шум|noise)[^)]*\)""", RegexOption.IGNORE_CASE), " ")
     }.replace(Regex("[\"«»`*]"), "").replace(Regex("\\s+"), " ").trim()
 
+    /** BCP-47 tag for the speech recogniser: "ru" → "ru-RU", "kk" → "kk-KZ", "en" → "en-US"; a full tag stays. */
+    fun recogLang(lang: String): String {
+        val l = lang.trim().replace('_', '-')
+        if (l.contains('-')) return l
+        val region = mapOf("en" to "US", "uk" to "UA", "kk" to "KZ", "ja" to "JP", "zh" to "CN", "ko" to "KR",
+            "be" to "BY", "uz" to "UZ", "hi" to "IN", "ar" to "SA", "cs" to "CZ", "el" to "GR", "he" to "IL",
+            "sv" to "SE", "da" to "DK", "vi" to "VN", "fa" to "IR", "ka" to "GE", "hy" to "AM", "pt" to "BR")
+        val low = l.lowercase()
+        return low + "-" + (region[low] ?: low.uppercase())
+    }
+
+    /** Joins neighbouring speech parts into pieces of at most [maxMs] (for a recogniser with a length limit). */
     fun groupSpans(speech: List<Span>, maxMs: Long = 12_000): List<Span> {
         val out = mutableListOf<Span>()
         for (s in speech) {

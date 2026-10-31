@@ -2280,8 +2280,9 @@ class StudioActivity : LumenBase() {
                 if (!canRecognise) return@async byAiOrBeats()
                 report("analyse", t("Распознавание речи…", "Recognising speech…"))
                 val pieces = Studio.groupSpans(speech)
-                StudioRecognizer.recognize(this, take.data, take.rate, pieces, lang() + "-" + lang().uppercase().replace("EN", "US").replace("UK", "UA"),
-                    { i, n -> report("analyse", t("Распознавание $i/$n", "Recognising $i/$n")) }, { cancel }) { res ->
+                StudioRecognizer.recognize(this, take.data, take.rate, pieces, Studio.recogLang(lang()),
+                    { i, n -> report("analyse", t("Распознавание $i/$n", "Recognising $i/$n")) }, { cancel },
+                    { msg -> report("analyse", msg) }) { res ->
                     if (cancel) {
                         fail(java.util.concurrent.CancellationException())
                         return@recognize

@@ -173,11 +173,13 @@ object Help {
             listOf(t("Из любого приложения: выделите текст → Lumen, или «Поделиться» документом.", "From any app: select text → Lumen, or share a document."))),
         HelpTopic("studio", "Lumen Studio",
             t("Ролики в стиле анимированной инфографики: слова появляются под голос, рядом схемы из эмодзи-плиток, диаграммы, цитаты и сравнения. " +
-                "Три задачи вверху экрана: «Shorts» — вертикальный ролик 9:16 по сценарию; «Видео» — горизонтальный ролик для YouTube 16:9 на 2–10 минут; " +
-                "«Озвучка» — готовое аудио или запись голоса превращается в анимированный ролик 9:16, 16:9 или 1:1. Ролик собирается на телефоне в MP4 720p или 1080p.",
+                "Четыре задачи вверху экрана: «Shorts» — вертикальный ролик 9:16 по сценарию; «Видео» — горизонтальный ролик для YouTube 16:9 на 2–10 минут; " +
+                "«Озвучка» — готовое аудио или запись голоса превращается в анимированный ролик 9:16, 16:9 или 1:1; " +
+                "«Нарезка» — голос за кадром поверх кусков видео с YouTube и графики. Ролик собирается на телефоне в MP4 720p или 1080p.",
                 "Videos in an animated infographic style: words appear with the voice, next to emoji-tile schemes, charts, quotes and comparisons. " +
-                    "Three tasks at the top: \"Shorts\" is a vertical 9:16 video from a script; \"Video\" is a horizontal 16:9 YouTube video of 2–10 minutes; " +
-                    "\"Voice-over\" turns ready audio or a recording into an animated 9:16, 16:9 or 1:1 video. The video is built on the phone as an MP4, 720p or 1080p."),
+                    "Four tasks at the top: \"Shorts\" is a vertical 9:16 video from a script; \"Video\" is a horizontal 16:9 YouTube video of 2–10 minutes; " +
+                    "\"Voice-over\" turns ready audio or a recording into an animated 9:16, 16:9 or 1:1 video; " +
+                    "\"Cuts\" puts a voice-over over pieces of YouTube videos and graphics. The video is built on the phone as an MP4, 720p or 1080p."),
             listOf(
                 t("1. Сценарий: напишите сами или нажмите «✨ Написать (AI)» по теме. Каждая сцена — абзац; первая строка может начинаться с [icons], [list], [flow], [cycle], [step: заголовок], [big], [stat: 80%]; строка с «|» — плитки «🔍 подпись».",
                     "1. Script: write it or tap \"✨ Write (AI)\" for a topic. Each scene is a paragraph; the first line may start with [icons], [list], [flow], [cycle], [step: title], [big], [stat: 80%]; a line with \"|\" lists tiles \"🔍 label\"."),
@@ -201,6 +203,8 @@ object Help {
                 t("Звуки эффектов синтезируются в самом приложении, без файлов и сети; их можно выключить в шаге 4.", "Sound effects are synthesised by the app itself, with no files or network; turn them off in step 4."),
                 t("Автомонтаж своего видео: «✂ Вырезать паузы» убирает тишину (джамп-каты), «Зумы» чередуют крупность и плавно наезжают камерой, «Переходы» вводят вставки слайдом. «🎞 Раскадровка» показывает кадр каждой сцены.",
                     "Auto-edit of your video: \"✂ Cut out pauses\" removes silence (jump cuts), \"Zooms\" alternate framing and push in, \"Transitions\" slide inserts in. \"🎞 Storyboard\" shows a frame of every scene."),
+                t("«Нарезка»: в карточке «🎞 Клипы с YouTube» добавьте клип по ссылке — начало, конец (до 30 с) и подпись, что в кадре. «⬇ Скачать» загружает только эти секунды видео без звука. AI-режиссёр ставит клипы на сцены по подписям; сцену можно поменять вручную нажатием в списке сцен или кнопкой «Расставить по сценам без AI». Между клипами идёт графика. Чужие видео защищены авторским правом: берите короткие вставки.",
+                    "\"Cuts\": in the \"🎞 YouTube clips\" card add a clip by link: start, end (up to 30 s) and a note on what is in the shot. \"⬇ Download\" fetches only those seconds of video, without sound. The AI director puts the clips on scenes by their notes; tap a scene in the list or use \"Place on scenes without AI\" to change it. Graphics fill the scenes between clips. Other people's videos are copyrighted: use short inserts."),
                 t("«Видео на фоне»: добавьте клипы под любую озвучку (голос Microsoft, микрофон, аудио) — они идут по очереди и повторяются по кругу на всю длину озвучки.",
                     "\"Background video\": add clips under any voice-over (Microsoft voice, microphone, audio); they play in order and loop for the whole voice-over.")
             )),

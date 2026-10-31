@@ -14,10 +14,11 @@ import kotlin.math.sin
 
 /**
  * What Lumen Studio makes. SHORTS: vertical 9:16 from a script; VIDEO: horizontal 16:9 YouTube video from a script;
- * VOICE: an existing voice-over (audio file or microphone) turned into an animated video of any shape.
+ * VOICE: an existing voice-over (audio file or microphone) turned into an animated video of any shape;
+ * CUTS: a voice-over over pieces of YouTube videos (B-roll, meme reactions) and graphics, see [StudioCuts].
  */
 enum class StudioTask(val id: String) {
-    SHORTS("shorts"), VIDEO("video"), VOICE("voice");
+    SHORTS("shorts"), VIDEO("video"), VOICE("voice"), CUTS("cuts");
 
     companion object {
         fun of(id: String): StudioTask = entries.firstOrNull { it.id == id } ?: SHORTS
@@ -106,7 +107,9 @@ object StudioDirector {
     /** A scene of the AI plan over words [from]..[to] (absolute indices); cue `at` are absolute too. */
     data class DScene(
         val from: Int, val to: Int, val kind: String, val title: String, val items: List<SItem>,
-        val emph: List<String>, val transition: String, val cues: List<SCue>
+        val emph: List<String>, val transition: String, val cues: List<SCue>,
+        /** Clip shown in this scene (Cuts task); empty = graphics. */
+        val clip: String = ""
     )
 
     data class Direction(val title: String, val drop: Set<Int>, val scenes: List<DScene>)
@@ -138,7 +141,7 @@ object StudioDirector {
     }
 
     /** Plan from an AI reply; scenes are put in order and made to cover all [wordCount] words. Null if nothing usable. */
-    fun parse(reply: String, wordCount: Int): Direction? {
+    fun parse(reply: String, wordCount: Int, clipIds: Set<String> = emptySet()): Direction? {
         if (wordCount <= 0) return null
         val o = JsonText.firstObject(reply)?.let { runCatching { JSONObject(it) }.getOrNull() }
             ?: JsonSalvage.array(reply, "scenes")?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -168,7 +171,8 @@ object StudioDirector {
                 }
             }
             raw += DScene(from, to, fitKind(base.kind, base.items), base.title, base.items, base.emph,
-                s.optString("transition").trim().lowercase().takeIf { it in TRANSITIONS } ?: "", cues)
+                s.optString("transition").trim().lowercase().takeIf { it in TRANSITIONS } ?: "", cues,
+                base.clip.takeIf { it in clipIds } ?: "")
         }
         val drop = mutableSetOf<Int>()
         o.optJSONArray("drop")?.let { da -> for (i in 0 until da.length()) wordIndex(da.opt(i))?.takeIf { it in 0 until wordCount }?.let { drop += it } }
@@ -330,7 +334,7 @@ object StudioDirector {
                 return (n - r.first).coerceIn(0, r.last - r.first)
             }
             val cues = s.cues.map { it.copy(at = local(it.at)) }
-            scenes += SScene(r.joinToString(" ") { out[it].text }, s.kind, s.title, s.items, s.emph, cues, s.transition)
+            scenes += SScene(r.joinToString(" ") { out[it].text }, s.kind, s.title, s.items, s.emph, cues, s.transition, s.clip)
             ranges += r
         }
         return Applied(SScript(d.title, scenes), ranges, out, keep, drop.size)

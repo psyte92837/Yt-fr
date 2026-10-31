@@ -49,6 +49,10 @@ object StudioPrefs {
     var aspect: String
         get() = p.getString("studio_aspect", StudioAspect.PORTRAIT.id) ?: StudioAspect.PORTRAIT.id
         set(v) = p.edit().putString("studio_aspect", v).apply()
+    /** Frame of the Cuts task: [StudioAspect.id]. */
+    var cutsAspect: String
+        get() = p.getString("studio_aspect_cuts", StudioAspect.LANDSCAPE.id) ?: StudioAspect.LANDSCAPE.id
+        set(v) = p.edit().putString("studio_aspect_cuts", v).apply()
     /** Short side of the frame: 720 or 1080. */
     var quality: Int
         get() = p.getInt("studio_quality", if (height >= 1920) 1080 else 720)
@@ -170,6 +174,10 @@ class StudioActivity : LumenBase() {
     private val takeFile get() = File(tdir, "take.wav")
     private val sourceFile get() = File(tdir, "source.mp4")
     private val musicFile get() = File(dir, "music.wav")
+    /** Cuts task: marked YouTube pieces and their cut files. */
+    private val cutsFile get() = File(tdir, "clips.json")
+    private val cutsDir get() = File(tdir, "clips").apply { mkdirs() }
+    private var cutClips: List<SClip> = emptyList()
     private var previewBusy = false
     private var previewAgain = false
 
@@ -220,6 +228,7 @@ class StudioActivity : LumenBase() {
             lastVideo = it
             savedAs = StudioJob.savedAs
         }
+        loadCuts()
         render()
         restoreAnalysis()
         Lumen.async({ EdgeTts.voices() }, {}) {
@@ -310,7 +319,7 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over")), task.ordinal) {
+        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
         c.muted(when (task) {
@@ -323,6 +332,9 @@ class StudioActivity : LumenBase() {
             StudioTask.VOICE -> t(
                 "Готовая озвучка → анимированный ролик. Загрузите аудио или запишите голос: AI-режиссёр сам разметит сцены, графику, зумы, плашки и звуки и вырежет оговорки. Кадр 9:16, 16:9 или 1:1.",
                 "A ready voice-over → an animated video. Upload audio or record your voice: the AI director lays out scenes, graphics, zooms, stickers and sounds and cuts slips. Frame 9:16, 16:9 or 1:1.")
+            StudioTask.CUTS -> t(
+                "Нарезка с голосом за кадром: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, AI-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1.",
+                "A voice-over over cuts: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1.")
         })
         c.steps(stepNow(), 4)
         if (task == StudioTask.VOICE) {
@@ -332,6 +344,7 @@ class StudioActivity : LumenBase() {
             scriptCard(c, 1)
             voiceCard(c, 2)
         }
+        if (task == StudioTask.CUTS) cutsCard(c)
         analyseCard(c)
         videoCard(c)
         page("Lumen Studio", c.root, keepScroll = true)
@@ -369,7 +382,7 @@ class StudioActivity : LumenBase() {
         }
         add(text(ctx, "$n. " + t("Сценарий", "Script"), Type.TITLE_M, bold = true), 0)
         add(detach(topicEdit), 8)
-        if (task == StudioTask.VIDEO) {
+        if (longScript()) {
             spinner(t("Длительность", "Length"), listOf(120 to "2 мин", 180 to "3 мин", 300 to "5 мин", 480 to "8 мин", 600 to "10 мин"), StudioPrefs.videoSeconds) {
                 StudioPrefs.videoSeconds = it
                 render()
@@ -394,9 +407,13 @@ class StudioActivity : LumenBase() {
 
     private fun voiceCard(c: Col, n: Int) = c.card {
         add(text(ctx, "$n. " + if (task == StudioTask.VOICE) t("Озвучка", "Voice-over") else t("Голос", "Voice"), Type.TITLE_M, bold = true), 0)
-        val modes = if (task == StudioTask.VOICE) listOf("file", "mic") else listOf("edge", "mic", "file", "video")
+        val modes = when (task) {
+            StudioTask.VOICE -> listOf("file", "mic")
+            StudioTask.CUTS -> listOf("edge", "mic", "file")
+            else -> listOf("edge", "mic", "file", "video")
+        }
         val labels = if (task == StudioTask.VOICE) listOf(t("Аудиофайл", "Audio file"), t("Микрофон", "Mic"))
-        else listOf("Microsoft", t("Микрофон", "Mic"), t("Аудио", "Audio"), t("Видео", "Video"))
+        else listOf("Microsoft", t("Микрофон", "Mic"), t("Аудио", "Audio"), t("Видео", "Video")).take(modes.size)
         add(segBar(ctx, labels, modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)) {
             StudioPrefs.voiceMode = modes[it]
             resetAnalysis()
@@ -625,11 +642,23 @@ class StudioActivity : LumenBase() {
             if (zooms + pops + sounds > 0) muted("🎬 " + t("зумов $zooms · плашек $pops · звуков $sounds", "zooms $zooms · stickers $pops · sounds $sounds"))
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
+            if (pickable) muted(t("Нажмите на сцену, чтобы выбрать ей клип.", "Tap a scene to pick its clip."))
+            val ready = readyIds()
             plan.times.take(60).forEach { st ->
                 val scn = sc.scenes[st.scene]
                 val fx = scn.cues.joinToString("") { when (it.type) { "zoom" -> "🔍"; "pop" -> "💬"; else -> "🔊" } }
-                muted("${Studio.clock(st.startMs)} · ${kindLabel(scn.kind)}" + (if (fx.isNotEmpty()) " $fx" else "") + " · " +
-                    scn.say.take(70) + if (scn.say.length > 70) "…" else "")
+                val what = if (scn.clip in ready) "🎞 ${scn.clip}" else kindLabel(scn.kind)
+                val line = "${Studio.clock(st.startMs)} · $what" + (if (fx.isNotEmpty()) " $fx" else "") + " · " +
+                    scn.say.take(70) + if (scn.say.length > 70) "…" else ""
+                if (pickable) {
+                    add(text(ctx, line, 13f, color = if (scn.clip in ready) Palette.ON_SURFACE else Palette.MUTED).apply {
+                        setPadding(0, dp(4), 0, dp(4))
+                        setOnClickListener { pickClip(st.scene) }
+                    }, 2)
+                } else {
+                    muted(line)
+                }
             }
             if (plan.times.size > 60) muted("… " + t("ещё ${plan.times.size - 60}", "${plan.times.size - 60} more"))
         }
@@ -660,11 +689,13 @@ class StudioActivity : LumenBase() {
         add(text(ctx, t("4. Ролик", "4. Video"), Type.TITLE_M, bold = true), 0)
         val styles = listOfNotNull(StudioStyle.DARK, StudioStyle.LIGHT, if (montageReady()) StudioStyle.VIDEO else null)
         val labels = listOf(t("Тёмный", "Dark"), t("Светлый", "Light"), t("Монтаж", "Montage")).take(styles.size)
-        add(segBar(ctx, labels, styles.indexOf(currentStyle()).coerceAtLeast(0)) {
+        if (cutMontage()) muted(t("Монтаж нарезки: клипы идут на своих сценах, между ними — графика, внизу слово под голос. Звук клипов выключен.",
+            "Cut montage: clips play on their scenes, graphics in between, the spoken word below. Clip sound is off."))
+        else add(segBar(ctx, labels, styles.indexOf(currentStyle()).coerceAtLeast(0)) {
             StudioPrefs.style = styles[it].name
             render()
         }, 8)
-        muted(when (currentStyle()) {
+        if (!cutMontage()) muted(when (currentStyle()) {
             StudioStyle.DARK -> t("Слова появляются группами с размытием, схемы из эмодзи на тёмном фоне.", "Word groups blur in, emoji schemes on a dark screen.")
             StudioStyle.LIGHT -> t("Заголовок капсом и одно крупное слово под голос на светлом фоне.", "A capital headline and one big word at a time on a light screen.")
             StudioStyle.VIDEO -> if (videoReady()) t("Ваше видео, слово под голос внизу, графика вставками.", "Your video, the spoken word below, graphics cut in.")
@@ -686,7 +717,7 @@ class StudioActivity : LumenBase() {
                 render()
             }
         }
-        if (!videoReady()) bgBlock(this)
+        if (!videoReady() && task != StudioTask.CUTS) bgBlock(this)
         add(text(ctx, t("Цвет акцента", "Accent colour"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         chips(StudioPrefs.ACCENTS.map { (col, e) ->
             chip(ctx, e, col == StudioPrefs.accent) {
@@ -694,11 +725,11 @@ class StudioActivity : LumenBase() {
                 render()
             }
         })
-        if (task == StudioTask.VOICE) {
+        if (task == StudioTask.VOICE || task == StudioTask.CUTS) {
             add(text(ctx, t("Кадр", "Frame"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val shapes = StudioAspect.entries
             add(segBar(ctx, listOf(t("9:16 Shorts", "9:16 Shorts"), t("16:9 YouTube", "16:9 YouTube"), t("1:1 квадрат", "1:1 square")), shapes.indexOf(aspect())) {
-                StudioPrefs.aspect = shapes[it].id
+                if (task == StudioTask.CUTS) StudioPrefs.cutsAspect = shapes[it].id else StudioPrefs.aspect = shapes[it].id
                 board = emptyList()
                 render()
             }, 4)
@@ -761,7 +792,8 @@ class StudioActivity : LumenBase() {
 
     /** Storyboard: a small frame of every scene; a tap shows that scene in the preview. */
     private fun storyboard(c: Col, plan: StudioPlan) {
-        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}"
+        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
+            plan.script.scenes.joinToString(",") { it.clip } + ":" + readyIds().joinToString(",")
         if (board.isNotEmpty() && boardKey == key) {
             c.add(text(this, t("Раскадровка", "Storyboard"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val flow = FlowLayout(this, dp(6), dp(6))
@@ -793,7 +825,7 @@ class StudioActivity : LumenBase() {
         busy = "board"
         cancel = false
         render()
-        val bg = if (plan.style == StudioStyle.VIDEO) bgSpec() else null
+        val bg = if (plan.style == StudioStyle.VIDEO) bgSpec(plan) else null
         Lumen.async({
             val n = plan.times.size
             plan.times.mapIndexed { i, st ->
@@ -1042,12 +1074,26 @@ class StudioActivity : LumenBase() {
         File(bgDir, name).takeIf { name.isNotBlank() && it.exists() && ms > 0 }?.let { it to ms }
     }
 
-    private fun montageReady() = videoReady() || clips().isNotEmpty()
+    private fun montageReady() = task != StudioTask.CUTS && (videoReady() || clips().isNotEmpty())
 
-    /** What goes under a VIDEO-style video: the speaker's own video (with cuts) or the background clips. */
-    private fun bgSpec(): StudioBg = if (videoReady()) StudioBg(sourceFile, cuts, emptyList()) else StudioBg(null, null, clips())
+    /** Cuts task with downloaded clips: always a montage (clips on their scenes, graphics in between). */
+    private fun cutMontage() = task == StudioTask.CUTS && readyCuts().isNotEmpty()
+
+    /**
+     * What goes under a VIDEO-style video: the speaker's own video (with cuts), the background clips,
+     * or (Cuts task) the YouTube clips on the scenes of [plan].
+     */
+    private fun bgSpec(plan: StudioPlan): StudioBg {
+        if (task == StudioTask.CUTS) {
+            val ready = readyCuts()
+            val slots = StudioCuts.slots(plan.times, plan.script.scenes.map { it.clip }, ready.associateBy { it.id })
+            return StudioBg(null, null, emptyList(), slots, ready.associate { it.id to File(cutsDir, it.file) })
+        }
+        return if (videoReady()) StudioBg(sourceFile, cuts, emptyList()) else StudioBg(null, null, clips())
+    }
 
     private fun currentStyle(): StudioStyle {
+        if (cutMontage()) return StudioStyle.VIDEO
         val s = runCatching { StudioStyle.valueOf(StudioPrefs.style) }.getOrDefault(StudioStyle.DARK)
         return if (s == StudioStyle.VIDEO && !montageReady()) StudioStyle.DARK else s
     }
@@ -1120,6 +1166,179 @@ class StudioActivity : LumenBase() {
         }
     }
 
+    // ---------- Cuts: YouTube clips ----------
+
+    private fun loadCuts() {
+        cutClips = if (task == StudioTask.CUTS && cutsFile.exists()) StudioCuts.fromJson(cutsFile.readText()) else emptyList()
+    }
+
+    private fun saveCuts(list: List<SClip>) {
+        cutClips = list
+        runCatching { cutsFile.writeText(StudioCuts.toJson(list)) }.onFailure { L.w("studio", "save clips: ${it.message}") }
+    }
+
+    /** Clips that are downloaded and cut. */
+    private fun readyCuts(): List<SClip> = cutClips.filter { it.file.isNotEmpty() && it.lenMs > 0 && File(cutsDir, it.file).exists() }
+
+    private fun readyIds(): Set<String> = readyCuts().map { it.id }.toSet()
+
+    private fun withClips(sc: SScript, ids: List<String>) = sc.copy(scenes = sc.scenes.mapIndexed { i, s -> s.copy(clip = ids.getOrElse(i) { "" }) })
+
+    private fun cutsCard(c: Col) = c.card {
+        add(text(ctx, t("🎞 Клипы с YouTube", "🎞 YouTube clips"), Type.TITLE_M, bold = true), 0)
+        muted(t("Отметьте куски видео: ссылка, начало и конец (до 30 с) и что в кадре — по этой подписи AI-режиссёр поймёт, куда поставить клип. " +
+            "Скачиваются только эти секунды, без звука. Короткие вставки по 1–5 с безопаснее для авторских прав.",
+            "Mark pieces of videos: link, start and end (up to 30 s) and what is in the shot; the AI director uses this note to place the clip. " +
+                "Only these seconds are downloaded, without sound. Short 1–5 s inserts are safer for copyright."))
+        cutClips.forEach { cl ->
+            val ready = cl.file.isNotEmpty() && File(cutsDir, cl.file).exists()
+            val about = cl.note.ifBlank { cl.title }.ifBlank { cl.url }
+            val line = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                addView(text(ctx, (if (ready) "✅ " else "⬇ ") + "${cl.id} · ${StudioCuts.stamp(cl.fromMs)}–${StudioCuts.stamp(cl.toMs)}\n" +
+                    about.take(90), 14f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                if (busy.isEmpty()) {
+                    addView(btn(ctx, "✎", style = BtnStyle.TEXT) { editClip(cl) }.apply { contentDescription = t("Изменить ${cl.id}", "Edit ${cl.id}") })
+                    addView(btn(ctx, "✕", style = BtnStyle.TEXT) { removeClip(cl) }.apply { contentDescription = t("Убрать ${cl.id}", "Remove ${cl.id}") })
+                }
+            }
+            add(line, 6)
+        }
+        progress("cuts", t("Загрузка клипов…", "Downloading clips…"))
+        if (busy.isNotEmpty()) return@card
+        val addBtn = btn(ctx, t("＋ Клип по ссылке", "＋ Clip by link"), style = BtnStyle.TONAL) { editClip(null) }
+        if (cutClips.any { it !in readyCuts() }) row(addBtn, btn(ctx, t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() })
+        else add(addBtn, 8)
+        if (script != null && readyCuts().isNotEmpty()) {
+            button(t("🎞 Расставить по сценам без AI", "🎞 Place on scenes without AI"), style = BtnStyle.TEXT) { autoPlace() }
+        }
+    }
+
+    /** Adds a clip ([old] == null) or changes one; a new link or time drops the downloaded file. */
+    private fun editClip(old: SClip?) {
+        val clipText = runCatching {
+            (getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull()?.trim().orEmpty()
+        val url0 = old?.url ?: clipText.takeIf { YtQuery.videoIdFromUrl(it) != null }.orEmpty()
+        val urlE = edt(this, t("Ссылка на видео YouTube", "YouTube video link"), url0)
+        val fromE = edt(this, t("Начало: 1:23 или 83", "Start: 1:23 or 83"), old?.let { StudioCuts.stamp(it.fromMs) } ?: StudioCuts.startOf(url0)?.let { StudioCuts.stamp(it) }.orEmpty())
+        val toE = edt(this, t("Конец (по умолчанию +5 с)", "End (default +5 s)"), old?.let { StudioCuts.stamp(it.toMs) }.orEmpty())
+        val noteE = edt(this, t("Что в кадре: «Хоумлендер в шоке», «интерфейс Codex»", "What is in the shot: \"shocked face\", \"Codex UI\""), old?.note.orEmpty())
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val p = dp(24)
+            setPadding(p, dp(8), p, 0)
+            listOf(urlE, fromE, toE, noteE).forEach { addView(it, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)) }
+        }
+        android.app.AlertDialog.Builder(this).setTitle(if (old == null) t("Новый клип", "New clip") else t("Клип ${old.id}", "Clip ${old.id}")).setView(box)
+            .setPositiveButton("OK") { _, _ ->
+                val url = urlE.text.toString().trim()
+                val id = YtQuery.videoIdFromUrl(url)
+                if (id == null) {
+                    toast(t("Нужна ссылка на видео YouTube", "A YouTube video link is needed"))
+                    return@setPositiveButton
+                }
+                val from = StudioCuts.parseTime(fromE.text.toString()) ?: StudioCuts.startOf(url) ?: 0L
+                val to = toE.text.toString().takeIf { it.isNotBlank() }?.let { StudioCuts.parseTime(it) }
+                val (a, b) = StudioCuts.span(from, to)
+                val note = noteE.text.toString().trim().take(200)
+                val list = cutClips.toMutableList()
+                if (old == null) {
+                    if (list.size >= StudioCuts.MAX_CLIPS) {
+                        toast(t("Не больше ${StudioCuts.MAX_CLIPS} клипов", "At most ${StudioCuts.MAX_CLIPS} clips"))
+                        return@setPositiveButton
+                    }
+                    list += SClip(StudioCuts.newId(list), url, a, b, note)
+                } else {
+                    val same = old.url == url && old.fromMs == a && old.toMs == b
+                    if (!same && old.file.isNotEmpty()) File(cutsDir, old.file).delete()
+                    val upd = if (same) old.copy(note = note) else old.copy(url = url, fromMs = a, toMs = b, note = note, title = "", file = "", leadMs = 0, lenMs = 0)
+                    list[list.indexOfFirst { it.id == old.id }.coerceAtLeast(0)] = upd
+                }
+                saveCuts(list)
+                board = emptyList()
+                render()
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    private fun removeClip(cl: SClip) = confirm(t("Убрать клип ${cl.id}?", "Remove clip ${cl.id}?"), cl.note.ifBlank { cl.url }, t("Убрать", "Remove")) {
+        if (cl.file.isNotEmpty()) File(cutsDir, cl.file).delete()
+        saveCuts(cutClips.filter { it.id != cl.id })
+        board = emptyList()
+        render()
+    }
+
+    /** Downloads every clip that is not ready yet, one after another; a failed one is reported and skipped. */
+    private fun downloadCuts() {
+        val todo = cutClips.filter { it !in readyCuts() }
+        if (todo.isEmpty()) return
+        busy = "cuts"
+        cancel = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        render()
+        val dirNow = cutsDir
+        val maxH = StudioPrefs.quality
+        Lumen.async({
+            val done = HashMap<String, SClip>()
+            val errors = mutableListOf<String>()
+            todo.forEachIndexed { i, cl ->
+                if (cancel) throw java.util.concurrent.CancellationException()
+                report("cuts", t("Клип ${i + 1}/${todo.size}", "Clip ${i + 1}/${todo.size}"))
+                try {
+                    done[cl.id] = StudioCutsLoad.fetch(cl, dirNow, maxH, { cancel }) { report("cuts", it) }
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    L.w("studio", "clip ${cl.id}: ${e.message}")
+                    errors += "${cl.id}: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+            done to errors
+        }, { e ->
+            busy = ""
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) { (done, errors) ->
+            busy = ""
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            saveCuts(cutClips.map { done[it.id] ?: it })
+            board = emptyList()
+            render()
+            if (errors.isNotEmpty()) showText(t("Не все клипы скачались", "Some clips failed"), errors.joinToString("\n"))
+            else toast(t("Клипов скачано: ${done.size}", "Clips downloaded: ${done.size}"))
+        }
+    }
+
+    /** Picks the clip of scene [i] (or graphics). */
+    private fun pickClip(i: Int) {
+        val sc = script ?: return
+        val ready = readyCuts()
+        val labels = listOf(t("— графика, без клипа", "— graphics, no clip")) +
+            ready.map { "🎞 ${it.id} · ${it.note.ifBlank { it.title }.take(50)} · ${(it.lenMs + 500) / 1000} с" }
+        android.app.AlertDialog.Builder(this).setTitle(t("Сцена ${i + 1}", "Scene ${i + 1}"))
+            .setItems(labels.toTypedArray()) { _, k ->
+                val id = if (k == 0) "" else ready[k - 1].id
+                script = sc.copy(scenes = sc.scenes.mapIndexed { j, s -> if (j == i) s.copy(clip = id) else s })
+                board = emptyList()
+                saveAnalysis()
+                render()
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    /** Puts the downloaded clips on scenes by the words of their notes, without the AI. */
+    private fun autoPlace() {
+        val sc = script ?: return
+        script = withClips(sc, StudioCuts.autoAssign(sc.scenes, readyCuts()))
+        board = emptyList()
+        saveAnalysis()
+        render()
+        toast(t("Клипы расставлены: нажмите на сцену, чтобы поменять", "Clips placed: tap a scene to change"))
+    }
+
     private fun drawPreview(plan: StudioPlan) {
         val img = preview ?: return
         val at = previewMs.coerceIn(0, plan.totalMs)
@@ -1135,7 +1354,7 @@ class StudioActivity : LumenBase() {
             return
         }
         previewBusy = true
-        val src = bgSpec()
+        val src = bgSpec(plan)
         Lumen.async({ StudioVideo.preview(plan, at, pw, ph, src) }, { previewBusy = false }) { bmp ->
             previewBusy = false
             if (preview === img) img.setImageBitmap(bmp)
@@ -1150,8 +1369,11 @@ class StudioActivity : LumenBase() {
         val sc = script ?: return null
         val voice = pcm ?: return null
         if (words.isEmpty()) return null
-        return StudioPlan.build(sc, words, voice.ms + 500, currentStyle(), StudioPrefs.accent, ranges, StudioPrefs.overlay,
-            StudioPrefs.zooms, StudioPrefs.transitions)
+        val style = currentStyle()
+        val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) readyIds().let { ids -> sc.scenes.indices.filter { sc.scenes[it].clip in ids }.toSet() }
+        else null
+        return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, StudioPrefs.overlay,
+            StudioPrefs.zooms, StudioPrefs.transitions, clipScenes)
     }
 
     private fun detach(v: View): View {
@@ -1164,7 +1386,11 @@ class StudioActivity : LumenBase() {
         StudioTask.SHORTS -> StudioAspect.PORTRAIT
         StudioTask.VIDEO -> StudioAspect.LANDSCAPE
         StudioTask.VOICE -> StudioAspect.of(StudioPrefs.aspect)
+        StudioTask.CUTS -> StudioAspect.of(StudioPrefs.cutsAspect)
     }
+
+    /** A long YouTube script (2–10 minutes with chapters) rather than a Shorts one. */
+    private fun longScript() = task == StudioTask.VIDEO || task == StudioTask.CUTS && aspect() != StudioAspect.PORTRAIT
 
     /** Another task: its own script, take and analysis are loaded; nothing is deleted. */
     private fun switchTask(to: StudioTask) {
@@ -1179,7 +1405,9 @@ class StudioActivity : LumenBase() {
         player = null
         StudioPrefs.task = to.id
         if (to == StudioTask.VOICE && StudioPrefs.voiceMode !in listOf("file", "mic")) StudioPrefs.voiceMode = "file"
+        if (to == StudioTask.CUTS && StudioPrefs.voiceMode == "video") StudioPrefs.voiceMode = "edge"
         clearState()
+        loadCuts()
         lastVideo = null
         savedAs = ""
         previewMs = 0
@@ -1241,7 +1469,7 @@ class StudioActivity : LumenBase() {
             busy = "ai_script"
             cancel = false
             render()
-            val long = task == StudioTask.VIDEO
+            val long = longScript()
             val sec = if (long) StudioPrefs.videoSeconds else StudioPrefs.seconds
             val extra = if (scriptEdit.text.isNotBlank() && topicEdit.text.isNotBlank())
                 "Учти черновик автора и сохрани его мысли:\n" + scriptEdit.text.toString().take(3000) else ""
@@ -1564,11 +1792,14 @@ class StudioActivity : LumenBase() {
             StudioTask.SHORTS -> t("короткого вертикального ролика (Shorts 9:16)", "a short vertical video (Shorts 9:16)")
             StudioTask.VIDEO -> t("горизонтального ролика для YouTube (16:9)", "a horizontal YouTube video (16:9)")
             StudioTask.VOICE -> t("анимированного ролика по готовой озвучке (кадр ", "an animated video for a ready voice-over (frame ") + aspect().label + ")"
+            StudioTask.CUTS -> t("ролика-нарезки: голос за кадром поверх вставок из чужих видео и графики (кадр ",
+                "a cut video: a voice-over over pieces of other videos and graphics (frame ") + aspect().label + ")"
         }
+        val cutsNow = if (task == StudioTask.CUTS) readyCuts() else emptyList()
         val vars = mapOf(
             "format" to format,
             "long" to if (task == StudioTask.VIDEO || p0.ms > 180_000) ", в длинном ролике до 12 секунд" else "",
-            "visuals" to STUDIO_VISUALS,
+            "visuals" to STUDIO_VISUALS + StudioCuts.promptBlock(cutsNow),
             "drop" to if (allowDrop) "drop — номера слов-паразитов («эм», «ну», «короче», «как бы», «вот»), повторов и оговорок, которые нужно вырезать из записи. " +
                 "Не трогай значимые слова и не вырезай больше 10% текста. Если вырезать нечего — пустой массив."
             else "drop — всегда пустой массив.",
@@ -1580,9 +1811,13 @@ class StudioActivity : LumenBase() {
         render()
         Lumen.async({
             val d = aiJson("studio_direct", vars, "You are a video editor and motion designer. Answer with JSON only.",
-                if (ws.size > 600) 16_000 else 8000) { StudioDirector.parse(it, ws.size) }
+                if (ws.size > 600) 16_000 else 8000) { StudioDirector.parse(it, ws.size, cutsNow.map { c -> c.id }.toSet()) }
             val drop = if (allowDrop) StudioDirector.safeDrop(d, ws.size) else emptySet()
-            val ap = StudioDirector.apply(d, ws, p0.ms, drop)
+            var ap = StudioDirector.apply(d, ws, p0.ms, drop)
+            // the AI put no clip anywhere: spread them by words of their notes
+            if (cutsNow.isNotEmpty() && ap.script.scenes.none { it.clip.isNotEmpty() }) {
+                ap = ap.copy(script = withClips(ap.script, StudioCuts.autoAssign(ap.script.scenes, cutsNow)))
+            }
             val np = ap.keep?.let { StudioAudio.Pcm(Studio.cutPcm(p0.data, p0.rate, it), p0.rate) } ?: p0
             val nc = ap.keep?.let { StudioDirector.composeCuts(oldCuts, it) } ?: oldCuts
             Triple(ap, np, nc)
@@ -1623,7 +1858,7 @@ class StudioActivity : LumenBase() {
         }
         StudioService.start(this, StudioJob.Request(
             plan, voice, out, name, wdt, hgt,
-            if (plan.style == StudioStyle.VIDEO) bgSpec().takeIf { !it.empty } else null,
+            if (plan.style == StudioStyle.VIDEO) bgSpec(plan).takeIf { !it.empty } else null,
             musicFile.takeIf { it.exists() }, StudioPrefs.musicVolume, StudioPrefs.musicDuck, StudioPrefs.sfx
         ))
         wasRunning = true

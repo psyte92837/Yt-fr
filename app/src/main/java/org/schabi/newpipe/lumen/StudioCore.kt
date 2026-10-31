@@ -37,7 +37,9 @@ data class SCue(val type: String, val at: Int, val text: String = "", val icon: 
  */
 data class SScene(
     val say: String, val kind: String = "text", val title: String = "", val items: List<SItem> = emptyList(),
-    val emph: List<String> = emptyList(), val cues: List<SCue> = emptyList(), val transition: String = ""
+    val emph: List<String> = emptyList(), val cues: List<SCue> = emptyList(), val transition: String = "",
+    /** Id of the YouTube clip shown instead of the graphics (Cuts task, see [StudioCuts]); empty = none. */
+    val clip: String = ""
 )
 
 data class SScript(val title: String, val scenes: List<SScene>)
@@ -97,7 +99,8 @@ object Studio {
                 SCue(type, c.optInt("at", 0).coerceAtLeast(0), c.optString("text").ifBlank { c.optString("name") }.trim(), c.optString("icon").trim())
             }
         } ?: emptyList()
-        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase())
+        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase(),
+            o.optString("clip").trim().take(16))
     }
 
     const val MAX_ITEMS = 6
@@ -112,6 +115,7 @@ object Studio {
                 sc.cues.forEach { put(JSONObject().put("type", it.type).put("at", it.at).put("text", it.text).put("icon", it.icon)) }
             })
             if (sc.transition.isNotEmpty()) o.put("transition", sc.transition)
+            if (sc.clip.isNotEmpty()) o.put("clip", sc.clip)
             put(o)
         }
     }).toString()

@@ -1,517 +1,517 @@
 {
   "app/src/main/java/org/schabi/newpipe/lumen/AiJournal.kt": {
-    "mtime": 1793413444.7104077,
-    "seen": 1793413448.8244486,
+    "mtime": 1793414181.8941016,
+    "seen": 1793414185.6181386,
     "ast_hash": "fb309ca529ac387ba7b6753cd4933c5d",
     "semantic_hash": "fb309ca529ac387ba7b6753cd4933c5d"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/AiStats.kt": {
-    "mtime": 1793413444.7104318,
-    "seen": 1793413448.8244555,
+    "mtime": 1793414181.8941352,
+    "seen": 1793414185.6181445,
     "ast_hash": "29df6f4f3310e4137950036db1d47df4",
     "semantic_hash": "29df6f4f3310e4137950036db1d47df4"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Analysis.kt": {
-    "mtime": 1793413444.7104535,
-    "seen": 1793413448.8244581,
+    "mtime": 1793414181.8941612,
+    "seen": 1793414185.6181471,
     "ast_hash": "85f326219da91285188280408e66e5ba",
     "semantic_hash": "85f326219da91285188280408e66e5ba"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/AudienceTab.kt": {
-    "mtime": 1793413444.7104752,
-    "seen": 1793413448.82446,
+    "mtime": 1793414181.8941922,
+    "seen": 1793414185.6181483,
     "ast_hash": "db924d0d5584a2166e94312f2d56cb81",
     "semantic_hash": "db924d0d5584a2166e94312f2d56cb81"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Audit.kt": {
-    "mtime": 1793413444.7104976,
-    "seen": 1793413448.8244615,
+    "mtime": 1793414181.8942251,
+    "seen": 1793414185.6181495,
     "ast_hash": "7e4f544b14e9bbc1ddc43f2e10a54ac5",
     "semantic_hash": "7e4f544b14e9bbc1ddc43f2e10a54ac5"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/AuditActivity.kt": {
-    "mtime": 1793413444.7105236,
-    "seen": 1793413448.824463,
+    "mtime": 1793414181.8942618,
+    "seen": 1793414185.6181512,
     "ast_hash": "8d87cb792ec70975dc10a0edb6ef3957",
     "semantic_hash": "8d87cb792ec70975dc10a0edb6ef3957"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Backup.kt": {
-    "mtime": 1793413444.710545,
-    "seen": 1793413448.8244643,
+    "mtime": 1793414181.8942926,
+    "seen": 1793414185.6181526,
     "ast_hash": "ad0ec8c6238733b393ea010880a1ef85",
     "semantic_hash": "ad0ec8c6238733b393ea010880a1ef85"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Browser.kt": {
-    "mtime": 1793413444.710562,
-    "seen": 1793413448.8244658,
+    "mtime": 1793414181.8943212,
+    "seen": 1793414185.618154,
     "ast_hash": "a9e5067eba172e2150ca5a0c0837fc41",
     "semantic_hash": "a9e5067eba172e2150ca5a0c0837fc41"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt": {
-    "mtime": 1793413444.710588,
-    "seen": 1793413448.824467,
+    "mtime": 1793414181.8943582,
+    "seen": 1793414185.618155,
     "ast_hash": "2270ff294a9185eb36f5f1e6049d1ca5",
     "semantic_hash": "2270ff294a9185eb36f5f1e6049d1ca5"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Channels.kt": {
-    "mtime": 1793413444.7106059,
-    "seen": 1793413448.8244684,
+    "mtime": 1793414181.8943872,
+    "seen": 1793414185.618156,
     "ast_hash": "2dbec9c3734040bb13aeadc2371ddeb4",
     "semantic_hash": "2dbec9c3734040bb13aeadc2371ddeb4"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Charts.kt": {
-    "mtime": 1793413444.7106264,
-    "seen": 1793413448.82447,
+    "mtime": 1793414181.8944187,
+    "seen": 1793414185.6181574,
     "ast_hash": "a8e02040817a942b26bf7e678eb21b16",
     "semantic_hash": "a8e02040817a942b26bf7e678eb21b16"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Core.kt": {
-    "mtime": 1793413444.710642,
-    "seen": 1793413448.8244717,
+    "mtime": 1793414181.894444,
+    "seen": 1793414185.6181586,
     "ast_hash": "674f2067d75e9b29b5da07171c15d657",
     "semantic_hash": "674f2067d75e9b29b5da07171c15d657"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt": {
-    "mtime": 1793413444.7106628,
-    "seen": 1793413448.8244731,
+    "mtime": 1793414181.894477,
+    "seen": 1793414185.6181595,
     "ast_hash": "cec7923e3941632a0b6c0ddc71e904d7",
     "semantic_hash": "cec7923e3941632a0b6c0ddc71e904d7"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Diagram.kt": {
-    "mtime": 1793413444.7106845,
-    "seen": 1793413448.8244743,
+    "mtime": 1793414181.894511,
+    "seen": 1793414185.6181607,
     "ast_hash": "8ef93b6bbbe8892aaf246ecbd1437b1d",
     "semantic_hash": "8ef93b6bbbe8892aaf246ecbd1437b1d"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/DiagramActivity.kt": {
-    "mtime": 1793413444.7107081,
-    "seen": 1793413448.824476,
+    "mtime": 1793414181.8945446,
+    "seen": 1793414185.6181617,
     "ast_hash": "c24421dc1cc42cad97dd0c1deb29a4b9",
     "semantic_hash": "c24421dc1cc42cad97dd0c1deb29a4b9"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/DiagramDraw.kt": {
-    "mtime": 1793413444.7107296,
-    "seen": 1793413448.8244774,
+    "mtime": 1793414181.8945777,
+    "seen": 1793414185.6181624,
     "ast_hash": "480af976095f935e1785e9aea6db0524",
     "semantic_hash": "480af976095f935e1785e9aea6db0524"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Dossier.kt": {
-    "mtime": 1793413444.7107496,
-    "seen": 1793413448.8244786,
+    "mtime": 1793414181.8946106,
+    "seen": 1793414185.6181638,
     "ast_hash": "08ebfad69522a922b486c55e0d541942",
     "semantic_hash": "08ebfad69522a922b486c55e0d541942"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/DossierReport.kt": {
-    "mtime": 1793413444.7107725,
-    "seen": 1793413448.82448,
+    "mtime": 1793414181.894643,
+    "seen": 1793414185.6181648,
     "ast_hash": "6912e4cdafe0c4e385857ca26ba7956e",
     "semantic_hash": "6912e4cdafe0c4e385857ca26ba7956e"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/EdgeGec.kt": {
-    "mtime": 1793413444.710794,
-    "seen": 1793413448.8244815,
+    "mtime": 1793414181.894676,
+    "seen": 1793414185.618166,
     "ast_hash": "3919997039fe97732a744a4afa7740c1",
     "semantic_hash": "3919997039fe97732a744a4afa7740c1"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Export.kt": {
-    "mtime": 1793413444.7108126,
-    "seen": 1793413448.8244832,
+    "mtime": 1793414181.8947058,
+    "seen": 1793414185.6181667,
     "ast_hash": "df0e5812e821e17f78706188bedcba1a",
     "semantic_hash": "df0e5812e821e17f78706188bedcba1a"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Graph.kt": {
-    "mtime": 1793413444.7108338,
-    "seen": 1793413448.8244846,
+    "mtime": 1793414181.894738,
+    "seen": 1793414185.618168,
     "ast_hash": "6de78564b683a197b0c315e73f7e08b3",
     "semantic_hash": "6de78564b683a197b0c315e73f7e08b3"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/GraphAlgo.kt": {
-    "mtime": 1793413444.7108567,
-    "seen": 1793413448.8244858,
+    "mtime": 1793414181.8947706,
+    "seen": 1793414185.618169,
     "ast_hash": "3e763e2d306e797da1c788b127cc5f9c",
     "semantic_hash": "3e763e2d306e797da1c788b127cc5f9c"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/GraphReport.kt": {
-    "mtime": 1793413444.7108777,
-    "seen": 1793413448.8244874,
+    "mtime": 1793414181.894802,
+    "seen": 1793414185.6181703,
     "ast_hash": "9b6d6fd0bfb2d690ce856e2d6c5ddb9c",
     "semantic_hash": "9b6d6fd0bfb2d690ce856e2d6c5ddb9c"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Harvest.kt": {
-    "mtime": 1793413444.7109,
-    "seen": 1793413448.8244889,
+    "mtime": 1793414181.8948357,
+    "seen": 1793414185.6181715,
     "ast_hash": "c12ccc4ae8645536bc866e9aef546ed9",
     "semantic_hash": "c12ccc4ae8645536bc866e9aef546ed9"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/HarvestActivity.kt": {
-    "mtime": 1793413444.710925,
-    "seen": 1793413448.8244903,
+    "mtime": 1793414181.8948717,
+    "seen": 1793414185.6181724,
     "ast_hash": "54228b7ddbb677fb60f01531e0baac72",
     "semantic_hash": "54228b7ddbb677fb60f01531e0baac72"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Help.kt": {
-    "mtime": 1793413444.7109466,
-    "seen": 1793413448.8244917,
-    "ast_hash": "e0bdacbfe0cb0d9f6b8b144e77f01aef",
-    "semantic_hash": "e0bdacbfe0cb0d9f6b8b144e77f01aef"
+    "mtime": 1793414181.8949165,
+    "seen": 1793414185.6181734,
+    "ast_hash": "38af29e0f033ad375e9dbaa8fe0e6cf8",
+    "semantic_hash": "38af29e0f033ad375e9dbaa8fe0e6cf8"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/HomeActivities.kt": {
-    "mtime": 1793413444.71097,
-    "seen": 1793413448.8244932,
+    "mtime": 1793414181.8949544,
+    "seen": 1793414185.6181746,
     "ast_hash": "bf252c509b1a1ff13c02cc4ba52cf89a",
     "semantic_hash": "bf252c509b1a1ff13c02cc4ba52cf89a"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/KeyVault.kt": {
-    "mtime": 1793413444.7109969,
-    "seen": 1793413448.8244946,
+    "mtime": 1793414181.8949904,
+    "seen": 1793414185.6181757,
     "ast_hash": "e9b8f9303decb4577ea8aa15fabc4c4c",
     "semantic_hash": "e9b8f9303decb4577ea8aa15fabc4c4c"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Llm.kt": {
-    "mtime": 1793413444.71104,
-    "seen": 1793413448.8244958,
+    "mtime": 1793414181.8950171,
+    "seen": 1793414185.6181765,
     "ast_hash": "953494adbec2b183bf350c6d6d5f6d82",
     "semantic_hash": "953494adbec2b183bf350c6d6d5f6d82"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/LlmParse.kt": {
-    "mtime": 1793413444.7110672,
-    "seen": 1793413448.8244972,
+    "mtime": 1793414181.8950524,
+    "seen": 1793414185.6181777,
     "ast_hash": "9d677998a90d3efa97932093c26a651f",
     "semantic_hash": "9d677998a90d3efa97932093c26a651f"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Log.kt": {
-    "mtime": 1793413444.7110856,
-    "seen": 1793413448.8244984,
+    "mtime": 1793414181.8950815,
+    "seen": 1793414185.6181786,
     "ast_hash": "16f32bfdf1490218de963bc58ecf2b76",
     "semantic_hash": "16f32bfdf1490218de963bc58ecf2b76"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Models.kt": {
-    "mtime": 1793413444.7111063,
-    "seen": 1793413448.8244996,
+    "mtime": 1793414181.895113,
+    "seen": 1793414185.6181796,
     "ast_hash": "1e5bb0d712b5f10ccb6a6d12f79dea55",
     "semantic_hash": "1e5bb0d712b5f10ccb6a6d12f79dea55"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/OverviewTabs.kt": {
-    "mtime": 1793413444.71113,
-    "seen": 1793413448.824501,
+    "mtime": 1793414181.8951464,
+    "seen": 1793414185.6181803,
     "ast_hash": "a4cf3f92c3164cf6588c7cc6e260bc0c",
     "semantic_hash": "a4cf3f92c3164cf6588c7cc6e260bc0c"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Pains.kt": {
-    "mtime": 1793413444.7111528,
-    "seen": 1793413448.8245022,
+    "mtime": 1793414181.895179,
+    "seen": 1793414185.6181815,
     "ast_hash": "69ea36035b5763e88f8f43442b612203",
     "semantic_hash": "69ea36035b5763e88f8f43442b612203"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/ProjectActivity.kt": {
-    "mtime": 1793413444.711177,
-    "seen": 1793413448.824504,
+    "mtime": 1793414181.895215,
+    "seen": 1793414185.6181824,
     "ast_hash": "437fbaa2a2609e6f6f3b37c207b9dfb9",
     "semantic_hash": "437fbaa2a2609e6f6f3b37c207b9dfb9"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Quick.kt": {
-    "mtime": 1793413444.711216,
-    "seen": 1793413448.8245053,
+    "mtime": 1793414181.89526,
+    "seen": 1793414185.6181836,
     "ast_hash": "9ebdca6ce2f42f5ff537ded7f3c6e3c3",
     "semantic_hash": "9ebdca6ce2f42f5ff537ded7f3c6e3c3"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Recs.kt": {
-    "mtime": 1793413444.711243,
-    "seen": 1793413448.8245065,
+    "mtime": 1793414181.8952997,
+    "seen": 1793414185.618185,
     "ast_hash": "0d8b91804eee98cbc8fa03c504c312c4",
     "semantic_hash": "0d8b91804eee98cbc8fa03c504c312c4"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/RecsTab.kt": {
-    "mtime": 1793413444.7112725,
-    "seen": 1793413448.824508,
+    "mtime": 1793414181.895336,
+    "seen": 1793414185.618186,
     "ast_hash": "485827e9577547f8b8349ca6164e1d59",
     "semantic_hash": "485827e9577547f8b8349ca6164e1d59"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/ReportKit.kt": {
-    "mtime": 1793413444.7112942,
-    "seen": 1793413448.8245091,
+    "mtime": 1793414181.8953686,
+    "seen": 1793414185.618187,
     "ast_hash": "3011ef64d28bba098975bd23416c7faf",
     "semantic_hash": "3011ef64d28bba098975bd23416c7faf"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Seo.kt": {
-    "mtime": 1793413444.711316,
-    "seen": 1793413448.82451,
+    "mtime": 1793414181.8954015,
+    "seen": 1793414185.6181881,
     "ast_hash": "c49caab3d847f19e9532436cb5ff940c",
     "semantic_hash": "c49caab3d847f19e9532436cb5ff940c"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/SeoTab.kt": {
-    "mtime": 1793413444.7113461,
-    "seen": 1793413448.8245118,
+    "mtime": 1793414181.895444,
+    "seen": 1793414185.6181893,
     "ast_hash": "40f7153ebf753aa5a3a449d2ca104434",
     "semantic_hash": "40f7153ebf753aa5a3a449d2ca104434"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Services.kt": {
-    "mtime": 1793413444.7113655,
-    "seen": 1793413448.824513,
+    "mtime": 1793414181.8954751,
+    "seen": 1793414185.6181903,
     "ast_hash": "37e6fcdc0dbdb9c065620c4753fd6031",
     "semantic_hash": "37e6fcdc0dbdb9c065620c4753fd6031"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/SettingsActivity.kt": {
-    "mtime": 1793413444.711392,
-    "seen": 1793413448.8245146,
+    "mtime": 1793414181.8955112,
+    "seen": 1793414185.6181912,
     "ast_hash": "4ae4528e16ecd930e694a35350b4af72",
     "semantic_hash": "4ae4528e16ecd930e694a35350b4af72"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Store.kt": {
-    "mtime": 1793413444.711421,
-    "seen": 1793413448.8245163,
+    "mtime": 1793414181.895549,
+    "seen": 1793414185.6181931,
     "ast_hash": "04314b197e2e9634d3090da8a9f042a5",
     "semantic_hash": "04314b197e2e9634d3090da8a9f042a5"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/StudioActivity.kt": {
-    "mtime": 1793413444.711441,
-    "seen": 1793413448.8245177,
-    "ast_hash": "21544bcc9b2de5301191ccdc643e97d1",
-    "semantic_hash": "21544bcc9b2de5301191ccdc643e97d1"
+    "mtime": 1793414181.8955836,
+    "seen": 1793414185.6181943,
+    "ast_hash": "8f1fb6fd4f82212586fa9860f82f2dec",
+    "semantic_hash": "8f1fb6fd4f82212586fa9860f82f2dec"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/StudioCore.kt": {
-    "mtime": 1793413444.7114742,
-    "seen": 1793413448.824519,
-    "ast_hash": "4b9a67ee249fef8ba31cd7b30d43359c",
-    "semantic_hash": "4b9a67ee249fef8ba31cd7b30d43359c"
+    "mtime": 1793414181.8956363,
+    "seen": 1793414185.6181955,
+    "ast_hash": "f73ca9bbf8c4a8ee265cd64ab84a8e5c",
+    "semantic_hash": "f73ca9bbf8c4a8ee265cd64ab84a8e5c"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/StudioRender.kt": {
-    "mtime": 1793413444.711501,
-    "seen": 1793413448.8245206,
-    "ast_hash": "80ef1c9522f4794d259e12474b5d1aa4",
-    "semantic_hash": "80ef1c9522f4794d259e12474b5d1aa4"
+    "mtime": 1793414181.8956769,
+    "seen": 1793414185.6181965,
+    "ast_hash": "3322c107e2dd7ac2947b63e80496ec10",
+    "semantic_hash": "3322c107e2dd7ac2947b63e80496ec10"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/StudioService.kt": {
-    "mtime": 1793413444.7115371,
-    "seen": 1793413448.824522,
-    "ast_hash": "ae035097d417515d3949e927741adddb",
-    "semantic_hash": "ae035097d417515d3949e927741adddb"
+    "mtime": 1793414181.8957253,
+    "seen": 1793414185.6181974,
+    "ast_hash": "cd85287158185dc77db61a86e9072ffc",
+    "semantic_hash": "cd85287158185dc77db61a86e9072ffc"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Style.kt": {
-    "mtime": 1793413444.7115579,
-    "seen": 1793413448.824523,
+    "mtime": 1793414181.895758,
+    "seen": 1793414185.6181986,
     "ast_hash": "ac43117e3629dc50f21d6d8695bbcf9e",
     "semantic_hash": "ac43117e3629dc50f21d6d8695bbcf9e"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Text.kt": {
-    "mtime": 1793413444.7115843,
-    "seen": 1793413448.8245244,
+    "mtime": 1793414181.8957975,
+    "seen": 1793414185.6181996,
     "ast_hash": "8f8e5d6ddcceb5d686b76bfe744d6b74",
     "semantic_hash": "8f8e5d6ddcceb5d686b76bfe744d6b74"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Topic.kt": {
-    "mtime": 1793413444.7116053,
-    "seen": 1793413448.8245258,
+    "mtime": 1793414181.895829,
+    "seen": 1793414185.6182005,
     "ast_hash": "16cd9b67dc4c39087d0d3d9538986d2a",
     "semantic_hash": "16cd9b67dc4c39087d0d3d9538986d2a"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/TopicActivity.kt": {
-    "mtime": 1793413444.7116237,
-    "seen": 1793413448.824527,
+    "mtime": 1793414181.89586,
+    "seen": 1793414185.6182015,
     "ast_hash": "58665b970c11247d2a1fbae4111b1baf",
     "semantic_hash": "58665b970c11247d2a1fbae4111b1baf"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Tts.kt": {
-    "mtime": 1793413444.711656,
-    "seen": 1793413448.8245285,
+    "mtime": 1793414181.8959053,
+    "seen": 1793414185.6182027,
     "ast_hash": "c56ff189be52096071c9df0f8f83d3d0",
     "semantic_hash": "c56ff189be52096071c9df0f8f83d3d0"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/TtsActivity.kt": {
-    "mtime": 1793413444.7116868,
-    "seen": 1793413448.82453,
+    "mtime": 1793414181.8959463,
+    "seen": 1793414185.6182039,
     "ast_hash": "0336cb94c17e492f652d61e3dd8d2686",
     "semantic_hash": "0336cb94c17e492f652d61e3dd8d2686"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/TtsService.kt": {
-    "mtime": 1793413444.7117128,
-    "seen": 1793413448.8245313,
+    "mtime": 1793414181.8959827,
+    "seen": 1793414185.6182048,
     "ast_hash": "97e4be0e9e2b12a1060d388b1ccf6e37",
     "semantic_hash": "97e4be0e9e2b12a1060d388b1ccf6e37"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/TtsShare.kt": {
-    "mtime": 1793413444.7117379,
-    "seen": 1793413448.8245325,
+    "mtime": 1793414181.896019,
+    "seen": 1793414185.618206,
     "ast_hash": "8263f076226018187f255ffeb4ec8854",
     "semantic_hash": "8263f076226018187f255ffeb4ec8854"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Ui.kt": {
-    "mtime": 1793413444.7117558,
-    "seen": 1793413448.8245335,
+    "mtime": 1793414181.8960483,
+    "seen": 1793414185.618207,
     "ast_hash": "b288610ac1ffb31a2ae1a3ae4ca0b88a",
     "semantic_hash": "b288610ac1ffb31a2ae1a3ae4ca0b88a"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/VideoActivity.kt": {
-    "mtime": 1793413444.7117927,
-    "seen": 1793413448.824535,
+    "mtime": 1793414181.8960924,
+    "seen": 1793414185.618208,
     "ast_hash": "9a3a476ac6e7164360bfc5f2b0d84a58",
     "semantic_hash": "9a3a476ac6e7164360bfc5f2b0d84a58"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Voc.kt": {
-    "mtime": 1793413444.711813,
-    "seen": 1793413448.824536,
+    "mtime": 1793414181.8961236,
+    "seen": 1793414185.6182094,
     "ast_hash": "1f8dbb3f7bdf7732b63c58274e351c9b",
     "semantic_hash": "1f8dbb3f7bdf7732b63c58274e351c9b"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/Watch.kt": {
-    "mtime": 1793413444.7118309,
-    "seen": 1793413448.8245373,
+    "mtime": 1793414181.8961546,
+    "seen": 1793414185.6182106,
     "ast_hash": "b1d51b9652e182afac71a632adfd8ae1",
     "semantic_hash": "b1d51b9652e182afac71a632adfd8ae1"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/YouTube.kt": {
-    "mtime": 1793413444.7118514,
-    "seen": 1793413448.8245387,
+    "mtime": 1793414181.896187,
+    "seen": 1793414185.6182115,
     "ast_hash": "731c8a846d385f2fddee65c784bd9734",
     "semantic_hash": "731c8a846d385f2fddee65c784bd9734"
   },
   "app/src/main/java/org/schabi/newpipe/lumen/YtFallback.kt": {
-    "mtime": 1793413444.711874,
-    "seen": 1793413448.8245401,
+    "mtime": 1793414181.896221,
+    "seen": 1793414185.618213,
     "ast_hash": "9ec1519523a02219e0742030631e71e9",
     "semantic_hash": "9ec1519523a02219e0742030631e71e9"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/AiStatsTest.kt": {
-    "mtime": 1793413444.7120605,
-    "seen": 1793413448.8245418,
+    "mtime": 1793414181.8964174,
+    "seen": 1793414185.618214,
     "ast_hash": "698cbd99f223ad2cbc19fa6c837cd2a3",
     "semantic_hash": "698cbd99f223ad2cbc19fa6c837cd2a3"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/AuditTest.kt": {
-    "mtime": 1793413444.7120774,
-    "seen": 1793413448.824543,
+    "mtime": 1793414181.8964431,
+    "seen": 1793414185.6182148,
     "ast_hash": "00e433214112a65c0d882d68b146de9d",
     "semantic_hash": "00e433214112a65c0d882d68b146de9d"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/BackupTest.kt": {
-    "mtime": 1793413444.7120948,
-    "seen": 1793413448.8245442,
+    "mtime": 1793414181.89647,
+    "seen": 1793414185.618216,
     "ast_hash": "776e91fb769e88009288049e05d4d16b",
     "semantic_hash": "776e91fb769e88009288049e05d4d16b"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/BrowserUiTest.kt": {
-    "mtime": 1793413444.7121084,
-    "seen": 1793413448.8245456,
+    "mtime": 1793414181.896495,
+    "seen": 1793414185.618217,
     "ast_hash": "592cb2bc3af89411a14f7dcf3b6a1071",
     "semantic_hash": "592cb2bc3af89411a14f7dcf3b6a1071"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/CustomReportTest.kt": {
-    "mtime": 1793413444.7121236,
-    "seen": 1793413448.8245468,
+    "mtime": 1793414181.89652,
+    "seen": 1793414185.618218,
     "ast_hash": "c4035f0914ccc39ed73f21948d15970f",
     "semantic_hash": "c4035f0914ccc39ed73f21948d15970f"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/DiagramTest.kt": {
-    "mtime": 1793413444.712138,
-    "seen": 1793413448.824548,
+    "mtime": 1793414181.8965445,
+    "seen": 1793414185.618219,
     "ast_hash": "0f789c1ea0e02b1e7c3031d8822b203c",
     "semantic_hash": "0f789c1ea0e02b1e7c3031d8822b203c"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/EdgeTtsTest.kt": {
-    "mtime": 1793413444.7121553,
-    "seen": 1793413448.8245494,
+    "mtime": 1793414181.8965714,
+    "seen": 1793414185.61822,
     "ast_hash": "786825c369bd793d1185781ae2841148",
     "semantic_hash": "786825c369bd793d1185781ae2841148"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/HarvestTest.kt": {
-    "mtime": 1793413444.7121744,
-    "seen": 1793413448.8245506,
+    "mtime": 1793414181.8966002,
+    "seen": 1793414185.618221,
     "ast_hash": "45cec6f43c4909b89e921b1a80a66606",
     "semantic_hash": "45cec6f43c4909b89e921b1a80a66606"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/HelpMapTest.kt": {
-    "mtime": 1793413444.7121904,
-    "seen": 1793413448.8245516,
+    "mtime": 1793414181.8966284,
+    "seen": 1793414185.6182218,
     "ast_hash": "e913eef19529cc7f68ed688be1697b92",
     "semantic_hash": "e913eef19529cc7f68ed688be1697b92"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/LumenCoreTest.kt": {
-    "mtime": 1793413444.712205,
-    "seen": 1793413448.8245533,
+    "mtime": 1793414181.8966534,
+    "seen": 1793414185.618223,
     "ast_hash": "73acee79d9f1bea7c318b939bb862892",
     "semantic_hash": "73acee79d9f1bea7c318b939bb862892"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/PainsTest.kt": {
-    "mtime": 1793413444.712228,
-    "seen": 1793413448.8245544,
+    "mtime": 1793414181.896684,
+    "seen": 1793414185.6182244,
     "ast_hash": "28c42cd457ef8e8ce07ded560aa71455",
     "semantic_hash": "28c42cd457ef8e8ce07ded560aa71455"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/ParTest.kt": {
-    "mtime": 1793413444.7122452,
-    "seen": 1793413448.8245559,
+    "mtime": 1793414181.8967113,
+    "seen": 1793414185.6182256,
     "ast_hash": "de94163647aeb0d379a91680b89724ef",
     "semantic_hash": "de94163647aeb0d379a91680b89724ef"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/ProgressTextTest.kt": {
-    "mtime": 1793413444.7122598,
-    "seen": 1793413448.824557,
+    "mtime": 1793414181.8967369,
+    "seen": 1793414185.6182268,
     "ast_hash": "9d5eef8e2c580bdbd761663698e86902",
     "semantic_hash": "9d5eef8e2c580bdbd761663698e86902"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/ReportsTest.kt": {
-    "mtime": 1793413444.712274,
-    "seen": 1793413448.8245583,
+    "mtime": 1793414181.8967614,
+    "seen": 1793414185.618228,
     "ast_hash": "937ba3315467cc3ef5c470f0784905ff",
     "semantic_hash": "937ba3315467cc3ef5c470f0784905ff"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/SeoGraphTest.kt": {
-    "mtime": 1793413444.7122922,
-    "seen": 1793413448.82456,
+    "mtime": 1793414181.8967898,
+    "seen": 1793414185.6182292,
     "ast_hash": "07dbf02ece6d00a45eccc029118f0b01",
     "semantic_hash": "07dbf02ece6d00a45eccc029118f0b01"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/StudioTest.kt": {
-    "mtime": 1793413444.712309,
-    "seen": 1793413448.8245614,
-    "ast_hash": "18347215a4d77d15e33a4f2e9d8764dc",
-    "semantic_hash": "18347215a4d77d15e33a4f2e9d8764dc"
+    "mtime": 1793414181.8968177,
+    "seen": 1793414185.6182306,
+    "ast_hash": "30bc2de8eab0260ff0ee70b0c0366645",
+    "semantic_hash": "30bc2de8eab0260ff0ee70b0c0366645"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/StyleTest.kt": {
-    "mtime": 1793413444.7123308,
-    "seen": 1793413448.8245628,
+    "mtime": 1793414181.8968496,
+    "seen": 1793414185.6182315,
     "ast_hash": "4daf1e55eb95c02b55c806878f7f57f0",
     "semantic_hash": "4daf1e55eb95c02b55c806878f7f57f0"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/TextTest.kt": {
-    "mtime": 1793413444.712347,
-    "seen": 1793413448.8245642,
+    "mtime": 1793414181.896877,
+    "seen": 1793414185.6182325,
     "ast_hash": "13f563957e20f49d428347b944074001",
     "semantic_hash": "13f563957e20f49d428347b944074001"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/TopicFilterTest.kt": {
-    "mtime": 1793413444.712363,
-    "seen": 1793413448.8245654,
+    "mtime": 1793414181.8969226,
+    "seen": 1793414185.6182337,
     "ast_hash": "30bc885ad6b697b9fd9fa99545cc1e9e",
     "semantic_hash": "30bc885ad6b697b9fd9fa99545cc1e9e"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/TtsPoolTest.kt": {
-    "mtime": 1793413444.7123778,
-    "seen": 1793413448.8245668,
+    "mtime": 1793414181.8969562,
+    "seen": 1793414185.6182346,
     "ast_hash": "3c5f2c9c2228201e470e5a112b8f7a8b",
     "semantic_hash": "3c5f2c9c2228201e470e5a112b8f7a8b"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/TtsRetryTest.kt": {
-    "mtime": 1793413444.712392,
-    "seen": 1793413448.8245678,
+    "mtime": 1793414181.8969822,
+    "seen": 1793414185.6182356,
     "ast_hash": "67b4b6074188a130f536eccde0076e0a",
     "semantic_hash": "67b4b6074188a130f536eccde0076e0a"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/WatchTest.kt": {
-    "mtime": 1793413444.7124066,
-    "seen": 1793413448.824569,
+    "mtime": 1793414181.8970072,
+    "seen": 1793414185.6182368,
     "ast_hash": "dfb0e8c730a5b7d9e51ac26646411bf2",
     "semantic_hash": "dfb0e8c730a5b7d9e51ac26646411bf2"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/WizardStepsTest.kt": {
-    "mtime": 1793413444.712423,
-    "seen": 1793413448.8245704,
+    "mtime": 1793414181.897036,
+    "seen": 1793414185.6182377,
     "ast_hash": "ddc9480de1271f68b4b13618a50b558b",
     "semantic_hash": "ddc9480de1271f68b4b13618a50b558b"
   },
   "app/src/test/java/org/schabi/newpipe/lumen/YtFallbackTest.kt": {
-    "mtime": 1793413444.7124379,
-    "seen": 1793413448.8245716,
+    "mtime": 1793414181.897061,
+    "seen": 1793414185.6182387,
     "ast_hash": "fa3946a6ab6604fd54e26af8ddfcec2d",
     "semantic_hash": "fa3946a6ab6604fd54e26af8ddfcec2d"
   }

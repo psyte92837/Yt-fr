@@ -43,7 +43,7 @@ object KeyVault {
         }
         val c = Cipher.getInstance("AES/GCM/NoPadding")
         c.init(Cipher.ENCRYPT_MODE, secretKey())
-        val enc = c.doFinal(apiKey.trim().toByteArray())
+        val enc = c.doFinal(KeyText.clean(apiKey).toByteArray())
         val packed = Base64.encodeToString(c.iv, Base64.NO_WRAP) + ":" + Base64.encodeToString(enc, Base64.NO_WRAP)
         prefs.edit().putString(provider, packed).apply()
     }
@@ -54,7 +54,7 @@ object KeyVault {
             val (iv, data) = packed.split(":", limit = 2)
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(128, Base64.decode(iv, Base64.NO_WRAP)))
-            String(c.doFinal(Base64.decode(data, Base64.NO_WRAP)))
+            KeyText.clean(String(c.doFinal(Base64.decode(data, Base64.NO_WRAP))))
         } catch (e: Exception) {
             null
         }

@@ -204,10 +204,16 @@ class ProjectActivity : LumenBase() {
             header = header,
             actions = listOf("⋮" to { projectMenu() }),
             fab = fab,
-            footer = bottomNav(this, gl.map { it.icon to it.name }, gi) {
-                tab = groupTab[it]?.takeIf { id -> id in gl[it].tabs } ?: gl[it].tabs[0]
-                render()
+            footer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                val scope = { videos.values.filter { it.marked }.ifEmpty { videos.values.toList() } }
+                addView(askAiBar(this@ProjectActivity, AskAi.hint(tab), { askAiSheet(project, scope(), tab) }, { askAiSheet(project, scope(), tab, startVoice = true) }))
+                addView(bottomNav(this@ProjectActivity, gl.map { it.icon to it.name }, gi) {
+                    tab = groupTab[it]?.takeIf { id -> id in gl[it].tabs } ?: gl[it].tabs[0]
+                    render()
+                })
             },
+            footerExtra = dp(56),
             keepScroll = keep
         )
     }

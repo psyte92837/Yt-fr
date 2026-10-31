@@ -956,6 +956,21 @@ abstract class LumenBase : Activity() {
 
     private var pageScroll: ScrollView? = null
 
+    /** Receiver of the next dictation result (see [listen] in AskAi.kt). */
+    var voiceCallback: ((String) -> Unit)? = null
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != AskAi.REQ_VOICE) return
+        val cb = voiceCallback
+        voiceCallback = null
+        if (resultCode == RESULT_OK) {
+            AskAi.spoken(data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS))?.let { cb?.invoke(it) }
+        }
+    }
+
     /** The app-bar arrow; screens with inner levels override it. */
     open fun navigateUp() = finish()
 
@@ -999,7 +1014,8 @@ abstract class LumenBase : Activity() {
         fab: Pair<String, () -> Unit>? = null,
         scroll: Boolean = true,
         footer: View? = null,
-        keepScroll: Boolean = false
+        keepScroll: Boolean = false,
+        footerExtra: Int = 0
     ) {
         // views may be reused between re-renders (e.g. the graph view): detach them from the old layout first
         (content.parent as? ViewGroup)?.removeView(content)
@@ -1032,7 +1048,7 @@ abstract class LumenBase : Activity() {
                 setOnClickListener { fab.second() }
             }
             val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.BOTTOM or Gravity.END)
-            lp.setMargins(dp(16), dp(16), dp(16), dp(16) + if (footer != null) dp(80) else 0)
+            lp.setMargins(dp(16), dp(16), dp(16), dp(16) + if (footer != null) dp(80) + footerExtra else 0)
             frame.addView(f, lp)
             // leave room so the FAB never covers the last item
             if (scroll) (content as? ViewGroup)?.let { it.setPadding(it.paddingLeft, it.paddingTop, it.paddingRight, it.paddingBottom + dp(88)) }

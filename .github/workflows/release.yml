@@ -23,15 +23,13 @@ jobs:
         with:
           fetch-depth: 0 # full history: the release notes list every Lumen commit since the previous v* tag
 
-      - name: Create the tag (manual run)
+      - name: Release tag (manual run; the tag is created together with the release, after the APK is built)
         if: github.event_name == 'workflow_dispatch'
         env:
           TAG: ${{ inputs.tag }}
         run: |
           case "$TAG" in v*) ;; *) echo "::error::Tag must start with v"; exit 1 ;; esac
-          git config user.name lumen-bot; git config user.email lumen-bot@users.noreply.github.com
-          git tag -a "$TAG" -m "Lumen $TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG"
+          if git ls-remote --exit-code origin "refs/tags/$TAG" >/dev/null; then echo "::error::Tag $TAG already exists"; exit 1; fi
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Set up JDK 21
@@ -99,6 +97,8 @@ jobs:
         with:
           tag_name: ${{ env.RELEASE_TAG || github.ref_name }}
           name: Lumen ${{ env.RELEASE_TAG || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: true
           files: dist/*.apk
           body_path: dist/NOTES.md
           make_latest: true

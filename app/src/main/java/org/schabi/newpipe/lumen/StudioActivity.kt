@@ -2219,8 +2219,11 @@ class StudioActivity : LumenBase() {
             previewMs = 0
             render()
             if (noText) {
-                toast(t("Речь не распознана — смонтировано по звуку шаблоном «Ритм»", "No speech recognised: edited by the sound with the Rhythm template"))
-                animate(StudioApproach.RHYTHM, remember = false)
+                // no text: the chosen own template (it works by timing and loudness), else Rhythm
+                val own = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
+                val name = own?.name ?: t("Ритм", "Rhythm")
+                toast(t("Речь не распознана — смонтировано по звуку шаблоном «$name»", "No speech recognised: edited by the sound with the \"$name\" template"))
+                if (own != null) animateEdit(own) else animate(StudioApproach.RHYTHM, remember = false)
             } else if (StudioPrefs.autoDirect || autoAll) {
                 val ap = StudioApproach.of(StudioPrefs.approach)
                 val own = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }

@@ -529,6 +529,13 @@ object Studio {
     }
 
     /** Joins neighbouring speech parts into pieces of at most [maxMs] (for a recogniser with a length limit). */
+    /** Plain text of an AI transcription: no timecodes ([00:12], 0:12 -), speaker names, sound notes or quotes. */
+    fun cleanTranscript(text: String): String = text.lines().joinToString(" ") { line ->
+        line.replace(Regex("""^\s*\[?\(?\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\)?]?\s*-?\s*"""), " ")
+            .replace(Regex("""^\s*(\*\*)?[\p{L}\d ]{1,24}(\*\*)?:(\*\*)?\s+"""), " ")
+            .replace(Regex("""\[[^\]]*]|\([^)]*(музык|music|смех|laugh|шум|noise)[^)]*\)""", RegexOption.IGNORE_CASE), " ")
+    }.replace(Regex("[\"«»`*]"), "").replace(Regex("\\s+"), " ").trim()
+
     fun groupSpans(speech: List<Span>, maxMs: Long = 12_000): List<Span> {
         val out = mutableListOf<Span>()
         for (s in speech) {
@@ -1238,6 +1245,10 @@ val STUDIO_PROMPTS = linkedMapOf(
             "ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. До 24 слоёв, до 12 ключей. " +
             "Верни только JSON: {\"edit\":{…lumen.edit…},\"motions\":[{…lumen.motion…}],\"notes\":\"2-4 фразы: что взято из видео и что передать не удалось\"}.\n\n" +
             "Данные о видео:\n{data}"
+        ),
+    "studio_stt" to (
+        "Дословно расшифруй речь в этой записи на языке оригинала. Без таймкодов, имён говорящих, пояснений и описаний звуков. " +
+            "Если речи нет — верни пустой ответ."
         ),
     "studio_tpl_fix" to (
         "Исправь шаблон {kind}: проверка нашла ошибки:\n{errors}\nИсправь только их и верни весь шаблон, только JSON.\n\nШаблон:\n{data}"

@@ -2044,36 +2044,42 @@ object StudioRecognizer {
         }
         val main = Handler(Looper.getMainLooper())
         val results = mutableListOf<Pair<Span, String>>()
-        fun next(i: Int) {
+        // the on-device recogniser often lacks the language pack: after its first failure the online one is used
+        var onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
+        fun next(i: Int, retry: Boolean = false) {
             if (i >= pieces.size || cancelled()) {
                 done(results)
                 return
             }
-            progress(i, pieces.size)
+            if (!retry) progress(i, pieces.size)
             val piece = pieces[i]
             val from = (piece.startMs * rate / 1000).toInt().coerceIn(0, pcm.size)
             val to = (piece.endMs * rate / 1000).toInt().coerceIn(from, pcm.size)
             // a little silence around the piece helps the recogniser to start and stop
             val slice = Studio.silence(300, RATE) + Studio.resample(pcm.copyOfRange(from, to), rate, RATE) + Studio.silence(600, RATE)
-            val onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
-            val sr = if (onDevice) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
+            val local = onDevice
+            val sr = if (local) SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) else SpeechRecognizer.createSpeechRecognizer(ctx)
             val pipe = ParcelFileDescriptor.createPipe()
             var finished = false
-            fun finish(text: String?) {
+            fun finish(text: String?, error: Int = 0) {
                 if (finished) return
                 finished = true
                 runCatching { sr.destroy() }
                 runCatching { pipe[0].close() }
                 if (!text.isNullOrBlank()) results += piece to text
                 L.i("studio", "recognised piece ${i + 1}/${pieces.size}: ${text?.length ?: -1} chars")
-                main.post { next(i + 1) }
+                // "no match" and "speech timeout" mean silence; any other on-device failure: retry online
+                val retryOnline = local && text.isNullOrBlank() && error != SpeechRecognizer.ERROR_NO_MATCH &&
+                    error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && SpeechRecognizer.isRecognitionAvailable(ctx)
+                if (retryOnline) onDevice = false
+                main.post { if (retryOnline) next(i, retry = true) else next(i + 1) }
             }
             sr.setRecognitionListener(object : RecognitionListener {
                 override fun onResults(b: android.os.Bundle?) =
                     finish(b?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull())
                 override fun onError(error: Int) {
-                    L.w("studio", "recogniser error $error on piece ${i + 1}")
-                    finish(null)
+                    L.w("studio", "recogniser error $error on piece ${i + 1} (on device: $local)")
+                    finish(null, error)
                 }
                 override fun onReadyForSpeech(params: android.os.Bundle?) {}
                 override fun onBeginningOfSpeech() {}
@@ -2095,7 +2101,7 @@ object StudioRecognizer {
             } catch (e: Exception) {
                 L.w("studio", "recogniser start: ${e.message}")
                 runCatching { pipe[1].close() }
-                finish(null)
+                finish(null, -1)
                 return
             }
             Thread {
@@ -2109,7 +2115,7 @@ object StudioRecognizer {
                     L.w("studio", "pipe: ${e.message}")
                 }
             }.start()
-            main.postDelayed({ finish(null) }, 15_000 + piece.ms * 2)
+            main.postDelayed({ finish(null, -2) }, 15_000 + piece.ms * 2)
         }
         next(0)
     }

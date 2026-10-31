@@ -494,4 +494,11 @@ class StudioTest {
         assertFalse(Studio.startsWithEmoji("1 шаг"))
         assertEquals(SItem("", "поиск"), Studio.itemOf(" поиск "))
     }
+
+    @Test
+    fun cleanTranscriptDropsMarks() {
+        assertEquals("Привет всем. Сегодня про код", Studio.cleanTranscript("[00:01] Привет всем.\n**Спикер 1:** Сегодня (музыка) про «код»"))
+        assertEquals("Hello world", Studio.cleanTranscript("0:12 - Hello world"))
+        assertNotNull(STUDIO_PROMPTS["studio_stt"])
+    }
 }

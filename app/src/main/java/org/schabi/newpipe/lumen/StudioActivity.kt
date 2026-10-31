@@ -2252,7 +2252,32 @@ class StudioActivity : LumenBase() {
                     stats = Studio.stats(take.ms, speech, 0)
                     done(Unit)
                 }
-                if (!canRecognise || speech.isEmpty()) return@async byBeats()
+                fun use(res: List<Pair<Span, String>>, w: List<SWord>) {
+                    pcm = take
+                    words = w
+                    transcript = res.joinToString(" ") { it.second }
+                    script = Studio.autoScenes(w)
+                    ranges = null
+                    stats = Studio.stats(take.ms, speech, w.size)
+                    done(Unit)
+                }
+                // the phone could not recognise the speech: Gemini listens to the take, else edit by the beats
+                fun byAiOrBeats() {
+                    val prov = Provider.active()?.takeIf { it.kind == ApiKind.GEMINI }
+                    if (prov == null || speech.isEmpty()) {
+                        L.w("studio", "no words recognised, editing by beats")
+                        return byBeats()
+                    }
+                    Lumen.async({ aiTranscribe(prov, take, speech) }, { e ->
+                        if (e is java.util.concurrent.CancellationException) fail(e)
+                        else { L.w("studio", "AI transcription: ${e.message}"); byBeats() }
+                    }) { res ->
+                        val w = Studio.alignPieces(res, speech)
+                        if (w.isEmpty()) byBeats() else use(res, w)
+                    }
+                }
+                if (speech.isEmpty()) return@async byBeats()
+                if (!canRecognise) return@async byAiOrBeats()
                 report("analyse", t("Распознавание речи…", "Recognising speech…"))
                 val pieces = Studio.groupSpans(speech)
                 StudioRecognizer.recognize(this, take.data, take.rate, pieces, lang() + "-" + lang().uppercase().replace("EN", "US").replace("UK", "UA"),
@@ -2262,20 +2287,28 @@ class StudioActivity : LumenBase() {
                         return@recognize
                     }
                     val w = Studio.alignPieces(res, speech)
-                    if (w.isEmpty()) {
-                        L.w("studio", "no words recognised, editing by beats")
-                        byBeats()
-                        return@recognize
-                    }
-                    pcm = take
-                    words = w
-                    transcript = res.joinToString(" ") { it.second }
-                    script = Studio.autoScenes(w)
-                    ranges = null
-                    stats = Studio.stats(take.ms, speech, w.size)
-                    done(Unit)
+                    if (w.isEmpty()) byAiOrBeats() else use(res, w)
                 }
             }
+        }
+    }
+
+    /** Text of the take by Gemini (it hears audio): pieces of up to 3 minutes go as 16 kHz WAV. Runs off the main thread. */
+    private fun aiTranscribe(prov: Provider, take: StudioAudio.Pcm, speech: List<Span>): List<Pair<Span, String>> {
+        val chunks = Studio.groupSpans(speech, 180_000)
+        return chunks.mapIndexedNotNull { k, c ->
+            if (cancel) throw java.util.concurrent.CancellationException()
+            report("analyse", t("Расшифровка через AI ${k + 1}/${chunks.size}…", "AI transcription ${k + 1}/${chunks.size}…"))
+            val from = (c.startMs * take.rate / 1000).toInt().coerceIn(0, take.data.size)
+            val to = (c.endMs * take.rate / 1000).toInt().coerceIn(from, take.data.size)
+            val pcm16 = Studio.resample(take.data.copyOfRange(from, to), take.rate, StudioRecognizer.RATE)
+            val body = java.nio.ByteBuffer.allocate(pcm16.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            body.asShortBuffer().put(pcm16)
+            val wav = Studio.wavHeader(pcm16.size * 2, StudioRecognizer.RATE) + body.array()
+            val r = Llm.complete(prov, prov.fastModel, "You transcribe speech exactly. Answer with the plain text only.",
+                Prompts.fill("studio_stt", emptyMap()), maxTokens = 8192, task = "studio_stt", pid = "studio",
+                image = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP), imageMime = "audio/wav")
+            Studio.cleanTranscript(r.text).takeIf { it.isNotBlank() }?.let { c to it }
         }
     }
 

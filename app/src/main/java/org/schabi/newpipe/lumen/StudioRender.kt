@@ -207,11 +207,36 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     private fun insert(i: Int): Boolean {
         if (plan.style != StudioStyle.VIDEO) return false
         plan.clipScenes?.let { return i !in it }
-        return (!plan.overlay && plan.script.scenes[i].kind != "text") || fullPhoto(i) != null
+        return (!plan.overlay && plan.script.scenes[i].kind != "text") || (plan.script.scenes[i].brollMode != "card" && hasMedia(i))
     }
 
     /** B-roll photo of scene [i] (null when it has none or it cannot be read). */
-    private fun photo(i: Int): Bitmap? = plan.script.scenes.getOrNull(i)?.media?.takeIf { it.isNotBlank() }?.let { StudioPhotos.get(it, max(w, h)) }
+    private fun photo(i: Int): Bitmap? {
+        val m = plan.script.scenes.getOrNull(i)?.media?.takeIf { it.isNotBlank() } ?: return null
+        if (!StudioStock.isVideo(m)) return StudioPhotos.get(m, max(w, h))
+        // a stock clip: its picture at the time inside the scene; clips of scenes long gone are closed
+        clips.entries.removeAll { (k, v) -> (k < i - 1 || k > i + 1).also { if (it) v.close() } }
+        val clip = clips.getOrPut(i) { StudioClipPhoto(File(m), w, h, live) }
+        return clip.at(nowMs - (plan.times.getOrNull(i)?.startMs ?: 0))
+    }
+
+    /** Does scene [i] have B-roll media on disk (without decoding it)? */
+    private fun hasMedia(i: Int): Boolean {
+        val m = plan.script.scenes.getOrNull(i)?.media?.takeIf { it.isNotBlank() } ?: return false
+        return if (StudioStock.isVideo(m)) File(m).exists() else photo(i) != null
+    }
+
+    /** Stock clips being played, by scene. */
+    private val clips = HashMap<Int, StudioClipPhoto>()
+
+    /** False for a single still frame (the preview): clips are read as one picture, not decoded frame by frame. */
+    var live = true
+
+    /** Closes the decoders of the stock clips. */
+    fun close() {
+        clips.values.forEach { it.close() }
+        clips.clear()
+    }
 
     /** The photo when it fills the whole frame of scene [i]. */
     private fun fullPhoto(i: Int): Bitmap? = if (plan.script.scenes.getOrNull(i)?.brollMode == "card") null else photo(i)
@@ -1287,6 +1312,74 @@ object StudioPhotos {
     }
 }
 
+/**
+ * A stock video clip used as a B-roll "photo": its picture at a time inside the scene. [live] decodes frame by frame
+ * (rendering, time only moves forward; a loop or a jump back reopens the decoder); otherwise one still frame is read
+ * (the preview on screen). The clip loops when the scene is longer.
+ */
+class StudioClipPhoto(private val file: File, w0: Int, h0: Int, private val live: Boolean) : java.io.Closeable {
+    // the picture is cropped to the frame; the long side is at most 1280 to keep memory low
+    private val k = min(1f, 1280f / max(w0, h0))
+    private val w = max(2, (w0 * k).toInt() / 2 * 2)
+    private val h = max(2, (h0 * k).toInt() / 2 * 2)
+    private val lenMs: Long = StudioBroll.clipMs(file)
+    private var frames: StudioFrames? = null
+    private var lastMs = Long.MAX_VALUE
+    private var argb: IntArray? = null
+    private var bmp: Bitmap? = null
+    private var shown = false
+    private var broken = lenMs <= 0
+
+    fun at(localMs: Long): Bitmap? {
+        if (broken) return null
+        val t = if (lenMs > 0) localMs.mod(lenMs) else 0
+        return try {
+            if (live) liveAt(t) else stillAt(t)
+        } catch (e: Exception) {
+            L.w("studio", "clip ${file.name}: ${e.message}")
+            broken = true
+            close()
+            null
+        }
+    }
+
+    private fun liveAt(t: Long): Bitmap? {
+        if (frames == null || t + 50 < lastMs) {
+            frames?.close()
+            frames = StudioFrames(file, w, h)
+            shown = false
+        }
+        lastMs = t
+        val out = argb ?: IntArray(w * h).also { argb = it }
+        val b = bmp ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { bmp = it }
+        if (frames!!.advance(t * 1000, out, true)) {
+            b.setPixels(out, 0, w, 0, 0, w, h)
+            shown = true
+        }
+        return if (shown) b else null
+    }
+
+    private fun stillAt(t: Long): Bitmap? {
+        if (bmp != null) return bmp
+        val r = android.media.MediaMetadataRetriever()
+        try {
+            r.setDataSource(file.absolutePath)
+            val f = r.getFrameAtTime(t * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: return null
+            val s = min(1f, max(w.toFloat() / f.width, h.toFloat() / f.height))
+            bmp = if (s < 1f) Bitmap.createScaledBitmap(f, max(1, (f.width * s).toInt()), max(1, (f.height * s).toInt()), true).also { if (it !== f) f.recycle() } else f
+            return bmp
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    override fun close() {
+        runCatching { frames?.close() }
+        frames = null
+        lastMs = Long.MAX_VALUE
+    }
+}
+
 /** Audio: decoding any file Android can read, and encoding the final AAC track. */
 object StudioAudio {
     private const val TIMEOUT = 10_000L
@@ -1564,6 +1657,7 @@ object StudioVideo {
             }
             drain(true)
             writeAudio(Long.MAX_VALUE)
+            painter.close()
             bmp.recycle()
             ok = true
         } finally {
@@ -1614,6 +1708,7 @@ object StudioVideo {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         val painter = StudioPainter(w, h, plan)
+        painter.live = false
         val at = background?.frameAt(tMs)
         if (plan.style == StudioStyle.VIDEO) c.drawColor(0xFF000000.toInt())
         if (at != null && painter.needsVideo(tMs)) {
@@ -2216,6 +2311,7 @@ object FramePipeline {
                         while (!stop.get() && !ready[k].offer(buf, 200, ms)) Unit
                         f += workers
                     }
+                    painter.close()
                     bmp.recycle()
                 } catch (e: Throwable) {
                     while (!stop.get() && !ready[k].offer(e, 200, ms)) Unit

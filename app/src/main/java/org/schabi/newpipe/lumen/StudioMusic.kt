@@ -139,6 +139,99 @@ object StudioBroll {
         return s
     }
 
+    private const val MAX_CLIP_BYTES = 40L * 1024 * 1024
+
+    private fun get(url: String, headers: Map<String, String>): String? = runCatching {
+        val b = Request.Builder().url(url).header("User-Agent", UA)
+        headers.forEach { (k, v) -> b.header(k, v) }
+        http.newCall(b.build()).execute().use { r -> if (r.isSuccessful) r.body?.string() else null.also { L.w("studio", "stock ${r.code}: ${url.substringBefore('?')}") } }
+    }.getOrNull()
+
+    /** Streams [url] into [out] (at most 40 MB); false when it failed or was too big. */
+    private fun download(url: String, out: File, cancelled: () -> Boolean): Boolean = runCatching {
+        http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+            val b = r.body
+            if (!r.isSuccessful || b == null || b.contentLength() > MAX_CLIP_BYTES) return@use false
+            var total = 0L
+            out.parentFile?.mkdirs()
+            out.outputStream().use { os ->
+                val inp = b.byteStream()
+                val buf = ByteArray(64 * 1024)
+                while (total <= MAX_CLIP_BYTES) {
+                    if (cancelled()) throw java.util.concurrent.CancellationException()
+                    val n = inp.read(buf)
+                    if (n < 0) break
+                    total += n
+                    os.write(buf, 0, n)
+                }
+            }
+            total in 1..MAX_CLIP_BYTES
+        }
+    }.getOrElse { e -> if (e is java.util.concurrent.CancellationException) throw e else false }.also { if (!it) out.delete() }
+
+    /** Length of a downloaded clip when Android can play its picture, else 0. */
+    fun clipMs(f: File): Long {
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(f.absolutePath)
+            if (r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO) != "yes") 0
+            else r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0
+        } catch (e: Exception) {
+            0
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    /** Stock sources that can be searched now (with their keys): Pexels, Pixabay, then Wikimedia Commons. */
+    fun stockSources(): List<String> = listOfNotNull(
+        StudioStock.PEXELS.takeIf { KeyVault.has(StudioStock.PEXELS_KEY) },
+        StudioStock.PIXABAY.takeIf { KeyVault.has(StudioStock.PIXABAY_KEY) },
+        StudioStock.COMMONS
+    )
+
+    private fun search(source: String, query: String, aspect: StudioAspect): List<StockClip> = when (source) {
+        StudioStock.PEXELS -> {
+            val key = KeyVault.get(StudioStock.PEXELS_KEY).orEmpty()
+            (get(StudioStock.pexelsUrl(query, aspect), mapOf("Authorization" to key))?.let { StudioStock.parsePexels(it) }.orEmpty())
+                .ifEmpty { get(StudioStock.pexelsUrl(query, null), mapOf("Authorization" to key))?.let { StudioStock.parsePexels(it) }.orEmpty() }
+        }
+        StudioStock.PIXABAY -> get(StudioStock.pixabayUrl(query, KeyVault.get(StudioStock.PIXABAY_KEY).orEmpty()), emptyMap())
+            ?.let { StudioStock.parsePixabay(it) }.orEmpty()
+        else -> get(StudioStock.commonsUrl(query), emptyMap())?.let { StudioStock.parseCommons(it) }.orEmpty()
+    }
+
+    /**
+     * Real footage for a B-roll scene: every source is asked with ever wider search words until something fits;
+     * the best clips are downloaded until one plays. Returns the clip, its file and length, or null.
+     */
+    fun fetchClip(query: String, aspect: StudioAspect, needMs: Long, used: Set<String>, dir: File, name: String, cancelled: () -> Boolean): Triple<StockClip, File, Long>? {
+        for (source in stockSources()) {
+            for (q in StudioStock.ladder(query)) {
+                if (cancelled()) throw java.util.concurrent.CancellationException()
+                val hits = search(source, q, aspect)
+                if (hits.isEmpty()) continue
+                for (c in StudioStock.rank(hits, aspect, needMs, used).take(3)) {
+                    for (url in c.urls) {
+                        if (cancelled()) throw java.util.concurrent.CancellationException()
+                        val ext = if (url.substringBefore('?').endsWith(".webm")) "webm" else "mp4"
+                        val f = File(dir, "$name.$ext")
+                        if (!download(url, f, cancelled)) continue
+                        val ms = clipMs(f)
+                        if (ms > 0) {
+                            L.i("studio", "clip '${query.take(40)}' ($source, '$q'): ${c.width}x${c.height} ${ms / 1000}s")
+                            return Triple(c, f, ms)
+                        }
+                        f.delete()
+                    }
+                }
+                break
+            }
+        }
+        L.i("studio", "clip '${query.take(40)}': nothing")
+        return null
+    }
+
     /** Finds a photo for [query] and saves it as [out] (JPEG); null when nothing usable was found. */
     fun fetch(query: String, aspect: StudioAspect, commercial: Boolean, out: File, maxSide: Int, cancelled: () -> Boolean): BrollHit? {
         var hits = text(StudioBrollCatalog.url(query, commercial, aspect))?.let { StudioBrollCatalog.parse(it) }.orEmpty()

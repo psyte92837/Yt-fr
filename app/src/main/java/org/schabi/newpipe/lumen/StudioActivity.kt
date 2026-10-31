@@ -94,6 +94,11 @@ object StudioPrefs {
     var broll: Boolean
         get() = p.getBoolean("studio_broll", true)
         set(v) = p.edit().putBoolean("studio_broll", v).apply()
+
+    /** B-roll: real video clips from stock sources first, photos when no clip is found. */
+    var brollVideo: Boolean
+        get() = p.getBoolean("studio_broll_video", true)
+        set(v) = p.edit().putBoolean("studio_broll_video", v).apply()
     /** The AI director may cut out filler words and slips of the take. */
     var dropFillers: Boolean
         get() = p.getBoolean("studio_drop_fillers", true)
@@ -437,7 +442,7 @@ class StudioActivity : LumenBase() {
         "ai_edit" -> t("AI правит сценарий", "AI edits the script")
         "analyse" -> t("озвучка и разметка", "voice and timing")
         "ai_direct" -> t("AI-режиссёр", "AI director")
-        "broll" -> t("поиск фото", "finding photos")
+        "broll" -> t("поиск B-roll", "finding B-roll")
         "board" -> t("раскадровка", "storyboard")
         "music" -> t("музыка", "music")
         "bg" -> t("клипы фона", "background clips")
@@ -788,19 +793,26 @@ class StudioActivity : LumenBase() {
             check(t("Запускать выбранный способ сразу после разбора", "Run the chosen way right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
             if (cur == StudioApproach.FULL) {
                 if (StudioPrefs.voiceMode != "edge") check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
-                check(t("🖼 Подбирать фото B-roll (Openverse, свободные лицензии)", "🖼 Find B-roll photos (Openverse, open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }
+                check(t("🖼 Подбирать B-roll (свободные лицензии)", "🖼 Find B-roll (open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }
+                if (StudioPrefs.broll) {
+                    check(t("🎞 Сначала реальные видео-клипы (Pexels, Pixabay, Wikimedia), иначе фото", "🎞 Real video clips first (Pexels, Pixabay, Wikimedia), else photos"),
+                        StudioPrefs.brollVideo) { StudioPrefs.brollVideo = it; render() }
+                    if (StudioPrefs.brollVideo) button(t("🔑 Ключи Pexels и Pixabay", "🔑 Pexels and Pixabay keys") +
+                        " (" + StudioBroll.stockSources().size + "/3)", style = BtnStyle.TEXT) { stockKeys() }
+                }
             }
             lastTokens?.let { (i, o) -> muted(t("Последний вызов AI: $i → $o токенов", "Last AI call: $i → $o tokens")) }
-            progress("broll", t("Поиск фото…", "Finding photos…"))
+            progress("broll", t("Поиск B-roll…", "Finding B-roll…"))
             val (zooms, pops, sounds) = StudioDirector.summary(sc)
             val figures = sc.scenes.sumOf { it.shapes.size }
             val asked = sc.scenes.count { it.broll.isNotBlank() }
             val got = sc.scenes.count { it.broll.isNotBlank() && it.media.isNotBlank() }
             if (zooms + pops + sounds + figures + asked > 0) muted("🎬 " + t(
                 "зумов $zooms · плашек $pops · звуков $sounds · фигур $figures" + (if (asked > 0) " · фото $got из $asked" else ""),
-                "zooms $zooms · stickers $pops · sounds $sounds · shapes $figures" + (if (asked > 0) " · photos $got of $asked" else "")))
+                "zooms $zooms · stickers $pops · sounds $sounds · shapes $figures" + (if (asked > 0) " · photos $got of $asked" else "")) +
+                sc.scenes.count { StudioStock.isVideo(it.media) }.let { n -> if (n > 0) t(" (клипов $n)", " ($n clips)") else "" })
             if (busy.isEmpty() && got < asked) button(t("🖼 Подобрать B-roll", "🖼 Find B-roll"), style = BtnStyle.TEXT) { fetchBroll() }
-            if (got > 0) button(t("⧉ Источники фото для описания", "⧉ Photo credits for the description"), style = BtnStyle.TEXT) { copyText(StudioDirector.credits(sc)) }
+            if (got > 0) button(t("⧉ Источники B-roll для описания", "⧉ B-roll credits for the description"), style = BtnStyle.TEXT) { copyText(StudioDirector.credits(sc)) }
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
@@ -809,7 +821,7 @@ class StudioActivity : LumenBase() {
             plan.times.take(60).forEach { st ->
                 val scn = sc.scenes[st.scene]
                 val fx = scn.cues.joinToString("") { when (it.type) { "zoom" -> "🔍"; "pop" -> "💬"; else -> "🔊" } } +
-                    "✏️".repeat(scn.shapes.size) + (if (scn.media.isNotBlank()) "🖼" else if (scn.broll.isNotBlank()) "▫️" else "")
+                    "✏️".repeat(scn.shapes.size) + (if (StudioStock.isVideo(scn.media)) "🎞" else if (scn.media.isNotBlank()) "🖼" else if (scn.broll.isNotBlank()) "▫️" else "")
                 val what = if (scn.clip in ready) "🎞 ${scn.clip}" else kindLabel(scn.kind)
                 val line = "${Studio.clock(st.startMs)} · $what" + (if (fx.isNotEmpty()) " $fx" else "") + " · " +
                     scn.say.take(70) + if (scn.say.length > 70) "…" else ""
@@ -2622,16 +2634,36 @@ class StudioActivity : LumenBase() {
         val used = sc0.scenes.map { it.media }.toSet()
         bdir.listFiles()?.filter { it.absolutePath !in used }?.forEach { it.delete() }
         val maxSide = if (StudioPrefs.quality >= 1080) 1920 else 1280
+        val video = StudioPrefs.brollVideo
+        val times = currentPlan()?.times
         busy = "broll"
         cancel = false
         render()
         job("broll", {
             val found = java.util.concurrent.ConcurrentHashMap<Int, Pair<String, String>>()
             val ready = java.util.concurrent.atomic.AtomicInteger(0)
-            report("broll", t("Фото 0/${need.size}", "Photos 0/${need.size}"))
+            val used = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+            report("broll", t("B-roll 0/${need.size}", "B-roll 0/${need.size}"))
             Par.mapAll(need, 3) { _, i ->
                 if (cancel) throw java.util.concurrent.CancellationException()
-                val f = File(bdir, "b_${System.currentTimeMillis()}_$i.jpg")
+                val stamp = "b_${System.currentTimeMillis()}_$i"
+                // real footage first (a clip not used in another scene), a photo when none plays
+                val clip = if (!video) null else try {
+                    val needMs = times?.firstOrNull { it.scene == i }?.let { it.endMs - it.startMs } ?: 4000L
+                    StudioBroll.fetchClip(sc0.scenes[i].broll, asp, needMs, used, bdir, stamp) { cancel }
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    L.w("studio", "clip: ${e.message}")
+                    null
+                }
+                if (clip != null) {
+                    used += clip.first.source + ":" + clip.first.id
+                    found[i] = clip.second.absolutePath to StudioStock.credit(clip.first)
+                    report("broll", t("B-roll ${ready.incrementAndGet()}/${need.size}", "B-roll ${ready.get()}/${need.size}"))
+                    return@mapAll i
+                }
+                val f = File(bdir, "$stamp.jpg")
                 val hit = try {
                     StudioBroll.fetch(sc0.scenes[i].broll, asp, true, f, maxSide) { cancel }
                 } catch (e: java.util.concurrent.CancellationException) {
@@ -2641,7 +2673,7 @@ class StudioActivity : LumenBase() {
                     null
                 }
                 if (hit != null) found[i] = f.absolutePath to StudioBrollCatalog.credit(hit)
-                report("broll", t("Фото ${ready.incrementAndGet()}/${need.size}", "Photos ${ready.get()}/${need.size}"))
+                report("broll", t("B-roll ${ready.incrementAndGet()}/${need.size}", "B-roll ${ready.get()}/${need.size}"))
                 i
             }
             HashMap(found)
@@ -2659,7 +2691,9 @@ class StudioActivity : LumenBase() {
             }
             board = emptyList()
             render()
-            toast(t("Фото найдено: ${found.size} из ${need.size}", "Photos found: ${found.size} of ${need.size}"))
+            val nClips = found.values.count { StudioStock.isVideo(it.first) }
+            toast(t("B-roll найден: ${found.size} из ${need.size} (клипов $nClips, фото ${found.size - nClips})",
+                "B-roll found: ${found.size} of ${need.size} ($nClips clips, ${found.size - nClips} photos)"))
             if (autoFinishLater) {
                 autoFinishLater = false
                 autoFinish()
@@ -2668,6 +2702,32 @@ class StudioActivity : LumenBase() {
     }
 
     private var autoFinishLater = false
+
+    /** Free keys of Pexels and Pixabay (Wikimedia Commons needs none); they stay on the phone. */
+    private fun stockKeys() {
+        bottomSheet(t("Видео-клипы для B-roll", "Video clips for B-roll"), {}) { dismiss ->
+            muted(t("Без ключей клипы ищутся в Wikimedia Commons. С бесплатными ключами Pexels и Pixabay выбор намного больше. " +
+                "Ключи хранятся только на телефоне, на сервер уходят только слова поиска.",
+                "Without keys clips come from Wikimedia Commons. Free Pexels and Pixabay keys give far more choice. " +
+                    "The keys stay on the phone; only the search words are sent."))
+            listOf(Triple("Pexels", StudioStock.PEXELS_KEY, StudioStock.PEXELS_KEY_URL), Triple("Pixabay", StudioStock.PIXABAY_KEY, StudioStock.PIXABAY_KEY_URL))
+                .forEach { (name, id, url) ->
+                    val key = edit(if (KeyVault.has(id)) t("$name: ключ сохранён (вставьте новый, чтобы заменить)", "$name: key saved (paste a new one to replace)")
+                    else t("Ключ $name", "$name key"))
+                    row(
+                        btn(ctx, t("Получить ключ", "Get a key"), style = BtnStyle.TEXT) { openUrl(url) },
+                        btn(ctx, t("Сохранить", "Save"), style = BtnStyle.TONAL) {
+                            val k = key.text.toString().trim()
+                            if (k.length < 10) return@btn
+                            KeyVault.put(id, k)
+                            toast(t("Ключ $name сохранён", "$name key saved"))
+                            dismiss()
+                            render()
+                        }
+                    )
+                }
+        }
+    }
 
     /** End of the "AI makes everything" chain: the video is built right away. */
     private fun autoFinish() {

@@ -220,4 +220,32 @@ class StudioCutsTest {
         assertEquals("c3", back.scenes[0].clip)
         assertEquals("", back.scenes[1].clip)
     }
+
+    // ---------- search by title ----------
+
+    @Test
+    fun hitsBlockNumbersVideos() {
+        val b = StudioCuts.hitsBlock(listOf(CutHit("u1", "Cat\nfails", "Pets", 200_000), CutHit("u2", "Dog")))
+        assertEquals("[1] Cat fails — Pets, 3:20\n[2] Dog", b)
+    }
+
+    @Test
+    fun parsesPicks() {
+        val m = StudioCuts.parsePicks("ok {\"picks\":[{\"n\":2,\"note\":\"кот падает\"},{\"n\":9},{\"n\":2},{\"n\":1}]} ", 3)!!
+        assertEquals(mapOf(1 to "кот падает", 0 to ""), m)
+        assertNull(StudioCuts.parsePicks("nope", 3))
+    }
+
+    @Test
+    fun addsHitsWithoutRepeats() {
+        val old = listOf(SClip("c1", "u1", 0, 5000))
+        val hits = listOf(CutHit("u1", "A"), CutHit("u2", "B"), CutHit("u3", "C"))
+        val out = StudioCuts.addHits(old, hits, mapOf("u3" to "note"))
+        assertEquals(listOf("c1", "c2", "c3"), out.map { it.id })
+        assertEquals("B", out[1].note)
+        assertEquals("note", out[2].note)
+        assertEquals(5000L, out[2].toMs)
+        val full = List(StudioCuts.MAX_CLIPS) { SClip("c${it + 1}", "x$it", 0, 5000) }
+        assertEquals(StudioCuts.MAX_CLIPS, StudioCuts.addHits(full, hits).size)
+    }
 }

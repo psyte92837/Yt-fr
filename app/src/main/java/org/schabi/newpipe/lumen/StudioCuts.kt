@@ -37,6 +37,9 @@ data class SClip(
 /** Part of the output where clip [id] plays; the file time is [leadMs] + ([offsetMs] + t − [startMs]) mod [lenMs]. */
 data class ClipSlot(val startMs: Long, val endMs: Long, val id: String, val leadMs: Long, val lenMs: Long, val offsetMs: Long = 0)
 
+/** A video found by title in the Cuts search. */
+data class CutHit(val url: String, val title: String, val channel: String = "", val durationMs: Long = 0)
+
 /** A fragment of a DASH stream from its sidx box: where its bytes are and what time it covers. */
 data class DashSeg(val offset: Long, val size: Long, val startUs: Long, val durUs: Long)
 
@@ -265,5 +268,48 @@ object StudioCuts {
             ". Сцене можно дать поле \"clip\" с id клипа: тогда вместо графики на экране идёт этот клип, а голос продолжает рассказ. " +
             "Ставь клип туда, где он по смыслу иллюстрирует речь или смешно реагирует на неё; каждый клип 1-2 раза; " +
             "сцена с клипом обычно не длиннее клипа; между клипами — сцены с графикой."
+    }
+
+    // ---------- search by title ----------
+
+    /** Numbered list of found videos for the AI filter prompt: "[1] title — channel, 3:20". */
+    fun hitsBlock(hits: List<CutHit>): String = hits.withIndex().joinToString("\n") { (i, h) ->
+        "[${i + 1}] " + h.title.replace('\n', ' ').trim().take(140) +
+            (if (h.channel.isNotBlank()) " — " + h.channel.take(60) else "") +
+            (if (h.durationMs > 0) ", " + stamp(h.durationMs) else "")
+    }
+
+    /**
+     * The AI filter answer {"picks":[{"n":3,"note":"..."}]} → index in the list (0-based) to what is in the shot.
+     * Numbers out of 1..[count] and repeats are dropped; null when it is not that JSON.
+     */
+    fun parsePicks(s: String, count: Int): Map<Int, String>? = runCatching {
+        val t = s.trim().let { v -> v.substring(v.indexOf('{').coerceAtLeast(0), (v.lastIndexOf('}') + 1).coerceAtLeast(1)) }
+        val arr = JSONObject(t).getJSONArray("picks")
+        val out = LinkedHashMap<Int, String>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i)
+            val n = o?.optInt("n", 0) ?: arr.optInt(i, 0)
+            if (n !in 1..count || out.containsKey(n - 1)) continue
+            out[n - 1] = o?.optString("note", "").orEmpty().replace('\n', ' ').trim().take(200)
+        }
+        out
+    }.getOrNull()
+
+    /**
+     * Adds the marked videos as clips from [fromMs] (default length); a video already in the list is skipped,
+     * at most [MAX_CLIPS] in all. The note is the AI note or the title.
+     */
+    fun addHits(clips: List<SClip>, hits: List<CutHit>, notes: Map<String, String> = emptyMap(), fromMs: Long = 0): List<SClip> {
+        val out = clips.toMutableList()
+        val have = clips.map { it.url }.toMutableSet()
+        for (h in hits) {
+            if (out.size >= MAX_CLIPS) break
+            if (h.url in have) continue
+            have += h.url
+            val (a, b) = span(fromMs, null)
+            out += SClip(newId(out), h.url, a, b, notes[h.url].orEmpty().ifBlank { h.title.take(200) }, h.title)
+        }
+        return out
     }
 }

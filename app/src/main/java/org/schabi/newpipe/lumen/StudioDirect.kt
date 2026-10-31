@@ -494,10 +494,11 @@ object StudioKeys {
         val color = o.optString("color").trim().ifBlank { "accent" }.take(9)
         return SShape(el, text, color, o.optBoolean("fill", false),
             num(o, "w", 0.01f, 1.5f) ?: if (el == "text" || el == "emoji") 0.08f else 0.2f,
-            num(o, "h", 0.005f, 1.5f) ?: if (el == "text" || el == "emoji") 0.08f else 0.2f, keys)
+            num(o, "h", 0.005f, 1.5f) ?: if (el == "text" || el == "emoji") 0.08f else 0.2f, keys, if (o.optString("align").equals("left", true)) "left" else "center")
     }
 
     fun toJson(s: SShape): JSONObject = JSONObject().put("el", s.el).put("text", s.text).put("color", s.color).put("fill", s.fill)
+        .apply { if (s.align != "center") put("align", s.align) }
         .put("w", s.w.toDouble()).put("h", s.h.toDouble()).put("keys", org.json.JSONArray().apply {
             s.keys.forEach { k ->
                 put(JSONObject().put("at", k.at).put("ms", k.ms).apply {

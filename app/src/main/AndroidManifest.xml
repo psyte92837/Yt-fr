@@ -204,6 +204,12 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".lumen.StudioTemplatesActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <service
             android:name=".lumen.StudioService"
             android:exported="false"

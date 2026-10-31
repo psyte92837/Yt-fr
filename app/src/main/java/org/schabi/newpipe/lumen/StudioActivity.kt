@@ -279,8 +279,27 @@ class StudioActivity : LumenBase() {
         super.onPause()
     }
 
+    /** Saved templates (screen "📚 Templates"), reloaded whenever the Studio comes back. */
+    private var motionTpls: Map<String, MotionTpl> = emptyMap()
+    private var editTpls: List<EditTpl> = emptyList()
+
+    private fun loadTemplates() {
+        val st = StudioTemplatesActivity.store(this)
+        motionTpls = runCatching { st.motionMap() }.getOrDefault(emptyMap())
+        editTpls = runCatching { st.edits() }.getOrDefault(emptyList())
+    }
+
+    /** The visuals for the prompts, with the saved motion templates. */
+    private fun visuals() = STUDIO_VISUALS + StudioTplCatalog.visuals(motionTpls.values.toList())
+
     override fun onStart() {
         super.onStart()
+        val before = motionTpls.keys to editTpls.map { it.id to it.json }
+        loadTemplates()
+        if (before != (motionTpls.keys to editTpls.map { it.id to it.json })) {
+            board = emptyList()
+            if (busy.isEmpty() && recorder == null) render()
+        }
         StudioJob.listener = ::onJob
         if (wasRunning && !StudioJob.running) onJob()
     }
@@ -745,7 +764,8 @@ class StudioActivity : LumenBase() {
             add(text(ctx, if (task == StudioTask.VOICE) t("Как анимировать", "How to animate") else t("Режиссура", "Direction"),
                 Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val cur = StudioApproach.of(StudioPrefs.approach)
-            muted(approachHelp(cur))
+            val ownWay = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
+            muted(if (ownWay != null) "🧪 " + ownWay.name + t(" — свой подход, без AI и токенов. ", " — own way, no AI or tokens. ") + ownWay.use else approachHelp(cur))
             progress("ai_direct", t("Режиссёр размечает ролик…", "The director is planning the video…"))
             if (busy.isEmpty()) {
                 fun b(ap: StudioApproach, label: String) = btn(ctx, (if (ap == cur) "● " else "") + label,
@@ -753,6 +773,16 @@ class StudioActivity : LumenBase() {
                 row(b(StudioApproach.RULES, t("⚡ Правила", "⚡ Rules")), b(StudioApproach.RHYTHM, t("🥁 Ритм", "🥁 Rhythm")))
                 row(b(StudioApproach.LITE, t("💸 Эконом AI", "💸 Lite AI")), b(StudioApproach.HYBRID, t("🧩 Гибрид", "🧩 Hybrid")))
                 add(b(StudioApproach.FULL, t("🎬 Полный AI-режиссёр", "🎬 Full AI director")), 4)
+                // own ways of editing (lumen.edit), made by the AI on the templates screen: no tokens
+                editTpls.chunked(2).forEach { pair ->
+                    row(*pair.map { e ->
+                        val on = StudioPrefs.approach == "edit:" + e.id
+                        btn(ctx, (if (on) "● " else "") + "🧪 " + e.name, style = if (on) BtnStyle.TONAL else BtnStyle.TEXT) { animateEdit(e) }
+                    }.toTypedArray())
+                }
+                button(t("📚 Шаблоны: свои моушны и подходы (AI)", "📚 Templates: own motions and ways (AI)"), style = BtnStyle.TEXT) {
+                    StudioTemplatesActivity.open(this@StudioActivity)
+                }
                 if (transcript.isNotBlank()) button(t("Текст расшифровки", "Transcript"), style = BtnStyle.TEXT) { showText(t("Расшифровка", "Transcript"), transcript) }
             }
             check(t("Запускать выбранный способ сразу после разбора", "Run the chosen way right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
@@ -1749,7 +1779,7 @@ class StudioActivity : LumenBase() {
             StudioPrefs.zooms, StudioPrefs.transitions,
             if (StudioPrefs.pulse) pulseOf(voice) else null,
             if (StudioPrefs.liveEmoji) emojiDir else null,
-            clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null)
+            clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls)
     }
 
     private val emojiDir get() = File(dir, "emoji")
@@ -1880,7 +1910,7 @@ class StudioActivity : LumenBase() {
         job("ai_script", {
             val sc = aiScript(if (cartoon) "studio_script_cartoon" else if (long) "studio_script_video" else "studio_script", mapOf(
                 "topic" to topic, "seconds" to sec.toString(), "words" to Studio.wordsFor(sec).toString(),
-                "lang" to aiLang(), "extra" to extra, "visuals" to STUDIO_VISUALS, "cast" to StudioToon.promptCast(cast)
+                "lang" to aiLang(), "extra" to extra, "visuals" to visuals(), "cast" to StudioToon.promptCast(cast)
             ), if (long) 14_000 else 6000)
             // names as in the cast, so "@Name" finds its character
             if (cartoon) sc.copy(scenes = sc.scenes.map { s -> s.copy(who = cast.getOrNull(StudioToon.find(cast, s.who))?.name ?: "") }) else sc
@@ -1999,7 +2029,7 @@ class StudioActivity : LumenBase() {
         job("ai_edit", {
             aiJson("studio_script_edit", mapOf(
                 "format" to format, "lang" to aiLang(), "ask" to ask, "cast" to StudioAssist.castRule(cast),
-                "visuals" to STUDIO_VISUALS, "script" to Studio.toJson(before)
+                "visuals" to visuals(), "script" to Studio.toJson(before)
             ), "You edit scripts for explainer videos. Answer with JSON only.", if (longScript()) 16_000 else 8000) { StudioAssist.parse(it) }
         }, { e -> busy = ""; render(); if (e !is java.util.concurrent.CancellationException) err(e) }) { res ->
             busy = ""
@@ -2196,7 +2226,9 @@ class StudioActivity : LumenBase() {
             render()
             if (StudioPrefs.autoDirect || autoAll) {
                 val ap = StudioApproach.of(StudioPrefs.approach)
-                animate(if (ap.usesAi && Provider.active() == null) StudioApproach.RULES else ap, remember = false)
+                val own = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
+                if (own != null) animateEdit(own)
+                else animate(if (ap.usesAi && Provider.active() == null) StudioApproach.RULES else ap, remember = false)
             } else autoFinish()
         }
         val fail = { e: Throwable ->
@@ -2395,8 +2427,18 @@ class StudioActivity : LumenBase() {
         if (ap == StudioApproach.FULL) direct() else directBy(ap)
     }
 
+    /** An own way of editing (lumen.edit): the whole plan by its rules, without AI. */
+    private fun animateEdit(e: EditTpl) {
+        StudioPrefs.approach = "edit:" + e.id
+        when (e.style) {
+            "dark" -> StudioPrefs.style = StudioStyle.DARK.name
+            "light" -> StudioPrefs.style = StudioStyle.LIGHT.name
+        }
+        directBy(StudioApproach.RULES, e)
+    }
+
     /** Rules, rhythm, lite AI or hybrid: a plan without cutting the take. */
-    private fun directBy(ap: StudioApproach) {
+    private fun directBy(ap: StudioApproach, edit: EditTpl? = null) {
         val p0 = pcm ?: return
         val ws = words
         if (ws.isEmpty() || busy.isNotEmpty()) return
@@ -2408,7 +2450,7 @@ class StudioActivity : LumenBase() {
         cancel = false
         render()
         job("ai_direct", {
-            val d = when (ap) {
+            val d = if (edit != null) StudioEditTpl.direct(edit, ws, StudioRhythm.wordLoudness(ws, Studio.frameRms(p0.data, p0.rate))) else when (ap) {
                 StudioApproach.RULES -> StudioRules.direct(ws)
                 StudioApproach.RHYTHM -> {
                     val loud = StudioRhythm.wordLoudness(ws, Studio.frameRms(p0.data, p0.rate))
@@ -2417,14 +2459,15 @@ class StudioActivity : LumenBase() {
                 }
                 StudioApproach.LITE -> aiJson("studio_direct_lite", mapOf(
                     "format" to formatText(), "long" to if (long) ", в длинном ролике до 12 с" else "", "lang" to aiLang(),
-                    "data" to StudioCompact.transcript(ws)
+                    "tpls" to StudioTplCatalog.kinds(motionTpls.values.toList()), "data" to StudioCompact.transcript(ws)
                 ), "You are a video editor. Answer with compact JSON only.", if (ws.size > 600) 8000 else 3000, fast = true) { StudioCompact.parse(it, ws) }
                 else -> {
                     val draft = StudioRules.direct(ws)
                     val n = maxOf(2, draft.scenes.size * 3 / 10)
                     runCatching {
                         aiJson("studio_direct_patch", mapOf(
-                            "format" to formatText(), "n" to n.toString(), "lang" to aiLang(), "data" to StudioCompact.listing(draft, ws)
+                            "format" to formatText(), "n" to n.toString(), "lang" to aiLang(),
+                            "tpls" to StudioTplCatalog.kinds(motionTpls.values.toList()), "data" to StudioCompact.listing(draft, ws)
                         ), "You are a video editor. Answer with compact JSON only.", 2500 + n * 120) { StudioCompact.patch(draft, it, ws) }
                     }.getOrElse { e -> if (e is java.util.concurrent.CancellationException) throw e else draft }
                 }
@@ -2472,7 +2515,7 @@ class StudioActivity : LumenBase() {
         val vars = mapOf(
             "format" to format,
             "long" to if (task == StudioTask.VIDEO || p0.ms > 180_000) ", в длинном ролике до 12 секунд" else "",
-            "visuals" to STUDIO_VISUALS + StudioCuts.promptBlock(cutsNow),
+            "visuals" to visuals() + StudioCuts.promptBlock(cutsNow),
             "drop" to if (allowDrop) "drop — номера слов-паразитов («эм», «ну», «короче», «как бы», «вот»), повторов и оговорок, которые нужно вырезать из записи. " +
                 "Не трогай значимые слова и не вырезай больше 10% текста. Если вырезать нечего — пустой массив."
             else "drop — всегда пустой массив.",

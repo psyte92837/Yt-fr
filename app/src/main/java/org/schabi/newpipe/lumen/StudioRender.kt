@@ -72,7 +72,9 @@ class StudioPlan(
     /** Cuts task: scenes that show a YouTube clip; every other scene is a graphic insert. Null = not a cut montage. */
     val clipScenes: Set<Int>? = null,
     /** Cartoon task: the characters on the stage (null = not a cartoon). */
-    val cast: List<SChar>? = null
+    val cast: List<SChar>? = null,
+    /** Saved motion templates by id, for scenes of kind "tpl:id". */
+    val templates: Map<String, MotionTpl> = emptyMap()
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
@@ -95,6 +97,16 @@ class StudioPlan(
         }
     }
 
+    /** Shapes of the motion template of every scene ("tpl:id"), with absolute key times; empty when the template is missing. */
+    val tplShapes: List<List<Pair<SShape, List<Long>>>> = times.map { st ->
+        val sc = script.scenes.getOrNull(st.scene)
+        val t = sc?.kind?.takeIf { Studio.isTpl(it) }?.let { templates[it.removePrefix("tpl:")] }
+        if (sc == null || t == null) emptyList()
+        else runCatching {
+            StudioMotionTpl.compile(t, sc, words, st.words, st.startMs, st.endMs, st.words.firstOrNull { it in emph } ?: StudioWords.keyWord(words, st.words))
+        }.getOrDefault(emptyList())
+    }
+
     /** Stickers of every scene with their time. */
     val pops: List<List<Pair<Long, SCue>>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "pop" }.map { cueMs(st, it) to it } }
 
@@ -103,14 +115,15 @@ class StudioPlan(
         fun build(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
-            pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null
+            pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
+            templates: Map<String, MotionTpl> = emptyMap()
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK && cast == null
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() })
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates)
         }
     }
 }
@@ -274,9 +287,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** Shapes of the AI director animated on their key frames (arrows draw themselves, rings circle, a spotlight dims the rest). */
-    private fun shapes(c: Canvas, i: Int, tMs: Long, a: Float) {
-        val list = plan.shapes.getOrNull(i) ?: return
-        if (a <= 0f) return
+    private fun shapes(c: Canvas, i: Int, tMs: Long, a: Float) = drawShapes(c, plan.shapes.getOrNull(i) ?: return, tMs, a)
+
+    /** Shapes with absolute key times: of the AI director or compiled from a motion template. */
+    private fun drawShapes(c: Canvas, list: List<Pair<SShape, List<Long>>>, tMs: Long, a: Float) {
+        if (a <= 0f || list.isEmpty()) return
         val base = min(w, h).toFloat()
         for ((sh, times) in list) {
             val st = StudioKeys.state(sh, times, tMs) ?: continue
@@ -363,9 +378,12 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                     while (shapeText.measureText(sh.text) > w * 0.9f / max(0.2f, st.s) && shapeText.textSize > 2 * u) shapeText.textSize *= 0.9f
                     val tw = shapeText.measureText(sh.text)
                     val sz = shapeText.textSize
+                    val left = sh.align == "left"
+                    shapeText.textAlign = if (left) Paint.Align.LEFT else Paint.Align.CENTER
+                    val x0 = if (left) 0f else -tw / 2
                     if (sh.fill) {
                         shapeFill.alpha = (235 * al).toInt()
-                        c.drawRoundRect(RectF(-tw / 2 - sz * 0.45f, -sz * 0.75f, tw / 2 + sz * 0.45f, sz * 0.45f), sz * 0.3f, sz * 0.3f, shapeFill)
+                        c.drawRoundRect(RectF(x0 - sz * 0.45f, -sz * 0.75f, x0 + tw + sz * 0.45f, sz * 0.45f), sz * 0.3f, sz * 0.3f, shapeFill)
                         shapeText.color = 0xFFFFFFFF.toInt()
                     } else {
                         shapeText.color = col
@@ -374,6 +392,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                     shapeText.alpha = (255 * al).toInt()
                     c.drawText(sh.text, 0f, sz * 0.33f, shapeText)
                     shapeText.clearShadowLayer()
+                    shapeText.textAlign = Paint.Align.CENTER
                 }
                 "emoji" -> {
                     emoji(c, sh.text, 0f, ph * 0.35f, ph, al)
@@ -528,7 +547,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val local = tMs - st.startMs
         val sceneMs = st.endMs - st.startMs
         val card = if (onPhoto) null else photo(i)
-        val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big", "quote"))))
+        val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && !Studio.isTpl(sc.kind) && sc.kind !in listOf("step", "stat", "big", "quote"))))
         val vx = w / 2f
         val vy = if (wide) h * 0.42f else h * 0.37f
         if (wide) caption(c, i, tMs, a, if (textOnly) h * 0.30f else h * 0.78f, if (textOnly) 7f * u else 5.2f * u, w * (if (textOnly) 0.56f else 0.5f))
@@ -645,7 +664,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val sceneMs = st.endMs - st.startMs
         val card = if (onPhoto) null else photo(i)
         if (plan.style == StudioStyle.DARK) {
-            val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && sc.kind !in listOf("step", "stat", "big", "quote"))))
+            val textOnly = onPhoto || (card == null && (sc.kind == "text" || (sc.items.isEmpty() && !Studio.isTpl(sc.kind) && sc.kind !in listOf("step", "stat", "big", "quote"))))
             caption(c, i, tMs, a, if (onPhoto) h * 0.62f else if (textOnly) h * 0.40f else h * 0.15f, if (textOnly) 7.6f * u else 6.2f * u)
             if (card != null) photoCard(c, card, i, w / 2f, h * 0.57f, local, sceneMs, a)
             else if (!textOnly) visual(c, sc, i, w / 2f, h * 0.57f, local, sceneMs, a)
@@ -830,6 +849,15 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     // ---------- visuals ----------
 
     private fun visual(c: Canvas, sc: SScene, index: Int, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
+        if (Studio.isTpl(sc.kind)) {
+            val list = plan.tplShapes.getOrNull(index).orEmpty()
+            if (list.isNotEmpty()) {
+                drawShapes(c, list, local + plan.times[index].startMs, a)
+                return
+            }
+            if (sc.items.isNotEmpty()) grid(c, sc.items, cx, cy, local, sceneMs, a)
+            return
+        }
         when (sc.kind) {
             "step" -> step(c, plan.steps[index], if (dark) sc.title else "", cx, cy, local, a)
             "icons" -> grid(c, sc.items, cx, cy, local, sceneMs, a)

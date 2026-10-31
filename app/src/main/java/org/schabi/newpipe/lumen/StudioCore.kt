@@ -42,7 +42,9 @@ data class SKey(
 /** An animated shape of the AI director ([StudioKeys.SHAPES]); [w], [h] in parts of the short side of the frame. */
 data class SShape(
     val el: String, val text: String = "", val color: String = "accent", val fill: Boolean = false,
-    val w: Float = 0.2f, val h: Float = 0.2f, val keys: List<SKey> = emptyList()
+    val w: Float = 0.2f, val h: Float = 0.2f, val keys: List<SKey> = emptyList(),
+    /** Text shapes: "center" or "left" (starts at x). */
+    val align: String = "center"
 )
 
 /**
@@ -106,6 +108,9 @@ object Studio {
     /** Visual layouts a scene can use. */
     val KINDS = listOf("text", "step", "icons", "list", "flow", "cycle", "big", "stat", "quote", "chart", "compare")
 
+    /** "tpl:id": a scene drawn by a saved motion template. */
+    fun isTpl(kind: String) = kind.startsWith("tpl:") && kind.length > 4
+
     // ---------- script: JSON from AI ----------
 
     /** Script from an AI reply (tolerates prose and ```json fences around the object). Null if nothing usable. */
@@ -123,7 +128,7 @@ object Studio {
     fun sceneOf(o: JSONObject): SScene? {
         val say = o.optString("say").ifBlank { o.optString("text") }.trim()
         if (say.isEmpty()) return null
-        val kind = o.optString("kind").trim().lowercase().takeIf { it in KINDS } ?: "text"
+        val kind = o.optString("kind").trim().lowercase().takeIf { it in KINDS || isTpl(it) } ?: "text"
         val items = o.optJSONArray("items")?.let { a ->
             (0 until a.length()).mapNotNull { j ->
                 val it = a.opt(j)
@@ -1136,17 +1141,88 @@ val STUDIO_PROMPTS = linkedMapOf(
     "studio_direct_lite" to (
         "Режиссёр монтажа {format}. В речи [N] — номер слова, с которого может начаться сцена.\n" +
             "Раздели речь на сцены по смыслу (3-8 с{long}) и для каждой дай массив [N,kind,title,items,emph,fx]. " +
-            "kind: text step icons list flow cycle big stat quote chart compare; " +
+            "kind: text step icons list flow cycle big stat quote chart compare{tpls}; " +
             "items: \"эмодзи подпись|…\" (chart: \"подпись=число|…\", compare: ровно 2 стороны); emph: ключевые слова через ;; " +
             "fx через ;: z@слово — зум, p@слово:ТЕКСТ:эмодзи — плашка до 3 слов, s@слово:звук (whoosh pop click ding boom riser), t:переход (fade slide zoom whip none). " +
             "Первая сцена — хук. 0-3 эффекта на сцену, чередуй визуалы. Подписи на языке {lang}.\n" +
             "Только JSON: {\"t\":\"название\",\"s\":[[0,\"stat\",\"80%\",\"😬 людей\",\"80%\",\"z@80%;t:none\"]]}\n\n{data}"
         ),
+    "studio_tpl_motion" to (
+        "Ты моушн-дизайнер. Придумай шаблон анимированной графики для роликов по запросу: \"{ask}\".\n" +
+            "Протокол lumen.motion v1 — анимированная графика сцены с параметрами. Кадр: x и y в долях (0..1), размеры w и h в долях короткой стороны; " +
+            "имена позиций: left 0.18, center 0.5, right 0.82, top 0.16, middle 0.5, bottom 0.72, third1 0.33, third2 0.67. " +
+            "Держи графику в зоне y 0.30-0.70: сверху и снизу идут субтитры. " +
+            "Слой: el — arrow, line, circle, ring, rect, underline, check, cross, spotlight, text, emoji или group (children — слои без keys, сдвиг dx, dy от группы); " +
+            "text, color (accent, white, ink, red, green, yellow, blue или #RRGGBB), fill, align (center или left), w, h (для text и emoji h — размер шрифта ~0.05-0.09). " +
+            "Текст может брать данные сцены: \$title, \$value, \$key (главное слово), \$num (номер), а в повторе — \$it.icon, \$it.label, \$it.value. " +
+            "each: \"items\" повторяет слой для каждого пункта сцены (i — номер с 0, n — сколько), sync: \"word\" — пункт появляется, когда звучит его слово. " +
+            "keys — ключевые кадры: t — мс от якоря at (start — начало сцены, item — появление пункта, key — главное слово, end — конец сцены; t может быть отрицательным), " +
+            "x, y, s (масштаб), r (градусы), o (0..1), draw (доля прорисовки линии) — числа или формулы с i, n, num, + - * / ( ), min, max, abs, sin, cos, clamp, round, odd; " +
+            "ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. До 24 слоёв, до 12 ключей. " +
+            "Сделай выразительно, но читаемо: появления с back или spring, по очереди, 4-10 слоёв. {tpls}\n" +
+            "Верни только JSON: {\"lumen\":\"motion\",\"v\":1,\"id\":\"kinetic_list\",\"name\":\"Кинетический список\",\"use\":\"когда применять, до 10 слов\"," +
+            "\"layers\":[{\"el\":\"text\",\"text\":\"\$title\",\"h\":0.07,\"keys\":[{\"t\":0,\"x\":\"center\",\"y\":0.32,\"o\":0,\"s\":0.8},{\"t\":250,\"o\":1,\"s\":1,\"ease\":\"back\"}]}," +
+            "{\"each\":\"items\",\"sync\":\"word\",\"el\":\"group\",\"keys\":[{\"t\":0,\"x\":0.12,\"y\":\"0.42+i*0.08\",\"o\":0},{\"t\":300,\"x\":0.2,\"o\":1,\"ease\":\"out\"}]," +
+            "\"children\":[{\"el\":\"emoji\",\"text\":\"\$it.icon\",\"h\":0.06},{\"el\":\"text\",\"text\":\"\$it.label\",\"dx\":0.07,\"align\":\"left\",\"h\":0.05}]}]}"
+        ),
+    "studio_tpl_edit" to (
+        "Ты режиссёр монтажа. Придумай подход к монтажу роликов по запросу: \"{ask}\".\n" +
+            "Протокол lumen.edit v1 — подход к монтажу всего ролика без AI. Поля: pace {sceneWords:[мин,макс] слов в сцене, cutOnPause: мс паузы для новой сцены}, " +
+            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light или пусто), " +
+            "rules — по порядку, срабатывают все подходящие (поздние перекрывают), else — если не подошло ни одно: " +
+            "if — условия через & (с ! — отрицание): first, last, number, step, compare, list, quote, emoji, question, long (10+ слов), short (до 4), pause (пауза перед сценой), loud, keyword:слово|слово, every:N; " +
+            "do — kind (text step icons list flow cycle big stat quote chart compare), tpl (id своего моушн-шаблона), transition (fade slide zoom whip none), " +
+            "cues — [\"zoom@key\", \"sfx:ding@start\", \"pop:ТЕКСТ:эмодзи@key\"] (звуки whoosh pop click ding boom riser; якорь key, start или end). " +
+            "Свои моушн-шаблоны: {tpls}\n" +
+            "Верни только JSON: {\"lumen\":\"edit\",\"v\":1,\"id\":\"fast_shorts\",\"name\":\"Быстрый Shorts\",\"use\":\"когда применять\",\"pace\":{\"sceneWords\":[3,8],\"cutOnPause\":400}," +
+            "\"camera\":{\"punchEvery\":2},\"style\":\"\",\"rules\":[{\"if\":\"first\",\"do\":{\"transition\":\"none\",\"cues\":[\"zoom@key\",\"sfx:whoosh@start\"]}}," +
+            "{\"if\":\"number\",\"do\":{\"kind\":\"stat\",\"transition\":\"zoom\",\"cues\":[\"sfx:ding@key\"]}},{\"if\":\"else\",\"do\":{\"transition\":\"whip\"}}]}"
+        ),
+    "studio_tpl_patch" to (
+        "Измени шаблон ({kind}) по просьбе: \"{ask}\".\n" +
+            "Протокол lumen.motion v1 — анимированная графика сцены с параметрами. Кадр: x и y в долях (0..1), размеры w и h в долях короткой стороны; " +
+            "имена позиций: left 0.18, center 0.5, right 0.82, top 0.16, middle 0.5, bottom 0.72, third1 0.33, third2 0.67. " +
+            "Держи графику в зоне y 0.30-0.70: сверху и снизу идут субтитры. " +
+            "Слой: el — arrow, line, circle, ring, rect, underline, check, cross, spotlight, text, emoji или group (children — слои без keys, сдвиг dx, dy от группы); " +
+            "text, color (accent, white, ink, red, green, yellow, blue или #RRGGBB), fill, align (center или left), w, h (для text и emoji h — размер шрифта ~0.05-0.09). " +
+            "Текст может брать данные сцены: \$title, \$value, \$key (главное слово), \$num (номер), а в повторе — \$it.icon, \$it.label, \$it.value. " +
+            "each: \"items\" повторяет слой для каждого пункта сцены (i — номер с 0, n — сколько), sync: \"word\" — пункт появляется, когда звучит его слово. " +
+            "keys — ключевые кадры: t — мс от якоря at (start — начало сцены, item — появление пункта, key — главное слово, end — конец сцены; t может быть отрицательным), " +
+            "x, y, s (масштаб), r (градусы), o (0..1), draw (доля прорисовки линии) — числа или формулы с i, n, num, + - * / ( ), min, max, abs, sin, cos, clamp, round, odd; " +
+            "ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. До 24 слоёв, до 12 ключей. " +
+            "Протокол lumen.edit v1 — подход к монтажу всего ролика без AI. Поля: pace {sceneWords:[мин,макс] слов в сцене, cutOnPause: мс паузы для новой сцены}, " +
+            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light или пусто), " +
+            "rules — по порядку, срабатывают все подходящие (поздние перекрывают), else — если не подошло ни одно: " +
+            "if — условия через & (с ! — отрицание): first, last, number, step, compare, list, quote, emoji, question, long (10+ слов), short (до 4), pause (пауза перед сценой), loud, keyword:слово|слово, every:N; " +
+            "do — kind (text step icons list flow cycle big stat quote chart compare), tpl (id своего моушн-шаблона), transition (fade slide zoom whip none), " +
+            "cues — [\"zoom@key\", \"sfx:ding@start\", \"pop:ТЕКСТ:эмодзи@key\"] (звуки whoosh pop click ding boom riser; якорь key, start или end). " +
+            "Верни только JSON Patch (RFC 6902, операции add, replace, remove) — массив изменений, без всего шаблона, например " +
+            "[{\"op\":\"replace\",\"path\":\"/layers/0/keys/1/ease\",\"value\":\"spring\"}].\n\nШаблон:\n{data}"
+        ),
+    "studio_tpl_fix" to (
+        "Исправь шаблон {kind}: проверка нашла ошибки:\n{errors}\nИсправь только их и верни весь шаблон, только JSON.\n\nШаблон:\n{data}"
+        ),
+    "studio_tpl_look" to (
+        "На картинке кадры шаблона анимации «{name}» ({use}) на пробных данных, слева направо по времени. " +
+            "Оцени: читаемость, наложения, выход за кадр, ритм появления. Если есть что исправить — верни JSON Patch (массив add/replace/remove) к шаблону ниже; " +
+            "если всё хорошо — пустой массив [].\n" +
+            "Протокол lumen.motion v1 — анимированная графика сцены с параметрами. Кадр: x и y в долях (0..1), размеры w и h в долях короткой стороны; " +
+            "имена позиций: left 0.18, center 0.5, right 0.82, top 0.16, middle 0.5, bottom 0.72, third1 0.33, third2 0.67. " +
+            "Держи графику в зоне y 0.30-0.70: сверху и снизу идут субтитры. " +
+            "Слой: el — arrow, line, circle, ring, rect, underline, check, cross, spotlight, text, emoji или group (children — слои без keys, сдвиг dx, dy от группы); " +
+            "text, color (accent, white, ink, red, green, yellow, blue или #RRGGBB), fill, align (center или left), w, h (для text и emoji h — размер шрифта ~0.05-0.09). " +
+            "Текст может брать данные сцены: \$title, \$value, \$key (главное слово), \$num (номер), а в повторе — \$it.icon, \$it.label, \$it.value. " +
+            "each: \"items\" повторяет слой для каждого пункта сцены (i — номер с 0, n — сколько), sync: \"word\" — пункт появляется, когда звучит его слово. " +
+            "keys — ключевые кадры: t — мс от якоря at (start — начало сцены, item — появление пункта, key — главное слово, end — конец сцены; t может быть отрицательным), " +
+            "x, y, s (масштаб), r (градусы), o (0..1), draw (доля прорисовки линии) — числа или формулы с i, n, num, + - * / ( ), min, max, abs, sin, cos, clamp, round, odd; " +
+            "ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. До 24 слоёв, до 12 ключей. " +
+            "\n\nШаблон:\n{data}"
+        ),
     "studio_direct_patch" to (
         "Улучши черновик монтажа {format}. Ниже сцены в виде «#номер вид | текст». Выбери до {n} ключевых сцен " +
             "(хук, главные мысли, цифры, сравнения, вывод) и дай им лучший визуал и эффекты; остальные не трогай.\n" +
             "Строка ответа: [номер,kind,title,items,emph,fx]. " +
-            "kind: text step icons list flow cycle big stat quote chart compare; " +
+            "kind: text step icons list flow cycle big stat quote chart compare{tpls}; " +
             "items: \"эмодзи подпись|…\" (chart: \"подпись=число|…\", compare: ровно 2 стороны); emph: ключевые слова через ;; " +
             "fx через ;: z@слово — зум, p@слово:ТЕКСТ:эмодзи — плашка до 3 слов, s@слово:звук (whoosh pop click ding boom riser), t:переход (fade slide zoom whip none). " +
             "Подписи на языке {lang}.\n" +

@@ -333,7 +333,7 @@ object StudioCompact {
     private fun items(s: String): List<SItem> = s.split('|').map { Studio.itemOf(it) }.filter { it.icon.isNotEmpty() || it.label.isNotEmpty() }.take(Studio.MAX_ITEMS)
 
     private fun row(a: JSONArray, from: Int, to: Int, words: List<SWord>): StudioDirector.DScene {
-        val kind = a.optString(1).trim().lowercase().takeIf { it in Studio.KINDS } ?: "text"
+        val kind = a.optString(1).trim().lowercase().takeIf { it in Studio.KINDS || Studio.isTpl(it) } ?: "text"
         val its = items(a.optString(3))
         val (cues, tr) = effects(a.optString(5), words, from..to)
         val emph = a.optString(4).split(';').map { it.trim() }.filter { it.isNotEmpty() && it.length <= 40 }.take(3)

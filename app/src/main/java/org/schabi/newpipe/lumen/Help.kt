@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "browser", "tts", "studio", "settings"
+        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "settings"
     )
 
     private val screens = mapOf(
@@ -30,6 +30,7 @@ object HelpMap {
         "TopicActivity" to "seo",
         "DiagramActivity" to "diagram",
         "AiJournalActivity" to "journal",
+        "SendReviewActivity" to "send_review",
         "BrowserActivity" to "browser",
         "TtsActivity" to "tts",
         "TtsShareListen" to "tts",
@@ -133,6 +134,15 @@ object Help {
         HelpTopic("journal", t("Ответы AI", "AI answers"),
             t("Каждый запрос к AI: промпт, ответ, модель, токены, ошибки. Полезно, если результат странный.", "Every AI request: prompt, answer, model, tokens, errors. Useful when a result looks odd."),
             listOf(t("Откройте запись, чтобы увидеть полный ответ.", "Open an entry to see the full answer."), t("Записью можно поделиться с разработчиком.", "An entry can be shared with the developer."))),
+        HelpTopic("send_review", t("Что отправляем в AI", "What goes to AI"),
+            t("Перед каждым запросом к AI показывает все данные, которые уйдут провайдеру: системную инструкцию, блоки и строки запроса, ссылку на видео, размер и оценку токенов. Ключ API в текст не входит.",
+                "Before every AI request it shows all data that will go to the provider: the system instruction, request blocks and lines, the video link, size and token estimate. The API key is not part of the text."),
+            listOf(
+                t("Снимите галочки с лишних блоков или строк — они не отправятся.", "Untick blocks or lines you don't want to send."),
+                t("Текст можно отредактировать вручную; выбор сохраняется для повторов той же задачи.", "You can edit the text by hand; the choice carries over to retries of the same task."),
+                t("«Отправить» или «Не отправлять»; фоновые задачи спрашивают через уведомление.", "\"Send\" or \"Don't send\"; background jobs ask via a notification.")
+            ),
+            listOf(t("Правила по задачам (спрашивать / отправлять / никогда) — в Настройки → AI → Что отправляется.", "Per-task rules (ask / send / never) are in Settings → AI → What is sent."))),
         HelpTopic("browser", t("Браузер", "Browser"),
             t("Встроенный браузер. Может записывать звук вкладки.", "Built-in browser. It can record the tab's sound."),
             listOf(t("Введите адрес или запрос в строке сверху.", "Type an address or a query in the top bar."))),

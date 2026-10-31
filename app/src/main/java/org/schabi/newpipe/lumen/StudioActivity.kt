@@ -57,6 +57,10 @@ object StudioPrefs {
     var cast: List<SChar>
         get() = StudioToon.parseCast(p.getString("studio_cast", null)).ifEmpty { StudioToon.defaultCast() }
         set(v) = p.edit().putString("studio_cast", StudioToon.castJson(v)).apply()
+    /** Saved characters to reuse in other cartoons. */
+    var library: List<SChar>
+        get() = StudioToon.parseCast(p.getString("studio_cast_lib", null), StudioToon.MAX_LIB)
+        set(v) = p.edit().putString("studio_cast_lib", StudioToon.castJson(v.take(StudioToon.MAX_LIB))).apply()
     /** Frame of the Cuts task: [StudioAspect.id]. */
     var cutsAspect: String
         get() = p.getString("studio_aspect_cuts", StudioAspect.LANDSCAPE.id) ?: StudioAspect.LANDSCAPE.id
@@ -184,6 +188,7 @@ class StudioActivity : LumenBase() {
         private const val REQ_CAPTURE = 7404
         private const val REQ_MUSIC = 7405
         private const val REQ_BG = 7406
+        private const val REQ_CHAR_IMG = 7407
 
         fun open(ctx: Context) {
             ctx.startActivity(Intent(ctx, StudioActivity::class.java)
@@ -1369,8 +1374,8 @@ class StudioActivity : LumenBase() {
     /** Characters of the cartoon: who they are, how they look and sound. */
     private fun castCard(c: Col) = c.card {
         add(text(ctx, t("🎭 Персонажи", "🎭 Characters"), Type.TITLE_M, bold = true), 0)
-        muted(t("До ${StudioToon.MAX_CAST} героев. В сценарии реплика начинается с @Имя: — AI сам распределит реплики. Голоса Microsoft подбираются по полу, тон — по виду героя.",
-            "Up to ${StudioToon.MAX_CAST} characters. In the script a line starts with @Name: — AI assigns the lines. Microsoft voices are picked by gender, the pitch by the look."))
+        muted(t("До ${StudioToon.MAX_CAST} героев. Соберите своего из деталей, опишите словами, создайте по картинке или возьмите свою картинку — встроенным AI или любым другим через протокол lumen.char. В сценарии реплика начинается с @Имя:",
+            "Up to ${StudioToon.MAX_CAST} characters. Build your own from parts, describe it, make it from a picture or use your picture as it is — with the built-in AI or any other through the lumen.char protocol. In the script a line starts with @Name:"))
         val cast = StudioPrefs.cast
         cast.forEachIndexed { i, ch ->
             val voice = when (ch.voice) {
@@ -1384,9 +1389,10 @@ class StudioActivity : LumenBase() {
                 gravity = android.view.Gravity.CENTER_VERTICAL
                 addView(ImageView(ctx).apply {
                     setImageBitmap(charBitmap(ch, dp(56)))
-                    contentDescription = StudioToon.lookLabel(ch.look)
+                    contentDescription = StudioToon.kindLabel(ch)
                 }, LinearLayout.LayoutParams(dp(56), dp(56)))
-                addView(text(ctx, "@${ch.name}\n${StudioToon.emoji(ch.look)} ${StudioToon.lookLabel(ch.look)} · $voice", 14f),
+                val persona = if (ch.persona.isNotBlank()) "\n" + ch.persona.take(60) + if (ch.persona.length > 60) "…" else "" else ""
+                addView(text(ctx, "@${ch.name}\n${StudioToon.kindLabel(ch)} · $voice$persona", 14f),
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
                 if (busy.isEmpty()) {
                     addView(btn(ctx, "✎", style = BtnStyle.TEXT) { editChar(i) }.apply { contentDescription = t("Изменить ${ch.name}", "Edit ${ch.name}") })
@@ -1398,7 +1404,31 @@ class StudioActivity : LumenBase() {
             }
             add(line, 6)
         }
-        if (cast.size < StudioToon.MAX_CAST && busy.isEmpty()) button(t("＋ Персонаж", "＋ Character"), style = BtnStyle.TONAL) { editChar(-1) }
+        if (busy.isEmpty()) {
+            val views = mutableListOf<View>()
+            if (cast.size < StudioToon.MAX_CAST) views += btn(ctx, t("＋ Персонаж", "＋ Character"), style = BtnStyle.TONAL) { editChar(-1) }
+            views += btn(ctx, t("📚 Библиотека", "📚 Library") + StudioPrefs.library.size.let { if (it > 0) " ($it)" else "" }, style = BtnStyle.TEXT) {
+                charLibrary { picked -> addFromLibrary(picked) }
+            }
+            row(*views.toTypedArray())
+        }
+    }
+
+    /** Puts a character of the library into the cast: replaces the one with its name, or takes a free place. */
+    private fun addFromLibrary(ch: SChar) {
+        val cast = StudioPrefs.cast.toMutableList()
+        val same = cast.indexOfFirst { it.name.equals(ch.name, true) }
+        when {
+            same >= 0 -> cast[same] = ch
+            cast.size < StudioToon.MAX_CAST -> cast += ch
+            else -> {
+                toast(t("В ролике уже ${StudioToon.MAX_CAST} героя: уберите одного", "The cast is full (${StudioToon.MAX_CAST}): remove one first"))
+                return
+            }
+        }
+        StudioPrefs.cast = cast
+        board = emptyList()
+        render()
     }
 
     /** A character drawn on a transparent square [px]. */
@@ -1409,62 +1439,36 @@ class StudioActivity : LumenBase() {
         return bmp
     }
 
+    /** Waits for the picture picked for the character editor. */
+    private var onCharImage: ((android.net.Uri) -> Unit)? = null
+
     /** Adds a character ([index] == -1) or changes one. */
     private fun editChar(index: Int) {
         val cast = StudioPrefs.cast
         val old = cast.getOrNull(index)
-        var look = old?.look ?: StudioToon.LOOKS.firstOrNull { l -> cast.none { it.look == l } } ?: "blob"
-        var voice = old?.voice ?: ""
-        val nameE = edt(this, t("Имя (одно слово)", "Name (one word)"), old?.name ?: StudioToon.lookLabel(look))
-        val col = Col(this, 20)
-        val img = ImageView(this)
-        fun build() {
-            col.root.removeAllViews()
-            img.setImageBitmap(charBitmap(SChar(nameE.text.toString().ifBlank { "?" }, look, voice), dp(120), "explain"))
-            (img.parent as? ViewGroup)?.removeView(img)
-            col.add(img, 0).layoutParams = LinearLayout.LayoutParams(dp(120), dp(120)).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL }
-            (nameE.parent as? ViewGroup)?.removeView(nameE)
-            col.add(nameE, 8)
-            col.add(text(this, t("Вид", "Look"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            col.chips(StudioToon.LOOKS.map { l ->
-                chip(this, StudioToon.emoji(l) + " " + StudioToon.lookLabel(l), l == look) {
-                    val auto = nameE.text.isBlank() || StudioToon.LOOKS.any { StudioToon.lookLabel(it) == nameE.text.toString() }
-                    look = l
-                    if (auto) nameE.setText(StudioToon.lookLabel(l))
-                    build()
-                }
-            }, collapseAfter = 99)
-            col.add(text(this, t("Голос", "Voice"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val opts = listOf("" to t("Авто", "Auto"), "f" to t("♀ Женский", "♀ Female"), "m" to t("♂ Мужской", "♂ Male"))
-            col.chips(opts.map { (v, label) ->
-                chip(this, label, v == voice || (voice !in listOf("", "f", "m") && v == "")) {
-                    voice = v
-                    build()
-                }
-            })
+        val start = old ?: run {
+            val look = StudioToon.LOOKS.firstOrNull { l -> cast.none { it.look == l } } ?: "blob"
+            SChar(StudioToon.cleanName(StudioToon.lookLabel(look)), look)
         }
-        build()
-        android.app.AlertDialog.Builder(this).setTitle(if (old == null) t("Новый персонаж", "New character") else "@" + old.name)
-            .setView(ScrollView(this).apply { addView(col.root) })
-            .setPositiveButton("OK") { _, _ ->
-                val name = StudioToon.cleanName(nameE.text.toString()).ifEmpty { StudioToon.cleanName(StudioToon.lookLabel(look)) }
-                if (cast.withIndex().any { (k, ch) -> k != index && ch.name.equals(name, true) }) {
-                    toast(t("Имя «$name» уже занято", "The name \"$name\" is taken"))
-                    return@setPositiveButton
-                }
-                val ch = SChar(name, look, voice)
-                val list = cast.toMutableList()
-                if (old == null) list += ch else list[index] = ch
-                StudioPrefs.cast = list
-                // the script refers to the old name: rename the lines
-                if (old != null && old.name != name) {
-                    scriptEdit.setText(scriptEdit.text.toString().replace(Regex("(^|\\n)@" + Regex.escape(old.name) + "(?=[(:\\s])"), "$1@$name"))
-                    script = script?.let { sc -> sc.copy(scenes = sc.scenes.map { if (it.who == old.name) it.copy(who = name) else it }) }
-                }
-                board = emptyList()
-                render()
+        StudioCharEditor(this, start, old == null, aiLang(),
+            taken = { name -> cast.withIndex().any { (k, ch) -> k != index && ch.name.equals(name, true) } },
+            pickImage = { cb ->
+                onCharImage = cb
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_CHAR_IMG)
             }
-            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+        ) { ch ->
+            val list = StudioPrefs.cast.toMutableList()
+            if (old == null || index !in list.indices) list += ch else list[index] = ch
+            StudioPrefs.cast = list.take(StudioToon.MAX_CAST)
+            val name = ch.name
+            // the script refers to the old name: rename the lines
+            if (old != null && old.name != name) {
+                scriptEdit.setText(scriptEdit.text.toString().replace(Regex("(^|\\n)@" + Regex.escape(old.name) + "(?=[(:\\s])"), "$1@$name"))
+                script = script?.let { sc -> sc.copy(scenes = sc.scenes.map { if (it.who == old.name) it.copy(who = name) else it }) }
+            }
+            board = emptyList()
+            render()
+        }.show()
     }
 
     /** Adds a clip ([old] == null) or changes one; a new link or time drops the downloaded file. */
@@ -2021,6 +2025,7 @@ class StudioActivity : LumenBase() {
             REQ_AUDIO -> importAudio(uri)
             REQ_VIDEO, REQ_CAPTURE -> importVideo(uri)
             REQ_MUSIC -> importMusic(uri)
+            REQ_CHAR_IMG -> onCharImage?.invoke(uri).also { onCharImage = null }
         }
     }
 
@@ -2188,7 +2193,7 @@ class StudioActivity : LumenBase() {
         val voiced = try { Par.mapAll(sc.scenes, EdgeTts.WORKERS) { i, scene ->
             if (cancel) throw java.util.concurrent.CancellationException()
             val ci = StudioToon.find(cast, scene.who)
-            val so = if (ci >= 0) TtsOptions(castVoices[ci], StudioPrefs.rate, StudioToon.pitch(cast[ci].look)) else o
+            val so = if (ci >= 0) TtsOptions(castVoices[ci], StudioToon.rateOf(cast[ci], StudioPrefs.rate), StudioToon.pitchOf(cast[ci])) else o
             // a scene voiced in an earlier, interrupted attempt is taken from disk
             val key = StudioTtsCache.key(scene.say, so)
             val cached = cachedScene(tmp, key)
@@ -2231,7 +2236,7 @@ class StudioActivity : LumenBase() {
         // only the scenes of this script stay for the next run (e.g. after a small edit)
         val keep = sc.scenes.mapIndexed { i, scene ->
             val ci = StudioToon.find(cast, scene.who)
-            StudioTtsCache.key(scene.say, if (ci >= 0) TtsOptions(castVoices[ci], StudioPrefs.rate, StudioToon.pitch(cast[ci].look)) else o)
+            StudioTtsCache.key(scene.say, if (ci >= 0) TtsOptions(castVoices[ci], StudioToon.rateOf(cast[ci], StudioPrefs.rate), StudioToon.pitchOf(cast[ci])) else o)
         }.toSet()
         tmp.listFiles()?.filter { it.name.substringBefore('_') !in keep }?.forEach { it.delete() }
         if (all.isEmpty()) error(t("Сервис не вернул разметку слов. Попробуйте другой голос.", "The service returned no word timings. Try another voice."))

@@ -139,7 +139,10 @@ object Llm {
         maxTokens: Int = 4096,
         task: String = "",
         pid: String = "",
-        lowMedia: Boolean = false
+        lowMedia: Boolean = false,
+        /** A picture sent with the message (base64 of a JPEG or PNG), for models that see images. */
+        image: String? = null,
+        imageMime: String = "image/jpeg"
     ): LlmReply {
         val started = System.currentTimeMillis()
         var raw: String? = null
@@ -153,7 +156,7 @@ object Llm {
         val sent = out.user
         val file = out.fileUri
         try {
-            val r = Par.retrying { completeRaw(p, model, system, sent, json, file, maxTokens, lowMedia) { raw = it } }
+            val r = Par.retrying { completeRaw(p, model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file)
             return r
@@ -173,6 +176,8 @@ object Llm {
         fileUri: String?,
         maxTokens: Int,
         lowMedia: Boolean,
+        image: String?,
+        imageMime: String,
         onRaw: (String) -> Unit
     ): LlmReply {
         val headers = authHeaders(p)
@@ -182,7 +187,9 @@ object Llm {
                     "messages",
                     JSONArray()
                         .put(JSONObject().put("role", "system").put("content", system))
-                        .put(JSONObject().put("role", "user").put("content", user))
+                        .put(JSONObject().put("role", "user").put("content", if (image == null) user else JSONArray()
+                            .put(JSONObject().put("type", "text").put("text", user))
+                            .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:$imageMime;base64,$image")))))
                 ).put(if (p == Provider.OPENAI) "max_completion_tokens" else "max_tokens", maxTokens)
                 if (json && p != Provider.OLLAMA && p != Provider.CUSTOM) {
                     body.put("response_format", JSONObject().put("type", "json_object"))
@@ -191,7 +198,9 @@ object Llm {
             }
             ApiKind.ANTHROPIC -> {
                 val body = JSONObject().put("model", model).put("max_tokens", maxTokens).put("system", system)
-                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", user)))
+                    .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", if (image == null) user else JSONArray()
+                        .put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", imageMime).put("data", image)))
+                        .put(JSONObject().put("type", "text").put("text", user)))))
                 LlmParse.anthropic(http("${p.baseUrl}/messages", "POST", headers, body.toString()).also(onRaw), model)
             }
             ApiKind.GEMINI -> {
@@ -199,6 +208,7 @@ object Llm {
                 if (fileUri != null) {
                     parts.put(JSONObject().put("file_data", JSONObject().put("file_uri", fileUri)))
                 }
+                if (image != null) parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", imageMime).put("data", image)))
                 parts.put(JSONObject().put("text", user))
                 val gen = JSONObject().put("maxOutputTokens", maxTokens)
                 if (json) gen.put("responseMimeType", "application/json")

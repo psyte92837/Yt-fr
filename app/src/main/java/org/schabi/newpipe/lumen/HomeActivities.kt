@@ -125,6 +125,12 @@ class LumenActivity : LumenBase() {
         super.onResume()
         render()
         AutoBackup.maybe(this)
+        // monitoring jobs made before "Wi-Fi only" was removed still wait for Wi-Fi: schedule them again once
+        if (!Lumen.prefs.getBoolean("monitor_any_net", false)) {
+            runCatching { Store.projects().filter { it.monitor.enabled }.forEach { Monitoring.apply(this, it) } }
+                .onFailure { L.w("monitor", "reschedule: ${it.message}") }
+            Lumen.prefs.edit().putBoolean("monitor_any_net", true).apply()
+        }
         try {
             Updates.schedule(this)
         } catch (e: Exception) {

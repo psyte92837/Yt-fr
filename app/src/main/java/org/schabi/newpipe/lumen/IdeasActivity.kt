@@ -140,7 +140,6 @@ class IdeasActivity : LumenBase() {
             draft.hours = hours[it]
             render()
         }, 4)
-        c.check(t("Только по Wi-Fi", "Wi-Fi only"), draft.wifiOnly) { draft.wifiOnly = it }
         c.add(text(this, t("Поисковые запросы (необязательно)", "Search queries (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         queriesEdit = c.edit(t("По одному в строке. Пусто — ИИ подберёт на языке рынка", "One per line. Empty: AI picks them in the market language"),
             draft.queries.joinToString("\n"), multiline = true)

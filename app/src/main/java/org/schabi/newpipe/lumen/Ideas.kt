@@ -21,13 +21,12 @@ data class IdeasConfig(
     var country: String = "US",
     var queries: MutableList<String> = mutableListOf(),
     var hours: Int = 24,
-    var wifiOnly: Boolean = true,
     var enabled: Boolean = false,
     var projectId: String = "",
     val id: String = newId()
 ) {
     fun toJson(): JSONObject = JSONObject().put("business", business).put("country", country)
-        .put("queries", JSONArray(queries)).put("hours", hours).put("wifiOnly", wifiOnly)
+        .put("queries", JSONArray(queries)).put("hours", hours)
         .put("enabled", enabled).put("projectId", projectId).put("id", id)
 
     companion object {
@@ -37,7 +36,6 @@ data class IdeasConfig(
             country = o.optString("country", "US")
             queries = IdeasLogic.strings(o.optJSONArray("queries"))
             hours = o.optInt("hours", 24)
-            wifiOnly = o.optBoolean("wifiOnly", true)
             enabled = o.optBoolean("enabled", false)
             projectId = o.optString("projectId", "")
         }
@@ -270,7 +268,7 @@ object Ideas {
         p.queries = c.queries.toMutableList()
         p.filters = SearchFilters(sort = "date", period = "week", limit = 30, country = c.country, origLang = IdeasLogic.langFor(c.country))
         p.collect = CollectConfig(meta = true, subtitles = false, comments = true, commentsLimit = 60, commentsSort = "top", replies = false, channelStats = false)
-        p.monitor = MonitorConfig(enabled = c.enabled, hours = c.hours, wifiOnly = c.wifiOnly, aiSummary = false,
+        p.monitor = MonitorConfig(enabled = c.enabled, hours = c.hours, aiSummary = false,
             aiFilter = Provider.active() != null, recDrip = 0, anyLang = false)
         p.archived = false
         Store.save(p)

@@ -1238,7 +1238,6 @@ class ProjectActivity : LumenBase() {
                 listOf(1 to t("каждый час", "hourly"), 3 to t("каждые 3 ч", "every 3 h"), 6 to t("каждые 6 ч", "every 6 h"),
                     12 to t("каждые 12 ч", "every 12 h"), 24 to t("ежедневно", "daily"), 168 to t("еженедельно", "weekly")),
                 m.hours) { m.hours = it }
-            c.check(t("Только по Wi-Fi", "Wi-Fi only"), m.wifiOnly) { m.wifiOnly = it }
             c.check(t("Только при зарядке", "Only while charging"), m.charging) { m.charging = it }
             c.check(t("Искать на всех языках", "Search in all languages"), m.anyLang) { m.anyLang = it }
             c.muted(t("AI один раз переводит тему на ${WatchLangs.DEFAULT.size} языков (en, es, pt, hi, ar, ja…), поиск идёт по всем без фильтра страны и языка. Без AI — только исходные запросы.",

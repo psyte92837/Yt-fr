@@ -370,7 +370,7 @@ object Monitoring {
         val extras = PersistableBundle().apply { putString("id", p.id) }
         val job = JobInfo.Builder(jobId(p.id), ComponentName(ctx, MonitorJob::class.java))
             .setPeriodic(maxOf(1, p.monitor.hours) * 3_600_000L)
-            .setRequiredNetworkType(if (p.monitor.wifiOnly) JobInfo.NETWORK_TYPE_UNMETERED else JobInfo.NETWORK_TYPE_ANY)
+            .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY) // any internet: Wi-Fi or mobile
             .setRequiresCharging(p.monitor.charging)
             .setPersisted(true)
             .setExtras(extras)

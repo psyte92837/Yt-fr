@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "lens", "settings"
+        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "lens", "bots", "settings"
     )
 
     private val screens = mapOf(
@@ -38,6 +38,9 @@ object HelpMap {
         "TtsShareSave" to "tts",
         "StudioActivity" to "studio",
         "LensActivity" to "lens",
+        "BotsActivity" to "bots",
+        "BotNewActivity" to "bots",
+        "BotActivity" to "bots",
         "SettingsActivity" to "settings",
         "HelpActivity" to "about"
     )
@@ -233,6 +236,27 @@ object Help {
                     "Nothing recognised? Screen tab → \"🐞 Screen parse report\" and send it to the developer.")
             )
         ),
+        HelpTopic("bots", t("Мои ТГ боты", "My Telegram bots"),
+            t("Telegram-боты, которые пишет ИИ по вашему описанию, а телефон работает их сервером. У раздела своя иконка «Lumen Боты» на рабочем столе. " +
+                "Код бота — JavaScript; он выполняется на телефоне в песочнице без доступа к файлам и ключам.",
+                "Telegram bots written by AI from your description, with the phone as their server. The section has its own \"Lumen Bots\" home-screen icon. " +
+                    "The bot code is JavaScript; it runs on the phone in a sandbox with no access to files or keys."),
+            listOf(
+                t("1. В Telegram откройте @BotFather → /newbot, придумайте имя и @username, скопируйте токен.", "1. In Telegram open @BotFather → /newbot, pick a name and @username, copy the token."),
+                t("2. «＋ Новый бот»: вставьте токен, опишите, что делает бот и какие у него команды, нажмите «✨ Создать бота». ИИ напишет код, Lumen проверит его и при ошибке попросит ИИ исправить.",
+                    "2. \"＋ New bot\": paste the token, describe what the bot does and its commands, tap \"✨ Create the bot\". AI writes the code, Lumen checks it and asks AI to fix any error."),
+                t("3. Вкладка «Тест» — чат с ботом прямо на телефоне, без Telegram. Кнопки бота нажимаются.", "3. The Test tab is a chat with the bot right on the phone, without Telegram. The bot's buttons work."),
+                t("4. «▶ Запуск» — бот начинает отвечать в Telegram. В шторке висит уведомление «Lumen Боты» с кнопкой «Остановить все».", "4. \"▶ Start\" — the bot answers in Telegram. A \"Lumen Bots\" notification with \"Stop all\" stays in the shade."),
+                t("5. «Код» → «✏️ Изменить словами»: опишите правку, ИИ перепишет код; работающий бот перезагрузится сам. Старые версии можно вернуть.", "5. Code → \"✏️ Change in words\": describe the change, AI rewrites the code; a running bot reloads by itself. Old versions can be restored."),
+                t("6. «Журнал» — входящие, ответы, ошибки и пользователи. Ошибку можно отдать ИИ на исправление.", "6. Journal — incoming messages, answers, errors and users. An error can be handed to AI to fix.")
+            ),
+            listOf(
+                t("Боты отвечают, пока телефон включён и в сети. Сообщения, пришедшие офлайн, Telegram хранит до суток и бот ответит на них позже.", "Bots answer while the phone is on and online. Telegram keeps messages sent while offline for up to a day; the bot answers them later."),
+                t("Разрешите работу в фоне (снимите ограничения батареи), иначе Android усыпит ботов. На Xiaomi, Huawei, Honor, Oppo также включите автозапуск для Lumen.", "Allow background work (remove battery restrictions), or Android puts the bots to sleep. On Xiaomi, Huawei, Honor, Oppo also allow autostart for Lumen."),
+                t("Владелец: отправьте боту /lumen_owner и код из настроек — тогда /lumen_stats, /lumen_logs и /lumen_stop работают прямо в Telegram.", "Owner: send /lumen_owner and the code from settings to the bot — then /lumen_stats, /lumen_logs and /lumen_stop work right in Telegram."),
+                t("Ответы ИИ работающих ботов уходят без окна проверки и ограничены лимитами в настройках бота, чтобы чужие люди не израсходовали ключ.", "AI answers of running bots are sent without the review screen and are capped by the bot's limits so strangers cannot burn your key."),
+                t("Один токен может обслуживать только один сервер. Если бот уже работает где-то ещё, Lumen покажет «Токен занят».", "One token can be served by one server only. If the bot already runs elsewhere, Lumen shows \"Token in use\".")
+            )),
         HelpTopic("settings", t("Настройки", "Settings"),
             t("Язык, тема, режим, AI-провайдеры и модели, промпты, мониторинг, резервные копии, журнал ошибок.", "Language, theme, mode, AI providers and models, prompts, monitoring, backups, error log."),
             listOf(

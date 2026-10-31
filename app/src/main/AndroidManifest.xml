@@ -19,6 +19,9 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Lumen Studio: recording the voice-over -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Lumen Bots: the phone is the server of the user's Telegram bots (always-on service) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- We need to be able to open links in the browser on API 30+ -->
     <queries>
@@ -70,6 +73,53 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- ===== Lumen: "My Telegram bots" — own launcher icon, AI-written bots served by the phone ===== -->
+        <activity
+            android:name=".lumen.BotsActivity"
+            android:exported="true"
+            android:icon="@mipmap/lumen_bots"
+            android:roundIcon="@mipmap/lumen_bots"
+            android:label="@string/lumen_bots_label"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}.bots"
+            android:theme="@style/LumenTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".lumen.BotNewActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".lumen.BotActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <service
+            android:name=".lumen.BotService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Self-hosted Telegram bot server: answers the user's own bots around the clock" />
+        </service>
+        <service
+            android:name=".lumen.BotWatchJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <receiver
+            android:name=".lumen.BotBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
         <activity
             android:name=".lumen.WizardActivity"
             android:exported="false"

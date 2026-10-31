@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lumen Bots launcher foreground: a robot head (108dp adaptive icon, art inside the 66dp safe zone) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:pathData="M54,27 L54,36" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,21a4,4 0,1 1,0 8a4,4 0,1 1,0 -8z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M40,36 L68,36 Q78,36 78,46 L78,64 Q78,74 68,74 L40,74 Q30,74 30,64 L30,46 Q30,36 40,36 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M24,48 L28,48 L28,62 L24,62 Q22,62 22,60 L22,50 Q22,48 24,48 Z M84,48 L80,48 L80,62 L84,62 Q86,62 86,60 L86,50 Q86,48 84,48 Z" />
+    <path
+        android:fillColor="@color/lumen_bots_icon_background"
+        android:pathData="M44,46a5,5 0,1 1,0 10a5,5 0,1 1,0 -10z M64,46a5,5 0,1 1,0 10a5,5 0,1 1,0 -10z" />
+    <path
+        android:fillColor="@color/lumen_bots_icon_background"
+        android:pathData="M45,62 L63,62 Q65,62 65,64 Q65,66 63,66 L45,66 Q43,66 43,64 Q43,62 45,62 Z" />
+</vector>

@@ -299,12 +299,18 @@ class WizardActivity : LumenBase() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        step = savedInstanceState?.getInt("step", 0) ?: 0
         render()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("step", step)
     }
 
     private fun next() {
         step++
-        if (step > 5) {
+        if (step >= WizardSteps.KEYS.size) {
             Settings.wizardDone = true
             finish()
         } else {
@@ -314,10 +320,11 @@ class WizardActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        c.steps(step, 6)
-        c.muted(t("Шаг ${step + 1} из 6 · всё можно изменить позже", "Step ${step + 1} of 6 · everything can be changed later"))
-        when (step) {
-            0 -> {
+        val total = WizardSteps.KEYS.size
+        c.steps(step, total)
+        c.muted(t("Шаг ${step + 1} из $total · всё можно изменить позже", "Step ${step + 1} of $total · everything can be changed later"))
+        when (WizardSteps.KEYS[step]) {
+            "lang" -> {
                 c.title("Lumen")
                 c.p(t("Язык интерфейса", "Interface language"))
                 c.button("Русский", Settings.lang == "ru") {
@@ -336,7 +343,13 @@ class WizardActivity : LumenBase() {
                 c.muted(t("Файл ${AutoBackup.FILE_NAME} лежит в «Загрузки/Lumen» (или в папке копий, выбранной в настройках).",
                     "The file ${AutoBackup.FILE_NAME} is in Downloads/Lumen (or in the backup folder chosen in settings)."))
             }
-            1 -> {
+            "look" -> {
+                c.title(t("Оформление", "Appearance"))
+                c.p(t("Нажмите на готовую градиентную тему — она применится сразу.", "Tap a ready-made gradient theme — it applies right away."))
+                themeTiles(c)
+                c.button(t("Далее", "Next"), true) { next() }
+            }
+            "mode" -> {
                 c.title(t("Режим", "Mode"))
                 c.p(t("Оставить плеер NewPipe (просмотр, фон, скачивание) или только аналитику?",
                     "Keep the NewPipe player (watching, background, downloads) or analytics only?"))
@@ -349,7 +362,7 @@ class WizardActivity : LumenBase() {
                     next()
                 }
             }
-            2 -> {
+            "ai" -> {
                 c.title(t("AI-провайдер", "AI provider"))
                 c.p(t("Для уточнения темы и сводок нужен ваш API-ключ (Gemini, OpenRouter, OpenAI, Claude, DeepSeek, Groq или локальная модель). Ключ хранится зашифрованно только на устройстве.",
                     "Domain refinement and summaries need your own API key (Gemini, OpenRouter, OpenAI, Claude, DeepSeek, Groq or a local model). The key is stored encrypted on this device only."))
@@ -359,7 +372,7 @@ class WizardActivity : LumenBase() {
                 }
                 c.button(t("Позже", "Later")) { next() }
             }
-            3 -> {
+            "monitor" -> {
                 c.title(t("Мониторинг тем", "Topic monitoring"))
                 c.p(t("Приложение может само проверять новые видео по расписанию и присылать уведомление. Включается отдельно для каждого проекта.",
                     "The app can check for new videos on a schedule and notify you. It is enabled per project."))
@@ -377,7 +390,7 @@ class WizardActivity : LumenBase() {
                     next()
                 }
             }
-            4 -> {
+            "transcribe" -> {
                 c.title(t("Транскрибация через AI", "AI transcription"))
                 c.p(t("Если у видео нет субтитров, его можно расшифровать через Gemini (по ссылке на видео). Это расходует токены вашего ключа — перед запуском покажем оценку.",
                     "If a video has no subtitles it can be transcribed with Gemini (via the video link). This uses tokens of your key — an estimate is shown before running."))
@@ -390,7 +403,7 @@ class WizardActivity : LumenBase() {
                     next()
                 }
             }
-            5 -> {
+            "backup" -> {
                 c.title(t("Резервные копии", "Backups"))
                 c.p(t("По умолчанию всё хранится только в приложении, экспорт — вручную. Можно выбрать папку для резервных копий в Настройках → Резервная копия.",
                     "By default everything stays inside the app and export is manual. You can choose a backup folder in Settings → Backup."))
@@ -402,6 +415,44 @@ class WizardActivity : LumenBase() {
             render()
         }
         page("Lumen", c.root, back = false)
+    }
+
+    /** Two-column grid of gradient swatches; a tap saves the theme and repaints the wizard on the same step. */
+    private fun themeTiles(c: Col) {
+        Palette.gradientNames.chunked(2).forEach { pair ->
+            val tiles = pair.map { (key, label) -> themeTile(key, label) }.toMutableList()
+            if (tiles.size == 1) tiles += android.view.View(this)
+            c.add(rowOf(this, *tiles.toTypedArray()), 10)
+        }
+    }
+
+    private fun themeTile(key: String, label: String): android.view.View {
+        val selected = Settings.style == key
+        val prev = Palette.gradientPreview(key)
+        val night = isNight()
+        val bg = if (prev != null) {
+            android.graphics.drawable.GradientDrawable(android.graphics.drawable.GradientDrawable.Orientation.TL_BR, prev.first)
+        } else {
+            android.graphics.drawable.GradientDrawable().apply { setColor(if (night) 0xFF1D1B20.toInt() else 0xFFF7F2FA.toInt()) }
+        }
+        bg.cornerRadius = dp(16).toFloat()
+        bg.setStroke(dp(if (selected) 3 else 1), if (selected) Palette.ACCENT else Palette.OUTLINE)
+        val dark = prev?.second ?: night
+        val onTile = if (dark) 0xFFFFFFFF.toInt() else 0xFF1D1B20.toInt()
+        return text(this, (if (selected) "✓ " else "") + label, Type.BODY, bold = true, color = onTile).apply {
+            gravity = Gravity.BOTTOM or Gravity.START
+            minHeight = dp(88)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = ripple(this@WizardActivity, bg, onTile)
+            isClickable = true
+            contentDescription = label
+            setOnClickListener {
+                if (Settings.style != key) {
+                    Settings.style = key
+                    recreate()
+                }
+            }
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -418,6 +469,11 @@ class WizardActivity : LumenBase() {
         @Suppress("DEPRECATION")
         super.onBackPressed()
     }
+}
+
+/** Order of first-run wizard steps; the appearance step comes right after the language. */
+object WizardSteps {
+    val KEYS = listOf("lang", "look", "mode", "ai", "monitor", "transcribe", "backup")
 }
 
 /** Enter a phrase → optional AI domain refinement → filters → create project and search. */

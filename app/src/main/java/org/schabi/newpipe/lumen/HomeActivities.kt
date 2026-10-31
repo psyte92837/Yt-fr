@@ -140,7 +140,17 @@ class LumenActivity : LumenBase() {
         if (requestCode == REQ_RESTORE && resultCode == RESULT_OK && uri != null) restoreFrom(uri) { render() }
     }
 
+    /** Option button: tap saves the choice and redraws the step; moving on is always the explicit «Далее» button. */
+    private fun choice(c: Col, label: String, selected: Boolean, pick: () -> Unit) =
+        c.button((if (selected) "✓ " else "") + label, style = if (selected) BtnStyle.TONAL else BtnStyle.OUTLINED) {
+            pick()
+            render()
+        }
+
+    private fun nextButton(c: Col) = c.button(WizardSteps.nextLabel(step), true) { next() }
+
     private fun render() {
+        step = step.coerceIn(0, WizardSteps.KEYS.size - 1)
         val c = Col(this)
         Updates.available?.let { u ->
             val broken = System.currentTimeMillis() - Updates.brokenAt < 3 * 86_400_000L
@@ -395,7 +405,17 @@ class WizardActivity : LumenBase() {
         }
     }
 
+    /** Option button: tap saves the choice and redraws the step; moving on is always the explicit «Далее» button. */
+    private fun choice(c: Col, label: String, selected: Boolean, pick: () -> Unit) =
+        c.button((if (selected) "✓ " else "") + label, style = if (selected) BtnStyle.TONAL else BtnStyle.OUTLINED) {
+            pick()
+            render()
+        }
+
+    private fun nextButton(c: Col) = c.button(WizardSteps.nextLabel(step), true) { next() }
+
     private fun render() {
+        step = step.coerceIn(0, WizardSteps.KEYS.size - 1)
         val c = Col(this)
         val total = WizardSteps.KEYS.size
         c.steps(step, total)
@@ -404,14 +424,9 @@ class WizardActivity : LumenBase() {
             "lang" -> {
                 c.title("Lumen")
                 c.p(t("Язык интерфейса", "Interface language"))
-                c.button("Русский", Settings.lang == "ru") {
-                    Settings.lang = "ru"
-                    next()
-                }
-                c.button("English", Settings.lang == "en") {
-                    Settings.lang = "en"
-                    next()
-                }
+                choice(c, "Русский", Settings.lang == "ru") { Settings.lang = "ru" }
+                choice(c, "English", Settings.lang == "en") { Settings.lang = "en" }
+                nextButton(c)
                 c.h2(t("Уже пользовались Lumen?", "Used Lumen before?"))
                 c.button(t("Восстановить из резервной копии…", "Restore from a backup…"), style = BtnStyle.OUTLINED) {
                     @Suppress("DEPRECATION")
@@ -423,68 +438,57 @@ class WizardActivity : LumenBase() {
             "look" -> {
                 c.title(t("Оформление", "Appearance"))
                 c.p(t("Нажмите на готовую градиентную тему — она применится сразу.", "Tap a ready-made gradient theme — it applies right away."))
-                themeTiles(c)
-                c.button(t("Далее", "Next"), true) { next() }
+                nextButton(c)
+                c.h2(t("Светлые", "Light"))
+                themeTiles(c, Palette.lightGradients)
+                c.h2(t("Тёмные", "Dark"))
+                themeTiles(c, Palette.darkGradients)
+                nextButton(c)
             }
             "mode" -> {
                 c.title(t("Режим", "Mode"))
                 c.p(t("Оставить плеер NewPipe (просмотр, фон, скачивание) или только аналитику?",
                     "Keep the NewPipe player (watching, background, downloads) or analytics only?"))
-                c.button(t("Только аналитика", "Analytics only"), Settings.mode == "analytics") {
-                    Settings.mode = "analytics"
-                    next()
-                }
-                c.button(t("Аналитика + плеер NewPipe", "Analytics + NewPipe player"), Settings.mode == "player") {
-                    Settings.mode = "player"
-                    next()
-                }
+                choice(c, t("Только аналитика", "Analytics only"), Settings.mode == "analytics") { Settings.mode = "analytics" }
+                choice(c, t("Аналитика + плеер NewPipe", "Analytics + NewPipe player"), Settings.mode == "player") { Settings.mode = "player" }
+                nextButton(c)
             }
             "ai" -> {
                 c.title(t("AI-провайдер", "AI provider"))
                 c.p(t("Для уточнения темы и сводок нужен ваш API-ключ (Gemini, OpenRouter, OpenAI, Claude, DeepSeek, Groq или локальная модель). Ключ хранится зашифрованно только на устройстве.",
                     "Domain refinement and summaries need your own API key (Gemini, OpenRouter, OpenAI, Claude, DeepSeek, Groq or a local model). The key is stored encrypted on this device only."))
-                c.button(t("Подключить сейчас", "Connect now"), true) {
+                c.button(t("Подключить сейчас", "Connect now"), style = BtnStyle.TONAL) {
                     startActivity(Intent(this, SettingsActivity::class.java).putExtra("ai", true))
-                    next()
                 }
-                c.button(t("Позже", "Later")) { next() }
+                c.muted(t("Можно подключить позже в Настройках → AI.", "You can connect it later in Settings → AI."))
+                nextButton(c)
             }
             "monitor" -> {
                 c.title(t("Мониторинг тем", "Topic monitoring"))
                 c.p(t("Приложение может само проверять новые видео по расписанию и присылать уведомление. Включается отдельно для каждого проекта.",
                     "The app can check for new videos on a schedule and notify you. It is enabled per project."))
-                var hours = Settings.defaultMonitorHours
-                c.spinner(t("Частота по умолчанию", "Default frequency"),
-                    listOf(6 to t("каждые 6 ч", "every 6 h"), 12 to t("каждые 12 ч", "every 12 h"), 24 to t("ежедневно", "daily"), 168 to t("еженедельно", "weekly")),
-                    hours) { hours = it }
-                c.button(t("Разрешить мониторинг", "Allow monitoring"), true) {
-                    Settings.monitoringAllowed = true
-                    Settings.defaultMonitorHours = hours
-                    next()
+                choice(c, t("Разрешить мониторинг", "Allow monitoring"), Settings.monitoringAllowed) { Settings.monitoringAllowed = true }
+                choice(c, t("Не использовать", "Don't use"), !Settings.monitoringAllowed) { Settings.monitoringAllowed = false }
+                if (Settings.monitoringAllowed) {
+                    c.spinner(t("Частота по умолчанию", "Default frequency"),
+                        listOf(6 to t("каждые 6 ч", "every 6 h"), 12 to t("каждые 12 ч", "every 12 h"), 24 to t("ежедневно", "daily"), 168 to t("еженедельно", "weekly")),
+                        Settings.defaultMonitorHours) { Settings.defaultMonitorHours = it }
                 }
-                c.button(t("Нет", "No")) {
-                    Settings.monitoringAllowed = false
-                    next()
-                }
+                nextButton(c)
             }
             "transcribe" -> {
                 c.title(t("Транскрибация через AI", "AI transcription"))
                 c.p(t("Если у видео нет субтитров, его можно расшифровать через Gemini (по ссылке на видео). Это расходует токены вашего ключа — перед запуском покажем оценку.",
                     "If a video has no subtitles it can be transcribed with Gemini (via the video link). This uses tokens of your key — an estimate is shown before running."))
-                c.button(t("Разрешить", "Allow"), true) {
-                    Settings.aiTranscriptionAllowed = true
-                    next()
-                }
-                c.button(t("Не использовать", "Don't use")) {
-                    Settings.aiTranscriptionAllowed = false
-                    next()
-                }
+                choice(c, t("Разрешить", "Allow"), Settings.aiTranscriptionAllowed) { Settings.aiTranscriptionAllowed = true }
+                choice(c, t("Не использовать", "Don't use"), !Settings.aiTranscriptionAllowed) { Settings.aiTranscriptionAllowed = false }
+                nextButton(c)
             }
             "backup" -> {
                 c.title(t("Резервные копии", "Backups"))
                 c.p(t("По умолчанию всё хранится только в приложении, экспорт — вручную. Можно выбрать папку для резервных копий в Настройках → Резервная копия.",
                     "By default everything stays inside the app and export is manual. You can choose a backup folder in Settings → Backup."))
-                c.button(t("Готово", "Done"), true) { next() }
+                nextButton(c)
             }
         }
         if (step > 0) c.button(t("← Назад", "← Back"), style = BtnStyle.TEXT) {
@@ -495,8 +499,8 @@ class WizardActivity : LumenBase() {
     }
 
     /** Two-column grid of gradient swatches; a tap saves the theme and repaints the wizard on the same step. */
-    private fun themeTiles(c: Col) {
-        Palette.gradientNames.chunked(2).forEach { pair ->
+    private fun themeTiles(c: Col, keys: List<String>) {
+        Palette.gradientNames.filter { it.first in keys }.chunked(2).forEach { pair ->
             val tiles = pair.map { (key, label) -> themeTile(key, label) }.toMutableList()
             if (tiles.size == 1) tiles += android.view.View(this)
             c.add(rowOf(this, *tiles.toTypedArray()), 10)
@@ -551,6 +555,9 @@ class WizardActivity : LumenBase() {
 /** Order of first-run wizard steps; the appearance step comes right after the language. */
 object WizardSteps {
     val KEYS = listOf("lang", "look", "mode", "ai", "monitor", "transcribe", "backup")
+
+    /** Every step ends with this button; the last one finishes the wizard. */
+    fun nextLabel(step: Int) = if (step >= KEYS.size - 1) t("Готово", "Done") else t("Далее →", "Next →")
 }
 
 /** Enter a phrase → optional AI domain refinement → filters → create project and search. */
@@ -575,7 +582,17 @@ class NewProjectActivity : LumenBase() {
         render()
     }
 
+    /** Option button: tap saves the choice and redraws the step; moving on is always the explicit «Далее» button. */
+    private fun choice(c: Col, label: String, selected: Boolean, pick: () -> Unit) =
+        c.button((if (selected) "✓ " else "") + label, style = if (selected) BtnStyle.TONAL else BtnStyle.OUTLINED) {
+            pick()
+            render()
+        }
+
+    private fun nextButton(c: Col) = c.button(WizardSteps.nextLabel(step), true) { next() }
+
     private fun render() {
+        step = step.coerceIn(0, WizardSteps.KEYS.size - 1)
         val c = Col(this)
         if (watch) {
             c.title(t("Домен для наблюдения", "Domain to watch"))

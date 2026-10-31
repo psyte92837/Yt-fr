@@ -69,7 +69,7 @@ class IdeasTest {
 
     @Test
     fun configRoundTrip() {
-        val cfg = IdeasConfig("bakery", "DE", mutableListOf("bäckerei"), 12, false, true, "p1")
+        val cfg = IdeasConfig("bakery", "DE", mutableListOf("bäckerei"), 12, false, "p1")
         assertEquals(cfg, IdeasConfig.from(JSONObject(cfg.toJson().toString())))
     }
 

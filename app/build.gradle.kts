@@ -56,6 +56,11 @@ configure<ApplicationExtension> {
         System.getProperty("versionNameSuffix")?.let { versionNameSuffix = it }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Lumen: build number, commit and extractor version for the in-app update check (CI passes -DlumenBuild/-DlumenCommit)
+        buildConfigField("int", "LUMEN_BUILD", (System.getProperty("lumenBuild")?.toIntOrNull() ?: 0).toString())
+        buildConfigField("String", "LUMEN_COMMIT", "\"" + (System.getProperty("lumenCommit") ?: "") + "\"")
+        buildConfigField("String", "LUMEN_EXTRACTOR", "\"" + libs.versions.teamnewpipe.newpipe.extractor.get() + "\"")
     }
 
     // Lumen: release signing from environment (set by .github/workflows/release.yml from repo secrets)
@@ -176,6 +181,13 @@ checkstyle {
     isIgnoreFailures = false
     isShowViolations = true
     toolVersion = libs.versions.checkstyle.get()
+}
+
+// Lumen: the live YouTube check (LiveYouTubeTest) runs only when asked with -DlumenLive=1 (extractor-watch.yml)
+tasks.withType<Test>().configureEach {
+    val live = System.getProperty("lumenLive") ?: ""
+    systemProperty("lumenLive", live)
+    if (live.isNotEmpty()) outputs.upToDateWhen { false }
 }
 
 tasks.register<Checkstyle>("runCheckstyle") {

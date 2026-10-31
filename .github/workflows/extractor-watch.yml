@@ -1,0 +1,170 @@
+# Lumen: keeps NewPipeExtractor fresh so YouTube changes do not break the app.
+# Daily: 1) checks live YouTube with the current extractor (LiveYouTubeTest);
+#        2) looks for a newer extractor (latest release; dev head if YouTube is broken now);
+#        3) bumps the pin, builds, runs unit tests and the live check again;
+#        4) green -> commits to main and starts build.yml, which publishes the APK to the "lumen-latest" release
+#           (the app finds it in the background and offers to install);
+#           red or no fix yet -> opens or updates an issue labelled "youtube".
+name: Extractor watch
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'auto: release, or dev head if YouTube is broken; release; dev'
+        default: auto
+        type: choice
+        options: [auto, release, dev]
+
+concurrency:
+  group: extractor-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: 21
+          distribution: temurin
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Live YouTube check with the current extractor
+        id: before
+        run: |
+          python3 tools/extractor_update.py selftest
+          echo "pin=$(python3 tools/extractor_update.py current)" >> "$GITHUB_OUTPUT"
+          ./gradlew testDebugUnitTest --tests 'org.schabi.newpipe.lumen.LiveYouTubeTest' -DlumenLive=1 -DskipChecks --stacktrace || true
+          verdict=$(head -n1 app/build/lumen-live/result.txt 2>/dev/null || echo unknown)
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          { echo "### Live YouTube, current extractor: $verdict"; echo '```'; cat app/build/lumen-live/result.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cp app/build/lumen-live/result.txt "$RUNNER_TEMP/live-before.txt" 2>/dev/null || echo "unknown" > "$RUNNER_TEMP/live-before.txt"
+
+      - name: Second opinion from yt-dlp
+        id: ytdlp
+        if: steps.before.outputs.verdict != 'ok'
+        run: |
+          pip install --quiet --upgrade yt-dlp
+          if yt-dlp --skip-download --print title "https://www.youtube.com/watch?v=jNQXAC9IVRw" > "$RUNNER_TEMP/ytdlp.txt" 2>&1; then
+            echo "works=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "works=no" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$(yt-dlp --version)" >> "$GITHUB_OUTPUT"
+          tail -n 5 "$RUNNER_TEMP/ytdlp.txt"
+
+      - name: Look for a newer NewPipeExtractor
+        id: find
+        run: |
+          res=$(python3 tools/extractor_update.py find --mode "${{ inputs.mode || 'auto' }}" --live "${{ steps.before.outputs.verdict }}")
+          echo "$res" > "$RUNNER_TEMP/candidate.json"
+          echo "$res" | python3 -c "import json,sys; d=json.load(sys.stdin); print('pin=' + d.get('pin','')); print('label=' + d.get('label','')); print('kind=' + d.get('kind','')); print('ahead=' + str(d.get('ahead','')))" >> "$GITHUB_OUTPUT"
+          echo "### Candidate" >> "$GITHUB_STEP_SUMMARY"
+          echo "$res" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bump the pin and wait for JitPack
+        if: steps.find.outputs.pin != ''
+        run: |
+          pin="${{ steps.find.outputs.pin }}"
+          python3 tools/extractor_update.py set "$pin"
+          git diff --stat
+          # JitPack builds the artifact on the first request; it can take several minutes
+          url="https://jitpack.io/com/github/TeamNewPipe/NewPipeExtractor/$pin/NewPipeExtractor-$pin.pom"
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 120 "$url" || echo 000)
+            echo "JitPack try $i: $code"
+            [ "$code" = "200" ] && break
+            sleep 30
+          done
+
+      - name: Build, unit tests and live check with the new extractor
+        id: after
+        if: steps.find.outputs.pin != ''
+        run: |
+          set +e
+          ./gradlew assembleDebug testDebugUnitTest -DlumenLive=1 -DskipChecks --stacktrace > "$RUNNER_TEMP/build.log" 2>&1
+          code=$?
+          tail -n 60 "$RUNNER_TEMP/build.log"
+          verdict=$(head -n1 app/build/lumen-live/result.txt 2>/dev/null || echo unknown)
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          if [ $code -eq 0 ]; then echo "build=ok" >> "$GITHUB_OUTPUT"; else echo "build=failed" >> "$GITHUB_OUTPUT"; fi
+          { echo "### New extractor: build exit $code, live $verdict"; echo '```'; cat app/build/lumen-live/result.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cp app/build/lumen-live/result.txt "$RUNNER_TEMP/live-after.txt" 2>/dev/null || true
+
+      - name: Commit to main and publish a build
+        id: ship
+        # a "blocked" live result (bot check from the runner IP) does not block the bump: the build and unit tests passed
+        if: steps.find.outputs.pin != '' && steps.after.outputs.build == 'ok' && steps.after.outputs.verdict != 'broken'
+        run: |
+          git config user.name "lumen-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add gradle/libs.versions.toml
+          msg="Extractor: NewPipeExtractor ${{ steps.find.outputs.label }} (${{ steps.find.outputs.ahead }} new commits)"
+          log=$(python3 -c "import json; print(json.load(open('$RUNNER_TEMP/candidate.json')).get('log',''))")
+          git commit -m "$msg" -m "Checked by extractor-watch: build, unit tests, live YouTube = ${{ steps.after.outputs.verdict }}." -m "$log"
+          if git push origin HEAD:main; then
+            gh workflow run build.yml --ref main
+            echo "how=main" >> "$GITHUB_OUTPUT"
+          else
+            # main is protected: open a pull request instead
+            br="bot/extractor-${{ steps.find.outputs.pin }}"
+            git push -f origin HEAD:"refs/heads/$br"
+            gh pr create --base main --head "$br" --title "$msg" --body "Automatic NewPipeExtractor bump. Build, unit tests and the live YouTube check passed.
+
+          $log" || true
+            echo "how=pr" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report a problem
+        if: always() && (steps.ship.outcome != 'success') && (steps.before.outputs.verdict == 'broken' || steps.after.outputs.build == 'failed' || steps.after.outputs.verdict == 'broken')
+        run: |
+          gh label create youtube --color B60205 --description "YouTube changes / extractor health" 2>/dev/null || true
+          title="YouTube: NewPipeExtractor needs attention"
+          {
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo "**Current extractor** \`${{ steps.before.outputs.pin }}\`: live check = **${{ steps.before.outputs.verdict }}**"
+            echo '```'; cat "$RUNNER_TEMP/live-before.txt" 2>/dev/null; echo '```'
+            if [ -n "${{ steps.find.outputs.pin }}" ]; then
+              echo "**Candidate** ${{ steps.find.outputs.label }}: build = ${{ steps.after.outputs.build }}, live = ${{ steps.after.outputs.verdict }}"
+              echo '```'; cat "$RUNNER_TEMP/live-after.txt" 2>/dev/null; echo; grep -E "^e: |error:|FAILED" "$RUNNER_TEMP/build.log" 2>/dev/null | head -n 40; echo '```'
+              echo "If the build failed, NewPipeExtractor changed its API: see how upstream NewPipe adapted (commits touching gradle/libs.versions.toml in TeamNewPipe/NewPipe)."
+            else
+              echo "No newer NewPipeExtractor yet (release or dev). Upstream: https://github.com/TeamNewPipe/NewPipeExtractor/issues"
+            fi
+            echo
+            echo "yt-dlp ${{ steps.ytdlp.outputs.version }} from the same runner works: ${{ steps.ytdlp.outputs.works }} (yes = YouTube changed and the runner IP is fine)"
+          } > "$RUNNER_TEMP/issue.md"
+          num=$(gh issue list --label youtube --state open --json number --jq '.[0].number' 2>/dev/null)
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file "$RUNNER_TEMP/issue.md"
+          else
+            gh issue create --title "$title" --label youtube --body-file "$RUNNER_TEMP/issue.md"
+          fi
+
+      - name: Close the issue when YouTube works again
+        if: steps.before.outputs.verdict == 'ok' || steps.ship.outcome == 'success'
+        run: |
+          num=$(gh issue list --label youtube --state open --json number --jq '.[0].number' 2>/dev/null)
+          if [ -n "$num" ]; then
+            gh issue close "$num" --comment "Live YouTube check passes again (run ${{ github.run_id }})." || true
+          fi

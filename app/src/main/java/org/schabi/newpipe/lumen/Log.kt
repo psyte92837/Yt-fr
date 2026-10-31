@@ -76,6 +76,7 @@ object L {
     }
 
     private fun write(level: String, tag: String, msg: String, t: Throwable?) {
+        if (t != null && tag != "update") ExtractorHealth.note(t)
         val line = buildString {
             append(fmt.format(Date())).append(' ').append(level).append('/').append(tag).append(": ").append(msg.replace('\n', ' ').take(2000))
             if (t != null) append('\n').append(stack(t).prependIndent("    "))

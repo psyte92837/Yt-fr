@@ -17,12 +17,17 @@ class SettingsActivity : LumenBase() {
     private var section = -1 // -1 = list of sections
     private var direct = false // opened straight into a section (AI banner, logs): back leaves the screen
     private var testing = ""
+    private var updStatus = ""
+    private var updBusy = false
+    private var probeText = ""
+    private var probeBusy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("ai", false)) section = 1
         if (intent.getBooleanExtra("logs", false)) section = 2
         if (intent.getBooleanExtra("quick", false)) section = 3
+        if (intent.getBooleanExtra("update", false)) section = 3
         direct = section >= 0
         render()
     }
@@ -43,7 +48,7 @@ class SettingsActivity : LumenBase() {
         Triple(t("Общие", "General"), t("язык, режим, мониторинг, сбор", "language, mode, monitoring, collection"), 0),
         Triple(t("AI и промпты", "AI and prompts"), t("провайдер, ключи, шаблоны запросов", "provider, keys, prompt templates"), 1),
         Triple(t("Данные", "Data"), t("резервная копия, журнал, статистика AI", "backup, logs, AI usage"), 2),
-        Triple(t("О приложении", "About"), t("версия, быстрый анализ", "version, instant analysis"), 3)
+        Triple(t("О приложении", "About"), t("версия, обновления, проверка YouTube, быстрый анализ", "version, updates, YouTube check, instant analysis"), 3)
     )
 
     private fun render() {
@@ -532,6 +537,8 @@ class SettingsActivity : LumenBase() {
             "A mobile tool for YouTube topic research: search, metadata/transcript/comment collection, local analytics and AI summaries with your own API key."))
         c.p(t("Форк NewPipe. Лицензия GPL-3.0-or-later. Данные извлекаются через NewPipeExtractor без официального API. Все данные хранятся только на устройстве.",
             "A NewPipe fork. Licensed GPL-3.0-or-later. Data is extracted with NewPipeExtractor without the official API. All data stays on the device."))
+        updates(c)
+        c.h2(t("О проекте", "About the project"))
         c.button("NewPipe ↗", style = BtnStyle.TEXT) { openUrl("https://newpipe.net") }
         c.button(t("Лицензии библиотек NewPipe", "NewPipe library licenses"), style = BtnStyle.TEXT) {
             try {
@@ -541,6 +548,110 @@ class SettingsActivity : LumenBase() {
             }
         }
         c.add(View(this), 0).layoutParams = LinearLayout.LayoutParams(1, dp(24))
+    }
+
+    /** Version, background update check, install, live YouTube self-test. */
+    private fun updates(c: Col) {
+        c.h2(t("Версия и обновления", "Version and updates"))
+        val build = if (Updates.currentBuild > 0) Updates.currentBuild.toString() else t("локальная", "local")
+        c.muted(org.schabi.newpipe.BuildConfig.VERSION_NAME + " · " + t("сборка ", "build ") + build +
+            (if (Updates.currentCommit.isNotBlank()) " · " + UpdateLogic.shortSha(Updates.currentCommit) else "") +
+            "\nNewPipeExtractor " + UpdateLogic.extractorLabel(Updates.currentExtractor))
+        c.check(t("Проверять обновления в фоне (раз в 12 ч)", "Check for updates in the background (every 12 h)"), Updates.enabled) {
+            Updates.enabled = it
+            Updates.schedule(this)
+        }
+        c.muted(t("Когда YouTube что-то меняет, бот в GitHub сам подтягивает свежий NewPipeExtractor, проверяет его на живом YouTube и выпускает новую сборку. " +
+            "Если в приложении подряд идут ошибки разбора, Lumen проверяет обновление сразу.",
+            "When YouTube changes something, a GitHub bot pulls the fresh NewPipeExtractor, tests it against live YouTube and publishes a new build. " +
+            "If parsing errors pile up in the app, Lumen checks for an update right away."))
+        if (System.currentTimeMillis() - Updates.brokenAt < 3 * 86_400_000L) c.p(ExtractorHealth.hint(), 13f, Palette.WARN)
+        val u = Updates.available
+        if (u != null) {
+            c.card {
+                add(text(ctx, t("Доступна сборка ${u.build}", "Build ${u.build} available"), Type.TITLE_M, bold = true), 0)
+                val ex = if (u.extractor.isNotBlank() && u.extractor != Updates.currentExtractor)
+                    t("Новый NewPipeExtractor: ", "New NewPipeExtractor: ") + UpdateLogic.extractorLabel(u.extractor) + "\n" else ""
+                muted(ex + (if (u.notes.isNotBlank()) u.notes.take(800) + "\n" else "") + u.date.take(10) + " " + UpdateLogic.mb(u.size))
+                button(t("Скачать и установить", "Download and install"), primary = true) { installUpdate(u) }
+                button(t("Открыть страницу сборки ↗", "Open the build page ↗"), style = BtnStyle.TEXT) { openUrl(UpdateLogic.PAGE) }
+            }
+        } else {
+            val last = Updates.lastCheckAt
+            c.muted(if (last == 0L) t("Ещё не проверялось", "Not checked yet") else
+                t("Проверено: ", "Checked: ") + Fmt.dateTime(last) + (if (Updates.lastError.isNotBlank()) " · " + Updates.lastError
+                else " · " + t("у вас последняя сборка", "you have the latest build")))
+        }
+        if (updStatus.isNotEmpty()) c.p(updStatus, 13f, Palette.MUTED)
+        if (!updBusy) c.button(t("Проверить обновления", "Check for updates")) {
+            updBusy = true
+            updStatus = t("Проверка…", "Checking…")
+            render()
+            Lumen.async({ Updates.check(this, notify = false) }, onError = {
+                updBusy = false
+                updStatus = "✗ " + (it.message ?: it.javaClass.simpleName)
+                render()
+            }) {
+                updBusy = false
+                updStatus = if (it == null) t("✓ У вас последняя сборка", "✓ You have the latest build") else ""
+                render()
+            }
+        }
+        c.h2(t("Проверка YouTube", "YouTube check"))
+        c.muted(t("Поиск, страница видео, потоки, комментарии и канал через NewPipeExtractor. Показывает, что сломалось, если YouTube что-то поменял.",
+            "Search, video page, streams, comments and channel through NewPipeExtractor. Shows what broke if YouTube changed something."))
+        if (probeText.isNotEmpty()) c.p(probeText, 13f)
+        if (!probeBusy) c.button(t("Проверить работу YouTube", "Test YouTube now")) {
+            probeBusy = true
+            probeText = t("Проверка… (до минуты)", "Testing… (up to a minute)")
+            render()
+            Lumen.async({ YtProbe.run() }, onError = {
+                probeBusy = false
+                probeText = "✗ " + (it.message ?: "")
+                render()
+            }) { r ->
+                probeBusy = false
+                probeText = when (YtProbe.verdict(r)) {
+                    "ok" -> t("✓ Всё работает", "✓ Everything works")
+                    "blocked" -> t("YouTube блокирует запросы с этого IP (проверка на бота или сеть). Это не поломка Lumen.", "YouTube blocks requests from this IP (bot check or network). Lumen itself is fine.")
+                    else -> t("✗ Есть поломка. Обновите Lumen, а если обновления нет, бот GitHub уже ищет исправление.", "✗ Something is broken. Update Lumen; if there is no update yet, the GitHub bot is looking for a fix.")
+                } + "\n\n" + YtProbe.report(r)
+                if (YtProbe.verdict(r) == "broken") Updates.checkSoon(this)
+                render()
+            }
+        }
+    }
+
+    private fun installUpdate(u: UpdateInfo) {
+        if (!Updates.canInstall(this)) {
+            confirm(t("Разрешите установку", "Allow installing"),
+                t("Android просит один раз разрешить Lumen устанавливать приложения. Включите переключатель и вернитесь.",
+                    "Android asks to allow Lumen to install apps once. Turn on the switch and come back."),
+                t("Открыть", "Open")) { Updates.openInstallPermission(this) }
+            return
+        }
+        updBusy = true
+        updStatus = t("Скачивание…", "Downloading…")
+        render()
+        Lumen.async({
+            Updates.download(this, u) { pct -> Lumen.ui { if (updBusy && pct % 5 == 0) { updStatus = t("Скачивание… ", "Downloading… ") + pct + "%"; render() } } }
+        }, onError = {
+            updBusy = false
+            updStatus = "✗ " + (it.message ?: "") + t(". Можно скачать вручную со страницы сборки.", ". You can download it manually from the build page.")
+            render()
+        }) { f ->
+            updStatus = t("Установка… подтвердите в окне Android", "Installing… confirm in the Android dialog")
+            render()
+            try {
+                Updates.install(this, f)
+            } catch (e: Exception) {
+                L.e("update", "install failed", e)
+                updStatus = "✗ " + (e.message ?: "")
+                openUrl(u.apk)
+            }
+            updBusy = false
+            render()
+        }
     }
 
     companion object {

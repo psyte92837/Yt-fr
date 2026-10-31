@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # publish the rolling "lumen-latest" release from main
     steps:
       - uses: actions/checkout@v6
 
@@ -31,7 +31,7 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
 
       - name: Build debug APK and run unit tests
-        run: ./gradlew assembleDebug testDebugUnitTest -DskipChecks --stacktrace
+        run: ./gradlew assembleDebug testDebugUnitTest -DskipChecks --stacktrace -DlumenBuild=${{ github.run_number }} -DlumenCommit=${{ github.sha }}
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
@@ -39,6 +39,48 @@ jobs:
           name: lumen-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # The app checks update.json in the background and offers to install the new APK (Settings → About).
+      - name: Publish to the rolling "lumen-latest" release (main only)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          mkdir -p dist
+          apk="dist/lumen-debug-$BUILD.apk"
+          cp "$(ls app/build/outputs/apk/debug/*.apk | head -n1)" "$apk"
+          export APK_NAME="$(basename "$apk")"
+          export SHA256="$(sha256sum "$apk" | cut -d' ' -f1)"
+          export SIZE="$(stat -c%s "$apk")"
+          export EXTRACTOR="$(python3 tools/extractor_update.py current)"
+          export NOTES="$(git log -1 --format=%s)"
+          python3 - > dist/update.json <<'PY'
+          import json, os
+          e = os.environ
+          print(json.dumps({
+              "build": int(e["BUILD"]), "commit": e["GITHUB_SHA"], "extractor": e["EXTRACTOR"],
+              "application_id": "org.lumen.analyzer.debug",
+              "apk": "https://github.com/%s/releases/download/lumen-latest/%s" % (e["GITHUB_REPOSITORY"], e["APK_NAME"]),
+              "sha256": e["SHA256"], "size": int(e["SIZE"]), "notes": e["NOTES"][:500],
+              "date": __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime())}, ensure_ascii=False))
+          PY
+          cat dist/update.json
+          git tag -f lumen-latest "$GITHUB_SHA"
+          git push -f origin refs/tags/lumen-latest
+          gh release view lumen-latest >/dev/null 2>&1 || gh release create lumen-latest --prerelease --verify-tag \
+            --title "Lumen: latest build" --notes "Rolling build of main. The app installs it from Settings → About."
+          # APK first, then update.json, then remove older APKs: the feed never points to a missing file
+          gh release upload lumen-latest "$apk" --clobber
+          gh release upload lumen-latest dist/update.json --clobber
+          gh release edit lumen-latest --prerelease --title "Lumen: build $BUILD" \
+            --notes "Build $BUILD · ${GITHUB_SHA:0:10} · NewPipeExtractor ${EXTRACTOR:0:10}
+
+          $NOTES"
+          for a in $(gh release view lumen-latest --json assets --jq '.assets[].name'); do
+            case "$a" in lumen-debug-*.apk) [ "$a" != "$APK_NAME" ] && gh release delete-asset lumen-latest "$a" -y ;; esac
+          done
+          echo "Published build $BUILD: https://github.com/$GITHUB_REPOSITORY/releases/tag/lumen-latest" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test reports
         if: failure()

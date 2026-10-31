@@ -125,6 +125,11 @@ class LumenActivity : LumenBase() {
         super.onResume()
         render()
         AutoBackup.maybe(this)
+        try {
+            Updates.schedule(this)
+        } catch (e: Exception) {
+            L.w("update", "cannot schedule update check: ${e.message}")
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -137,6 +142,14 @@ class LumenActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
+        Updates.available?.let { u ->
+            val broken = System.currentTimeMillis() - Updates.brokenAt < 3 * 86_400_000L
+            val card = c.card {
+                add(text(ctx, if (broken) t("Готово исправление для YouTube", "A YouTube fix is ready") else t("Доступно обновление", "Update available"), Type.TITLE_M, bold = true), 0)
+                muted(t("Сборка ${u.build}. Нажмите, чтобы установить", "Build ${u.build}. Tap to install"))
+            }
+            card.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java).putExtra("update", true)) }
+        }
         if (Provider.active() == null) {
             c.card {
                 val row = LinearLayout(ctx).apply {

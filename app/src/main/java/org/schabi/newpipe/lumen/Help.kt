@@ -177,8 +177,13 @@ object Help {
             listOf(
                 t("AI: выберите провайдера, нажмите «Получить ключ», вставьте ключ. Ключ шифруется и хранится только на устройстве.", "AI: pick a provider, tap \"Get key\", paste it. The key is encrypted and stays on the device."),
                 t("Промпты: любой промпт можно отредактировать или сбросить.", "Prompts: any prompt can be edited or reset."),
-                t("Логи: отчёт об ошибке для разработчика.", "Logs: a bug report for the developer.")
-            ))
+                t("Логи: отчёт об ошибке для разработчика.", "Logs: a bug report for the developer."),
+                t("О приложении → Обновления: Lumen сам проверяет новую сборку раз в 12 часов и сразу, если YouTube начал отдавать ошибки разбора. «Скачать и установить» ставит её поверх, данные сохраняются.",
+                    "About → Updates: Lumen checks for a new build every 12 hours, and right away if YouTube starts returning parsing errors. \"Download and install\" installs it over the current one, data is kept."),
+                t("«Проверить работу YouTube» показывает, что именно сломалось: поиск, видео, потоки, комментарии или канал. «Блокирует IP» значит VPN или прокси, а не поломку.",
+                    "\"Test YouTube now\" shows what exactly broke: search, video, streams, comments or channel. \"Blocks this IP\" means a VPN or proxy, not a bug.")
+            ),
+            listOf(t("Первое обновление: Android один раз попросит разрешить Lumen устанавливать приложения.", "First update: Android asks once to allow Lumen to install apps.")))
     )
 
     fun topic(id: String): HelpTopic = topics().firstOrNull { it.id == id } ?: topics().first()

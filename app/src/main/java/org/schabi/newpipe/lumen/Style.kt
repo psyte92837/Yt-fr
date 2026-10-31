@@ -507,7 +507,7 @@ object VideoStyle {
     fun run(pid: String, vid: String, force: Boolean = true, progress: (String) -> Unit = {}): String {
         val p = Store.project(pid) ?: return ""
         val v = Store.videos(pid)[vid] ?: return ""
-        val m = measure(pid, v, p.collect.subLang, progress)
+        val m = measure(pid, v, p.collect.subLang, progress = progress)
         if (Provider.active() == null) return t("Метрики готовы. Подключите AI для описания стиля.", "Metrics ready. Connect AI for the style description.")
         progress(t("AI описывает стиль…", "AI describes the style…"))
         ai(p, Store.videos(pid)[vid] ?: v, m, force)

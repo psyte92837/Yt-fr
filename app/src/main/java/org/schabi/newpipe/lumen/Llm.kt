@@ -22,7 +22,7 @@ enum class Provider(
     val needsKey: Boolean = true
 ) {
     GEMINI("Google Gemini", ApiKind.GEMINI, "https://generativelanguage.googleapis.com/v1beta",
-        "https://aistudio.google.com/apikey", "gemini-2.5-flash", "gemini-2.5-pro"),
+        "https://aistudio.google.com/apikey", "gemini-3.5-flash-lite", "gemini-3.5-flash-lite"),
     OPENROUTER("OpenRouter", ApiKind.OPENAI_COMPAT, "https://openrouter.ai/api/v1",
         "https://openrouter.ai/keys", "openrouter/auto", "openrouter/auto"),
     OPENAI("OpenAI", ApiKind.OPENAI_COMPAT, "https://api.openai.com/v1",

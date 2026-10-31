@@ -115,7 +115,7 @@ class StudioSchemeTest {
         val sc = listOf(SScene("Сначала идея потом прототип", "text"), SScene("и наконец продажи растут", "icons"))
         val block = StudioScheme.scenesBlock(sc, words, listOf(0..4, 5..8))
         assertTrue(block.startsWith("Сцена 1 [0..4] (text): [0]Сначала"))
-        assertTrue("Сцена 2 [5..8] (icons): [5]и" in block)
+        assertTrue("Сцена 2 [5..8] (icons): [5]наконец" in block)
         assertEquals(1, StudioScheme.maxSchemes(2))
         assertEquals(4, StudioScheme.maxSchemes(12))
     }

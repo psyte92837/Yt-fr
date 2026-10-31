@@ -377,6 +377,8 @@ class SettingsActivity : LumenBase() {
             "pains" to t("Боли и кейсы людей", "Pains and cases of people"),
             CommentDigest.KIND to t("Сводка комментариев видео", "Video comment digest"),
             "kmap_aspect" to t("Карта знаний · сводка по ветке", "Knowledge map · branch summary"),
+            KMap.GAPS to t("Карта знаний · пробелы в знаниях", "Knowledge map · knowledge gaps"),
+            KMap.PATH to t("Карта знаний · путь обучения", "Knowledge map · learning path"),
             "ideas_queries" to t("Идеи для бизнеса · подбор запросов", "Business ideas · queries"),
             "ideas_digest" to t("Идеи для бизнеса · сводка", "Business ideas · digest"),
         )

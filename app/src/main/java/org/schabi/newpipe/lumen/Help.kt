@@ -132,12 +132,17 @@ object Help {
                 t("Откройте кнопкой «🗺 Карта знаний» на карточке проекта или в шапке проекта.", "Open it with \"🗺 Knowledge map\" on a project card or in the project's top bar."),
                 t("Нажмите на узел, чтобы раскрыть или свернуть его.", "Tap a node to open or close it."),
                 t("✨ у узла — AI-сводка именно по этой ветке; ✨✓ — сводка уже есть.", "✨ on a node makes an AI summary of that branch; ✨✓ means one exists."),
-                t("Долгое нажатие на видео или канал открывает его.", "Long press on a video or channel opens it.")
+                t("Долгое нажатие на узел: фокус на ветке, сводка, открыть видео или канал, подробнее.", "Long press on a node: focus on the branch, summary, open the video or channel, details."),
+                t("🌳 Дерево / 🪐 Карта — переключение вида. На карте двигайте и масштабируйте двумя пальцами: чем ближе, тем больше подписей. ⤢ — вписать в экран.", "🌳 Tree / 🪐 Map switches the view. On the map pan and zoom with two fingers: the closer, the more labels. ⤢ fits it to the screen."),
+                t("В фокусе ветка становится корнем; цепочка 🏠 › … сверху ведёт обратно.", "In focus a branch becomes the root; the 🏠 › … chain at the top leads back."),
+                t("❓ Пробелы и 🧭 Путь обучения — AI находит, что видео не раскрывают, и порядок просмотра; ответ становится веткой карты.", "❓ Gaps and 🧭 Learning path: the AI finds what the videos do not cover and a viewing order; the answer becomes a branch of the map.")
             ),
             listOf(
                 t("Сводка берёт обзор всех подветок, а не детали первых: чем выше узел, тем шире взгляд.", "A summary takes an overview of all sub-branches rather than details of the first ones: the higher the node, the wider the view."),
                 t("Повтор с теми же данными бесплатный — из кэша. «Обновить» запрашивает заново.", "A repeat with the same data is free from the cache. \"Refresh\" asks again."),
-                t("⋮ → «Все сводки карты» собирает их в один текст.", "⋮ → \"All map summaries\" puts them into one text.")
+                t("⋮ → «Все сводки карты» собирает их в один текст.", "⋮ → \"All map summaries\" puts them into one text."),
+                t("Зелёный бейдж «+N» — видео, добавленные с прошлого открытия карты. Полоска под узлом — его доля видео.", "The green \"+N\" badge marks videos added since the map was last opened. The bar under a node is its share of videos."),
+                t("Цвет на карте — аспект, размер — число видео, кольцо — есть AI-сводка, «+» — внутри есть ещё.", "On the map colour is the aspect, size the number of videos, a ring means an AI summary, \"+\" means there is more inside.")
             )),
         HelpTopic("graph", t("Граф рекомендаций", "Recommendation graph"),
             t("Как YouTube связывает видео и каналы темы. Размер узла — важность (PageRank), цвет — кластер.", "How YouTube links videos and channels of the topic. Node size is importance (PageRank), colour is the cluster."),

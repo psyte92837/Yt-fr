@@ -83,7 +83,9 @@ class StudioPlan(
     /** Look of the info-schemes (null = auto from the palette) and where they go in a montage. */
     val schemeStyle: SchemeStyle? = null,
     val schemePlace: String = "overlay",
-    val schemeAnchor: String = "auto"
+    val schemeAnchor: String = "auto",
+    /** Animation with characters: how schemes are shown ([StudioLayers.TOON_MODES]). */
+    val toonSchemes: String = "board"
 ) {
     val subs get() = layers.subs
     val graphics get() = layers.graphics
@@ -134,14 +136,15 @@ class StudioPlan(
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
             templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.6f,
-            schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto"
+            schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto",
+            toonSchemes: String = "board"
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK && cast == null
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes))
         }
     }
 }
@@ -608,17 +611,46 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val local = tMs - st.startMs
         val sceneMs = st.endMs - st.startMs
         val card = if (onPhoto) null else photo(i)
-        val textOnly = onPhoto || (card == null && (!plan.graphics || !StudioLayers.hasScheme(sc.kind, sc.items.size)))
+        val isScheme = sc.kind == "scheme" && sc.scheme != null
+        val hidden = isScheme && plan.toonSchemes == "off"
+        val textOnly = onPhoto || hidden || (card == null && (!plan.graphics || !StudioLayers.hasScheme(sc.kind, sc.items.size)))
         val vx = w / 2f
-        val vy = if (wide) h * 0.42f else h * 0.37f
+        val big = isScheme && plan.toonSchemes == "big"
+        val vy = if (big) (if (wide) h * 0.40f else h * 0.36f) else if (wide) h * 0.42f else h * 0.37f
         if (wide) caption(c, i, tMs, a, if (textOnly) h * 0.30f else h * 0.78f, if (textOnly) 7f * u else 5.2f * u, w * (if (textOnly) 0.56f else 0.5f))
         else caption(c, i, tMs, a, if (textOnly) h * 0.30f else h * 0.065f, if (textOnly) 7.4f * u else 5.6f * u)
         if (textOnly) return
         c.save()
-        val k = 0.8f
+        val k = if (isScheme) StudioLayers.toonSchemeScale(plan.toonSchemes) else 0.8f
         c.scale(k, k, vx, vy)
+        if (isScheme && plan.toonSchemes == "board" && card == null) {
+            // a board the characters explain: the scheme sits on it
+            val r = schemeBox(vx, vy).apply { inset(-3f * u, -3f * u) }
+            fill.color = this@StudioPainter.card
+            fill.alpha = (235 * a).toInt()
+            fill.setShadowLayer(2f * u, 0f, 0.8f * u, 0x44000000)
+            c.drawRoundRect(r, 3f * u, 3f * u, fill)
+            fill.clearShadowLayer()
+            line.color = accent
+            line.alpha = (200 * a).toInt()
+            line.strokeWidth = max(2f, 0.6f * u)
+            c.drawRoundRect(r, 3f * u, 3f * u, line)
+        }
         if (card != null) photoCard(c, card, i, vx, vy, local, sceneMs, a) else visual(c, sc, i, vx, vy, local, sceneMs, a)
         c.restore()
+    }
+
+    /** Characters shrink (eased) during the scheme scenes in the "big" mode. */
+    private fun toonK(tMs: Long): Float {
+        if (plan.toonSchemes != "big" || !plan.graphics) return 1f
+        val i = Studio.sceneAt(plan.times, tMs)
+        fun on(j: Int) = plan.script.scenes.getOrNull(j)?.let { it.kind == "scheme" && it.scheme != null } == true
+        if (i < 0 || !on(i)) return 1f
+        val st = plan.times[i]
+        val inP = if (on(i - 1)) 1f else StudioMotion.inOut(Studio.appear(tMs, st.startMs, 380))
+        val outP = if (on(i + 1)) 1f else 1f - StudioMotion.inOut(Studio.appear(tMs, st.endMs - 320, 320))
+        val small = StudioLayers.toonScale(plan.toonSchemes, true)
+        return 1f - (1f - small) * inP * outP
     }
 
     /** All characters of the cast: the speaker of scene [i] talks, steps forward and gestures, the others listen. */
@@ -629,7 +661,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val st = plan.times.getOrNull(i)
         val who = sc?.let { StudioToon.find(cast, it.who) } ?: -1
         val prev = plan.script.scenes.getOrNull(i - 1)?.let { StudioToon.find(cast, it.who) } ?: -1
-        val size = toonSize
+        val size = toonSize * toonK(tMs)
         cast.forEachIndexed { k, ch ->
             val x = xs[k]
             val side = if (x <= w / 2f) 1f else -1f

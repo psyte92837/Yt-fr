@@ -36,4 +36,14 @@ class StudioLayersTest {
         assertEquals(0.42f, StudioLayers.overY(1f, true), 1e-4f)
         assertTrue(StudioLayers.overY(0.3f, true) < StudioLayers.overY(0.75f, true))
     }
+
+    @Test
+    fun toonModes() {
+        assertEquals("board", StudioLayers.toonMode("zzz"))
+        assertEquals("off", StudioLayers.toonMode("off"))
+        assertEquals(1f, StudioLayers.toonScale("board", true), 1e-4f)
+        assertEquals(1f, StudioLayers.toonScale("big", false), 1e-4f)
+        assertTrue(StudioLayers.toonScale("big", true) < 1f)
+        assertTrue(StudioLayers.toonSchemeScale("big") > StudioLayers.toonSchemeScale("board"))
+    }
 }

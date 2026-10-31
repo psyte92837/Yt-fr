@@ -24,6 +24,17 @@ enum class StudioLayers(val id: String, val subs: Boolean, val graphics: Boolean
          * Centre (fraction of the height) of a scheme drawn over a background: the upper part, so that the
          * subtitles below stay clear; a small scheme moves up, without subtitles it is centred.
          */
+        /** Schemes in an animation with characters: off, on a board above the characters, or big with the characters smaller. */
+        val TOON_MODES = listOf("off", "board", "big")
+
+        fun toonMode(id: String): String = id.takeIf { it in TOON_MODES } ?: "board"
+
+        /** Size of the characters during a scheme scene (1 = as usual). */
+        fun toonScale(mode: String, scheme: Boolean): Float = if (scheme && toonMode(mode) == "big") 0.62f else 1f
+
+        /** Scale of the scheme in an animation: on the board it leaves room for the characters, big takes most of the frame. */
+        fun toonSchemeScale(mode: String): Float = if (toonMode(mode) == "big") 1f else 0.8f
+
         fun overY(scale: Float, subs: Boolean): Float = if (!subs) 0.5f else (0.42f - (1f - scale) * 0.12f).coerceIn(0.3f, 0.42f)
     }
 }

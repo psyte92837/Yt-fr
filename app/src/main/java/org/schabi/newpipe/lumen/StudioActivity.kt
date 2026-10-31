@@ -136,6 +136,10 @@ object StudioPrefs {
     var layers: String
         get() = p.getString("studio_layers", StudioLayers.ALL.id) ?: StudioLayers.ALL.id
         set(v) = p.edit().putString("studio_layers", v).apply()
+    /** Animation with characters: schemes off, on a board or big ([StudioLayers.TOON_MODES]). */
+    var toonSchemes: String
+        get() = StudioLayers.toonMode(p.getString("studio_toon_schemes", "board") ?: "board")
+        set(v) = p.edit().putString("studio_toon_schemes", v).apply()
     /** Style of the info-schemes: [SchemeStyle.id]. */
     var schemeStyle: String
         get() = p.getString("studio_scheme_style", SchemeStyles.AUTO) ?: SchemeStyles.AUTO
@@ -1027,6 +1031,20 @@ class StudioActivity : LumenBase() {
             StudioLayers.GRAPHICS -> t("Только схемы, заголовки и стикеры: без субтитров.", "Schemes, headlines and stickers only: no subtitles.")
             StudioLayers.NONE -> t("Чистая картинка: ни субтитров, ни схем.", "A clean picture: no subtitles, no schemes.")
         })
+        if (task == StudioTask.CARTOON && StudioLayers.of(StudioPrefs.layers).graphics) {
+            add(text(ctx, t("Инфосхемы в анимации", "Info-schemes in the animation"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            add(segBar(ctx, listOf(t("Нет", "Off"), t("На доске", "On a board"), t("Крупно", "Big")),
+                StudioLayers.TOON_MODES.indexOf(StudioPrefs.toonSchemes).coerceAtLeast(1)) {
+                StudioPrefs.toonSchemes = StudioLayers.TOON_MODES[it]
+                board = emptyList()
+                render()
+            }, 4)
+            muted(when (StudioPrefs.toonSchemes) {
+                "off" -> t("Схемы не показываются: только персонажи и текст.", "Schemes are hidden: only the characters and the text.")
+                "big" -> t("На сценах со схемой персонажи плавно уменьшаются, схема крупно над ними.", "On scheme scenes the characters shrink smoothly, the scheme is big above them.")
+                else -> t("Схема на доске над персонажами — они её объясняют.", "The scheme on a board above the characters, who explain it.")
+            })
+        }
         if (StudioLayers.of(StudioPrefs.layers).graphics) {
             check(t("🖼 Схемы поверх фона: видео, клипов и картинок, фон остаётся виден", "🖼 Schemes over the background: video, clips and pictures stay visible"), StudioPrefs.overlay) {
                 StudioPrefs.overlay = it
@@ -1961,7 +1979,7 @@ class StudioActivity : LumenBase() {
             clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls,
             StudioLayers.of(StudioPrefs.layers), StudioLayers.scale(StudioPrefs.overSize),
             schemeStyleNow().takeIf { style == StudioStyle.VIDEO && it.id != SchemeStyles.AUTO },
-            if (style == StudioStyle.VIDEO) schemePlaceNow() else "overlay", schemeStyleNow().anchor)
+            if (style == StudioStyle.VIDEO) schemePlaceNow() else "overlay", schemeStyleNow().anchor, StudioPrefs.toonSchemes)
     }
 
     private val emojiDir get() = File(dir, "emoji")

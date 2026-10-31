@@ -33,13 +33,18 @@ class StudioTemplatesActivity : LumenBase() {
             ctx.startActivity(Intent(ctx, StudioTemplatesActivity::class.java).putExtra("video", url)
                 .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
         }
+
+        private const val TASK = "studio_tpl"
+        /** Shared by all copies of the screen: the work goes on when the screen is closed. */
+        @Volatile private var cancel = false
+        /** Report of work that ended while the screen was closed; shown when it opens again. */
+        private var pending: Pair<String, String>? = null
     }
 
     private val store by lazy { store(this) }
     private var tab = 0
     private var busy = ""
     private var status: android.widget.TextView? = null
-    @Volatile private var cancel = false
     private val previews = HashMap<String, List<Bitmap>>()
 
     private val motion get() = tab == 0
@@ -47,12 +52,32 @@ class StudioTemplatesActivity : LumenBase() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        BgTasks.find(TASK)?.let { busy = it.message.ifBlank { it.title } }
         render()
-        intent.getStringExtra("video")?.takeIf { it.isNotBlank() && savedInstanceState == null }?.let { askVideo(it) }
+        val fromTask = intent.hasExtra(Nav.EXTRA_INST)
+        if (!fromTask) intent.getStringExtra("video")?.takeIf { it.isNotBlank() && savedInstanceState == null && busy.isEmpty() }?.let { askVideo(it) }
+        BgTasks.watchers += watcher
+        if (busy.isEmpty()) showPending()
+    }
+
+    private fun showPending() {
+        val (title, text) = pending ?: return
+        pending = null
+        showText(t("Шаблоны: ", "Templates: ") + title, text)
+    }
+
+    /** Keeps the busy line in step with the background task (also for a screen opened from the notification). */
+    private val watcher: () -> Unit = {
+        val task = BgTasks.find(TASK)
+        if (task == null && busy.isNotEmpty()) {
+            busy = ""
+            if (!isDestroyed) render()
+        } else if (task != null && task.message.isNotBlank()) status?.text = task.message
+        if (task == null && !isDestroyed) showPending()
     }
 
     override fun onDestroy() {
-        cancel = true
+        BgTasks.watchers -= watcher
         super.onDestroy()
     }
 
@@ -130,7 +155,7 @@ class StudioTemplatesActivity : LumenBase() {
     /** One line per motion template, for prompts that may use them. */
     private fun tplLine() = store.motions().joinToString("; ") { StudioTplCatalog.motionLine(it) }.ifBlank { t("пока нет", "none yet") }
 
-    private fun say(s: String) = Lumen.ui { status?.text = s }
+    private fun say(s: String) = BgTasks.progress(TASK, s)
 
     private fun ai(key: String, prompt: String, limit: Int, image: String? = null): String {
         if (cancel) throw java.util.concurrent.CancellationException()
@@ -192,16 +217,30 @@ class StudioTemplatesActivity : LumenBase() {
         }
     }
 
+    /** Long work: a background task with a progress notification, so it goes on when the app is minimised. */
     private fun run(msg: String, work: () -> String, done: (String) -> Unit = {}) {
+        if (BgTasks.has(TASK)) {
+            toast(t("Уже идёт работа над шаблоном", "A template is already being made"))
+            return
+        }
         busy = msg
         cancel = false
         render()
-        Lumen.async({ work() }, { e ->
+        val open = BgTasks.reopen(this).apply { removeExtra("video") }
+        BgTasks.run(this, TASK, t("Шаблоны Studio", "Studio templates"), open, { task -> task.message = msg; work() }, { e ->
             busy = ""
+            if (isDestroyed) {
+                if (e !is java.util.concurrent.CancellationException) pending = t("Ошибка", "Error") to (e.message ?: e.javaClass.simpleName)
+                return@run
+            }
             render()
             if (e !is java.util.concurrent.CancellationException) err(e)
-        }) { r ->
+        }, { cancel = true }) { r ->
             busy = ""
+            if (isDestroyed) {
+                pending = t("Готово", "Done") to r
+                return@run
+            }
             render()
             done(r)
         }

@@ -38,24 +38,6 @@ class UpdatesTest {
     }
 
     @Test
-    fun lensEditionGetsLensApk() {
-        val withLens = feed.replace("\"notes\"", "\"apk_lens\": \"https://x/lumen-lens-debug.apk\", \"sha256_lens\": \"FF00\", \"size_lens\": 5, \"notes\"")
-        val u = UpdateLogic.parse(withLens)!!
-        assertEquals("https://x/lumen-lens-debug.apk", u.lensApk)
-        assertEquals(u.apk, u.forEdition(false).apk)
-        val l = u.forEdition(true)
-        assertEquals("https://x/lumen-lens-debug.apk", l.apk)
-        assertEquals("ff00", l.sha256)
-        assertEquals(5L, l.size)
-        assertEquals(412, l.build)
-        // round trip keeps the Lens APK
-        assertEquals(u.lensApk, UpdateLogic.parse(u.toJson())!!.lensApk)
-        // an old feed without the Lens APK: the Lens edition keeps the plain APK
-        val old = UpdateLogic.parse(feed)!!
-        assertEquals(old.apk, old.forEdition(true).apk)
-    }
-
-    @Test
     fun rejectsBrokenFeed() {
         assertNull(UpdateLogic.parse(""))
         assertNull(UpdateLogic.parse("<html>404</html>"))

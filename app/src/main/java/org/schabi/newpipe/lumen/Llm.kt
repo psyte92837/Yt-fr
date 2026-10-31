@@ -338,7 +338,6 @@ object Prompts {
         defaults.putAll(DIAGRAM_PROMPTS)
         defaults.putAll(STUDIO_PROMPTS)
         defaults.putAll(KMAP_PROMPTS)
-        defaults.putAll(LENS_PROMPTS)
         defaults.putAll(BOT_PROMPTS)
         defaults.putAll(MINIAPP_PROMPTS)
     }

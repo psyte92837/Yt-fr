@@ -53,7 +53,7 @@ jobs:
         run: |
           python3 tools/extractor_update.py selftest
           echo "pin=$(python3 tools/extractor_update.py current)" >> "$GITHUB_OUTPUT"
-          ./gradlew testStdDebugUnitTest --tests 'org.schabi.newpipe.lumen.LiveYouTubeTest' -DlumenLive=1 -DskipChecks --stacktrace || true
+          ./gradlew testDebugUnitTest --tests 'org.schabi.newpipe.lumen.LiveYouTubeTest' -DlumenLive=1 -DskipChecks --stacktrace || true
           verdict=$(head -n1 app/build/lumen-live/result.txt 2>/dev/null || echo unknown)
           echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
           { echo "### Live YouTube, current extractor: $verdict"; echo '```'; cat app/build/lumen-live/result.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -101,7 +101,7 @@ jobs:
         if: steps.find.outputs.pin != ''
         run: |
           set +e
-          ./gradlew assembleDebug testStdDebugUnitTest -DlumenLive=1 -DskipChecks --stacktrace > "$RUNNER_TEMP/build.log" 2>&1
+          ./gradlew assembleDebug testDebugUnitTest -DlumenLive=1 -DskipChecks --stacktrace > "$RUNNER_TEMP/build.log" 2>&1
           code=$?
           tail -n 60 "$RUNNER_TEMP/build.log"
           verdict=$(head -n1 app/build/lumen-live/result.txt 2>/dev/null || echo unknown)

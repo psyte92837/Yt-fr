@@ -21,24 +21,11 @@ class UpdateInfo(
     val sha256: String,
     val size: Long,
     val notes: String,
-    val date: String,
-    /** The same build with Lumen Lens (the "lens" edition with the accessibility service); empty in old feeds. */
-    val lensApk: String = "",
-    val lensSha256: String = "",
-    val lensSize: Long = 0
+    val date: String
 ) {
     fun toJson(): String = JSONObject().put("build", build).put("commit", commit).put("extractor", extractor)
         .put("application_id", appId).put("apk", apk).put("sha256", sha256).put("size", size)
-        .put("notes", notes).put("date", date)
-        .put("apk_lens", lensApk).put("sha256_lens", lensSha256).put("size_lens", lensSize).toString()
-
-    /** The APK of this edition: the Lens edition updates to the Lens APK, so Lens is not lost after an update. */
-    fun forEdition(lens: Boolean): UpdateInfo =
-        if (lens && lensApk.startsWith("https://")) {
-            UpdateInfo(build, commit, extractor, appId, lensApk, lensSha256, lensSize, notes, date, lensApk, lensSha256, lensSize)
-        } else {
-            this
-        }
+        .put("notes", notes).put("date", date).toString()
 }
 
 object UpdateLogic {
@@ -61,10 +48,7 @@ object UpdateLogic {
             sha256 = o.optString("sha256").lowercase(),
             size = o.optLong("size", 0),
             notes = o.optString("notes"),
-            date = o.optString("date"),
-            lensApk = o.optString("apk_lens").trim(),
-            lensSha256 = o.optString("sha256_lens").lowercase(),
-            lensSize = o.optLong("size_lens", 0)
+            date = o.optString("date")
         ) else null
     } catch (e: Exception) {
         null

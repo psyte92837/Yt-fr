@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Lumen Lens: reads YouTube video cards for the floating button (events of other apps only tell that YouTube was left) -->
-<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewScrolled"
-    android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
-    android:canRetrieveWindowContent="true"
-    android:description="@string/lumen_lens_desc"
-    android:notificationTimeout="400" />

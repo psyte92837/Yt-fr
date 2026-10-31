@@ -313,11 +313,6 @@
             android:exported="false"
             android:taskAffinity=""
             android:theme="@style/RouterActivityThemeDark" />
-        <!-- LensService (accessibility) is declared only in the "lens" edition: src/lens/AndroidManifest.xml -->
-        <activity
-            android:name=".lumen.LensActivity"
-            android:exported="false"
-            android:theme="@style/LumenTheme" />
         <!-- ===== /Lumen ===== -->
 
         <receiver

@@ -63,21 +63,6 @@ configure<ApplicationExtension> {
         buildConfigField("String", "LUMEN_EXTRACTOR", "\"" + libs.versions.teamnewpipe.newpipe.extractor.get() + "\"")
     }
 
-    // Lumen: two editions with the same app id. "std" has no accessibility service, so Play Protect
-    // (enhanced fraud protection) does not block a sideloaded install; "lens" adds Lumen Lens (src/lens).
-    flavorDimensions += "edition"
-    productFlavors {
-        create("std") {
-            dimension = "edition"
-            isDefault = true
-            buildConfigField("boolean", "LUMEN_LENS", "false")
-        }
-        create("lens") {
-            dimension = "edition"
-            buildConfigField("boolean", "LUMEN_LENS", "true")
-        }
-    }
-
     // Lumen: release signing from environment (set by .github/workflows/release.yml from repo secrets)
     val lumenKeystore = System.getenv("LUMEN_KEYSTORE_FILE")
     signingConfigs {
@@ -249,7 +234,7 @@ tasks.register<CheckDependenciesOrder>("checkDependenciesOrder") {
 }
 
 afterEvaluate {
-    tasks.matching { it.name == "preStdDebugBuild" || it.name == "preLensDebugBuild" }.configureEach {
+    tasks.named("preDebugBuild").configure {
         // Lumen: -DskipChecks skips style checks (used by the fork's CI to keep builds fast)
         if (!System.getProperties().containsKey("skipChecks")) {
             if (!System.getProperties().containsKey("skipFormatKtlint")) {

@@ -448,7 +448,7 @@ object Monitoring {
             it.runs.add(RunRecord(it.lastRunAt, "monitor", found.size, added))
             Store.save(it)
         }
-        if (added > 0 && Ideas.owns(pid)) {
+        if (added > 0 && Ideas.byProject(pid) != null) {
             Ideas.afterRun(ctx, pid, fresh)
         } else if (added > 0) {
             val title = WatchDigest.title(p.name, added, fresh)

@@ -72,4 +72,21 @@ class IdeasTest {
         val cfg = IdeasConfig("bakery", "DE", mutableListOf("bäckerei"), 12, false, true, "p1")
         assertEquals(cfg, IdeasConfig.from(JSONObject(cfg.toJson().toString())))
     }
+
+    @Test
+    fun severalBusinessesUpsertKeepsOrderAndIds() {
+        val a = IdeasConfig("cafe", id = "a")
+        val b = IdeasConfig("school", "GB", id = "b")
+        var list = IdeasLogic.upsert(IdeasLogic.upsert(emptyList(), a), b)
+        list = IdeasLogic.upsert(list, a.copy(business = "coffee shop"))
+        assertEquals(listOf("a", "b"), list.map { it.id })
+        assertEquals("coffee shop", list[0].business)
+        val back = IdeasLogic.configsFrom(org.json.JSONArray(IdeasLogic.configsJson(list + a).toString()))
+        assertEquals(list, back)
+    }
+
+    @Test
+    fun configWithoutIdGetsOne() {
+        assertTrue(IdeasConfig.from(JSONObject().put("business", "x")).id.isNotEmpty())
+    }
 }

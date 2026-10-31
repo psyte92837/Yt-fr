@@ -197,7 +197,7 @@ class StudioActivity : LumenBase() {
         private const val REQ_CHAR_IMG = 7407
 
         fun open(ctx: Context) {
-            ctx.startActivity(Intent(ctx, StudioActivity::class.java)
+            ctx.startActivity(Intent(ctx, StudioActivity::class.java).putExtra("fresh", true)
                 .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
         }
     }
@@ -256,17 +256,28 @@ class StudioActivity : LumenBase() {
     private var reloading = false
     private val watcher: () -> Unit = { onForeign() }
 
+    /** Opened from the menu: every task starts clean on its first visit, the old work goes to the drafts. */
+    private var fresh = false
+    /** Tasks already opened on this screen: their work is the current one. */
+    private val seen = HashSet<String>()
+    private val draftsDir get() = File(dir, "drafts")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         foreign = BgTasks.has("studio:") && BgTasks.find("studio:")?.key != "studio:render"
         BgTasks.watchers += watcher
+        fresh = savedInstanceState?.getBoolean("fresh") ?: intent.getBooleanExtra("fresh", false)
+        savedInstanceState?.getStringArrayList("seen")?.let { seen.addAll(it) }
+        // the notification reopens this screen with its intent: it must show the work, not start a new one
+        intent.removeExtra("fresh")
+        val stashed = savedInstanceState == null && visit()
         scriptEdit = edt(this, t("Сценарий: сцены через пустую строку", "Script: scenes separated by a blank line"), StudioPrefs.script, multiline = true).apply {
             minLines = 8
             maxLines = 18
         }
         topicEdit = edt(this, t("Тема или идея ролика", "Topic or idea of the video"), StudioPrefs.topic)
         wasRunning = StudioJob.running
-        StudioJob.result?.takeIf { it.exists() && !StudioJob.running }?.let {
+        if (!stashed) StudioJob.result?.takeIf { it.exists() && !StudioJob.running }?.let {
             lastVideo = it
             savedAs = StudioJob.savedAs
         }
@@ -277,6 +288,105 @@ class StudioActivity : LumenBase() {
             voices = it
             if (busy.isEmpty() && recorder == null) render()
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean("fresh", fresh)
+        outState.putStringArrayList("seen", ArrayList(seen))
+    }
+
+    // ---------- drafts ----------
+
+    /** First visit of the current task on a fresh screen: its old work goes to the drafts. True when something was moved. */
+    private fun visit(): Boolean {
+        val first = seen.add(task.id)
+        if (!fresh || !first || foreign || StudioJob.running || BgTasks.has("studio:")) return false
+        return stashCurrent()
+    }
+
+    private fun stashCurrent(): Boolean {
+        val d = runCatching { StudioDrafts.stash(draftsDir, task.id, tdir, StudioPrefs.script, StudioPrefs.topic, System.currentTimeMillis()) }
+            .onFailure { L.w("studio", "stash: ${it.message}") }.getOrNull() ?: return false
+        StudioPrefs.script = ""
+        StudioPrefs.topic = ""
+        L.i("studio", "draft ${d.id}: ${d.title}")
+        return true
+    }
+
+    private fun canLeave(): Boolean {
+        if (busy.isNotEmpty() || recorder != null || StudioJob.running || BgTasks.has("studio:")) {
+            toast(t("Дождитесь окончания текущего шага", "Wait for the current step to finish"))
+            return false
+        }
+        return true
+    }
+
+    /** The screen shows the task's work as it is on disk now. */
+    private fun reload() {
+        player?.release()
+        player = null
+        prevScript = null
+        clearState()
+        loadCuts()
+        lastVideo = null
+        savedAs = ""
+        previewMs = 0
+        scriptEdit.setText(StudioPrefs.script)
+        topicEdit.setText(StudioPrefs.topic)
+        render()
+        restoreAnalysis()
+    }
+
+    private fun newWork() {
+        if (!canLeave()) return
+        saveInputs()
+        val moved = stashCurrent()
+        reload()
+        toast(if (moved) t("Новая работа. Прежняя — в «Черновиках»", "New work. The previous one is in Drafts") else t("Новая работа", "New work"))
+    }
+
+    private fun draftsSheet() {
+        val list = StudioDrafts.list(draftsDir, task.id)
+        bottomSheet(t("Черновики", "Drafts")) { dismiss ->
+            if (list.isEmpty()) muted(t("Пока пусто. Когда вы начинаете новую работу, прежняя сохраняется сюда.",
+                "Empty for now. When you start a new work, the previous one is kept here."))
+            for (d in list) card {
+                add(text(ctx, d.title.ifBlank { t("Без названия", "Untitled") }, Type.TITLE_M, bold = true), 0)
+                muted(Fmt.dateTime(d.at) + (if (d.script.isNotBlank()) t(" · символов: ", " · characters: ") + d.script.length else "") +
+                    (if (d.bytes > 0) " · " + StudioDrafts.mb(d.bytes) else ""))
+                row(
+                    btn(ctx, t("Открыть", "Open"), style = BtnStyle.TONAL) { dismiss(); openDraft(d) },
+                    btn(ctx, t("Удалить", "Delete"), style = BtnStyle.TEXT) {
+                        confirm(t("Удалить черновик?", "Delete the draft?"), d.title, t("Удалить", "Delete")) {
+                            StudioDrafts.delete(draftsDir, d)
+                            dismiss()
+                            render()
+                            draftsSheet()
+                        }
+                    }
+                )
+            }
+            if (list.size > 1) button(t("Удалить все", "Delete all"), style = BtnStyle.TEXT) {
+                confirm(t("Удалить все черновики (${list.size})?", "Delete all drafts (${list.size})?"), "", t("Удалить", "Delete")) {
+                    StudioDrafts.deleteAll(draftsDir, task.id)
+                    dismiss()
+                    render()
+                }
+            }
+        }
+    }
+
+    /** Opens a draft; the current work (if any) becomes a draft itself. */
+    private fun openDraft(d: SDraft) {
+        if (!canLeave()) return
+        saveInputs()
+        stashCurrent()
+        runCatching { StudioDrafts.restore(draftsDir, d, tdir) }.onFailure { err(it); return }
+        StudioPrefs.script = d.script
+        StudioPrefs.topic = d.topic
+        reload()
+        toast(t("Открыт черновик", "Draft opened"))
     }
 
     override fun onPause() {
@@ -385,6 +495,13 @@ class StudioActivity : LumenBase() {
         c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
+        if (!foreign) {
+            val n = StudioDrafts.count(draftsDir, task.id)
+            c.row(
+                btn(this, t("＋ Новая", "＋ New"), style = BtnStyle.TONAL) { newWork() },
+                btn(this, t("🗂 Черновики", "🗂 Drafts") + if (n > 0) " ($n)" else "", style = BtnStyle.TONAL) { draftsSheet() }
+            )
+        }
         c.muted(when (task) {
             StudioTask.SHORTS -> t(
                 "Короткие вертикальные ролики 9:16: слова появляются под голос, рядом схемы из эмодзи. Четыре шага, всё собирается на телефоне.",
@@ -1836,6 +1953,7 @@ class StudioActivity : LumenBase() {
         player?.release()
         player = null
         StudioPrefs.task = to.id
+        visit()
         prevScript = null
         if (to == StudioTask.VOICE && StudioPrefs.voiceMode !in listOf("file", "mic")) StudioPrefs.voiceMode = "file"
         if ((to == StudioTask.CUTS || to == StudioTask.CARTOON) && StudioPrefs.voiceMode == "video") StudioPrefs.voiceMode = "edge"

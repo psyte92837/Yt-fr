@@ -46,9 +46,12 @@ data class ToonPose(
 )
 
 object StudioToon {
-    val LOOKS = listOf("fox", "cat", "bear", "robot", "owl", "kid", "prof", "blob")
+    val LOOKS = listOf(
+        "fox", "cat", "bear", "robot", "owl", "kid", "prof", "blob",
+        "dog", "rabbit", "panda", "penguin", "frog", "alien", "dino", "girl"
+    )
     val MOODS = listOf("calm", "happy", "explain", "think", "surprise", "sad", "angry")
-    const val MAX_CAST = 3
+    const val MAX_CAST = 4
 
     fun emoji(look: String): String = when (look) {
         "fox" -> "🦊"
@@ -58,6 +61,14 @@ object StudioToon {
         "owl" -> "🦉"
         "kid" -> "🧒"
         "prof" -> "🧑‍🏫"
+        "dog" -> "🐶"
+        "rabbit" -> "🐰"
+        "panda" -> "🐼"
+        "penguin" -> "🐧"
+        "frog" -> "🐸"
+        "alien" -> "👽"
+        "dino" -> "🦖"
+        "girl" -> "👧"
         else -> "🫧"
     }
 
@@ -69,6 +80,14 @@ object StudioToon {
         "owl" -> t("Сова", "Owl")
         "kid" -> t("Ребёнок", "Kid")
         "prof" -> t("Профессор", "Professor")
+        "dog" -> t("Пёс", "Dog")
+        "rabbit" -> t("Кролик", "Bunny")
+        "panda" -> t("Панда", "Panda")
+        "penguin" -> t("Пингвин", "Penguin")
+        "frog" -> t("Лягушка", "Frog")
+        "alien" -> t("Пришелец", "Alien")
+        "dino" -> t("Динозавр", "Dino")
+        "girl" -> t("Девочка", "Girl")
         else -> t("Капля", "Blob")
     }
 
@@ -90,13 +109,21 @@ object StudioToon {
         "owl" -> 0xFF8E6BBF
         "kid" -> 0xFFF6C49B
         "prof" -> 0xFFE8B58C
+        "dog" -> 0xFFD9A066
+        "rabbit" -> 0xFFE9E4F0
+        "panda" -> 0xFFF4F4F2
+        "penguin" -> 0xFF2F3A50
+        "frog" -> 0xFF6CC24A
+        "alien" -> 0xFF8BE36B
+        "dino" -> 0xFF5DBB8A
+        "girl" -> 0xFFF6C49B
         else -> 0xFF4FC3A1
     }.toInt()
 
     fun colorOf(ch: SChar): Int = if (ch.color != 0) ch.color else defaultColor(ch.look)
 
     /** "Male" or "Female": the voice a look gets when none is chosen. */
-    fun gender(look: String): String = if (look in listOf("bear", "robot", "prof")) "Male" else "Female"
+    fun gender(look: String): String = if (look in listOf("bear", "robot", "prof", "dog", "penguin", "frog", "alien", "dino")) "Male" else "Female"
 
     /** Voice pitch shift in Hz, so characters sharing a voice still sound different. */
     fun pitch(look: String): Int = when (look) {
@@ -108,6 +135,14 @@ object StudioToon {
         "prof" -> -8
         "robot" -> -15
         "bear" -> -25
+        "girl" -> 40
+        "rabbit" -> 25
+        "alien" -> 20
+        "penguin" -> 10
+        "panda" -> 5
+        "dog" -> 0
+        "frog" -> -5
+        "dino" -> -20
         else -> 0
     }
 
@@ -216,12 +251,14 @@ object StudioToon {
         wide -> when (n) {
             1 -> listOf(0.14f)
             2 -> listOf(0.13f, 0.87f)
-            else -> listOf(0.10f, 0.25f, 0.88f)
+            3 -> listOf(0.10f, 0.25f, 0.88f)
+            else -> listOf(0.09f, 0.22f, 0.78f, 0.91f)
         }
         else -> when (n) {
             1 -> listOf(0.5f)
             2 -> listOf(0.27f, 0.73f)
-            else -> listOf(0.18f, 0.5f, 0.82f)
+            3 -> listOf(0.18f, 0.5f, 0.82f)
+            else -> listOf(0.14f, 0.38f, 0.62f, 0.86f)
         }
     }
 
@@ -294,6 +331,14 @@ class StudioToonArt {
         c.drawOval(RectF(l, t, r, b), fill)
     }
 
+    private val PEOPLE = setOf("kid", "prof", "girl")
+
+    private fun clothes(look: String): Int = when (look) {
+        "kid" -> 0xFF4F8FF7.toInt()
+        "girl" -> 0xFFE85D9E.toInt()
+        else -> 0xFF5B6475.toInt()
+    }
+
     private fun stroke(width: Float, color: Int, alpha: Float = 1f) = line.apply {
         strokeWidth = width
         this.color = color
@@ -317,8 +362,20 @@ class StudioToonArt {
         c.scale(1f - breath * 0.5f, 1f + breath + hop * 0.6f)
         val a = alpha
         // feet
-        oval(c, -0.22f, -0.07f, -0.04f, 0.01f, dark(col, 0.25f), a)
-        oval(c, 0.04f, -0.07f, 0.22f, 0.01f, dark(col, 0.25f), a)
+        val feet = when (look) {
+            "penguin" -> 0xFFF5A623.toInt()
+            "panda" -> 0xFF26262B.toInt()
+            else -> dark(col, 0.25f)
+        }
+        oval(c, -0.22f, -0.07f, -0.04f, 0.01f, feet, a)
+        oval(c, 0.04f, -0.07f, 0.22f, 0.01f, feet, a)
+        // dino tail behind the body, away from the middle of the frame
+        if (look == "dino") {
+            fill.color = col
+            fill.alpha = (255 * a).toInt()
+            val s = -p.side
+            c.drawPath(Path().apply { moveTo(s * 0.2f, -0.32f); quadTo(s * 0.48f, -0.2f, s * 0.56f, -0.04f); lineTo(s * 0.18f, -0.1f); close() }, fill)
+        }
         // ears, hair and antenna behind the head
         when (look) {
             "fox", "cat" -> {
@@ -350,6 +407,35 @@ class StudioToonArt {
             "prof" -> for (s in listOf(-1f, 1f)) {
                 oval(c, s * 0.29f - 0.09f, -0.78f, s * 0.29f + 0.09f, -0.6f, 0xFFDADDE2.toInt(), a)
             }
+            "panda" -> for (s in listOf(-1f, 1f)) oval(c, s * 0.22f - 0.1f, -0.93f, s * 0.22f + 0.1f, -0.73f, 0xFF26262B.toInt(), a)
+            "rabbit" -> for (s in listOf(-1f, 1f)) {
+                c.save()
+                c.rotate(s * 12f, s * 0.12f, -0.8f)
+                oval(c, s * 0.12f - 0.075f, -1.28f, s * 0.12f + 0.075f, -0.74f, col, a)
+                oval(c, s * 0.12f - 0.035f, -1.22f, s * 0.12f + 0.035f, -0.82f, 0xFFFFB3C6.toInt(), a)
+                c.restore()
+            }
+            "frog" -> for (s in listOf(-1f, 1f)) oval(c, s * 0.13f - 0.12f, -0.98f, s * 0.13f + 0.12f, -0.74f, col, a)
+            "alien" -> for (s in listOf(-1f, 1f)) {
+                stroke(0.022f, dark(col, 0.3f), a)
+                c.drawLine(s * 0.1f, -0.86f, s * 0.2f, -1.04f, line)
+                oval(c, s * 0.2f - 0.04f, -1.09f, s * 0.2f + 0.04f, -1.0f, if (p.talking) p.accent else light(col, 0.3f), a)
+            }
+            "dino" -> {
+                fill.color = 0xFFF2A541.toInt()
+                fill.alpha = (255 * a).toInt()
+                for (x0 in listOf(-0.16f, 0f, 0.16f)) {
+                    c.drawPath(Path().apply { moveTo(x0 - 0.07f, -0.84f); lineTo(x0, -1.0f + abs(x0) * 0.4f); lineTo(x0 + 0.07f, -0.84f); close() }, fill)
+                }
+            }
+            "girl" -> {
+                fill.color = 0xFF8B3A2E.toInt()
+                fill.alpha = (255 * a).toInt()
+                for (s in listOf(-1f, 1f)) {
+                    c.drawOval(RectF(s * 0.36f - 0.09f, -0.84f, s * 0.36f + 0.09f, -0.6f), fill)
+                    oval(c, s * 0.3f - 0.035f, -0.8f, s * 0.3f + 0.035f, -0.73f, 0xFFFF6B9E.toInt(), a)
+                }
+            }
         }
         // body
         fill.color = col
@@ -357,16 +443,16 @@ class StudioToonArt {
         if (look == "robot") c.drawRoundRect(RectF(-0.31f, -0.88f, 0.31f, -0.05f), 0.1f, 0.1f, fill)
         else c.drawOval(RectF(-0.33f, -0.9f, 0.33f, -0.04f), fill)
         // clothes and hair of the people
-        if (look == "kid" || look == "prof") {
-            fill.color = if (look == "kid") 0xFF4F8FF7.toInt() else 0xFF5B6475.toInt()
+        if (look in PEOPLE) {
+            fill.color = clothes(look)
             fill.alpha = (255 * a).toInt()
             c.save()
             c.clipPath(Path().apply { addOval(RectF(-0.33f, -0.9f, 0.33f, -0.04f), Path.Direction.CW) })
             c.drawRect(-0.4f, -0.3f, 0.4f, 0f, fill)
             c.restore()
         }
-        if (look == "kid") {
-            fill.color = 0xFF6B4226.toInt()
+        if (look == "kid" || look == "girl") {
+            fill.color = if (look == "girl") 0xFF8B3A2E.toInt() else 0xFF6B4226.toInt()
             fill.alpha = (255 * a).toInt()
             c.drawPath(Path().apply {
                 moveTo(-0.3f, -0.66f)
@@ -385,12 +471,23 @@ class StudioToonArt {
             fill.color = 0xFF1E2430.toInt()
             fill.alpha = (255 * a).toInt()
             c.drawRoundRect(RectF(-0.24f, -0.76f, 0.24f, -0.34f), 0.07f, 0.07f, fill)
-        } else if (look != "kid" && look != "prof") {
+        } else if (look == "penguin") {
+            // white front and face
+            oval(c, -0.25f, -0.78f, 0.25f, -0.3f, 0xFFFFFFFF.toInt(), a)
+            oval(c, -0.24f, -0.5f, 0.24f, -0.07f, 0xFFFFFFFF.toInt(), a)
+        } else if (look !in PEOPLE) {
             // belly
-            oval(c, -0.19f, -0.42f, 0.19f, -0.08f, light(col, 0.45f), a)
+            oval(c, -0.19f, -0.42f, 0.19f, -0.08f, light(col, if (look == "panda" || look == "rabbit") 0.8f else 0.45f), a)
+        }
+        // floppy dog ears in front
+        if (look == "dog") for (s in listOf(-1f, 1f)) {
+            c.save()
+            c.rotate(s * -14f, s * 0.28f, -0.82f)
+            oval(c, s * 0.3f - 0.08f, -0.86f, s * 0.3f + 0.08f, -0.54f, dark(col, 0.35f), a)
+            c.restore()
         }
         // muzzle
-        if (look in listOf("fox", "cat", "bear")) oval(c, -0.15f, -0.56f, 0.15f, -0.33f, light(col, 0.6f), a)
+        if (look in listOf("fox", "cat", "bear", "dog", "rabbit", "panda")) oval(c, -0.15f, -0.56f, 0.15f, -0.33f, light(col, 0.6f), a)
         face(c, look, col, p, a)
         arms(c, look, col, p, a)
         // mood marks above the head
@@ -408,9 +505,17 @@ class StudioToonArt {
     }
 
     private fun face(c: Canvas, look: String, col: Int, p: ToonPose, a: Float) {
-        val ey = if (look == "robot") -0.6f else -0.62f
-        val ex = 0.11f
-        val big = if (look == "owl") 1.3f else 1f
+        val ey = when (look) {
+            "robot" -> -0.6f
+            "frog" -> -0.84f
+            else -> -0.62f
+        }
+        val ex = if (look == "frog") 0.13f else 0.11f
+        val big = when (look) {
+            "owl", "alien" -> 1.3f
+            "frog" -> 1.15f
+            else -> 1f
+        }
         val shut = p.blink.coerceIn(0f, 1f)
         val px = p.look.coerceIn(-1f, 1f) * 0.03f
         for (s in listOf(-1f, 1f)) {
@@ -423,6 +528,12 @@ class StudioToonArt {
                 continue
             }
             if (look == "owl") oval(c, cx - 0.12f, ey - 0.12f, cx + 0.12f, ey + 0.12f, light(col, 0.55f), a)
+            if (look == "panda") {
+                c.save()
+                c.rotate(s * -20f, cx, ey)
+                oval(c, cx - 0.09f, ey - 0.12f, cx + 0.09f, ey + 0.11f, 0xFF26262B.toInt(), a)
+                c.restore()
+            }
             val rx = 0.072f * big
             val ry = 0.088f * big * (1f - 0.9f * shut)
             oval(c, cx - rx, ey - ry, cx + rx, ey + ry, 0xFFFFFFFF.toInt(), a)
@@ -465,8 +576,9 @@ class StudioToonArt {
         }
         // nose and beak
         when (look) {
-            "fox", "cat", "bear" -> oval(c, -0.035f, -0.52f, 0.035f, -0.475f, 0xFF2B1D1A.toInt(), a)
-            "owl" -> {
+            "fox", "cat", "bear", "dog", "panda" -> oval(c, -0.035f, -0.52f, 0.035f, -0.475f, 0xFF2B1D1A.toInt(), a)
+            "rabbit" -> oval(c, -0.03f, -0.515f, 0.03f, -0.48f, 0xFFFF7A9C.toInt(), a)
+            "owl", "penguin" -> {
                 fill.color = 0xFFF5A623.toInt()
                 fill.alpha = (255 * a).toInt()
                 c.drawPath(Path().apply { moveTo(-0.04f, -0.53f); lineTo(0.04f, -0.53f); lineTo(0f, -0.46f); close() }, fill)
@@ -511,8 +623,12 @@ class StudioToonArt {
 
     private fun arms(c: Canvas, look: String, col: Int, p: ToonPose, a: Float) {
         val t = p.tMs.toFloat()
-        val armCol = if (look == "kid") 0xFF4F8FF7.toInt() else if (look == "prof") 0xFF5B6475.toInt() else dark(col, 0.12f)
-        val hand = if (look == "kid" || look == "prof") col else dark(col, 0.12f)
+        val armCol = when (look) {
+            in PEOPLE -> clothes(look)
+            "panda" -> 0xFF26262B.toInt()
+            else -> dark(col, 0.12f)
+        }
+        val hand = if (look in PEOPLE) col else armCol
         stroke(0.07f, armCol, a)
         for (s in listOf(-1f, 1f)) {
             val front = s == p.side

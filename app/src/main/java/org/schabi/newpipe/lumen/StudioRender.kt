@@ -454,7 +454,8 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     private val toonArt = StudioToonArt()
     private val castN get() = plan.cast?.size ?: 0
     /** Height of a character and the line its feet stand on. */
-    private val toonSize get() = if (wide) h * (if (castN >= 3) 0.40f else 0.46f) else h * (if (castN >= 3) 0.21f else 0.26f)
+    private val toonSize get() = if (wide) h * (if (castN >= 4) 0.36f else if (castN == 3) 0.40f else 0.46f)
+    else h * (if (castN >= 4) 0.18f else if (castN == 3) 0.21f else 0.26f)
     private val groundY get() = h * 0.965f
 
     /** The floor the characters stand on. */

@@ -53,7 +53,7 @@ class StudioCartoonTest {
         assertEquals(c, StudioToon.parseCast(StudioToon.castJson(c)))
         assertTrue(StudioToon.parseCast("not json").isEmpty())
         assertEquals("blob", StudioToon.parseCast("""[{"name":"X","look":"dragon"}]""")[0].look)
-        assertEquals(StudioToon.MAX_CAST, StudioToon.parseCast(StudioToon.castJson(c + SChar("Кот", "cat"))).size)
+        assertEquals(StudioToon.MAX_CAST, StudioToon.parseCast(StudioToon.castJson(c + SChar("Кот", "cat") + SChar("Пёс", "dog"))).size)
     }
 
     @Test
@@ -96,8 +96,16 @@ class StudioCartoonTest {
     }
 
     @Test
+    fun everyLookHasItsOwnFace() {
+        assertEquals(16, StudioToon.LOOKS.size)
+        assertEquals(StudioToon.LOOKS.size, StudioToon.LOOKS.map { StudioToon.emoji(it) }.distinct().size)
+        assertEquals(StudioToon.LOOKS.size, StudioToon.LOOKS.map { StudioToon.defaultColor(it) }.distinct().size + 1) // kid and girl share the skin
+        assertEquals("girl", StudioToon.parseCast("""[{"name":"Маша","look":"girl"}]""")[0].look)
+    }
+
+    @Test
     fun slotsFitTheFrame() {
-        for (n in 1..3) for (wide in listOf(true, false)) {
+        for (n in 1..StudioToon.MAX_CAST) for (wide in listOf(true, false)) {
             val s = StudioToon.slots(n, wide)
             assertEquals(n, s.size)
             assertTrue(s.all { it in 0f..1f })

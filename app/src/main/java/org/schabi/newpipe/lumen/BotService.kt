@@ -356,6 +356,7 @@ class BotWorker(private val ctx: Context, private val botId: String) : Thread("b
                 if (info == null || !info.enabled) break
                 try {
                     if (runtime == null || info.codeVersion != loadedVersion) load(info)
+                    api?.let { applyMenu(it, info) }
                     limiter.perUserHour = info.aiPerUserHour
                     limiter.perDay = info.aiPerDay
                     runSchedules()
@@ -473,7 +474,22 @@ class BotWorker(private val ctx: Context, private val botId: String) : Thread("b
         } catch (e: TgError) {
             Bots.log(botId, BotLogEntry.ERR, 0, "", "setMyCommands: ${e.description}")
         }
+        applyMenu(a, info)
         Bots.log(botId, BotLogEntry.SYS, 0, "", t("Код загружен, команд: ${meta.commands.size}", "Code loaded, commands: ${meta.commands.size}"))
+    }
+
+    private var menuShown = ""
+
+    /** Mini app in the menu next to the input (or the command list). */
+    private fun applyMenu(a: TgApi, b: BotInfo) {
+        val want = if (b.miniAppMenu && b.miniAppUrl.isNotBlank()) b.appLink else ""
+        if (want == menuShown) return
+        try {
+            a.setMenuButton(want, b.miniAppTitle.ifBlank { t("Открыть", "Open") })
+            menuShown = want
+        } catch (e: TgError) {
+            Bots.log(botId, BotLogEntry.ERR, 0, "", "setChatMenuButton: ${e.description}")
+        }
     }
 
     private fun runSchedules() {
@@ -498,6 +514,7 @@ class BotWorker(private val ctx: Context, private val botId: String) : Thread("b
         val who = u.user.name + if (u.user.username.isNotBlank()) " @" + u.user.username else ""
         val shown = when {
             u.kind == "callback" -> "[${t("кнопка", "button")}] ${u.data}"
+            u.appData.isNotBlank() -> "[${t("мини-апп", "mini app")}] ${u.appData}"
             u.photo -> "[${t("фото", "photo")}] ${u.text}"
             else -> u.text
         }
@@ -577,21 +594,28 @@ class BotWorker(private val ctx: Context, private val botId: String) : Thread("b
 
         private fun api(): TgApi = api ?: throw IllegalStateException("no connection")
 
+        private fun app(): String = Bots.get(botId)?.appLink.orEmpty()
+
+        override fun appUrl(params: String): String {
+            val l = app()
+            return if (l.isBlank() || params.isBlank()) l else MiniApp.withParams(l, params)
+        }
+
         override fun send(chatId: Long, text: String, opts: String): Long {
-            val id = api().send(chatId, text, opts(opts))
+            val id = api().send(chatId, text, opts(opts), app())
             Bots.log(botId, BotLogEntry.OUT, chatId, "", text)
             return id
         }
 
         override fun edit(chatId: Long, messageId: Long, text: String, opts: String) {
-            api().edit(chatId, messageId, text, opts(opts))
+            api().edit(chatId, messageId, text, opts(opts), app())
             Bots.log(botId, BotLogEntry.OUT, chatId, "", "✎ $text")
         }
 
         override fun answer(callbackId: String, text: String) = api().answer(callbackId, text)
 
         override fun photo(chatId: Long, url: String, caption: String, opts: String): Long {
-            val id = api().photo(chatId, url, caption, opts(opts))
+            val id = api().photo(chatId, url, caption, opts(opts), app())
             Bots.log(botId, BotLogEntry.OUT, chatId, "", "[${t("фото", "photo")}] $caption")
             return id
         }
@@ -640,12 +664,12 @@ object BotAi {
 
     private const val SYSTEM = "You are a senior Telegram bot developer. Output only working JavaScript for the described runtime."
 
-    private fun ask(task: String, prompt: String, pid: String): String {
+    fun ask(task: String, prompt: String, pid: String): String {
         val p = provider()
         return Llm.complete(p, p.smartModel.ifBlank { p.fastModel }, SYSTEM, prompt, maxTokens = 8000, task = task, pid = pid).text
     }
 
-    private fun lang() = if (Settings.lang == "en") "English" else "русском"
+    fun lang() = if (Settings.lang == "en") "English" else "русском"
 
     /** Writes the bot code from a description, then checks and repairs it (up to 2 times). */
     fun build(name: String, desc: String, pid: String, onStep: (String) -> Unit): Result {

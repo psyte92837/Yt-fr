@@ -7,6 +7,7 @@ package org.schabi.newpipe.lumen
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URI
+import java.net.URLEncoder
 import java.util.Calendar
 import java.util.TimeZone
 
@@ -41,13 +42,15 @@ data class TgUpdate(
     val data: String = "",
     val photo: Boolean = false,
     val command: String = "",
-    val args: String = ""
+    val args: String = "",
+    /** Data sent by the mini app (Telegram.WebApp.sendData). */
+    val appData: String = ""
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("updateId", updateId).put("kind", kind).put("chatId", chatId).put("chatType", chatType)
         .put("user", user.toJson()).put("text", text).put("messageId", messageId)
         .put("callbackId", callbackId).put("data", data).put("photo", photo)
-        .put("command", command).put("args", args)
+        .put("command", command).put("args", args).put("appData", appData)
 }
 
 class TgError(val code: Int, val description: String, val retryAfter: Int = 0) : java.io.IOException("Telegram $code: $description")
@@ -93,7 +96,8 @@ object Tg {
             return TgUpdate(
                 id, "message", chat.optLong("id"), chat.optString("type", "private"), TgUser.from(m.optJSONObject("from")),
                 text, m.optLong("message_id"), photo = m.has("photo"),
-                command = cmd?.first.orEmpty(), args = cmd?.second.orEmpty()
+                command = cmd?.first.orEmpty(), args = cmd?.second.orEmpty(),
+                appData = m.optJSONObject("web_app_data")?.optString("data").orEmpty()
             )
         }
         val q = u.optJSONObject("callback_query") ?: return null
@@ -148,14 +152,15 @@ object Tg {
      * {buttons:[["A", {text,data}, {text,url}]], keyboard:[["A","B"]], remove:true, html:true, markdown:true, silent:true, preview:false}.
      * Telegram-native "reply_markup" and "parse_mode" pass through.
      */
-    fun sendParams(chatId: Long, text: String, opts: JSONObject): JSONObject {
+    fun sendParams(chatId: Long, text: String, opts: JSONObject, appUrl: String = ""): JSONObject {
         val p = JSONObject().put("chat_id", chatId).put("text", text)
-        applyOpts(p, opts)
+        applyOpts(p, opts, appUrl)
         return p
     }
 
-    fun applyOpts(p: JSONObject, opts: JSONObject) {
-        markup(opts)?.let { p.put("reply_markup", it) }
+    /** [appUrl]: the bot's published mini app; buttons with "app" open it. */
+    fun applyOpts(p: JSONObject, opts: JSONObject, appUrl: String = "") {
+        markup(opts, appUrl)?.let { p.put("reply_markup", it) }
         when {
             opts.has("parse_mode") -> p.put("parse_mode", opts.optString("parse_mode"))
             opts.optBoolean("html") -> p.put("parse_mode", "HTML")
@@ -165,7 +170,16 @@ object Tg {
         if (opts.has("preview") && !opts.optBoolean("preview", true)) p.put("link_preview_options", JSONObject().put("is_disabled", true))
     }
 
-    fun markup(opts: JSONObject): JSONObject? {
+    /** Mini app link of a button: app: true → the bot's mini app, "https://…" → that page, {…} → the mini app with data. */
+    fun appLink(v: Any?, appUrl: String): String? = when {
+        v == null || v == JSONObject.NULL || v == false -> null
+        v is String && v.startsWith("https://") -> v
+        appUrl.isBlank() -> null
+        v == true -> appUrl
+        else -> MiniApp.withParams(appUrl, v.toString())
+    }
+
+    fun markup(opts: JSONObject, appUrl: String = ""): JSONObject? {
         opts.optJSONObject("reply_markup")?.let { return it }
         opts.optJSONArray("buttons")?.let { rows ->
             val kb = JSONArray()
@@ -177,8 +191,12 @@ object Tg {
                         is JSONObject -> {
                             val label = b.optString("text", b.optString("data", "?"))
                             btn.put("text", label)
-                            if (b.optString("url").isNotBlank()) btn.put("url", b.optString("url"))
-                            else btn.put("callback_data", b.optString("data", label).take(64))
+                            val app = appLink(b.opt("app"), appUrl)
+                            when {
+                                app != null -> btn.put("web_app", JSONObject().put("url", app))
+                                b.optString("url").isNotBlank() -> btn.put("url", b.optString("url"))
+                                else -> btn.put("callback_data", b.optString("data", label).take(64))
+                            }
                         }
                         else -> btn.put("text", b.toString()).put("callback_data", b.toString().take(64))
                     }
@@ -192,7 +210,11 @@ object Tg {
             val kb = JSONArray()
             rowsOf(rows).forEach { row ->
                 val r = JSONArray()
-                row.forEach { b -> r.put(JSONObject().put("text", if (b is JSONObject) b.optString("text") else b.toString())) }
+                row.forEach { b ->
+                    val btn = JSONObject().put("text", if (b is JSONObject) b.optString("text") else b.toString())
+                    if (b is JSONObject) appLink(b.opt("app"), appUrl)?.let { btn.put("web_app", JSONObject().put("url", it)) }
+                    r.put(btn)
+                }
                 if (r.length() > 0) kb.put(r)
             }
             return JSONObject().put("keyboard", kb).put("resize_keyboard", true).put("one_time_keyboard", opts.optBoolean("once"))
@@ -240,8 +262,17 @@ data class BotInfo(
     var notifyMessages: Boolean = false,
     var notifyErrors: Boolean = true,
     var commands: List<Pair<String, String>> = emptyList(),
-    var codeVersion: Long = 0
+    var codeVersion: Long = 0,
+    /** Published mini app page (https), its version (cache buster), menu button in Telegram. */
+    var miniAppUrl: String = "",
+    var miniAppVersion: Long = 0,
+    var miniAppMenu: Boolean = true,
+    var miniAppTitle: String = "",
+    var miniAppDesc: String = ""
 ) {
+    /** The link buttons open: the published page with its version. Empty when not published. */
+    val appLink: String get() = if (miniAppUrl.isBlank()) "" else MiniApp.link(miniAppUrl, miniAppVersion)
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("name", name).put("username", username).put("description", description)
         .put("enabled", enabled).put("createdAt", createdAt).put("updatedAt", updatedAt)
@@ -250,6 +281,8 @@ data class BotInfo(
         .put("notifyNewUser", notifyNewUser).put("notifyMessages", notifyMessages).put("notifyErrors", notifyErrors)
         .put("commands", JSONArray().also { a -> commands.forEach { a.put(JSONObject().put("name", it.first).put("desc", it.second)) } })
         .put("codeVersion", codeVersion)
+        .put("miniAppUrl", miniAppUrl).put("miniAppVersion", miniAppVersion).put("miniAppMenu", miniAppMenu)
+        .put("miniAppTitle", miniAppTitle).put("miniAppDesc", miniAppDesc)
 
     companion object {
         fun from(o: JSONObject): BotInfo {
@@ -263,7 +296,9 @@ data class BotInfo(
                 if (cmds == null) emptyList() else (0 until cmds.length()).mapNotNull { i ->
                     cmds.optJSONObject(i)?.let { it.optString("name") to it.optString("desc") }
                 },
-                o.optLong("codeVersion")
+                o.optLong("codeVersion"),
+                o.optString("miniAppUrl"), o.optLong("miniAppVersion"), o.optBoolean("miniAppMenu", true),
+                o.optString("miniAppTitle"), o.optString("miniAppDesc")
             )
         }
 
@@ -423,6 +458,70 @@ object BotNet {
     }
 }
 
+/** Telegram Mini App of a bot: one HTML page published at an https address. */
+object MiniApp {
+    const val SDK = "https://telegram.org/js/telegram-web-app.js"
+
+    /** The HTML from an AI answer: the ```html block, else from <!DOCTYPE/<html> to </html>. */
+    fun extractHtml(reply: String): String {
+        val fence = Regex("```(?:html|HTML)?[ \\t]*\\n([\\s\\S]*?)```").findAll(reply).map { it.groupValues[1] }.toList()
+        var html = if (fence.isNotEmpty()) fence.maxByOrNull { it.length }!! else reply
+        val start = Regex("(?i)<!doctype html|<html").find(html)?.range?.first
+        if (start != null) html = html.substring(start)
+        val end = html.lastIndexOf("</html>", ignoreCase = true)
+        if (end > 0) html = html.substring(0, end + 7)
+        return ensureSdk(html.trim())
+    }
+
+    /** Adds the Telegram WebApp script when the page lacks it. */
+    fun ensureSdk(html: String): String {
+        if (html.contains("telegram-web-app.js")) return html
+        val tag = "<script src=\"$SDK\"></script>"
+        val head = Regex("(?i)<head[^>]*>").find(html)
+        return if (head != null) html.substring(0, head.range.last + 1) + "\n" + tag + html.substring(head.range.last + 1) else tag + "\n" + html
+    }
+
+    /** Problems that make the page useless inside Telegram. */
+    fun problems(html: String): List<String> {
+        val out = ArrayList<String>()
+        if (!Regex("(?i)<html|<body|<div|<script").containsMatchIn(html)) out.add("no HTML")
+        if (html.length > 1_000_000) out.add("page is over 1 MB")
+        return out
+    }
+
+    /** Page address with the version (Telegram and GitHub Pages cache pages). */
+    fun link(base: String, version: Long): String {
+        val b = base.trim()
+        return if (version <= 0) b else b + (if (b.contains('?')) "&" else "?") + "v=" + version.toString(36)
+    }
+
+    /** Data for the page in "d" (read there with new URLSearchParams(location.search).get('d')). */
+    fun withParams(url: String, data: String): String =
+        url + (if (url.contains('?')) "&" else "?") + "d=" + URLEncoder.encode(data, "UTF-8").replace("+", "%20")
+
+    /** The "d" parameter of a mini app link (for the preview). */
+    fun paramsOf(url: String): String {
+        val q = url.substringAfter('?', "").substringBefore('#')
+        val d = q.split('&').firstOrNull { it.startsWith("d=") } ?: return ""
+        return java.net.URLDecoder.decode(d.removePrefix("d="), "UTF-8")
+    }
+
+    fun httpsOk(url: String): Boolean = try {
+        val u = URI(url.trim())
+        u.scheme == "https" && !u.host.isNullOrBlank()
+    } catch (e: Exception) {
+        false
+    }
+
+    /** GitHub Pages address of [path] in [repo] of [login]. */
+    fun pagesUrl(login: String, repo: String, path: String): String {
+        val l = login.lowercase()
+        val p = path.trim('/')
+        val root = if (repo.equals("$l.github.io", true)) "https://$l.github.io/" else "https://$l.github.io/$repo/"
+        return if (p.isEmpty()) root else "$root$p/"
+    }
+}
+
 /** One line of a bot's journal. */
 data class BotLogEntry(val at: Long, val kind: String, val chat: Long, val who: String, val text: String) {
     fun toJson(): JSONObject = JSONObject().put("at", at).put("kind", kind).put("chat", chat).put("who", who).put("text", text)
@@ -489,7 +588,14 @@ users()                  — все, кто писал боту: [{id, name, use
 http.get(url) / http.post(url, body) → {status, ok, text, json()}
 youtube('запрос', 5)     — поиск YouTube: [{title, url, channel, views, duration}]
 notify('текст')          — уведомление владельцу на телефон
-log(...)                 — запись в журнал бота"""
+log(...)                 — запись в журнал бота
+
+Мини-апп (веб-страница внутри Telegram; создаётся во вкладке «Мини-апп»):
+{keyboard: [[{text: '📱 Открыть', app: true}]]} — кнопка под полем ввода; только так мини-апп может вернуть данные боту
+{keyboard: [[{text: '🛒 Заказ', app: {item: 5}}]]} — открыть с данными (в мини-аппе: JSON.parse(new URLSearchParams(location.search).get('d')))
+{buttons: [[{text: '📱 Открыть', app: true}]]} — inline-кнопка (данные назад не возвращает)
+bot.on('app', ctx => …)  — мини-апп прислал Telegram.WebApp.sendData(…); ctx.appData — объект (если JSON) или строка
+appUrl({…})              — ссылка на мини-апп с данными (пустая строка, если мини-апп не опубликован)"""
 
 /** Prompts of the bot section (editable in Settings → prompts like the others). */
 val BOT_PROMPTS = linkedMapOf(
@@ -515,5 +621,30 @@ val BOT_PROMPTS = linkedMapOf(
         "Код Telegram-бота не работает. Исправь ошибку, ничего лишнего не меняй.\n\n" +
             "API бота:\n{api}\n\nКод:\n```js\n{code}\n```\n\nОшибка:\n{error}\n\n" +
             "Верни ПОЛНЫЙ исправленный код одним блоком ```js, без пояснений."
+        )
+)
+
+/** Prompts of mini apps. */
+val MINIAPP_PROMPTS = linkedMapOf(
+    "bot_miniapp" to (
+        "Ты опытный фронтенд-разработчик Telegram Mini Apps. Сделай мини-апп одним HTML-файлом.\n\n" +
+            "Требования:\n- Один файл: HTML + CSS + JS внутри, без сборщиков и фреймворков, без внешних картинок (эмодзи и SVG можно).\n" +
+            "- Подключи <script src=\"https://telegram.org/js/telegram-web-app.js\"></script>, вызови Telegram.WebApp.ready() и expand().\n" +
+            "- Цвета из темы Telegram: var(--tg-theme-bg-color), --tg-theme-text-color, --tg-theme-hint-color, --tg-theme-button-color, " +
+            "--tg-theme-button-text-color, --tg-theme-secondary-bg-color (с запасными значениями).\n" +
+            "- Мобильная вёрстка, крупные элементы, без горизонтальной прокрутки.\n" +
+            "- Главное действие — Telegram.WebApp.MainButton (setText, show, onClick). Отправка результата боту: " +
+            "Telegram.WebApp.sendData(JSON.stringify({...})) — до 4 КБ, после неё мини-апп закрывается.\n" +
+            "- Входные данные от бота (если есть): JSON.parse(new URLSearchParams(location.search).get('d') || 'null').\n" +
+            "- Пользователь: Telegram.WebApp.initDataUnsafe.user (может отсутствовать).\n" +
+            "- Haptic feedback на нажатия (Telegram.WebApp.HapticFeedback), если уместно.\n" +
+            "- Язык интерфейса — язык описания. Комментарии в коде на языке {lang}.\n" +
+            "- В конце файла комментарий <!-- DATA: формат JSON, который отправляет sendData -->.\n\n" +
+            "Что делает бот:\n{botdesc}\n\nЧто должен делать мини-апп:\n{desc}\n\nОтвет — только код одним блоком ```html."
+        ),
+    "bot_miniapp_edit" to (
+        "Измени Telegram Mini App по просьбе пользователя. Сохрани всё, что просьба не затрагивает, " +
+            "и комментарий <!-- DATA: … --> в конце (обнови, если формат данных меняется).\n\n" +
+            "Текущий код:\n```html\n{html}\n```\n\nЧто изменить:\n{request}\n\nВерни ПОЛНЫЙ новый файл одним блоком ```html, без пояснений."
         )
 )

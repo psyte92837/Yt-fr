@@ -67,7 +67,7 @@ class TgApi(private val token: String) {
     }
 
     /** Sends [text] (split into parts when long); a broken HTML/Markdown is re-sent as plain text. Returns the last message id. */
-    fun send(chatId: Long, text: String, opts: JSONObject): Long {
+    fun send(chatId: Long, text: String, opts: JSONObject, appUrl: String = ""): Long {
         val parts = Tg.split(text.ifEmpty { "…" })
         var last = 0L
         parts.forEachIndexed { i, part ->
@@ -78,19 +78,19 @@ class TgApi(private val token: String) {
                 remove("reply_markup")
             }
             last = try {
-                call("sendMessage", Tg.sendParams(chatId, part, o)).getJSONObject("result").optLong("message_id")
+                call("sendMessage", Tg.sendParams(chatId, part, o, appUrl)).getJSONObject("result").optLong("message_id")
             } catch (e: TgError) {
                 if (e.code != 400 || !e.description.contains("parse", true)) throw e
-                val plain = Tg.sendParams(chatId, part, o).apply { remove("parse_mode") }
+                val plain = Tg.sendParams(chatId, part, o, appUrl).apply { remove("parse_mode") }
                 call("sendMessage", plain).getJSONObject("result").optLong("message_id")
             }
         }
         return last
     }
 
-    fun edit(chatId: Long, messageId: Long, text: String, opts: JSONObject) {
+    fun edit(chatId: Long, messageId: Long, text: String, opts: JSONObject, appUrl: String = "") {
         val p = JSONObject().put("chat_id", chatId).put("message_id", messageId).put("text", Tg.split(text.ifEmpty { "…" }).first())
-        Tg.applyOpts(p, opts)
+        Tg.applyOpts(p, opts, appUrl)
         try {
             call("editMessageText", p)
         } catch (e: TgError) {
@@ -109,15 +109,22 @@ class TgApi(private val token: String) {
         }
     }
 
-    fun photo(chatId: Long, url: String, caption: String, opts: JSONObject): Long {
+    fun photo(chatId: Long, url: String, caption: String, opts: JSONObject, appUrl: String = ""): Long {
         val p = JSONObject().put("chat_id", chatId).put("photo", url)
         if (caption.isNotBlank()) p.put("caption", caption.take(1024))
-        Tg.applyOpts(p, opts)
+        Tg.applyOpts(p, opts, appUrl)
         return call("sendPhoto", p).getJSONObject("result").optLong("message_id")
     }
 
     fun setCommands(cmds: List<Pair<String, String>>) {
         call("setMyCommands", JSONObject().put("commands", Tg.commandsJson(cmds)))
+    }
+
+    /** The menu button next to the input: opens the mini app, or the command list when [url] is empty. */
+    fun setMenuButton(url: String, title: String) {
+        val mb = if (url.isBlank()) JSONObject().put("type", "commands")
+        else JSONObject().put("type", "web_app").put("text", title.ifBlank { "App" }.take(64)).put("web_app", JSONObject().put("url", url))
+        call("setChatMenuButton", JSONObject().put("menu_button", mb))
     }
 
     companion object {

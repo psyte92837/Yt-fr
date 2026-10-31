@@ -100,6 +100,31 @@ object Bots {
         }?.sortedByDescending { it.at } ?: emptyList()
     }
 
+    // ---- mini app ----
+    fun miniApp(id: String): String = synchronized(lock) { File(dir(id), "miniapp.html").takeIf { it.isFile }?.readText().orEmpty() }
+
+    /** Saves the page; the previous one stays in miniapp.prev.html for "undo". */
+    fun saveMiniApp(id: String, html: String) = synchronized(lock) {
+        val f = File(dir(id), "miniapp.html")
+        if (f.isFile) f.copyTo(File(dir(id), "miniapp.prev.html"), overwrite = true)
+        writeAtomic(f, html)
+    }
+
+    fun deleteMiniApp(id: String) = synchronized(lock) {
+        File(dir(id), "miniapp.html").delete()
+        File(dir(id), "miniapp.prev.html").delete()
+    }
+
+    fun hasPrevMiniApp(id: String): Boolean = File(File(root, id), "miniapp.prev.html").isFile
+
+    fun undoMiniApp(id: String) = synchronized(lock) {
+        val prev = File(dir(id), "miniapp.prev.html")
+        if (prev.isFile) {
+            writeAtomic(File(dir(id), "miniapp.html"), prev.readText())
+            prev.delete()
+        }
+    }
+
     // ---- journal ----
     fun log(id: String, kind: String, chat: Long, who: String, text: String) = synchronized(lock) {
         val f = File(dir(id), "log.jsonl")

@@ -365,4 +365,73 @@ class BotCoreTest {
         assertEquals("""[1,{"a":"b"}] none list""", h.sent.last().first)
         assertEquals(JSONArray("[1]").length(), 1)
     }
+
+    // ---- mini apps ----
+
+    @Test
+    fun miniAppButtonsAndData() {
+        val app = "https://ann.github.io/lumen-miniapps/b1/?v=k"
+        val inline = Tg.markup(JSONObject("""{"buttons":[[{"text":"Open","app":true},{"text":"Item","app":{"id":5}}]]}"""), app)!!
+        val row = inline.getJSONArray("inline_keyboard").getJSONArray(0)
+        assertEquals(app, row.getJSONObject(0).getJSONObject("web_app").getString("url"))
+        val withData = row.getJSONObject(1).getJSONObject("web_app").getString("url")
+        assertTrue(withData.startsWith("$app&d="))
+        assertEquals("""{"id":5}""", MiniApp.paramsOf(withData))
+        val kb = Tg.markup(JSONObject("""{"keyboard":[[{"text":"Form","app":true},"Help"]]}"""), app)!!
+        val k = kb.getJSONArray("keyboard").getJSONArray(0)
+        assertEquals(app, k.getJSONObject(0).getJSONObject("web_app").getString("url"))
+        assertFalse(k.getJSONObject(1).has("web_app"))
+        // no published mini app: plain buttons
+        val none = Tg.markup(JSONObject("""{"buttons":[[{"text":"Open","app":true}]]}"""))!!
+        assertTrue(none.getJSONArray("inline_keyboard").getJSONArray(0).getJSONObject(0).has("callback_data"))
+        // an explicit https page works without the bot's own mini app
+        assertEquals("https://x.org/a", Tg.appLink("https://x.org/a", ""))
+
+        val body = """{"ok":true,"result":[{"update_id":3,"message":{"message_id":9,"from":{"id":42,"first_name":"Ann"},"chat":{"id":42,"type":"private"},"web_app_data":{"data":"{\"sum\":3}","button_text":"Form"}}}]}"""
+        val u = Tg.parseUpdates(body).updates.single()
+        assertEquals("""{"sum":3}""", u.appData)
+    }
+
+    @Test
+    fun miniAppLinksAndHtml() {
+        assertEquals("https://a.b/x/", MiniApp.link("https://a.b/x/", 0))
+        assertEquals("https://a.b/x/?v=" + 1000L.toString(36), MiniApp.link("https://a.b/x/", 1000))
+        assertEquals("https://ann.github.io/lumen-miniapps/b1/", MiniApp.pagesUrl("Ann", "lumen-miniapps", "/b1/"))
+        assertEquals("https://ann.github.io/b1/", MiniApp.pagesUrl("Ann", "ann.github.io", "b1"))
+        assertTrue(MiniApp.httpsOk("https://x.org/app"))
+        assertFalse(MiniApp.httpsOk("http://x.org/app"))
+        val html = MiniApp.extractHtml("Sure!\n```html\n<!DOCTYPE html><html><head><title>A</title></head><body>Hi</body></html>\n```\nEnjoy")
+        assertTrue(html.startsWith("<!DOCTYPE html><html><head>"))
+        assertTrue(html.contains(MiniApp.SDK))
+        assertTrue(html.endsWith("</html>"))
+        assertTrue(MiniApp.problems(html).isEmpty())
+        assertFalse(MiniApp.problems("just text").isEmpty())
+        val kept = MiniApp.ensureSdk("<html><head><script src=\"https://telegram.org/js/telegram-web-app.js\"></script></head></html>")
+        assertEquals(1, Regex("telegram-web-app").findAll(kept).count())
+    }
+
+    @Test
+    fun botReceivesMiniAppData() {
+        val h = object : NoopBotHost() {
+            val sent = ArrayList<String>()
+            override fun send(chatId: Long, text: String, opts: String): Long {
+                sent.add(text)
+                return 1
+            }
+            override fun appUrl(params: String) = "https://app/?d=" + params
+        }
+        val rt = BotRuntime(
+            """
+            bot.start(ctx => ctx.reply(appUrl({a: 1})));
+            bot.on('app', ctx => ctx.reply('Сумма: ' + ctx.appData.sum + ' ' + ctx.message.web_app_data.data));
+            bot.on('text', ctx => ctx.reply('text'));
+            """.trimIndent(),
+            h
+        )
+        rt.load()
+        rt.handle(msg("/start"))
+        assertEquals("""https://app/?d={"a":1}""", h.sent.last())
+        assertEquals("app", rt.handle(TgUpdate(5, "message", 42, "private", me, "", 5, appData = """{"sum":3}""")))
+        assertEquals("""Сумма: 3 {"sum":3}""", h.sent.last())
+    }
 }

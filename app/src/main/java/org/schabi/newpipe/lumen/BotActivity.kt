@@ -84,7 +84,7 @@ class BotActivity : LumenBase() {
             })
         }
         header.addView(row)
-        header.addView(tabBar(this, listOf(t("Тест", "Test"), t("Код", "Code"), t("Журнал", "Journal"), t("Настройки", "Settings")), tab) {
+        header.addView(tabBar(this, listOf(t("Тест", "Test"), t("Код", "Code"), t("Мини-апп", "Mini app"), t("Журнал", "Journal"), t("Настройки", "Settings")), tab) {
             tab = it
             render()
         })
@@ -92,6 +92,7 @@ class BotActivity : LumenBase() {
         when (tab) {
             TAB_TEST -> renderTest(title, header)
             TAB_CODE -> page(title, codeTab(b).root, header = header, keepScroll = true)
+            TAB_APP -> page(title, appTab(b).root, header = header, keepScroll = true)
             TAB_LOG -> page(title, logTab(b).root, header = header)
             else -> page(title, settingsTab(b).root, header = header, keepScroll = true)
         }
@@ -122,7 +123,8 @@ class BotActivity : LumenBase() {
     )
 
     private val chat = ArrayList<Msg>()
-    private var keyboard: List<List<String>> = emptyList()
+    /** Reply keyboard of the test chat: label → mini app link ("" for a plain button). */
+    private var keyboard: List<List<Pair<String, String>>> = emptyList()
     private val sim = Executors.newSingleThreadExecutor()
     private var simRt: BotRuntime? = null
     private var simVersion = -1L
@@ -132,25 +134,39 @@ class BotActivity : LumenBase() {
     private var chatInput: EditText? = null
     private var draft = ""
 
+    /** Mini app address in the test chat: the published one, or a local stand-in while it is not published. */
+    private fun simApp(): String {
+        val b = info() ?: return ""
+        if (b.miniAppUrl.isNotBlank()) return b.appLink
+        return if (Bots.miniApp(botId).isNotBlank()) "https://lumen.preview/" else ""
+    }
+
     private fun parseButtons(opts: JSONObject): List<List<Pair<String, String>>> {
-        val m = Tg.markup(opts) ?: return emptyList()
+        val m = Tg.markup(opts, simApp()) ?: return emptyList()
         val kb = m.optJSONArray("inline_keyboard") ?: return emptyList()
         return (0 until kb.length()).map { i ->
             val r = kb.getJSONArray(i)
             (0 until r.length()).map { j ->
                 val o = r.getJSONObject(j)
-                o.optString("text") to if (o.has("url")) "url:" + o.optString("url") else "cb:" + o.optString("callback_data")
+                o.optString("text") to when {
+                    o.has("web_app") -> "app:" + o.getJSONObject("web_app").optString("url")
+                    o.has("url") -> "url:" + o.optString("url")
+                    else -> "cb:" + o.optString("callback_data")
+                }
             }
         }
     }
 
     private fun keyboardOf(opts: JSONObject) {
-        val m = Tg.markup(opts) ?: return
+        val m = Tg.markup(opts, simApp()) ?: return
         if (m.optBoolean("remove_keyboard")) keyboard = emptyList()
         val kb = m.optJSONArray("keyboard") ?: return
         keyboard = (0 until kb.length()).map { i ->
             val r = kb.getJSONArray(i)
-            (0 until r.length()).map { r.getJSONObject(it).optString("text") }
+            (0 until r.length()).map {
+                val o = r.getJSONObject(it)
+                o.optString("text") to (o.optJSONObject("web_app")?.optString("url").orEmpty())
+            }
         }
     }
 
@@ -208,6 +224,11 @@ class BotActivity : LumenBase() {
         override fun http(method: String, url: String, body: String, headers: String) = BotAi.http(method, url, body, headers)
         override fun youtube(query: String, n: Int) = BotAi.youtube(query, n)
         override fun users(): String = JSONArray().put(me.toJson()).toString()
+
+        override fun appUrl(params: String): String {
+            val l = simApp()
+            return if (l.isBlank() || params.isBlank()) l else MiniApp.withParams(l, params)
+        }
     }
 
     /** Runs [work] on the test runtime (reloaded when the code changed). */
@@ -253,6 +274,10 @@ class BotActivity : LumenBase() {
             openUrl(data.removePrefix("url:"))
             return
         }
+        if (data.startsWith("app:")) {
+            previewApp(data.removePrefix("app:"), fromKeyboard = false)
+            return
+        }
         chat.add(Msg(false, "[$label]", system = true))
         render()
         val u = TgUpdate(nextId++, "callback", me.id, "private", me, m.text, m.id, callbackId = "sim" + nextId, data = data.removePrefix("cb:"))
@@ -279,7 +304,11 @@ class BotActivity : LumenBase() {
         }
         if (keyboard.isNotEmpty()) {
             for (r in keyboard) {
-                footer.addView(chipRow(this, r.map { label -> chip(this, label) { sendTest(label) } }))
+                footer.addView(chipRow(this, r.map { (label, app) ->
+                    chip(this, if (app.isNotBlank()) "📱 $label" else label) {
+                        if (app.isNotBlank()) previewApp(app, fromKeyboard = true) else sendTest(label)
+                    }
+                }))
             }
         }
         val input = edt(this, t("Сообщение боту", "Message to the bot"), draft)
@@ -326,7 +355,11 @@ class BotActivity : LumenBase() {
             addView(tv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             for (r in m.buttons) {
                 addView(rowOf(context, *r.map { (label, data) ->
-                    btn(context, if (data.startsWith("url:")) "$label ↗" else label, style = BtnStyle.OUTLINED) { pressTest(m, label, data) }
+                    btn(context, when {
+                        data.startsWith("url:") -> "$label ↗"
+                        data.startsWith("app:") -> "📱 $label"
+                        else -> label
+                    }, style = BtnStyle.OUTLINED) { pressTest(m, label, data) }
                 }.toTypedArray()))
             }
             if (m.error != null) addView(btn(context, t("🛠 Исправить с ИИ", "🛠 Fix with AI"), style = BtnStyle.TONAL) { fixWithAi(m.error) })
@@ -472,6 +505,306 @@ class BotActivity : LumenBase() {
                 render()
             }
         }.show()
+    }
+
+    // ---------------- mini app ----------------
+
+    /** Opens the mini app like Telegram would; its sendData goes to the test chat. */
+    private fun previewApp(link: String, fromKeyboard: Boolean) {
+        val html = Bots.miniApp(botId)
+        if (html.isBlank()) {
+            if (MiniApp.httpsOk(link)) openUrl(link) else toast(t("Мини-апп ещё не создан: вкладка «Мини-апп»", "No mini app yet: see the Mini app tab"))
+            return
+        }
+        MiniAppPreview.show(this, html, MiniApp.paramsOf(link)) { data -> appDataToTest(data, fromKeyboard) }
+    }
+
+    private fun appDataToTest(data: String, fromKeyboard: Boolean) {
+        tab = TAB_TEST
+        chat.add(Msg(false, "📱 " + t("Мини-апп отправил: ", "The mini app sent: ") + data, system = true))
+        if (!fromKeyboard) {
+            chat.add(Msg(false, t("В Telegram данные дойдут до бота, только если мини-апп открыт keyboard-кнопкой (app: true в keyboard).",
+                "In Telegram the data reaches the bot only when the mini app is opened from a keyboard button (app: true in keyboard)."), system = true))
+        }
+        render()
+        val u = TgUpdate(nextId++, "message", me.id, "private", me, "", nextId++, appData = data)
+        simulate { it.handle(u) }
+    }
+
+    private var appDraft = ""
+    private var appDescEdit: EditText? = null
+    private var showHtml = false
+
+    private fun appTab(b: BotInfo): Col {
+        appDescEdit?.let { appDraft = it.text.toString() }
+        appDescEdit = null
+        val c = Col(this)
+        val html = Bots.miniApp(botId)
+        c.muted(t("Мини-апп — веб-страница внутри Telegram: форма заказа, каталог с корзиной, анкета, калькулятор, игра. Открывается кнопкой бота или из меню рядом с полем ввода.",
+            "A mini app is a web page inside Telegram: an order form, a catalog with a cart, a survey, a calculator, a game. It opens from a bot button or the menu next to the input."))
+        val busyNow = busy
+        if (busyNow != null) {
+            busyView = c.working(busyNow).first
+            return c
+        }
+        if (html.isBlank()) {
+            c.h2(t("Что должен делать мини-апп", "What the mini app should do"))
+            appDescEdit = c.edit(t("Например: каталог из 6 товаров с фото-эмодзи, корзина, кнопка «Оформить» отправляет заказ боту", "E.g. a catalog of 6 products with emoji pictures, a cart, "Checkout" sends the order to the bot"),
+                appDraft, multiline = true).apply { minLines = 4 }
+            c.chips(MINIAPP_EXAMPLES.map { (label, text) ->
+                chip(this, label) {
+                    appDraft = text()
+                    render()
+                }
+            })
+            c.button(t("✨ Создать мини-апп (ИИ)", "✨ Create the mini app (AI)"), primary = true) { createApp(b) }
+            c.button(t("Вставить свой HTML", "Paste my own HTML"), style = BtnStyle.TEXT) { editAppByHand("") }
+            return c
+        }
+        c.card {
+            if (b.miniAppUrl.isNotBlank()) {
+                add(text(ctx, "🌐 " + t("Опубликован", "Published"), Type.TITLE_M, bold = true, color = Palette.OK), 0)
+                add(text(ctx, b.miniAppUrl, 13f, color = Palette.ACCENT).apply { setOnClickListener { openUrl(b.appLink) } }, 4)
+            } else {
+                add(text(ctx, t("Не опубликован", "Not published"), Type.TITLE_M, bold = true, color = Palette.WARN), 0)
+                muted(t("Telegram откроет мини-апп только после публикации. В тест-чате и предпросмотре он работает уже сейчас.",
+                    "Telegram opens the mini app only after publishing. In the test chat and the preview it works already."))
+            }
+            muted((if (b.miniAppDesc.isNotBlank()) b.miniAppDesc.take(120) + " · " else "") + "%.1f KB".format(html.length / 1024.0))
+        }
+        c.button(t("👁 Предпросмотр", "👁 Preview"), primary = true) { previewApp(simApp(), fromKeyboard = true) }
+        c.row(
+            btn(this, t("✏️ Изменить словами", "✏️ Change in words"), style = BtnStyle.TONAL) { editApp(b, html) },
+            btn(this, t("Править HTML", "Edit HTML"), style = BtnStyle.TEXT) { editAppByHand(html) }
+        )
+        c.button(t("🔗 Подключить к боту (ИИ)", "🔗 Connect to the bot (AI)"), style = BtnStyle.TONAL) { connectApp(b, html) }
+        c.muted(t("ИИ добавит в код бота кнопку открытия и обработку данных, которые присылает мини-апп.", "AI adds an opening button and the handling of the mini app's data to the bot code."))
+
+        c.h2(t("Публикация", "Publishing"))
+        c.muted(t("Telegram открывает мини-аппы только по адресу https. Lumen бесплатно публикует страницу на GitHub Pages вашего аккаунта (публичный репозиторий «${GhPages.repo}»).",
+            "Telegram opens mini apps only from an https address. Lumen publishes the page for free to GitHub Pages of your account (public repository "${GhPages.repo}")."))
+        if (GhPages.token() == null) {
+            c.muted(t("1) Войдите на github.com (или зарегистрируйтесь). 2) Создайте токен: «Получить токен» → Generate token (право public_repo уже отмечено). 3) Вставьте его сюда.",
+                "1) Sign in to github.com (or sign up). 2) Make a token: "Get a token" → Generate token (public_repo is already ticked). 3) Paste it here."))
+            c.row(
+                btn(this, t("Получить токен", "Get a token"), style = BtnStyle.TEXT) { openUrl(GhPages.TOKEN_PAGE) },
+                btn(this, t("Ввести токен", "Enter the token"), style = BtnStyle.TONAL) { connectGitHub() }
+            )
+        } else {
+            c.muted("GitHub: @${GhPages.login} · ${GhPages.repo}")
+            c.button(if (b.miniAppUrl.isBlank() || !b.miniAppUrl.contains("github.io")) t("🌐 Опубликовать", "🌐 Publish") else t("🌐 Обновить публикацию", "🌐 Update the publication"), primary = true) {
+                publishApp(b)
+            }
+            c.button(t("Отключить GitHub / сменить репозиторий", "Disconnect GitHub / change the repository"), style = BtnStyle.TEXT) { gitHubMenu() }
+        }
+        c.button(t("Свой адрес (https)…", "Own address (https)…"), style = BtnStyle.TEXT) {
+            prompt(t("Адрес мини-аппа", "Mini app address"), "https://…", b.miniAppUrl) { url ->
+                if (url.isNotBlank() && !MiniApp.httpsOk(url)) {
+                    toast(t("Нужен адрес https://", "An https:// address is needed"))
+                    return@prompt
+                }
+                Bots.update(botId) {
+                    it.miniAppUrl = url.trim()
+                    it.miniAppVersion = System.currentTimeMillis()
+                }
+                pushMenu()
+                render()
+            }
+        }
+        c.button(t("Поделиться HTML", "Share the HTML"), style = BtnStyle.TEXT) { shareText("index.html", html) }
+
+        c.h2(t("В Telegram", "In Telegram"))
+        c.check(t("Кнопка мини-аппа в меню бота (рядом с полем ввода)", "Mini app button in the bot menu (next to the input)"), b.miniAppMenu) { v ->
+            Bots.update(botId) { it.miniAppMenu = v }
+            pushMenu()
+        }
+        val title = c.edit(t("Надпись на кнопке меню", "Menu button label"), b.miniAppTitle.ifBlank { t("Открыть", "Open") }).apply { isSingleLine = true }
+        c.button(t("Сохранить надпись", "Save the label"), style = BtnStyle.TEXT) {
+            Bots.update(botId) { it.miniAppTitle = title.text.toString().trim().take(64) }
+            pushMenu()
+            toast(t("Сохранено", "Saved"))
+        }
+        c.muted(t("Из меню мини-апп открывается для просмотра; вернуть данные боту он может только при открытии keyboard-кнопкой.",
+            "From the menu the mini app opens for viewing; it can send data back only when opened from a keyboard button."))
+
+        c.h2("HTML")
+        c.button(if (showHtml) t("Скрыть код", "Hide the code") else t("Показать код", "Show the code"), style = BtnStyle.TEXT) {
+            showHtml = !showHtml
+            render()
+        }
+        if (showHtml) {
+            val tv = TextView(this).apply {
+                typeface = Typeface.MONOSPACE
+                textSize = 11f
+                setTextColor(Palette.ON_SURFACE)
+                setTextIsSelectable(true)
+                text = highlight(html)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+            }
+            c.add(HorizontalScrollView(this).apply {
+                background = roundBg(Palette.CARD, 12f, context)
+                addView(tv)
+            }, 8)
+        }
+        if (Bots.hasPrevMiniApp(botId)) {
+            c.button(t("↩ Вернуть прошлую версию", "↩ Restore the previous version"), style = BtnStyle.TEXT) {
+                Bots.undoMiniApp(botId)
+                render()
+            }
+        }
+        c.button(t("Удалить мини-апп", "Delete the mini app"), style = BtnStyle.TEXT) {
+            confirm(t("Удалить мини-апп?", "Delete the mini app?"), t("Страница удалится с телефона, кнопка меню в Telegram вернётся к списку команд. Опубликованная копия на GitHub останется.",
+                "The page is deleted from the phone, the Telegram menu button goes back to the command list. The published copy on GitHub stays."), t("Удалить", "Delete")) {
+                Bots.deleteMiniApp(botId)
+                Bots.update(botId) {
+                    it.miniAppUrl = ""
+                    it.miniAppDesc = ""
+                }
+                pushMenu()
+                render()
+            }
+        }
+        return c
+    }
+
+    /** Applies the menu button right away (a running bot also does it on its next poll). */
+    private fun pushMenu() {
+        val b = info() ?: return
+        val token = Bots.token(botId) ?: return
+        val url = if (b.miniAppMenu && b.miniAppUrl.isNotBlank()) b.appLink else ""
+        Lumen.async({ TgApi(token).setMenuButton(url, b.miniAppTitle.ifBlank { t("Открыть", "Open") }) }, { e -> L.w("bots", "menu button: ${e.message}") }) { }
+    }
+
+    private fun needAi(): Boolean {
+        if (Provider.active() != null) return true
+        toast(t("Подключите AI в настройках", "Connect AI in settings"))
+        return false
+    }
+
+    private fun createApp(b: BotInfo) {
+        appDescEdit?.let { appDraft = it.text.toString() }
+        val desc = appDraft.trim()
+        if (desc.isBlank()) {
+            toast(t("Опишите мини-апп", "Describe the mini app"))
+            return
+        }
+        if (!needAi()) return
+        startBusy(t("ИИ делает мини-апп…", "AI is making the mini app…"))
+        Lumen.async({ MiniAppAi.build(b, desc) { s -> Lumen.ui { busyView?.text = s } } }, { e ->
+            stopBusy()
+            err(e)
+        }) { html ->
+            Bots.saveMiniApp(botId, html)
+            Bots.update(botId) { it.miniAppDesc = desc }
+            appDraft = ""
+            stopBusy()
+            confirm(t("Мини-апп готов", "The mini app is ready"),
+                t("Подключить его к боту? ИИ добавит в код кнопку открытия и обработку данных.", "Connect it to the bot? AI adds an opening button and data handling to the code."),
+                t("Подключить", "Connect")) { info()?.let { connectApp(it, html) } }
+        }
+    }
+
+    private fun editApp(b: BotInfo, html: String) {
+        if (!needAi()) return
+        prompt(t("Что изменить в мини-аппе?", "What should change in the mini app?"), t("Например: добавь поле «Комментарий» и тёмную шапку", "E.g. add a Comment field and a dark header"), multiline = true) { req ->
+            if (req.isBlank()) return@prompt
+            startBusy(t("ИИ меняет мини-апп…", "AI is changing the mini app…"))
+            Lumen.async({ MiniAppAi.edit(b, html, req) { s -> Lumen.ui { busyView?.text = s } } }, { e ->
+                stopBusy()
+                err(e)
+            }) { newHtml -> savedApp(newHtml) }
+        }
+    }
+
+    private fun savedApp(html: String) {
+        Bots.saveMiniApp(botId, html)
+        stopBusy()
+        val b = info() ?: return
+        if (b.miniAppUrl.contains("github.io") && GhPages.token() != null) {
+            confirm(t("Мини-апп изменён", "The mini app changed"), t("Обновить публикацию, чтобы изменения увидели в Telegram?", "Update the publication so Telegram shows the changes?"), t("Обновить", "Update")) { publishApp(b) }
+        } else {
+            toast(t("Сохранено", "Saved"))
+        }
+    }
+
+    private fun editAppByHand(html: String) {
+        val e = edt(this, "<!DOCTYPE html>…", html, multiline = true).apply {
+            typeface = Typeface.MONOSPACE
+            textSize = 11f
+            setHorizontallyScrolling(true)
+            minLines = 12
+        }
+        val box = ScrollView(this).apply {
+            setPadding(dp(16), dp(8), dp(16), 0)
+            addView(e)
+        }
+        AlertDialog.Builder(this).setTitle("HTML").setView(box)
+            .setPositiveButton(t("Сохранить", "Save")) { _, _ ->
+                val h = MiniApp.ensureSdk(e.text.toString().trim())
+                val bad = MiniApp.problems(h)
+                if (bad.isNotEmpty()) toast(bad.joinToString()) else savedApp(h)
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null)
+            .show()
+    }
+
+    private fun connectApp(b: BotInfo, html: String) {
+        if (!needAi()) return
+        tab = TAB_CODE
+        startBusy(t("ИИ подключает мини-апп к боту…", "AI is connecting the mini app to the bot…"))
+        Lumen.async({ MiniAppAi.connect(b, html) { s -> Lumen.ui { busyView?.text = s } } }, { e ->
+            stopBusy()
+            err(e)
+        }) { r -> applyResult(r, t("Подключён мини-апп", "Mini app connected")) }
+    }
+
+    private fun connectGitHub() {
+        prompt(t("Токен GitHub", "GitHub token"), "ghp_…") { tk ->
+            if (tk.isBlank()) return@prompt
+            Lumen.async({ GhPages.connect(tk) }, { e -> err(e) }) { login ->
+                toast("✓ @$login")
+                render()
+            }
+        }
+    }
+
+    private fun gitHubMenu() {
+        val items = listOf<Pair<String, () -> Unit>>(
+            t("Имя репозитория…", "Repository name…") to {
+                prompt(t("Репозиторий для мини-аппов", "Repository for mini apps"), "lumen-miniapps", GhPages.repo) { r ->
+                    if (Regex("^[A-Za-z0-9._-]{1,100}$").matches(r.trim())) GhPages.repo = r else toast(t("Недопустимое имя", "Invalid name"))
+                    render()
+                }
+            },
+            t("Отключить GitHub", "Disconnect GitHub") to {
+                GhPages.disconnect()
+                render()
+            }
+        )
+        AlertDialog.Builder(this).setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()
+    }
+
+    private fun publishApp(b: BotInfo) {
+        val html = Bots.miniApp(botId)
+        if (html.isBlank()) return
+        startBusy(t("Публикую…", "Publishing…"))
+        Lumen.async({ GhPages.publish(botId, html) { s -> Lumen.ui { busyView?.text = s } } }, { e ->
+            stopBusy()
+            err(e)
+        }) { url ->
+            Bots.update(botId) {
+                it.miniAppUrl = url
+                it.miniAppVersion = System.currentTimeMillis()
+            }
+            pushMenu()
+            stopBusy()
+            showText(t("Опубликовано", "Published"), url + "
+
+" + t(
+                "GitHub Pages обновляет страницу 1–2 минуты. Кнопки бота уже ведут на новую версию.",
+                "GitHub Pages updates the page in 1–2 minutes. The bot buttons already point to the new version."
+            ))
+        }
     }
 
     // ---------------- journal ----------------
@@ -666,12 +999,36 @@ class BotActivity : LumenBase() {
     companion object {
         const val TAB_TEST = 0
         const val TAB_CODE = 1
-        const val TAB_LOG = 2
-        const val TAB_SETTINGS = 3
+        const val TAB_APP = 2
+        const val TAB_LOG = 3
+        const val TAB_SETTINGS = 4
 
         fun open(ctx: Context, id: String, tab: Int = TAB_TEST, fresh: Boolean = false) {
             ctx.startActivity(Intent(ctx, BotActivity::class.java).putExtra("id", id).putExtra("tab", tab).putExtra("fresh", fresh))
         }
+
+        private val MINIAPP_EXAMPLES: List<Pair<String, () -> String>> = listOf(
+            t("🛒 Каталог", "🛒 Catalog") to {
+                t("Каталог из 6–8 товаров (эмодзи вместо фото, название, цена), корзина с количеством, итог. Кнопка «Оформить» отправляет боту список товаров, сумму, имя и телефон.",
+                    "A catalog of 6–8 products (emoji instead of photos, name, price), a cart with quantities, a total. "Checkout" sends the items, sum, name and phone to the bot.")
+            },
+            t("📝 Заявка", "📝 Request") to {
+                t("Форма заявки: имя, телефон, услуга (выбор из списка), дата и время, комментарий. Проверка полей, кнопка «Отправить» отправляет данные боту.",
+                    "A request form: name, phone, service (from a list), date and time, comment. Field validation, "Send" sends the data to the bot.")
+            },
+            t("📊 Опрос", "📊 Survey") to {
+                t("Опрос из 5 вопросов с вариантами ответа, прогресс-бар, в конце — результат и отправка ответов боту.",
+                    "A 5-question survey with answer options, a progress bar, at the end — the result and sending the answers to the bot.")
+            },
+            t("🧮 Калькулятор", "🧮 Calculator") to {
+                t("Калькулятор стоимости: ползунки площади и сроков, переключатели опций, итоговая цена пересчитывается сразу. «Отправить расчёт» — данные боту.",
+                    "A price calculator: sliders for area and terms, option switches, the total updates live. "Send the estimate" sends the data to the bot.")
+            },
+            t("🎮 Игра", "🎮 Game") to {
+                t("Простая игра «Поймай звезду» на 30 секунд: звёзды появляются в случайных местах, тап — очко. В конце результат отправляется боту для таблицы лидеров.",
+                    "A simple 30-second "Catch the star" game: stars appear at random spots, a tap scores. At the end the score is sent to the bot for a leaderboard.")
+            }
+        )
 
         private val KEYWORDS = Regex("""\b(function|return|const|let|var|if|else|for|of|in|while|true|false|null|undefined|new|try|catch|throw|typeof)\b""")
         private val STRINGS = Regex("""'(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`""")

@@ -43,6 +43,9 @@ interface BotHost {
 
     /** Returns a JSON array of {id, name, username}. */
     fun users(): String
+
+    /** Link to the bot's mini app with [params] (JSON) in "d"; empty when there is no mini app. */
+    fun appUrl(params: String): String = ""
 }
 
 /** Does nothing: for checking code right after the AI wrote it. */
@@ -178,6 +181,7 @@ class BotRuntime(private val code: String, private val host: BotHost, private va
         def("__http") { a -> host.http(str(a, 0), str(a, 1), str(a, 2), str(a, 3)) }
         def("__youtube") { a -> host.youtube(str(a, 0), long(a, 1).toInt().coerceIn(1, 20)) }
         def("__users") { _ -> host.users() }
+        def("__appUrl") { a -> host.appUrl(str(a, 0)) }
     }
 
     private fun str(a: Array<Any?>, i: Int): String {
@@ -263,6 +267,7 @@ class BotRuntime(private val code: String, private val host: BotHost, private va
   g.console = { log: g.log, info: g.log, warn: g.log, error: g.log };
   g.users = function () { return JSON.parse(String(__users())); };
   g.youtube = function (q, n) { return JSON.parse(String(__youtube(str(q), String(n || 5)))); };
+  g.appUrl = function (data) { return String(__appUrl(data === undefined ? '' : JSON.stringify(data))); };
 
   function match(p, s) {
     s = s === undefined || s === null ? '' : String(s);
@@ -277,7 +282,11 @@ class BotRuntime(private val code: String, private val host: BotHost, private va
       update: u, kind: u.kind, chatId: u.chatId, text: u.text, data: u.data, command: u.command, args: u.args,
       messageId: u.messageId, user: user, from: user, chat: { id: u.chatId, type: u.chatType }, match: null, photo: u.photo, answered: false
     };
+    c.appData = null;
+    if (u.appData) { try { c.appData = JSON.parse(u.appData); } catch (e) { c.appData = u.appData; } }
     c.message = { text: u.text, message_id: u.messageId, chat: c.chat, from: user };
+    if (u.appData) c.message.web_app_data = { data: u.appData };
+    c.webAppData = c.appData;
     if (u.kind === 'callback') c.callbackQuery = { data: u.data, id: u.callbackId, message: c.message, from: user };
     c.reply = function (t, o) { return send(u.chatId, t, o); };
     c.replyWithHTML = function (t, o) { o = o || {}; o.html = true; return c.reply(t, o); };
@@ -313,6 +322,11 @@ class BotRuntime(private val code: String, private val host: BotHost, private va
     }
   };
   function route(u, c) {
+      if (u.appData) {
+        var apps = (H.on.app || []).concat(H.on.web_app_data || []);
+        apps.forEach(function (fn) { fn(c); });
+        if (apps.length) return 'app';
+      }
       if (u.kind === 'callback') {
         for (var i = 0; i < H.actions.length; i++) {
           var m = match(H.actions[i].p, u.data);

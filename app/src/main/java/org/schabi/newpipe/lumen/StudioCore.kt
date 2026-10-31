@@ -31,13 +31,32 @@ data class SItem(val icon: String, val label: String, val value: String = "")
 data class SCue(val type: String, val at: Int, val text: String = "", val icon: String = "")
 
 /**
+ * A key frame of an animated shape: on word [at] of the scene plus [ms]. Values left null are taken from the key before.
+ * [x], [y]: centre in parts of the frame; [s] scale; [r] rotation in degrees; [o] opacity; [draw] how much of a line is drawn.
+ */
+data class SKey(
+    val at: Int, val ms: Long = 0, val x: Float? = null, val y: Float? = null, val s: Float? = null,
+    val r: Float? = null, val o: Float? = null, val draw: Float? = null, val ease: String = ""
+)
+
+/** An animated shape of the AI director ([StudioKeys.SHAPES]); [w], [h] in parts of the short side of the frame. */
+data class SShape(
+    val el: String, val text: String = "", val color: String = "accent", val fill: Boolean = false,
+    val w: Float = 0.2f, val h: Float = 0.2f, val keys: List<SKey> = emptyList()
+)
+
+/**
  * One screen of the video. [say] is spoken (and shown as captions); [kind] picks the visual
  * (see [Studio.KINDS]); [title] is used by "step" and "stat"; [items] by the tile layouts.
  * Set by the AI director: [emph] words highlighted in the captions, [cues] and the entry [transition].
  */
 data class SScene(
     val say: String, val kind: String = "text", val title: String = "", val items: List<SItem> = emptyList(),
-    val emph: List<String> = emptyList(), val cues: List<SCue> = emptyList(), val transition: String = ""
+    val emph: List<String> = emptyList(), val cues: List<SCue> = emptyList(), val transition: String = "",
+    /** Animated shapes on key frames. */
+    val shapes: List<SShape> = emptyList(),
+    /** B-roll: English search words for a stock photo, its [brollMode] ("full" or "card"), the downloaded [media] file and its [credit]. */
+    val broll: String = "", val brollMode: String = "", val media: String = "", val credit: String = ""
 )
 
 data class SScript(val title: String, val scenes: List<SScene>)
@@ -97,7 +116,13 @@ object Studio {
                 SCue(type, c.optInt("at", 0).coerceAtLeast(0), c.optString("text").ifBlank { c.optString("name") }.trim(), c.optString("icon").trim())
             }
         } ?: emptyList()
-        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase())
+        val shapes = o.optJSONArray("shapes")?.let { a -> (0 until a.length()).mapNotNull { j -> a.optJSONObject(j)?.let { StudioKeys.shapeOf(it) } } }
+            ?.take(StudioKeys.MAX_SHAPES) ?: emptyList()
+        val broll = o.opt("broll").let { b -> if (b is JSONObject) b.optString("query") else o.optString("broll") }.trim().take(80)
+        val mode = o.opt("broll").let { b -> if (b is JSONObject) b.optString("mode") else o.optString("brollMode") }.trim().lowercase()
+        return SScene(say, kind, o.optString("title").trim(), items.take(MAX_ITEMS), emph, cues, o.optString("transition").trim().lowercase(),
+            shapes, broll, if (mode == "card") "card" else if (broll.isNotEmpty() || o.optString("media").isNotEmpty()) "full" else "",
+            o.optString("media").trim(), o.optString("credit").trim())
     }
 
     const val MAX_ITEMS = 6
@@ -112,6 +137,11 @@ object Studio {
                 sc.cues.forEach { put(JSONObject().put("type", it.type).put("at", it.at).put("text", it.text).put("icon", it.icon)) }
             })
             if (sc.transition.isNotEmpty()) o.put("transition", sc.transition)
+            if (sc.shapes.isNotEmpty()) o.put("shapes", JSONArray().apply { sc.shapes.forEach { put(StudioKeys.toJson(it)) } })
+            if (sc.broll.isNotEmpty()) o.put("broll", sc.broll)
+            if (sc.brollMode.isNotEmpty()) o.put("brollMode", sc.brollMode)
+            if (sc.media.isNotEmpty()) o.put("media", sc.media)
+            if (sc.credit.isNotEmpty()) o.put("credit", sc.credit)
             put(o)
         }
     }).toString()
@@ -995,6 +1025,15 @@ val STUDIO_PROMPTS = linkedMapOf(
             "zoom — резкий наезд камеры на ударном слове (не чаще раза в 3-4 секунды); " +
             "pop — всплывающая плашка: text до 3 слов и icon-эмодзи («ВАЖНО», «×3», «ОШИБКА №1»), не больше 1-2 на сцену; " +
             "sfx — звук name: whoosh (смена темы), pop (появление), click (пункт списка), ding (вывод, верный ответ), boom (сильный акцент), riser (нарастание перед раскрытием; at — слово кульминации).\n" +
+            "broll — только для сцен, где реальное фото лучше схемы (место, предмет, люди, событие): английский запрос для поиска стокового фото, 2-4 конкретных слова (\"night city traffic\"); " +
+            "brollMode — full (фото на весь кадр, поверх только субтитры) или card (фото в карточке вместо схемы). Не больше трети сцен; для чисел, списков и процессов — графика, а не фото;\n" +
+            "shapes — 0-2 анимированные фигуры там, где нужно показать, связать или выделить: el — arrow, line, circle, ring, rect, underline, check, cross, spotlight (затемнение всего кроме круга), text, emoji; " +
+            "w, h — размер в долях короткой стороны кадра (для text и emoji h — размер шрифта, около 0.08); color — accent, white, ink, red, green, yellow; fill — заливка; " +
+            "keys — ключевые кадры по порядку: at — номер слова, ms — сдвиг от начала слова, x и y — центр в долях кадра (0..1), s — масштаб, r — поворот в градусах, o — прозрачность 0..1, " +
+            "draw — доля прорисовки линии 0..1, ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. " +
+            "Не ставь фигуры на субтитры внизу кадра (y больше 0.72). Пример — стрелка прорисовывается к цифре: " +
+            "{\"el\":\"arrow\",\"w\":0.35,\"color\":\"yellow\",\"keys\":[{\"at\":5,\"x\":0.3,\"y\":0.62,\"r\":-35,\"draw\":0},{\"at\":5,\"ms\":450,\"draw\":1,\"ease\":\"out\"}]}; " +
+            "кольцо выскакивает: {\"el\":\"ring\",\"w\":0.4,\"h\":0.4,\"keys\":[{\"at\":9,\"x\":0.5,\"y\":0.5,\"s\":0,\"draw\":0},{\"at\":9,\"ms\":400,\"s\":1,\"draw\":1,\"ease\":\"back\"}]}.\n" +
             "Первая сцена — хук: сильный визуал, zoom или pop. Чередуй визуалы и переходы. Не перегружай: 0-3 события на сцену, тихие сцены тоже нужны.\n" +
             "4. {drop}\n" +
             "Подписи и плашки на языке {lang}.\n" +

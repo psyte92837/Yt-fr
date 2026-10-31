@@ -6,6 +6,7 @@ package org.schabi.newpipe.lumen
 
 import org.json.JSONObject
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
@@ -106,7 +107,8 @@ object StudioDirector {
     /** A scene of the AI plan over words [from]..[to] (absolute indices); cue `at` are absolute too. */
     data class DScene(
         val from: Int, val to: Int, val kind: String, val title: String, val items: List<SItem>,
-        val emph: List<String>, val transition: String, val cues: List<SCue>
+        val emph: List<String>, val transition: String, val cues: List<SCue>,
+        val shapes: List<SShape> = emptyList(), val broll: String = "", val brollMode: String = ""
     )
 
     data class Direction(val title: String, val drop: Set<Int>, val scenes: List<DScene>)
@@ -149,7 +151,8 @@ object StudioDirector {
             val s = arr.optJSONObject(i) ?: continue
             val from = wordIndex(s.opt("from")) ?: continue
             val to = wordIndex(s.opt("to")) ?: from
-            // visuals and highlights are read like a saved scene; cues differ (absolute word numbers)
+            // visuals, highlights, shapes and B-roll are read like a saved scene (their word numbers stay absolute here);
+            // cues are read below
             val base = runCatching { Studio.sceneOf(JSONObject(s.toString()).put("say", "x").put("cues", org.json.JSONArray())) }
                 .getOrNull() ?: SScene("x")
             val cues = mutableListOf<SCue>()
@@ -168,7 +171,8 @@ object StudioDirector {
                 }
             }
             raw += DScene(from, to, fitKind(base.kind, base.items), base.title, base.items, base.emph,
-                s.optString("transition").trim().lowercase().takeIf { it in TRANSITIONS } ?: "", cues)
+                s.optString("transition").trim().lowercase().takeIf { it in TRANSITIONS } ?: "", cues,
+                base.shapes, base.broll, base.brollMode)
         }
         val drop = mutableSetOf<Int>()
         o.optJSONArray("drop")?.let { da -> for (i in 0 until da.length()) wordIndex(da.opt(i))?.takeIf { it in 0 until wordCount }?.let { drop += it } }
@@ -204,7 +208,10 @@ object StudioDirector {
         }
         if (out.isEmpty()) return emptyList()
         if (next < wordCount) out[out.lastIndex] = out.last().copy(to = wordCount - 1)
-        return out.map { s -> s.copy(cues = limitCues(s.cues, s.from, s.to)) }
+        return out.map { s ->
+            s.copy(cues = limitCues(s.cues, s.from, s.to),
+                shapes = s.shapes.take(StudioKeys.MAX_SHAPES).map { sh -> sh.copy(keys = sh.keys.map { it.copy(at = it.at.coerceIn(s.from, s.to)) }) })
+        }
     }
 
     /** Cues inside [from]..[to], sorted, at most 2 pops, 3 zooms (4 words apart) and 4 sounds per scene. */
@@ -330,11 +337,19 @@ object StudioDirector {
                 return (n - r.first).coerceIn(0, r.last - r.first)
             }
             val cues = s.cues.map { it.copy(at = local(it.at)) }
-            scenes += SScene(r.joinToString(" ") { out[it].text }, s.kind, s.title, s.items, s.emph, cues, s.transition)
+            val shapes = s.shapes.map { sh -> sh.copy(keys = sh.keys.map { it.copy(at = local(it.at)) }) }
+            scenes += SScene(r.joinToString(" ") { out[it].text }, s.kind, s.title, s.items, s.emph, cues, s.transition,
+                shapes, s.broll, s.brollMode)
             ranges += r
         }
         return Applied(SScript(d.title, scenes), ranges, out, keep, drop.size)
     }
+
+    /** Scenes that ask for a B-roll photo but have none yet. */
+    fun needBroll(s: SScript): List<Int> = s.scenes.indices.filter { s.scenes[it].broll.isNotBlank() && s.scenes[it].media.isBlank() }
+
+    /** Credits of the photos used, one per line, without repeats. */
+    fun credits(s: SScript): String = s.scenes.map { it.credit }.filter { it.isNotBlank() }.distinct().joinToString("\n")
 
     /** Short line about a plan: "zooms 4 · stickers 2 · sounds 6". */
     fun summary(s: SScript): Triple<Int, Int, Int> {
@@ -433,5 +448,176 @@ object StudioSfx {
             }
         }
         return ShortArray(base.size) { acc[it].roundToInt().coerceIn(-32768, 32767).toShort() }
+    }
+}
+
+/** Shapes animated on key frames: reading, checking and the state of a shape at any moment. */
+object StudioKeys {
+    val SHAPES = listOf("arrow", "line", "circle", "ring", "rect", "underline", "check", "cross", "spotlight", "text", "emoji")
+    val EASES = listOf("linear", "in", "out", "inOut", "back", "spring")
+    const val MAX_SHAPES = 3
+    const val MAX_KEYS = 8
+
+    /** Where a shape is and how it looks at one moment. */
+    data class State(val x: Float, val y: Float, val s: Float, val r: Float, val o: Float, val draw: Float)
+
+    private fun num(o: JSONObject, k: String, lo: Float, hi: Float): Float? {
+        if (!o.has(k)) return null
+        val v = o.optDouble(k)
+        if (v.isNaN()) return null
+        return v.toFloat().coerceIn(lo, hi)
+    }
+
+    /** "w12+300" → 300 (the shift after the word); a number or "w12" → 0. */
+    fun shiftMs(v: Any?): Long = (v as? String)?.substringAfter('+', "")?.trim()?.toLongOrNull() ?: 0L
+
+    /** A shape from JSON; null for an unknown kind, text without text or no key frames. */
+    fun shapeOf(o: JSONObject): SShape? {
+        val el = o.optString("el").ifBlank { o.optString("type") }.trim().lowercase()
+        if (el !in SHAPES) return null
+        val text = o.optString("text").trim().take(40)
+        if ((el == "text" || el == "emoji") && text.isEmpty()) return null
+        val ka = o.optJSONArray("keys") ?: return null
+        val keys = (0 until ka.length()).mapNotNull { i ->
+            val k = ka.optJSONObject(i) ?: return@mapNotNull null
+            val at = StudioDirector.wordIndex(k.opt("at")) ?: return@mapNotNull null
+            val ms = (if (k.has("ms")) k.optLong("ms") else shiftMs(k.opt("at"))).coerceIn(0, 20_000)
+            val ease = k.optString("ease").trim().let { e -> EASES.firstOrNull { it.equals(e, true) } ?: "" }
+            SKey(at.coerceAtLeast(0), ms, num(k, "x", -0.5f, 1.5f), num(k, "y", -0.5f, 1.5f), num(k, "s", 0f, 6f),
+                num(k, "r", -1080f, 1080f), num(k, "o", 0f, 1f), num(k, "draw", 0f, 1f), ease)
+        }.sortedWith(compareBy({ it.at }, { it.ms })).take(MAX_KEYS)
+        if (keys.isEmpty()) return null
+        val color = o.optString("color").trim().ifBlank { "accent" }.take(9)
+        return SShape(el, text, color, o.optBoolean("fill", false),
+            num(o, "w", 0.01f, 1.5f) ?: if (el == "text" || el == "emoji") 0.08f else 0.2f,
+            num(o, "h", 0.005f, 1.5f) ?: if (el == "text" || el == "emoji") 0.08f else 0.2f, keys)
+    }
+
+    fun toJson(s: SShape): JSONObject = JSONObject().put("el", s.el).put("text", s.text).put("color", s.color).put("fill", s.fill)
+        .put("w", s.w.toDouble()).put("h", s.h.toDouble()).put("keys", org.json.JSONArray().apply {
+            s.keys.forEach { k ->
+                put(JSONObject().put("at", k.at).put("ms", k.ms).apply {
+                    k.x?.let { put("x", it.toDouble()) }
+                    k.y?.let { put("y", it.toDouble()) }
+                    k.s?.let { put("s", it.toDouble()) }
+                    k.r?.let { put("r", it.toDouble()) }
+                    k.o?.let { put("o", it.toDouble()) }
+                    k.draw?.let { put("draw", it.toDouble()) }
+                    if (k.ease.isNotEmpty()) put("ease", k.ease)
+                })
+            }
+        })
+
+    fun ease(name: String, x: Float): Float = when (name) {
+        "linear" -> StudioMotion.clamp(x)
+        "in" -> StudioMotion.clamp(x).let { it * it * it }
+        "out" -> 1 - (1 - StudioMotion.clamp(x)).let { it * it * it }
+        "back" -> StudioMotion.backOut(x)
+        "spring" -> StudioMotion.spring(x)
+        else -> StudioMotion.inOut(x)
+    }
+
+    /** Key frames with every value filled in from the frames before (defaults: centre, scale 1, no turn, visible, drawn). */
+    fun resolve(keys: List<SKey>): List<State> {
+        var cur = State(0.5f, 0.5f, 1f, 0f, 1f, 1f)
+        return keys.map { k ->
+            cur = State(k.x ?: cur.x, k.y ?: cur.y, k.s ?: cur.s, k.r ?: cur.r, k.o ?: cur.o, k.draw ?: cur.draw)
+            cur
+        }
+    }
+
+    /** Times of the key frames, never going back: [wordMs] gives the start of word k of the scene. */
+    fun times(keys: List<SKey>, wordMs: (Int) -> Long): List<Long> {
+        var last = Long.MIN_VALUE
+        return keys.map { k ->
+            last = max(last, wordMs(k.at) + k.ms)
+            last
+        }
+    }
+
+    /** The shape at [tMs]; null before its first key frame. Between frames values glide with the ease of the next frame. */
+    fun state(shape: SShape, times: List<Long>, tMs: Long): State? {
+        if (shape.keys.isEmpty() || times.size != shape.keys.size || tMs < times[0]) return null
+        val f = resolve(shape.keys)
+        var k = 0
+        while (k + 1 < times.size && times[k + 1] <= tMs) k++
+        if (k == f.lastIndex) return f[k]
+        val a = f[k]
+        val b = f[k + 1]
+        val dur = times[k + 1] - times[k]
+        if (dur <= 0) return b
+        val p = ease(shape.keys[k + 1].ease, (tMs - times[k]).toFloat() / dur)
+        fun mix(x: Float, y: Float) = x + (y - x) * p
+        return State(mix(a.x, b.x), mix(a.y, b.y), mix(a.s, b.s), mix(a.r, b.r), mix(a.o, b.o), mix(a.draw, b.draw))
+    }
+
+    /** Named colour or "#RRGGBB"; [accent] and [ink] come from the style. */
+    fun color(name: String, accent: Int, ink: Int): Int = when (name.lowercase()) {
+        "accent" -> accent
+        "ink" -> ink
+        "white" -> 0xFFFFFFFF.toInt()
+        "black" -> 0xFF000000.toInt()
+        "red" -> 0xFFFF4D6A.toInt()
+        "green" -> 0xFF34C759.toInt()
+        "yellow" -> 0xFFFFD60A.toInt()
+        "blue" -> 0xFF4F8BFF.toInt()
+        else -> if (name.startsWith("#") && name.length == 7) (name.substring(1).toLongOrNull(16)?.toInt()?.let { it or 0xFF000000.toInt() } ?: accent) else accent
+    }
+}
+
+/** A stock photo found for B-roll. */
+data class BrollHit(
+    val url: String, val thumb: String, val width: Int, val height: Int, val title: String, val creator: String,
+    val license: String, val licenseVersion: String, val landing: String
+)
+
+/** B-roll photos from Openverse (official API, no key; Wikimedia, Flickr and other open collections). Pure part. */
+object StudioBrollCatalog {
+    /** Search for photos; [aspect] narrows to wide, tall or square pictures. */
+    fun url(query: String, commercial: Boolean, aspect: StudioAspect?): String =
+        "https://api.openverse.org/v1/images/?q=${StudioMusicCatalog.enc(query)}&page_size=12&mature=false" +
+            (if (commercial) "&license_type=commercial" else "") +
+            when (aspect) {
+                StudioAspect.PORTRAIT -> "&aspect_ratio=tall"
+                StudioAspect.LANDSCAPE -> "&aspect_ratio=wide"
+                StudioAspect.SQUARE -> "&aspect_ratio=square"
+                null -> ""
+            }
+
+    fun parse(json: String): List<BrollHit> {
+        val arr = runCatching { JSONObject(json).optJSONArray("results") }.getOrNull() ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val url = o.optString("url")
+            if (!url.startsWith("http")) return@mapNotNull null
+            BrollHit(url, o.optString("thumbnail"), o.optInt("width", 0), o.optInt("height", 0), o.optString("title"),
+                o.optString("creator"), StudioMusicCatalog.licenseCode(o.optString("license")), o.optString("license_version"),
+                o.optString("foreign_landing_url"))
+        }
+    }
+
+    /** Best photos first: big enough for the frame, then the shape closest to it; tiny ones last. */
+    fun rank(hits: List<BrollHit>, aspect: StudioAspect): List<BrollHit> {
+        val want = when (aspect) {
+            StudioAspect.PORTRAIT -> 9f / 16
+            StudioAspect.LANDSCAPE -> 16f / 9
+            StudioAspect.SQUARE -> 1f
+        }
+        return hits.sortedWith(compareBy<BrollHit> { if (min(it.width, it.height) in 1 until 600) 1 else 0 }
+            .thenBy { h -> if (h.width > 0 && h.height > 0) abs(kotlin.math.ln((h.width.toFloat() / h.height) / want)) else 9f })
+    }
+
+    /** Credit line for the video description. */
+    fun credit(h: BrollHit): String = buildString {
+        append("Photo")
+        if (h.title.isNotBlank()) append(": \"").append(h.title.take(80)).append('"')
+        if (h.creator.isNotBlank()) append(" by ").append(h.creator.take(60))
+        val lic = when (h.license) {
+            "cc0" -> "CC0"
+            "pdm" -> "Public Domain"
+            else -> ("CC " + h.license.uppercase() + " " + h.licenseVersion).trim()
+        }
+        append(" (").append(lic).append(')')
+        if (h.landing.isNotBlank()) append(' ').append(h.landing)
     }
 }

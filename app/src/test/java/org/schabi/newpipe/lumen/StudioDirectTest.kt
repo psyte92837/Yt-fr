@@ -218,3 +218,103 @@ class StudioDirectTest {
         assertTrue(StudioSfx.mix(base, 24_000, emptyList()) === base)
     }
 }
+
+class StudioKeysTest {
+    private fun shape(json: String) = StudioKeys.shapeOf(org.json.JSONObject(json))
+
+    @Test
+    fun readsShapesAndKeys() {
+        val s = shape("{\"el\":\"Arrow\",\"w\":0.35,\"color\":\"yellow\",\"keys\":[{\"at\":\"w7+200\",\"draw\":1,\"ease\":\"OUT\"},{\"at\":5,\"x\":9,\"draw\":0}]}")!!
+        assertEquals("arrow", s.el)
+        assertEquals(0.35f, s.w, 0.0001f)
+        // sorted by word, values clamped, "+200" read as a shift
+        assertEquals(listOf(5, 7), s.keys.map { it.at })
+        assertEquals(1.5f, s.keys[0].x!!, 0f)
+        assertEquals(200L, s.keys[1].ms)
+        assertEquals("out", s.keys[1].ease)
+        assertNull(shape("{\"el\":\"star\",\"keys\":[{\"at\":1}]}"))
+        assertNull(shape("{\"el\":\"text\",\"keys\":[{\"at\":1}]}"))
+        assertNull(shape("{\"el\":\"ring\",\"keys\":[]}"))
+        assertEquals(0.08f, shape("{\"el\":\"emoji\",\"text\":\"🔥\",\"keys\":[{\"at\":0}]}")!!.h, 0.0001f)
+        // round trip
+        assertEquals(s, StudioKeys.shapeOf(StudioKeys.toJson(s)))
+    }
+
+    @Test
+    fun interpolatesBetweenKeys() {
+        val s = SShape("ring", keys = listOf(SKey(0, x = 0.2f, s = 0f, draw = 0f), SKey(1, s = 1f, draw = 1f, ease = "linear"), SKey(2, x = 0.8f, ease = "linear")))
+        val times = listOf(1000L, 2000L, 3000L)
+        assertNull(StudioKeys.state(s, times, 999))
+        val a = StudioKeys.state(s, times, 1500)!!
+        assertEquals(0.5f, a.s, 0.0001f)
+        assertEquals(0.5f, a.draw, 0.0001f)
+        assertEquals(0.2f, a.x, 0.0001f)
+        // the third key keeps scale and draw of the second one
+        val b = StudioKeys.state(s, times, 2500)!!
+        assertEquals(0.5f, b.x, 0.0001f)
+        assertEquals(1f, b.s, 0.0001f)
+        assertEquals(0.8f, StudioKeys.state(s, times, 9000)!!.x, 0.0001f)
+        // defaults
+        assertEquals(StudioKeys.State(0.5f, 0.5f, 1f, 0f, 1f, 1f), StudioKeys.resolve(listOf(SKey(0)))[0])
+    }
+
+    @Test
+    fun keyTimesNeverGoBack() {
+        val keys = listOf(SKey(3), SKey(1, ms = 100), SKey(4, ms = 50))
+        val starts = mapOf(1 to 500L, 3 to 1500L, 4 to 2000L)
+        assertEquals(listOf(1500L, 1500L, 2050L), StudioKeys.times(keys) { starts[it] ?: 0L })
+    }
+
+    @Test
+    fun colorsAndEases() {
+        assertEquals(0xFFFFD60A.toInt(), StudioKeys.color("yellow", 1, 2))
+        assertEquals(1, StudioKeys.color("accent", 1, 2))
+        assertEquals(0xFF102030.toInt(), StudioKeys.color("#102030", 1, 2))
+        assertEquals(1, StudioKeys.color("#zz", 1, 2))
+        for (e in StudioKeys.EASES) {
+            assertEquals(e, 0f, StudioKeys.ease(e, 0f), 0.001f)
+            assertEquals(e, 1f, StudioKeys.ease(e, 1f), 0.001f)
+        }
+    }
+
+    @Test
+    fun directorCarriesShapesAndBroll() {
+        val reply = "{\"scenes\":[{\"from\":0,\"to\":2,\"broll\":\"night city\",\"brollMode\":\"card\"," +
+            "\"shapes\":[{\"el\":\"ring\",\"keys\":[{\"at\":1,\"s\":0},{\"at\":1,\"ms\":300,\"s\":1}]},{\"el\":\"line\",\"keys\":[{\"at\":40}]}]}," +
+            "{\"from\":3,\"to\":5,\"broll\":\"desk\"}]}"
+        val d = StudioDirector.parse(reply, 6)!!
+        assertEquals("card", d.scenes[0].brollMode)
+        assertEquals("full", d.scenes[1].brollMode)
+        // a key past the scene is moved inside it
+        assertEquals(2, d.scenes[0].shapes[1].keys[0].at)
+        val w = (0..5).map { SWord("w$it", it * 500L, it * 500L + 400) }
+        val a = StudioDirector.apply(d, w, 3000, setOf(0))
+        val sc = a.script.scenes[0]
+        assertEquals("night city", sc.broll)
+        // word 1 becomes the first word of the scene after word 0 is cut
+        assertEquals(listOf(0, 0), sc.shapes[0].keys.map { it.at })
+        assertEquals(listOf(0, 1), StudioDirector.needBroll(a.script))
+        val withPhoto = a.script.copy(scenes = a.script.scenes.mapIndexed { i, s -> if (i == 0) s.copy(media = "/x.jpg", credit = "Photo by A") else s })
+        assertEquals(listOf(1), StudioDirector.needBroll(withPhoto))
+        assertEquals("Photo by A", StudioDirector.credits(withPhoto))
+        assertEquals(withPhoto, Studio.parseScript(Studio.toJson(withPhoto)))
+    }
+
+    @Test
+    fun brollCatalog() {
+        val url = StudioBrollCatalog.url("night city", true, StudioAspect.LANDSCAPE)
+        assertTrue(url.contains("q=night+city") && url.contains("license_type=commercial") && url.contains("aspect_ratio=wide"))
+        assertTrue(!StudioBrollCatalog.url("x", false, null).contains("aspect_ratio"))
+        val json = "{\"results\":[" +
+            "{\"url\":\"https://a/1.jpg\",\"width\":400,\"height\":300,\"title\":\"Small\",\"license\":\"by\",\"license_version\":\"4.0\"}," +
+            "{\"url\":\"https://a/2.jpg\",\"width\":1200,\"height\":1600,\"title\":\"Tall\",\"license\":\"by\"}," +
+            "{\"url\":\"https://a/3.jpg\",\"width\":1920,\"height\":1080,\"title\":\"Wide\",\"creator\":\"Ann\",\"license\":\"by-sa\",\"license_version\":\"2.0\",\"foreign_landing_url\":\"https://f/3\"}," +
+            "{\"url\":\"ftp://bad\"}]}"
+        val hits = StudioBrollCatalog.parse(json)
+        assertEquals(3, hits.size)
+        assertEquals(listOf("Wide", "Tall", "Small"), StudioBrollCatalog.rank(hits, StudioAspect.LANDSCAPE).map { it.title })
+        assertEquals("Tall", StudioBrollCatalog.rank(hits, StudioAspect.PORTRAIT)[0].title)
+        assertEquals("Photo: \"Wide\" by Ann (CC BY-SA 2.0) https://f/3", StudioBrollCatalog.credit(hits[2]))
+        assertTrue(StudioBrollCatalog.parse("oops").isEmpty())
+    }
+}

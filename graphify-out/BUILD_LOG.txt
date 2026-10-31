@@ -69,25 +69,25 @@ Commands:
   AST cache: 0/140 files served from cache (0%); 140 to extract
   AST extraction: 100/140 uncached files (71%) [4 workers]
   AST extraction: 140/140 uncached files (100%) [4 workers]
-  warning: 6 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/Help.kt (error region at line 57, 4 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMap.kt (error region at line 51, 24 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMapActivity.kt (error region at line 19, 4 symbol(s) extracted) (+1 more)
-[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 3844 nodes, 12758 edges, 142 communities
+  warning: 5 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMap.kt (error region at line 51, 24 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMapActivity.kt (error region at line 19, 4 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/StudioRender.kt (error region at line 1, 79 symbol(s) extracted)
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 3851 nodes, 12782 edges, 143 communities
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
 Loading existing graph...
-Graph: 3844 nodes, 12758 edges
+Graph: 3851 nodes, 12782 edges
 Re-clustering...
-Done - 142 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+Done - 143 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-graph_map: 142 communities named, 140 files mapped
+graph_map: 143 communities named, 140 files mapped
 map exit=0
-total 6708
-drwxr-xr-x 3 runner runner    4096 Oct 31 15:59 .
-drwxr-xr-x 4 runner runner    4096 Oct 31 15:59 ..
--rw-r--r-- 1 runner runner  309895 Oct 31 15:59 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 31 15:59 .graphify_root
--rw-r--r-- 1 runner runner    6733 Oct 31 15:59 BUILD_LOG.txt
--rw-r--r-- 1 runner runner   44883 Oct 31 15:59 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Oct 31 15:59 cache
--rw-r--r-- 1 runner runner 6450695 Oct 31 15:59 graph.json
--rw-r--r-- 1 runner runner   33819 Oct 31 15:59 manifest.json
+total 6720
+drwxr-xr-x 3 runner runner    4096 Oct 31 16:03 .
+drwxr-xr-x 4 runner runner    4096 Oct 31 16:03 ..
+-rw-r--r-- 1 runner runner  310027 Oct 31 16:03 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 31 16:03 .graphify_root
+-rw-r--r-- 1 runner runner    6731 Oct 31 16:03 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner   43369 Oct 31 16:03 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 31 16:03 cache
+-rw-r--r-- 1 runner runner 6461766 Oct 31 16:03 graph.json
+-rw-r--r-- 1 runner runner   33843 Oct 31 16:03 manifest.json

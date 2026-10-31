@@ -168,6 +168,7 @@ class LumenActivity : LumenBase() {
                 add(row, 0)
             }
         }
+        if (!showArchived) botsCard(c)
         val all = Store.projects()
         val list = all.filter { it.archived == showArchived }
         c.h2(if (showArchived) t("Архив", "Archive") + " (${list.size})" else t("Проекты", "Projects") + " (${list.size})")
@@ -240,6 +241,30 @@ class LumenActivity : LumenBase() {
         )
     }
 
+    /** Entry to the separate "My Telegram bots" section (it also has its own launcher icon). */
+    private fun botsCard(c: Col) {
+        val bots = Bots.list()
+        val on = bots.count { it.enabled }
+        val card = c.card {
+            val row = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            val msg = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(ctx, t("🤖 Мои ТГ боты", "🤖 My Telegram bots"), Type.TITLE_M, bold = true))
+                addView(text(ctx, when {
+                    bots.isEmpty() -> t("ИИ напишет бота по описанию, телефон станет сервером", "AI writes a bot from your description, the phone is its server")
+                    else -> t("Ботов: ${bots.size} · работают: $on", "Bots: ${bots.size} · running: $on")
+                }, 13f, color = Palette.MUTED))
+            }
+            row.addView(msg, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(btn(ctx, t("Открыть", "Open"), style = BtnStyle.TONAL) { BotsActivity.open(ctx) })
+            add(row, 0)
+        }
+        card.setOnClickListener { BotsActivity.open(this) }
+    }
+
     private fun homeMenu(archived: Int) {
         val items = mutableListOf<Pair<String, () -> Unit>>()
         items.add(t("Задать домен для наблюдения", "Set a domain to watch") to {
@@ -262,6 +287,7 @@ class LumenActivity : LumenBase() {
         })
         items.add("🎬 Lumen Studio" to { StudioActivity.open(this) })
         items.add(t("🫧 Кнопка поверх YouTube", "🫧 Button over YouTube") to { LensActivity.open(this) })
+        items.add(t("🤖 Мои ТГ боты", "🤖 My Telegram bots") to { BotsActivity.open(this) })
         items.add(t("Справка и о проекте", "Help and about") to { HelpActivity.open(this, "about") })
         items.add(t("Журнал и отчёт об ошибке", "Logs and bug report") to {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))

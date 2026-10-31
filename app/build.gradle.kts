@@ -308,6 +308,8 @@ dependencies {
 
     // HTTP client
     implementation(libs.squareup.okhttp)
+    // Lumen Bots: runs the bot JavaScript
+    implementation(libs.mozilla.rhino)
     implementation(libs.squareup.okhttp.brotli)
 
     // Media player

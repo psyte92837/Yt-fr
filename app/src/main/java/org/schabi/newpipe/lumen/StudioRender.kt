@@ -287,7 +287,9 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** Shapes of the AI director animated on their key frames (arrows draw themselves, rings circle, a spotlight dims the rest). */
-    private fun shapes(c: Canvas, i: Int, tMs: Long, a: Float) = drawShapes(c, plan.shapes.getOrNull(i) ?: return, tMs, a)
+    private fun shapes(c: Canvas, i: Int, tMs: Long, a: Float) {
+        drawShapes(c, plan.shapes.getOrNull(i) ?: return, tMs, a)
+    }
 
     /** Shapes with absolute key times: of the AI director or compiled from a motion template. */
     private fun drawShapes(c: Canvas, list: List<Pair<SShape, List<Long>>>, tMs: Long, a: Float) {

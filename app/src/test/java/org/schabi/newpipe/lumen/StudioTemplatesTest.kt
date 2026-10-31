@@ -175,4 +175,24 @@ class StudioTemplatesTest {
         assertEquals(" tpl:kinetic_list", StudioTplCatalog.kinds(listOf(t)))
         assertEquals("", StudioTplCatalog.visuals(emptyList()))
     }
+
+    @Test
+    fun videoBriefAndReply() {
+        assertEquals(listOf(2.0, 1.5, 6.5), StudioVideoTpl.shots(listOf(2000, 3500), 10_000))
+        assertEquals(listOf(10.0), StudioVideoTpl.shots(emptyList(), 10_000))
+        val b = StudioVideoTpl.brief("Как это работает", "Канал", 65_000, true, listOf("темп 160 сл/мин"), listOf(2000, 3500),
+            listOf(0L to "Привет", 900L to "Привет", 2000L to "Сегодня о главном"), maxSpeech = 40)
+        assertTrue(b.contains("1:05 · Shorts"))
+        assertTrue(b.contains("- темп 160 сл/мин"))
+        assertTrue(b.contains("2.0 1.5 61.5"))
+        assertTrue(b.contains("[0:00] Привет\n[0:02] Сегодня о главном"))
+        assertEquals(1, Regex("Привет").findAll(b).count()) // repeated cues once
+        val parts = StudioVideoTpl.parse("{\"edit\":{\"rules\":[]},\"motions\":[{\"layers\":[]},{\"layers\":[]}],\"notes\":\"быстро\"}")!!
+        assertNotNull(parts.edit)
+        assertEquals(2, parts.motions.size)
+        assertEquals("быстро", parts.notes)
+        assertNull(StudioVideoTpl.parse("{\"x\":1}"))
+        assertEquals(4 to 3, StudioVideoTpl.grid(12, true))
+        assertEquals(6 to 2, StudioVideoTpl.grid(12, false))
+    }
 }

@@ -491,6 +491,7 @@ fun Activity.chooseLinkAction(text: String, onDone: () -> Unit = {}) {
         t("📊 Полный анализ", "📊 Full analysis") to { QuickAnalysis.start(this, link.url); onDone() },
         t("😣 Боли и кейсы людей (отчёт)", "😣 Pains and cases of people (report)") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },
         t("🎨 Определить стиль видео", "🎨 Detect video style") to { QuickAnalysis.start(this, link.url, "style"); onDone() },
+        t("🧪 Шаблон монтажа по этому видео (Studio, AI)", "🧪 Editing template from this video (Studio, AI)") to { StudioTemplatesActivity.openFromVideo(this, link.url); onDone() },
         t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) },
         t("▶ Только похожие и рекомендованные видео", "▶ Only similar & recommended videos") to { harvestSetup(link.url, "related", onDone) },
         t("📅 Похожие видео за период…", "📅 Similar videos by period…") to { harvestSetup(link.url, "period", onDone) },

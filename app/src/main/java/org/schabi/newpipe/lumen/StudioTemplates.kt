@@ -537,3 +537,76 @@ class StudioTplStore(private val dir: java.io.File) {
     fun saveEdit(t: EditTpl) = java.io.File(sub("edit"), t.id + ".json").writeText(JSONObject(t.json).put("id", t.id).toString(2))
     fun delete(kind: String, id: String) = java.io.File(sub(kind), "$id.json").delete()
 }
+
+/** A template from a video: what the AI gets about it and how its answer (a way of editing + motions) is split. */
+object StudioVideoTpl {
+    private fun clock(ms: Long): String {
+        val s = ms / 1000
+        return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
+    }
+
+    /** Shot lengths in seconds from cut times (the last shot runs to [durationMs]). */
+    fun shots(cutMs: List<Long>, durationMs: Long): List<Double> {
+        val pts = (listOf(0L) + cutMs.filter { it in 1 until durationMs }.sorted() + durationMs).distinct()
+        return pts.zipWithNext().map { (a, b) -> (b - a) / 1000.0 }.filter { it > 0 }
+    }
+
+    /**
+     * Text about the video for the AI: title, measured metrics, shot lengths, the first lines of speech with times
+     * (each piece of speech shorter than [maxSpeech] chars in total).
+     */
+    fun brief(title: String, channel: String, durationMs: Long, isShort: Boolean, metrics: List<String>, cutMs: List<Long>,
+              cues: List<Pair<Long, String>>, maxSpeech: Int = 2500): String = buildString {
+        append("Видео: «").append(title).append('»')
+        if (channel.isNotBlank()) append(" · канал ").append(channel)
+        append(" · ").append(clock(durationMs)).append(if (isShort) " · Shorts (вертикальное)" else "").append('\n')
+        if (metrics.isNotEmpty()) {
+            append("Замеры (приблизительно):\n")
+            metrics.forEach { append("- ").append(it).append('\n') }
+        }
+        val sh = shots(cutMs, durationMs)
+        if (sh.size > 1) {
+            append("Длины планов по раскадровке, с (первые 40): ")
+            append(sh.take(40).joinToString(" ") { String.format(java.util.Locale.US, "%.1f", it) }).append('\n')
+            append("Средний план ").append(String.format(java.util.Locale.US, "%.1f", sh.average())).append(" с, самый короткий ")
+                .append(String.format(java.util.Locale.US, "%.1f", sh.minOrNull() ?: 0.0)).append(" с\n")
+        }
+        if (cues.isNotEmpty()) {
+            append("Речь с таймкодами:\n")
+            var n = 0
+            var lastText = ""
+            for ((ms, text) in cues) {
+                val tx = text.trim()
+                if (tx.isEmpty() || tx == lastText) continue
+                lastText = tx
+                val line = "[${clock(ms)}] $tx\n"
+                if (n + line.length > maxSpeech) {
+                    append("…\n")
+                    break
+                }
+                append(line)
+                n += line.length
+            }
+        }
+    }
+
+    /** The parts of a reply: the edit template, the motion templates and the notes. */
+    data class Parts(val edit: String?, val motions: List<String>, val notes: String)
+
+    fun parse(reply: String): Parts? {
+        val o = JsonText.firstObject(reply)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+        val edit = o.optJSONObject("edit")?.toString()
+        val motions = mutableListOf<String>()
+        o.optJSONArray("motions")?.let { a -> for (i in 0 until min(a.length(), 3)) a.optJSONObject(i)?.let { motions += it.toString() } }
+        o.optJSONObject("motion")?.let { motions += it.toString() }
+        if (edit == null && motions.isEmpty()) return null
+        return Parts(edit, motions, o.optString("notes").trim().take(1500))
+    }
+
+    /** Grid for a contact sheet of [n] frames: columns and rows. */
+    fun grid(n: Int, wide: Boolean): Pair<Int, Int> {
+        if (n <= 0) return 0 to 0
+        val cols = if (wide) min(4, n) else min(6, n)
+        return cols to (n + cols - 1) / cols
+    }
+}

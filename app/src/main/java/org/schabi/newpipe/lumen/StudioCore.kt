@@ -1214,6 +1214,31 @@ val STUDIO_PROMPTS = linkedMapOf(
             "Верни только JSON Patch (RFC 6902, операции add, replace, remove) — массив изменений, без всего шаблона, например " +
             "[{\"op\":\"replace\",\"path\":\"/layers/0/keys/1/ease\",\"value\":\"spring\"}].\n\nШаблон:\n{data}"
         ),
+    "studio_tpl_from_video" to (
+        "Ты режиссёр монтажа и моушн-дизайнер. Разбери YouTube-видео и воссоздай его подход к монтажу в наших протоколах, чтобы другие ролики можно было смонтировать так же. {mode}\n" +
+            "Пожелания автора: {ask}\n" +
+            "Передай темп (слов в сцене, паузы), частоту зумов и смен плана, переходы, звуки, плашки, какие виды графики когда. " +
+            "Если в видео есть характерная графика (списки, цифры, подписи, стрелки, рамки), сделай для неё 1-2 моушн-шаблона и сошлись на них из правил (tpl). " +
+            "Не копируй чужие тексты, логотипы и персонажей — только приёмы.\n" +
+            "Протокол lumen.edit v1 — подход к монтажу всего ролика без AI. Поля: pace {sceneWords:[мин,макс] слов в сцене, cutOnPause: мс паузы для новой сцены}, " +
+            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light или пусто), " +
+            "rules — по порядку, срабатывают все подходящие (поздние перекрывают), else — если не подошло ни одно: " +
+            "if — условия через & (с ! — отрицание): first, last, number, step, compare, list, quote, emoji, question, long (10+ слов), short (до 4), pause (пауза перед сценой), loud, keyword:слово|слово, every:N; " +
+            "do — kind (text step icons list flow cycle big stat quote chart compare), tpl (id своего моушн-шаблона), transition (fade slide zoom whip none), " +
+            "cues — [\"zoom@key\", \"sfx:ding@start\", \"pop:ТЕКСТ:эмодзи@key\"] (звуки whoosh pop click ding boom riser; якорь key, start или end). " +
+            "Протокол lumen.motion v1 — анимированная графика сцены с параметрами. Кадр: x и y в долях (0..1), размеры w и h в долях короткой стороны; " +
+            "имена позиций: left 0.18, center 0.5, right 0.82, top 0.16, middle 0.5, bottom 0.72, third1 0.33, third2 0.67. " +
+            "Держи графику в зоне y 0.30-0.70: сверху и снизу идут субтитры. " +
+            "Слой: el — arrow, line, circle, ring, rect, underline, check, cross, spotlight, text, emoji или group (children — слои без keys, сдвиг dx, dy от группы); " +
+            "text, color (accent, white, ink, red, green, yellow, blue или #RRGGBB), fill, align (center или left), w, h (для text и emoji h — размер шрифта ~0.05-0.09). " +
+            "Текст может брать данные сцены: \$title, \$value, \$key (главное слово), \$num (номер), а в повторе — \$it.icon, \$it.label, \$it.value. " +
+            "each: \"items\" повторяет слой для каждого пункта сцены (i — номер с 0, n — сколько), sync: \"word\" — пункт появляется, когда звучит его слово. " +
+            "keys — ключевые кадры: t — мс от якоря at (start — начало сцены, item — появление пункта, key — главное слово, end — конец сцены; t может быть отрицательным), " +
+            "x, y, s (масштаб), r (градусы), o (0..1), draw (доля прорисовки линии) — числа или формулы с i, n, num, + - * / ( ), min, max, abs, sin, cos, clamp, round, odd; " +
+            "ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. До 24 слоёв, до 12 ключей. " +
+            "Верни только JSON: {\"edit\":{…lumen.edit…},\"motions\":[{…lumen.motion…}],\"notes\":\"2-4 фразы: что взято из видео и что передать не удалось\"}.\n\n" +
+            "Данные о видео:\n{data}"
+        ),
     "studio_tpl_fix" to (
         "Исправь шаблон {kind}: проверка нашла ошибки:\n{errors}\nИсправь только их и верни весь шаблон, только JSON.\n\nШаблон:\n{data}"
         ),

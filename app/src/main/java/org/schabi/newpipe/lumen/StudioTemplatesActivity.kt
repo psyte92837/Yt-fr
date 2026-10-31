@@ -27,6 +27,12 @@ class StudioTemplatesActivity : LumenBase() {
         }
 
         fun store(ctx: Context) = StudioTplStore(File(ctx.filesDir, "lumen/studio/templates"))
+
+        /** Opens the screen and makes a template from the video at [url] (from "Share" or a pasted link). */
+        fun openFromVideo(ctx: Context, url: String) {
+            ctx.startActivity(Intent(ctx, StudioTemplatesActivity::class.java).putExtra("video", url)
+                .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
     private val store by lazy { store(this) }
@@ -42,6 +48,7 @@ class StudioTemplatesActivity : LumenBase() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         render()
+        intent.getStringExtra("video")?.takeIf { it.isNotBlank() && savedInstanceState == null }?.let { askVideo(it) }
     }
 
     override fun onDestroy() {
@@ -69,6 +76,7 @@ class StudioTemplatesActivity : LumenBase() {
                 btn(this, t("✨ Новый по описанию", "✨ New from a description"), style = BtnStyle.TONAL) { ask(null) },
                 btn(this, t("🤖 Через другой ИИ", "🤖 With another AI"), style = BtnStyle.TEXT) { askOther() }
             )
+            c.button(t("🎬 По видео: ссылка на YouTube → подход и моушны", "🎬 From a video: a YouTube link → way and motions"), style = BtnStyle.TONAL) { askVideo(null) }
             c.button(t("📥 Вставить код из буфера", "📥 Paste code from the clipboard"), style = BtnStyle.TEXT) { paste() }
         }
         val list: List<Pair<String, String>> = if (motion) store.motions().map { it.id to it.name } else store.edits().map { it.id to it.name }
@@ -133,7 +141,8 @@ class StudioTemplatesActivity : LumenBase() {
     }
 
     /** Checks [text] as a template of the current kind; asks the AI to fix up to twice; saves it (as [own] when editing). */
-    private fun checkAndSave(text0: String, own: String?, useAi: Boolean): String {
+    private fun checkAndSave(text0: String, own: String?, useAi: Boolean, motion: Boolean = this.motion): String {
+        val kind = if (motion) "motion" else "edit"
         var text = text0
         repeat(3) { attempt ->
             val errors: List<String>
@@ -267,6 +276,95 @@ class StudioTemplatesActivity : LumenBase() {
             "fixed"
         }
     }) { r -> toast(if (r == "ok") t("AI: всё хорошо", "AI: looks good") else t("AI поправил шаблон", "AI fixed the template")) }
+
+    // ---------- from a video ----------
+
+    /** Asks for the link (and wishes) of a video to make a template from. */
+    private fun askVideo(url: String?) {
+        val clip = url ?: runCatching {
+            getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull()?.let { YtLink.classify(it) }?.takeIf { it.type == "video" }?.url
+        bottomSheet(t("Шаблон по видео", "Template from a video")) { dismiss ->
+            muted(t("Lumen снимет замеры (темп речи, длины планов, паузы, цвета), возьмёт кадры раскадровки и субтитры, а AI воссоздаст подход к монтажу и 1–2 моушн-шаблона. Gemini смотрит само видео.",
+                "Lumen measures the video (speech pace, shot lengths, pauses, colours), takes storyboard frames and subtitles, and the AI recreates its way of editing and 1–2 motion templates. Gemini watches the video itself."))
+            val link = edit(t("Ссылка на видео YouTube", "YouTube video link"), clip ?: "")
+            val wish = edit(t("Пожелания (необязательно): например «только темп и зумы»", "Wishes (optional): e.g. \"only pace and zooms\""), multiline = true)
+            button(t("🎬 Разобрать и создать", "🎬 Analyse and create"), primary = true) {
+                val l = YtLink.classify(link.text.toString())
+                if (l.type != "video") {
+                    toast(t("Нужна ссылка на видео", "A video link is needed"))
+                    return@button
+                }
+                dismiss()
+                fromVideo(l.url, wish.text.toString().trim())
+            }
+        }
+    }
+
+    /** Measures the video, shows it to the AI and saves the way of editing and the motion templates it returns. */
+    private fun fromVideo(url: String, wish: String) = run(t("Разбор видео…", "Analysing the video…"), {
+        val vid = YtQuery.videoIdFromUrl(url) ?: error(t("Не понял ссылку", "Cannot read the link"))
+        val v = Video(vid, url)
+        val extra = StyleExtra(12)
+        val m = VideoStyle.measure(null, v, "auto", { say(it) }, extra)
+        val cues = runCatching { StyleMath.cues(extra.vtt).map { it.startMs to it.text } }.getOrDefault(emptyList())
+        val data = StudioVideoTpl.brief(v.title, v.channel, if (m.duration > 0) m.duration * 1000 else 60_000, m.isShort, m.lines(), extra.cutMs, cues)
+        val prov = AiTasks.requireProvider()
+        val watch = prov == Provider.GEMINI && m.duration in 1..3600
+        val sheet = if (watch || extra.frames.isEmpty()) null else sheet(extra.frames.map { it.second })
+        extra.frames.forEach { it.second.recycle() }
+        val mode = when {
+            watch -> "Ты видишь само видео: опирайся на то, что видно и слышно, и на замеры."
+            sheet != null -> "Видео ты не видишь, но на картинке — кадры раскадровки по порядку слева направо, сверху вниз; плюс замеры и речь."
+            else -> "Видео ты не видишь: опирайся на замеры и речь, догадки о картинке помечай."
+        }
+        val prompt = Prompts.fill("studio_tpl_from_video", mapOf("mode" to mode, "ask" to wish.ifBlank { "нет" }, "data" to data))
+        say(t("AI разбирает приёмы видео…", "AI is working out the video's techniques…"))
+        if (cancel) throw java.util.concurrent.CancellationException()
+        val system = "You design motion graphics and video editing templates. Answer with JSON only."
+        val r = try {
+            Llm.complete(prov, if (watch) prov.fastModel else prov.smartModel, system, prompt, json = sheet == null, maxTokens = 9000,
+                task = "studio_tpl_from_video", pid = "studio", fileUri = if (watch) url else null, lowMedia = watch, image = sheet)
+        } catch (e: Exception) {
+            if (sheet == null || e is java.util.concurrent.CancellationException) throw e
+            // the model may not see pictures: once more without the frames
+            Llm.complete(prov, prov.smartModel, system, prompt.replace(mode, "Видео ты не видишь: опирайся на замеры и речь."), json = true,
+                maxTokens = 9000, task = "studio_tpl_from_video", pid = "studio")
+        }
+        val parts = StudioVideoTpl.parse(r.text) ?: error(t("AI не вернул шаблоны в нужном формате. Откройте «Ответы AI».", "AI did not return templates in the expected format. See \"AI answers\"."))
+        val saved = mutableListOf<String>()
+        parts.motions.forEachIndexed { i, mt ->
+            say(t("Проверка моушна ${i + 1}…", "Checking motion ${i + 1}…"))
+            runCatching { checkAndSave(mt, null, true, motion = true) }.onSuccess { saved += "✨ tpl:$it" }.onFailure { L.w("studio", "video motion: ${it.message}") }
+        }
+        parts.edit?.let { e ->
+            say(t("Проверка подхода…", "Checking the way…"))
+            runCatching { checkAndSave(e, null, true, motion = false) }.onSuccess { saved += "🧪 $it" }.onFailure { L.w("studio", "video edit: ${it.message}") }
+        }
+        if (saved.isEmpty()) error(t("Шаблоны не прошли проверку", "The templates failed the check"))
+        "«${v.title}»\n\n" + saved.joinToString("\n") + (if (parts.notes.isNotBlank()) "\n\n" + parts.notes else "") +
+            if (watch) t("\n\n👁 Gemini смотрел видео.", "\n\n👁 Gemini watched the video.") else ""
+    }) { report ->
+        tab = if (report.contains("🧪")) 1 else 0
+        render()
+        showText(t("Шаблон по видео", "Template from a video"), report + t(
+            "\n\nПодход появился кнопкой 🧪 в шаге 3 Studio; моушны — в списке «✨ Моушн» и в каталоге режиссёра.",
+            "\n\nThe way is a 🧪 button in step 3 of the Studio; motions are in \"✨ Motion\" and in the director's catalogue."))
+    }
+
+    /** Frames side by side in a grid, as one JPEG (base64) for a model that sees pictures. */
+    private fun sheet(frames: List<Bitmap>): String? {
+        if (frames.isEmpty()) return null
+        val fw = frames[0].width
+        val fh = frames[0].height
+        val (cols, rows) = StudioVideoTpl.grid(frames.size, fw >= fh)
+        val out = Bitmap.createBitmap(cols * fw, rows * fh, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(out)
+        frames.forEachIndexed { i, b -> cv.drawBitmap(b, (i % cols * fw).toFloat(), (i / cols * fh).toFloat(), null) }
+        val bytes = java.io.ByteArrayOutputStream().also { out.compress(Bitmap.CompressFormat.JPEG, 85, it) }.toByteArray()
+        out.recycle()
+        return android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+    }
 
     // ---------- other AI, code ----------
 

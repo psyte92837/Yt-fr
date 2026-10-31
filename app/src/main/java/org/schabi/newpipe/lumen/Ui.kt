@@ -84,21 +84,24 @@ object Palette {
 
     /** Ready-made gradient themes: (dark?, gradient colours, accent, onAccent, container, onContainer). */
     private class Grad(val dark: Boolean, val bg: IntArray, val accent: Long, val onAccent: Long, val cont: Long, val onCont: Long)
+    // Soft analogous gradients: neighbouring stops differ only slightly in hue and tone (M3 tones ~6-18 dark,
+    // ~92-98 light); accents follow M3 tonal roles (dark: primary 80 / on 20 / container 30 / on 90,
+    // light: primary 40 / white / container 90 / on 10), so buttons stay calm and readable (checked by tests).
     private val gradients = mapOf(
-        "aurora" to Grad(true, intArrayOf(0xFF0B1026.toInt(), 0xFF1B2A6B.toInt(), 0xFF0E7C86.toInt()), 0xFF5EEAD4, 0xFF00201B, 0xFF134E4A, 0xFFCCFBF1),
-        "sunset" to Grad(true, intArrayOf(0xFF2B0B3F.toInt(), 0xFF8E1A8C.toInt(), 0xFFE8603C.toInt()), 0xFFFFB38A, 0xFF4A1500, 0xFF7A2A55, 0xFFFFD9E6),
-        "neon" to Grad(true, intArrayOf(0xFF0F0C29.toInt(), 0xFF302B63.toInt(), 0xFF5B1F7A.toInt()), 0xFFFF6AD5, 0xFF3A0030, 0xFF4B2C8C, 0xFFE6DAFF),
-        "ocean" to Grad(true, intArrayOf(0xFF001B3A.toInt(), 0xFF05508F.toInt(), 0xFF1291B8.toInt()), 0xFF7FDBFF, 0xFF00263B, 0xFF0B4A73, 0xFFD2EFFF),
-        "candy" to Grad(false, intArrayOf(0xFFFFE3F1.toInt(), 0xFFE6DDFF.toInt(), 0xFFD0F0FF.toInt()), 0xFF8A3FFC, 0xFFFFFFFF, 0xFFEADCFF, 0xFF2A0A5E),
-        "peach" to Grad(false, intArrayOf(0xFFFFF1E0.toInt(), 0xFFFFD9C2.toInt(), 0xFFFFC6D3.toInt()), 0xFFC2410C, 0xFFFFFFFF, 0xFFFFDCC8, 0xFF431407),
-        "mint" to Grad(false, intArrayOf(0xFFE6FFF5.toInt(), 0xFFC9F4E4.toInt(), 0xFFD6EEFF.toInt()), 0xFF00796B, 0xFFFFFFFF, 0xFFB2F1E4, 0xFF00201B),
-        "sky" to Grad(false, intArrayOf(0xFFE8F4FF.toInt(), 0xFFD0E4FF.toInt(), 0xFFE6E0FF.toInt()), 0xFF0B57D0, 0xFFFFFFFF, 0xFFD3E3FD, 0xFF041E49),
-        "lavender" to Grad(false, intArrayOf(0xFFF5EDFF.toInt(), 0xFFE5D8FF.toInt(), 0xFFFFE2F4.toInt()), 0xFF6A3EC2, 0xFFFFFFFF, 0xFFE9DDFF, 0xFF23005C),
-        "sunrise" to Grad(false, intArrayOf(0xFFFFFBE3.toInt(), 0xFFFFEDC2.toInt(), 0xFFFFD8C6.toInt()), 0xFF8A5100, 0xFFFFFFFF, 0xFFFFDDB3, 0xFF2B1700),
-        "rose" to Grad(false, intArrayOf(0xFFFFEEF1.toInt(), 0xFFFFD8E2.toInt(), 0xFFF3E2FF.toInt()), 0xFFB0285A, 0xFFFFFFFF, 0xFFFFD9E2, 0xFF3E001D),
-        "pearl" to Grad(false, intArrayOf(0xFFFAFAFC.toInt(), 0xFFEDF0F5.toInt(), 0xFFE0E7F1.toInt()), 0xFF3D5A80, 0xFFFFFFFF, 0xFFD6E3F7, 0xFF0B1D33),
-        "forest" to Grad(true, intArrayOf(0xFF0B2116.toInt(), 0xFF14532D.toInt(), 0xFF3F6212.toInt()), 0xFF86EFAC, 0xFF003915, 0xFF1E5631, 0xFFD7F8DF),
-        "ember" to Grad(true, intArrayOf(0xFF1A0A0A.toInt(), 0xFF5B1313.toInt(), 0xFFB33A0B.toInt()), 0xFFFFB59A, 0xFF5A1A00, 0xFF6E2410, 0xFFFFDBCF)
+        "aurora" to Grad(true, intArrayOf(0xFF0D1B2A.toInt(), 0xFF0F2A3A.toInt(), 0xFF0F3B3F.toInt()), 0xFF80D5CB, 0xFF003731, 0xFF00504A, 0xFF9CF2E7),
+        "sunset" to Grad(true, intArrayOf(0xFF1E1226.toInt(), 0xFF2E1530.toInt(), 0xFF3D1C2A.toInt()), 0xFFFFB1C4, 0xFF5E1130, 0xFF7B2946, 0xFFFFD9E1),
+        "neon" to Grad(true, intArrayOf(0xFF16132C.toInt(), 0xFF1F1A3D.toInt(), 0xFF2A1C47.toInt()), 0xFFD0BCFF, 0xFF381E72, 0xFF4F378B, 0xFFEADDFF),
+        "ocean" to Grad(true, intArrayOf(0xFF0A1726.toInt(), 0xFF0C2338.toInt(), 0xFF0D3047.toInt()), 0xFF9ECAFF, 0xFF003258, 0xFF00497D, 0xFFD1E4FF),
+        "candy" to Grad(false, intArrayOf(0xFFFDF0F6.toInt(), 0xFFF5EEFC.toInt(), 0xFFEDEFFD.toInt()), 0xFF6E4FA8, 0xFFFFFFFF, 0xFFEDDCFF, 0xFF26005B),
+        "peach" to Grad(false, intArrayOf(0xFFFFF5EE.toInt(), 0xFFFFEDE4.toInt(), 0xFFFDE7E4.toInt()), 0xFF9C4A26, 0xFFFFFFFF, 0xFFFFDBCC, 0xFF380D00),
+        "mint" to Grad(false, intArrayOf(0xFFF0FAF6.toInt(), 0xFFE6F6F0.toInt(), 0xFFE3F2F2.toInt()), 0xFF006A60, 0xFFFFFFFF, 0xFFB9F0E6, 0xFF00201C),
+        "sky" to Grad(false, intArrayOf(0xFFF2F7FD.toInt(), 0xFFE8F1FC.toInt(), 0xFFE6ECFB.toInt()), 0xFF2C5BA8, 0xFFFFFFFF, 0xFFD8E2FF, 0xFF001A41),
+        "lavender" to Grad(false, intArrayOf(0xFFF7F2FC.toInt(), 0xFFF0EAFB.toInt(), 0xFFF3E9F7.toInt()), 0xFF6750A4, 0xFFFFFFFF, 0xFFEADDFF, 0xFF21005D),
+        "sunrise" to Grad(false, intArrayOf(0xFFFFF9EC.toInt(), 0xFFFFF2DE.toInt(), 0xFFFFEBDA.toInt()), 0xFF7D5700, 0xFFFFFFFF, 0xFFFFDEA6, 0xFF271900),
+        "rose" to Grad(false, intArrayOf(0xFFFFF3F5.toInt(), 0xFFFDEBEF.toInt(), 0xFFF9E9F2.toInt()), 0xFF984061, 0xFFFFFFFF, 0xFFFFD9E2, 0xFF3E001D),
+        "pearl" to Grad(false, intArrayOf(0xFFFAFAFC.toInt(), 0xFFF3F4F8.toInt(), 0xFFECEFF4.toInt()), 0xFF475D7A, 0xFFFFFFFF, 0xFFD6E3F7, 0xFF0B1D33),
+        "forest" to Grad(true, intArrayOf(0xFF0F1A13.toInt(), 0xFF15261B.toInt(), 0xFF1C3222.toInt()), 0xFF95D5A3, 0xFF00391A, 0xFF19512D, 0xFFB1F1BE),
+        "ember" to Grad(true, intArrayOf(0xFF1C1210.toInt(), 0xFF2A1714.toInt(), 0xFF3A1E16.toInt()), 0xFFFFB59D, 0xFF5D1900, 0xFF73341E, 0xFFFFDBD0)
     )
     val gradientNames get() = listOf("none" to t("Без градиента", "None"),
         "candy" to t("Конфетти (светлая)", "Candy (light)"), "peach" to t("Персик (светлая)", "Peach (light)"),
@@ -118,6 +121,20 @@ object Palette {
     /** Tile preview for a gradient theme: colours and whether it is dark; null for "none". */
     fun gradientPreview(name: String): Pair<IntArray, Boolean>? = gradients[name]?.let { it.bg to it.dark }
 
+    /** Accent and onAccent, container and onContainer of a gradient theme; null for "none". */
+    fun gradientAccent(name: String): IntArray? =
+        gradients[name]?.let { intArrayOf(it.accent.toInt(), it.onAccent.toInt(), it.cont.toInt(), it.onCont.toInt()) }
+
+    /** WCAG contrast ratio of two opaque ARGB colours (1..21). */
+    fun contrast(a: Int, b: Int): Double {
+        fun lum(c: Int): Double {
+            fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4) }
+            return 0.2126 * ch(c shr 16 and 0xFF) + 0.7152 * ch(c shr 8 and 0xFF) + 0.0722 * ch(c and 0xFF)
+        }
+        val (x, y) = lum(a) to lum(b)
+        return (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05)
+    }
+
     /** Active gradient colours or null; windows and pages paint this behind transparent content. */
     val gradient: IntArray? get() = if (LumenEnv.ready) gradients[Settings.style]?.bg else null
 
@@ -136,12 +153,12 @@ object Palette {
             ACCENT_SOFT = FAB; ON_SOFT = ON_FAB
             if (g.dark) {
                 SURFACE = g.bg[0]
-                CARD = 0x33FFFFFF // translucent glass over the gradient
-                ON_SURFACE = 0xFFF4F1FA.toInt(); MUTED = 0xFFD0CBDD.toInt(); OUTLINE = 0xFFA9A3B8.toInt()
+                CARD = 0x1FFFFFFF // light tonal overlay over the gradient (M3 elevation-like)
+                ON_SURFACE = 0xFFE9E6EE.toInt(); MUTED = 0xFFCAC4D0.toInt(); OUTLINE = 0xFF938F99.toInt()
                 BAD = 0xFFFFB4AB.toInt(); OK = 0xFF81C995.toInt(); WARN = 0xFFFFCC80.toInt()
             } else {
                 SURFACE = g.bg[0]
-                CARD = 0x80FFFFFF.toInt()
+                CARD = 0xB3FFFFFF.toInt()
                 ON_SURFACE = 0xFF1D1B20.toInt(); MUTED = 0xFF49454F.toInt(); OUTLINE = 0xFF79747E.toInt()
                 BAD = 0xFFB3261E.toInt(); OK = 0xFF2E7D32.toInt(); WARN = 0xFFB26A00.toInt()
             }

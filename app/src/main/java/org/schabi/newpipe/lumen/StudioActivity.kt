@@ -331,7 +331,7 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🧸 Мультик", "🧸 Cartoon")), task.ordinal) {
+        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
         c.muted(when (task) {
@@ -348,8 +348,8 @@ class StudioActivity : LumenBase() {
                 "Нарезка с голосом за кадром: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, AI-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1.",
                 "A voice-over over cuts: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1.")
             StudioTask.CARTOON -> t(
-                "Познавательный мультик: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
-                "An informational cartoon: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
+                "Познавательная анимация: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
+                "An informational animation: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
         })
         c.steps(stepNow(), 4)
         if (task == StudioTask.VOICE) {
@@ -1586,7 +1586,7 @@ class StudioActivity : LumenBase() {
             "Пример:\n[icons] Чем отличается инженерная разработка от вайб-кодинга?\n🔍 исследование | 📚 контекст | ✅ проверка\n\n" +
             "[step: Работа с контекстом] Второй этап — собрать документацию.\n\n" +
             "[stat: 80%] Столько времени уходит на подготовку.\n⏱ подготовка\n\n" +
-            "Мультик: реплику персонажа начните с @Имя: или @Имя(эмоция): — эмоции calm, happy, explain, think, surprise, sad, angry.\n" +
+            "Анимация: реплику персонажа начните с @Имя: или @Имя(эмоция): — эмоции calm, happy, explain, think, surprise, sad, angry.\n" +
             "@Лиса(surprise): [big] Подожди, а почему небо синее?\n💡 загадка",
         "Each scene is its own paragraph (a blank line between scenes).\n\n" +
             "The first line may start with the kind of visual:\n" +
@@ -1597,7 +1597,7 @@ class StudioActivity : LumenBase() {
             "Example:\n[icons] How is engineering different from vibe coding?\n🔍 research | 📚 context | ✅ checks\n\n" +
             "[step: Context] Stage two: collect the docs.\n\n" +
             "[stat: 80%] That much time goes to preparation.\n⏱ preparation\n\n" +
-            "Cartoon: start a character's line with @Name: or @Name(mood): — moods calm, happy, explain, think, surprise, sad, angry.\n" +
+            "Animation: start a character's line with @Name: or @Name(mood): — moods calm, happy, explain, think, surprise, sad, angry.\n" +
             "@Foxy(surprise): [big] Wait, why is the sky blue?\n💡 riddle"
     ))
 
@@ -1948,8 +1948,8 @@ class StudioActivity : LumenBase() {
             StudioTask.VOICE -> t("анимированного ролика по готовой озвучке (кадр ", "an animated video for a ready voice-over (frame ") + aspect().label + ")"
             StudioTask.CUTS -> t("ролика-нарезки: голос за кадром поверх вставок из чужих видео и графики (кадр ",
                 "a cut video: a voice-over over pieces of other videos and graphics (frame ") + aspect().label + ")"
-            StudioTask.CARTOON -> t("познавательного мультика: персонажи говорят по очереди, графика рядом с ними (кадр ",
-                "an informational cartoon: characters talk in turns, graphics next to them (frame ") + aspect().label + ")"
+            StudioTask.CARTOON -> t("познавательной анимации: персонажи говорят по очереди, графика рядом с ними (кадр ",
+                "an informational animation: characters talk in turns, graphics next to them (frame ") + aspect().label + ")"
         }
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val roles = script?.let { sc -> ranges?.let { StudioToon.wordRoles(sc.scenes, it, ws.size, cast) } }

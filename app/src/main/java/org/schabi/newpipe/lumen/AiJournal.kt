@@ -26,7 +26,7 @@ object AiJournal {
         val task: String,
         val provider: String,
         val model: String,
-        val status: String, // ok | truncated | error
+        val status: String, // ok | truncated | error | blocked (not sent)
         val error: String,
         val text: String,
         val raw: String,
@@ -34,25 +34,27 @@ object AiJournal {
         val prompt: String,
         val inTokens: Int,
         val outTokens: Int,
-        val ms: Long
+        val ms: Long,
+        val fileUri: String = ""
     ) {
         fun toJson(): JSONObject = JSONObject().put("id", id).put("at", at).put("pid", pid).put("task", task)
             .put("provider", provider).put("model", model).put("status", status).put("error", error)
             .put("text", text).put("raw", raw).put("system", system).put("prompt", prompt)
-            .put("in", inTokens).put("out", outTokens).put("ms", ms)
+            .put("in", inTokens).put("out", outTokens).put("ms", ms).put("file", fileUri)
 
         companion object {
             fun from(o: JSONObject) = Entry(
                 o.optString("id"), o.optLong("at"), o.optString("pid"), o.optString("task"), o.optString("provider"),
                 o.optString("model"), o.optString("status"), o.optString("error"), o.optString("text"), o.optString("raw"),
-                o.optString("system"), o.optString("prompt"), o.optInt("in"), o.optInt("out"), o.optLong("ms")
+                o.optString("system"), o.optString("prompt"), o.optInt("in"), o.optInt("out"), o.optLong("ms"), o.optString("file")
             )
         }
     }
 
     fun record(
         pid: String, task: String, provider: String, model: String, system: String, prompt: String,
-        text: String, raw: String, inTokens: Int, outTokens: Int, status: String, error: String?, ms: Long
+        text: String, raw: String, inTokens: Int, outTokens: Int, status: String, error: String?, ms: Long,
+        fileUri: String? = null
     ) {
         val d = dir ?: return
         try {
@@ -60,14 +62,14 @@ object AiJournal {
             val e = Entry(
                 at.toString() + "_" + newId(), at, pid, task.ifBlank { "ai" }, provider, model, status, L.redact(error ?: ""),
                 L.redact(text), L.redact(raw.take(200_000)), L.redact(system.take(4000)), L.redact(prompt.take(60_000)),
-                inTokens, outTokens, ms
+                inTokens, outTokens, ms, fileUri.orEmpty()
             )
             synchronized(lock) {
                 File(d, e.id + ".json").writeText(e.toJson().toString())
                 val files = d.listFiles()?.sortedBy { it.name } ?: return
                 if (files.size > KEEP) files.take(files.size - KEEP).forEach { it.delete() }
             }
-            AiStats.record(AiStats.Rec(at, pid, e.task, provider, model, status, inTokens, outTokens, ms))
+            if (status != "blocked") AiStats.record(AiStats.Rec(at, pid, e.task, provider, model, status, inTokens, outTokens, ms))
             L.i("ai", "$task ${provider}/$model → $status in=$inTokens out=$outTokens ${ms}ms" + (error?.let { " · ${it.take(200)}" } ?: ""))
         } catch (ex: Exception) {
             // journal must never break an AI call
@@ -104,6 +106,7 @@ object AiJournal {
     fun statusLabel(s: String) = when (s) {
         "ok" -> t("✓ ответ", "✓ answer")
         "truncated" -> t("✂ обрезан лимитом", "✂ cut by limit")
+        "blocked" -> t("⊘ не отправлено", "⊘ not sent")
         else -> t("✗ ошибка", "✗ error")
     }
 
@@ -113,7 +116,10 @@ object AiJournal {
         if (e.error.isNotBlank()) append(t("\nОшибка: ", "\nError: ")).append(e.error).append('\n')
         append(t("\n=== Ответ модели ===\n", "\n=== Model answer ===\n")).append(e.text.ifBlank { t("(пусто)", "(empty)") }).append('\n')
         if (e.raw.isNotBlank() && e.raw != e.text) append(t("\n=== Сырой ответ провайдера ===\n", "\n=== Raw provider response ===\n")).append(e.raw.take(30_000)).append('\n')
-        append(t("\n=== Запрос ===\n", "\n=== Prompt ===\n")).append(e.prompt.take(20_000)).append('\n')
+        append(if (e.status == "blocked") t("\n=== Запрос (не отправлен) ===\n", "\n=== Prompt (not sent) ===\n") else t("\n=== Отправленный запрос ===\n", "\n=== Sent prompt ===\n"))
+            .append(e.prompt.take(20_000)).append('\n')
+        if (e.fileUri.isNotBlank()) append(t("\n=== Видео ===\n", "\n=== Video ===\n")).append(e.fileUri).append('\n')
+        if (e.system.isNotBlank()) append(t("\n=== Системная инструкция ===\n", "\n=== System instruction ===\n")).append(e.system).append('\n')
     }
 }
 
@@ -137,7 +143,7 @@ class AiJournalActivity : LumenBase() {
         val c = Col(this)
         c.muted(t("Все ответы AI: сохраняются даже обрезанные и с ошибкой. Хранятся последние 400 вызовов, только на устройстве.",
             "All AI answers, including cut-off and failed ones. The last 400 calls are kept, on this device only."))
-        c.chips(listOf("all" to t("все", "all"), "ok" to "✓", "truncated" to "✂", "error" to "✗").map { (k, l) ->
+        c.chips(listOf("all" to t("все", "all"), "ok" to "✓", "truncated" to "✂", "error" to "✗", "blocked" to "⊘").map { (k, l) ->
             chip(this, "$l ${if (k == "all") all.size else all.count { it.status == k }}", status == k) {
                 status = k
                 render()
@@ -155,7 +161,7 @@ class AiJournalActivity : LumenBase() {
         list.take(150).forEach { e ->
             val card = c.card {
                 add(text(ctx, "${e.task} · ${AiJournal.statusLabel(e.status)}", 14f, bold = true,
-                    color = when (e.status) { "ok" -> Palette.ON_SURFACE; "truncated" -> Palette.WARN; else -> Palette.BAD }), 0)
+                    color = when (e.status) { "ok" -> Palette.ON_SURFACE; "truncated", "blocked" -> Palette.WARN; else -> Palette.BAD }), 0)
                 muted(Fmt.dateTime(e.at) + " · " + e.model + " · " + e.inTokens + "/" + e.outTokens + " · " + e.ms + " ms")
                 val preview = e.text.ifBlank { e.error.ifBlank { e.raw } }
                 add(text(ctx, preview.take(240).replace('\n', ' ') + if (preview.length > 240) "…" else "", 13f), 4)

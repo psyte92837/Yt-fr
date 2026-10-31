@@ -143,14 +143,23 @@ object Llm {
     ): LlmReply {
         val started = System.currentTimeMillis()
         var raw: String? = null
+        // the user sees the data that goes out and picks what to keep (SendReviewActivity)
+        val out = try {
+            SendGate.review(SendGate.Request(task.ifBlank { "ai" }, pid, p, model, system, user, fileUri, maxTokens))
+        } catch (e: SendCancelled) {
+            AiJournal.record(pid, task, p.name, model, system, user, "", "", 0, 0, "blocked", e.message, 0)
+            throw e
+        }
+        val sent = out.user
+        val file = out.fileUri
         try {
-            val r = Par.retrying { completeRaw(p, model, system, user, json, fileUri, maxTokens, lowMedia) { raw = it } }
-            AiJournal.record(pid, task, p.name, r.model, system, user, r.text, raw ?: "", r.inTokens, r.outTokens,
-                if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started)
+            val r = Par.retrying { completeRaw(p, model, system, sent, json, file, maxTokens, lowMedia) { raw = it } }
+            AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
+                if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file)
             return r
         } catch (e: Exception) {
-            AiJournal.record(pid, task, p.name, model, system, user, "", raw ?: (e as? LlmException)?.raw ?: "", 0, 0,
-                "error", e.message ?: e.javaClass.simpleName, System.currentTimeMillis() - started)
+            AiJournal.record(pid, task, p.name, model, system, sent, "", raw ?: (e as? LlmException)?.raw ?: "", 0, 0,
+                "error", e.message ?: e.javaClass.simpleName, System.currentTimeMillis() - started, file)
             throw e
         }
     }

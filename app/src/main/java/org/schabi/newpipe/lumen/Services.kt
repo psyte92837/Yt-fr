@@ -391,12 +391,22 @@ object Monitoring {
         }
         f.sort = "date"
         f.limit = minOf(60, maxOf(20, p.filters.limit))
+        var queries = p.effectiveQueries()
+        var extra = emptyList<String>()
+        if (p.monitor.anyLang) {
+            // any language: no region or original-language filter, the topic is also searched in translation
+            f.country = ""
+            f.origLang = ""
+            queries = WatchLangs.merge(queries, WatchLangs.translated(p))
+            extra = queries - p.effectiveQueries().toSet()
+            f.limit = minOf(200, maxOf(f.limit, queries.size * 10))
+        }
         val existing = Store.videos(pid).keys
         val rejected = WatchFilter.rejected(pid)
-        val found = YouTube.search(p.effectiveQueries(), f).filter { it.id !in existing && it.id !in rejected }.toMutableList()
+        val found = YouTube.search(queries, f).filter { it.id !in existing && it.id !in rejected }.toMutableList()
         var dropped = 0
         if (p.monitor.aiFilter && found.isNotEmpty()) {
-            val (keep, drop) = WatchFilter.apply(p, found)
+            val (keep, drop) = WatchFilter.apply(p, found, extra)
             dropped = drop.size
             found.retainAll(keep.toSet())
             L.i("monitor", "project $pid: filter kept ${keep.size}, rejected $dropped")
@@ -429,15 +439,9 @@ object Monitoring {
                 // keep going, the user can re-collect later
             }
         }
-        var summary = ""
-        if (added > 0 && p.monitor.aiSummary && Provider.active() != null) {
-            try {
-                val fresh = Store.videos(pid).values.filter { v -> found.any { it.id == v.id } }
-                summary = AiTasks.projectSummary(p, fresh, force = true).text
-            } catch (e: Exception) {
-                summary = ""
-            }
-        }
+        val ids = found.map { it.id }.toSet()
+        val fresh = Store.videos(pid).values.filter { it.id in ids }.ifEmpty { found }
+        val summary = if (added > 0 && p.monitor.aiSummary) WatchDigest.ai(p, fresh) else ""
         Store.project(pid)?.let {
             it.lastRunAt = System.currentTimeMillis()
             it.newCount += added
@@ -445,9 +449,10 @@ object Monitoring {
             Store.save(it)
         }
         if (added > 0) {
-            val body = (if (summary.isNotBlank()) summary.take(600) else found.take(5).joinToString("\n") { "• " + it.title }) +
-                if (dropped > 0) t("\n\nОтсеяно как не по теме: $dropped", "\n\nFiltered out as off-topic: $dropped") else ""
-            Notify.post(ctx, jobId(pid), t("«${p.name}»: новых видео — $added", "\"${p.name}\": $added new videos"), body, pid)
+            val title = WatchDigest.title(p.name, added, fresh)
+            val body = WatchDigest.body(fresh, summary, dropped)
+            WatchDigest.remember(pid, WatchDigest.Entry(System.currentTimeMillis(), title, body))
+            Notify.post(ctx, jobId(pid), title, body, pid)
         }
         if (added > 0) AutoBackup.maybe(ctx)
         return added

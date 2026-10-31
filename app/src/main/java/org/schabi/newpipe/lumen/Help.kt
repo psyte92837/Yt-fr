@@ -159,7 +159,7 @@ object Help {
             ),
             listOf(
                 t("Готовый ролик сохраняется в «Фильмы/Lumen» и сразу доступен для «Поделиться».", "The video is saved to Movies/Lumen and can be shared right away."),
-                t("Сборка минутного ролика занимает 1–3 минуты; не закрывайте экран.", "Building a one-minute video takes 1–3 minutes; keep the screen open."),
+                t("Сборка минутного ролика занимает 1–3 минуты и идёт в фоне: экран можно закрыть, прогресс и кнопка «Отмена» — в уведомлении, по готовности — «Открыть» и «Поделиться».", "Building a one-minute video takes 1–3 minutes in the background: you can close the screen; progress and Cancel are in the notification, then Open and Share."),
                 t("Голос Microsoft требует интернет; запись с микрофона и сборка работают без сети.", "Microsoft voices need internet; microphone recording and building work offline."),
                 t("Музыка зацикливается на длину ролика, плавно начинается и затихает, а под голосом сама становится тише.", "Music loops to the video length, fades in and out and gets quieter under the voice."),
                 t("Монтаж с видео собирается дольше: кадры декодируются и кадрируются под 9:16.", "Montage takes longer: frames are decoded and cropped to 9:16.")

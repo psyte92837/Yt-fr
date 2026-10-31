@@ -133,6 +133,10 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <service
+            android:name=".lumen.StudioService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <activity
             android:name=".lumen.HelpActivity"
             android:exported="false"

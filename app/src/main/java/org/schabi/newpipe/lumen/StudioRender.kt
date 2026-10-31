@@ -933,8 +933,13 @@ object StudioVideo {
  * Frames of the speaker's video, decoded in order and centre-cropped to the output size
  * (rotation of phone videos is taken into account). Pixels are converted only when they are shown.
  */
-class StudioFrames(file: File, private val w: Int, private val h: Int) : java.io.Closeable {
+class StudioFrames(private val file: File, private val w: Int, private val h: Int) : java.io.Closeable {
     private val ex = MediaExtractor()
+    // fallback for decoders that give no YUV image: slower frame-by-frame reading through MediaMetadataRetriever
+    private var retriever: android.media.MediaMetadataRetriever? = null
+    private var useRetriever = false
+    private var lastFetchUs = Long.MIN_VALUE
+    private var scratch: Bitmap? = null
     private val dec: MediaCodec
     private val rotation: Int
     private val info = MediaCodec.BufferInfo()
@@ -1014,6 +1019,7 @@ class StudioFrames(file: File, private val w: Int, private val h: Int) : java.io
      * (after the video ends, the last shown frame stays). Returns true when [out] changed.
      */
     fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean {
+        if (useRetriever) return need && fallback(tUs, out)
         var cand = -1
         while (!outEos) {
             if (pendIdx < 0 && !next()) break
@@ -1031,13 +1037,39 @@ class StudioFrames(file: File, private val w: Int, private val h: Int) : java.io
         var changed = false
         if (need) {
             val img = dec.getOutputImage(cand)
-                ?: throw IllegalStateException(t("Формат этого видео не поддерживается декодером телефона", "The phone's decoder cannot read this video format"))
+            if (img == null) {
+                L.w("studio", "decoder gives no image, falling back to MediaMetadataRetriever")
+                dec.releaseOutputBuffer(cand, false)
+                useRetriever = true
+                return fallback(tUs, out)
+            }
             convert(img, out)
             shown = true
             changed = true
         }
         dec.releaseOutputBuffer(cand, false)
         return changed
+    }
+
+    /** About 15 new pictures per second from the retriever (each one is a separate seek). */
+    private fun fallback(tUs: Long, out: IntArray): Boolean {
+        if (lastFetchUs != Long.MIN_VALUE && tUs - lastFetchUs < 66_000) return false
+        lastFetchUs = tUs
+        val r = retriever ?: android.media.MediaMetadataRetriever().also {
+            it.setDataSource(file.absolutePath)
+            retriever = it
+        }
+        val f = r.getFrameAtTime(tUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST) ?: return false
+        val bmp = scratch ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { scratch = it }
+        val s = max(w.toFloat() / f.width, h.toFloat() / f.height)
+        val sw = w / s
+        val sh = h / s
+        val src = android.graphics.Rect(((f.width - sw) / 2).toInt(), ((f.height - sh) / 2).toInt(), ((f.width + sw) / 2).toInt(), ((f.height + sh) / 2).toInt())
+        Canvas(bmp).drawBitmap(f, src, android.graphics.Rect(0, 0, w, h), Paint(Paint.FILTER_BITMAP_FLAG))
+        f.recycle()
+        bmp.getPixels(out, 0, w, 0, 0, w, h)
+        shown = true
+        return true
     }
 
     private fun copy(p: Image.Plane, old: ByteArray): ByteArray {
@@ -1087,6 +1119,8 @@ class StudioFrames(file: File, private val w: Int, private val h: Int) : java.io
     }
 
     override fun close() {
+        retriever?.let { r -> runCatching { r.release() } }
+        scratch?.recycle()
         if (pendIdx >= 0) runCatching { dec.releaseOutputBuffer(pendIdx, false) }
         runCatching { dec.stop() }
         dec.release()

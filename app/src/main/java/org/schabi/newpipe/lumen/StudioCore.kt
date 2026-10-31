@@ -90,6 +90,36 @@ object Studio {
         }
     }).toString()
 
+    // ---------- saved analysis ----------
+
+    /** Result of step 3, kept on disk so the screen survives the app being closed. */
+    data class Analysis(
+        val mode: String, val script: SScript, val words: List<SWord>, val ranges: List<IntRange>?,
+        val transcript: String, val stats: VoiceStats
+    )
+
+    fun analysisToJson(a: Analysis): String = JSONObject()
+        .put("mode", a.mode)
+        .put("script", JSONObject(toJson(a.script)))
+        .put("words", JSONArray().apply { a.words.forEach { put(JSONArray().put(it.text).put(it.startMs).put(it.endMs)) } })
+        .put("ranges", a.ranges?.let { r -> JSONArray().apply { r.forEach { put(JSONArray().put(it.first).put(it.last + 1)) } } } ?: JSONObject.NULL)
+        .put("transcript", a.transcript)
+        .put("stats", JSONArray().put(a.stats.totalMs).put(a.stats.speechMs).put(a.stats.pauses).put(a.stats.longestPauseMs).put(a.stats.words))
+        .toString()
+
+    fun analysisFromJson(s: String): Analysis? = try {
+        val o = JSONObject(s)
+        val script = parseScript(o.getJSONObject("script").toString()) ?: SScript("", emptyList())
+        val wa = o.getJSONArray("words")
+        val words = (0 until wa.length()).map { i -> wa.getJSONArray(i).let { SWord(it.getString(0), it.getLong(1), it.getLong(2)) } }
+        val ranges = o.optJSONArray("ranges")?.let { ra -> (0 until ra.length()).map { i -> ra.getJSONArray(i).let { it.getInt(0) until it.getInt(1) } } }
+        val st = o.getJSONArray("stats")
+        Analysis(o.optString("mode"), script, words, ranges, o.optString("transcript"),
+            VoiceStats(st.getLong(0), st.getLong(1), st.getInt(2), st.getLong(3), st.getInt(4)))
+    } catch (e: Exception) {
+        null
+    }
+
     // ---------- script: editable plain text ----------
     //
     // One scene per block, blocks separated by a blank line:

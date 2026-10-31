@@ -375,6 +375,19 @@ class StudioTest {
     }
 
     @Test
+    fun analysisSurvivesSaveAndLoad() {
+        val a = Studio.Analysis(
+            "mic", SScript("T", listOf(SScene("Раз два", "icons", "", listOf(SItem("🔍", "поиск"))), SScene("три"))),
+            listOf(SWord("Раз", 0, 100), SWord("два", 150, 300), SWord("три", 900, 1000)),
+            listOf(0 until 2, 2 until 3), "Раз два три", VoiceStats(1500, 700, 1, 600, 3)
+        )
+        assertEquals(a, Studio.analysisFromJson(Studio.analysisToJson(a)))
+        val noRanges = a.copy(ranges = null)
+        assertEquals(noRanges, Studio.analysisFromJson(Studio.analysisToJson(noRanges)))
+        assertNull(Studio.analysisFromJson("{}"))
+    }
+
+    @Test
     fun emojiDetection() {
         assertTrue(Studio.startsWithEmoji("🔍 поиск"))
         assertTrue(Studio.startsWithEmoji("⚙️ процесс"))

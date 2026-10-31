@@ -4,7 +4,6 @@
  */
 package org.schabi.newpipe.lumen
 
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,8 +11,6 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.MediaStore
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -127,6 +124,9 @@ class StudioActivity : LumenBase() {
     private var savedAs = ""
 
     @Volatile private var cancel = false
+    private var wasRunning = false
+    private val analysisFile get() = File(dir, "analysis.json")
+    private val voiceFile get() = File(dir, "voice.wav")
     private var busy = ""
     private var recorder: StudioRecorder? = null
     private var player: MediaPlayer? = null
@@ -150,7 +150,13 @@ class StudioActivity : LumenBase() {
             maxLines = 18
         }
         topicEdit = edt(this, t("Тема или идея ролика", "Topic or idea of the video"), StudioPrefs.topic)
+        wasRunning = StudioJob.running
+        StudioJob.result?.takeIf { it.exists() && !StudioJob.running }?.let {
+            lastVideo = it
+            savedAs = StudioJob.savedAs
+        }
         render()
+        restoreAnalysis()
         Lumen.async({ EdgeTts.voices() }, {}) {
             voices = it
             if (busy.isEmpty() && recorder == null) render()
@@ -160,6 +166,59 @@ class StudioActivity : LumenBase() {
     override fun onPause() {
         saveInputs()
         super.onPause()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        StudioJob.listener = ::onJob
+        if (wasRunning && !StudioJob.running) onJob()
+    }
+
+    override fun onStop() {
+        StudioJob.listener = null
+        super.onStop()
+    }
+
+    // ---------- saved analysis ----------
+
+    /** Keeps step 3 on disk: words, scenes and the voice track. */
+    private fun saveAnalysis() {
+        val p = pcm ?: return
+        val sc = script ?: return
+        val st = stats ?: return
+        val a = Studio.Analysis(StudioPrefs.voiceMode, sc, words, ranges, transcript, st)
+        val w = words
+        Lumen.async({
+            writeWav(voiceFile, p.data, p.rate)
+            analysisFile.writeText(Studio.analysisToJson(a.copy(words = w)))
+        }, { e -> L.w("studio", "save analysis: ${e.message}") }) {}
+    }
+
+    private fun restoreAnalysis() {
+        if (!analysisFile.exists() || !voiceFile.exists()) return
+        Lumen.async({
+            val a = Studio.analysisFromJson(analysisFile.readText()) ?: error("bad analysis")
+            val (data, rate) = Studio.readWav(voiceFile.readBytes()) ?: error("bad voice")
+            a to StudioAudio.Pcm(data, rate)
+        }, { e -> L.w("studio", "restore analysis: ${e.message}") }) { (a, p) ->
+            if (a.mode != StudioPrefs.voiceMode || words.isNotEmpty() || busy.isNotEmpty()) return@async
+            pcm = p
+            words = a.words
+            script = a.script
+            ranges = a.ranges
+            transcript = a.transcript
+            stats = a.stats
+            render()
+        }
+    }
+
+    private fun writeWav(f: File, pcm: ShortArray, rate: Int) {
+        val data = java.nio.ByteBuffer.allocate(pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        data.asShortBuffer().put(pcm)
+        f.outputStream().use {
+            it.write(Studio.wavHeader(pcm.size * 2, rate))
+            it.write(data.array())
+        }
     }
 
     override fun onDestroy() {
@@ -536,8 +595,13 @@ class StudioActivity : LumenBase() {
         }
         add(seek, 4)
         drawPreview(plan)
-        if (busy.isEmpty()) button(t("🎬 Создать ролик", "🎬 Make video"), primary = true) { renderVideo() }
-        progress("render", t("Подготовка…", "Preparing…"))
+        if (StudioJob.running) {
+            bars["render"] = working(StudioJob.message)
+            muted(t("Сборка идёт в фоне: экран можно закрыть, прогресс — в уведомлении.", "Building in the background: you can close the screen, progress is in the notification."))
+            button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) { StudioService.cancel(this@StudioActivity) }
+        } else if (busy.isEmpty()) {
+            button(t("🎬 Создать ролик", "🎬 Make video"), primary = true) { renderVideo() }
+        }
         lastVideo?.takeIf { it.exists() }?.let { f ->
             p("✅ " + t("Готово: ", "Done: ") + savedAs.ifBlank { f.name })
             row(
@@ -601,18 +665,6 @@ class StudioActivity : LumenBase() {
         }
     }
 
-    /** Voice padded to the video length, with the background music mixed in when chosen. */
-    private fun finalAudio(plan: StudioPlan, voice: StudioAudio.Pcm, progress: (String) -> Unit): StudioAudio.Pcm {
-        val samples = (plan.totalMs * voice.rate / 1000).toInt()
-        val base = Studio.fit(voice.data, samples)
-        if (!musicFile.exists()) return StudioAudio.Pcm(base, voice.rate)
-        progress(t("Музыка: сведение", "Music: mixing"))
-        val (m, r) = Studio.readWav(musicFile.readBytes()) ?: return StudioAudio.Pcm(base, voice.rate)
-        val music = Studio.resample(m, r, voice.rate)
-        val speech = if (StudioPrefs.musicDuck) Studio.spansOfWords(plan.words) else emptyList()
-        return StudioAudio.Pcm(Studio.mixMusic(base, music, voice.rate, StudioPrefs.musicVolume, speech), voice.rate)
-    }
-
     private fun videoReady() = StudioPrefs.voiceMode == "video" && sourceFile.exists()
 
     private fun currentStyle(): StudioStyle {
@@ -658,6 +710,8 @@ class StudioActivity : LumenBase() {
     }
 
     private fun resetAnalysis() {
+        analysisFile.delete()
+        voiceFile.delete()
         pcm = null
         words = emptyList()
         script = null
@@ -784,14 +838,7 @@ class StudioActivity : LumenBase() {
         Lumen.async({ writeTake(take, rec.rate) }, ::err) { render() }
     }
 
-    private fun writeTake(pcm: ShortArray, rate: Int) {
-        val data = java.nio.ByteBuffer.allocate(pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        data.asShortBuffer().put(pcm)
-        takeFile.outputStream().use {
-            it.write(Studio.wavHeader(pcm.size * 2, rate))
-            it.write(data.array())
-        }
-    }
+    private fun writeTake(pcm: ShortArray, rate: Int) = writeWav(takeFile, pcm, rate)
 
     private fun importAudio(uri: Uri) {
         busy = "import"
@@ -889,6 +936,7 @@ class StudioActivity : LumenBase() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         render()
         val done = { _: Unit ->
+            saveAnalysis()
             busy = ""
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             previewMs = 0
@@ -1004,6 +1052,7 @@ class StudioActivity : LumenBase() {
             busy = ""
             script = sc
             ranges = null
+            saveAnalysis()
             scriptEdit.setText(Studio.toText(sc))
             render()
         }
@@ -1011,58 +1060,49 @@ class StudioActivity : LumenBase() {
 
     // ---------- step 4: video ----------
 
+    /** Starts the build in [StudioService]: it goes on with the screen closed or the phone locked. */
     private fun renderVideo() {
         val plan = currentPlan() ?: return
         val voice = pcm ?: return
+        if (StudioJob.running) return
         val hgt = StudioPrefs.height
         val wdt = hgt * 9 / 16
         val day = SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date())
         val name = Studio.fileName(plan.script.title.ifBlank { topicEdit.text.toString() }, day)
         val out = ReportKit.shareFile(this, name)
-        busy = "render"
-        cancel = false
         lastVideo = null
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        render()
-        val started = System.currentTimeMillis()
-        Lumen.async({
-            val audio = finalAudio(plan, voice) { report("render", it) }
-            val bg = if (plan.style == StudioStyle.VIDEO) sourceFile.takeIf { it.exists() } else null
-            StudioVideo.render(plan, audio, out, wdt, hgt, 30, { cancel }, bg) { report("render", it) }
-            report("render", t("Сохранение…", "Saving…"))
-            saveToMovies(out, name)
-        }, { e ->
-            busy = ""
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            render()
-            if (e !is java.util.concurrent.CancellationException) err(e)
-        }) { where ->
-            busy = ""
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            lastVideo = out
-            savedAs = where
-            L.i("studio", "video ${out.length() / 1024} KB, ${wdt}x$hgt, ${plan.totalMs} ms in ${(System.currentTimeMillis() - started) / 1000} s")
-            render()
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1)
         }
+        StudioService.start(this, StudioJob.Request(
+            plan, voice, out, name, wdt, hgt,
+            if (plan.style == StudioStyle.VIDEO) sourceFile.takeIf { it.exists() } else null,
+            musicFile.takeIf { it.exists() }, StudioPrefs.musicVolume, StudioPrefs.musicDuck
+        ))
+        wasRunning = true
+        render()
     }
 
-    /** Movies/Lumen through MediaStore on Android 10+; older versions keep it in the app's Movies folder. */
-    private fun saveToMovies(f: File, name: String): String {
-        if (Build.VERSION.SDK_INT >= 29) {
-            val v = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, name)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/Lumen")
-            }
-            val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, v) ?: return f.name
-            contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
-            return "Movies/Lumen/$name"
+    /** Progress and the end of a background build (main thread). */
+    private fun onJob() {
+        if (StudioJob.running) {
+            bars["render"]?.let { (tv, bar) ->
+                tv.text = StudioJob.message
+                bar.showProgress(StudioJob.message)
+            } ?: render()
+            return
         }
-        val d = getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: return f.name
-        d.mkdirs()
-        val copy = File(d, name)
-        f.copyTo(copy, overwrite = true)
-        return copy.absolutePath
+        if (!wasRunning) return
+        wasRunning = false
+        StudioJob.result?.takeIf { it.exists() }?.let {
+            lastVideo = it
+            savedAs = StudioJob.savedAs
+        }
+        render()
+        StudioJob.error?.let { e ->
+            StudioJob.error = null
+            err(IllegalStateException(e))
+        }
     }
 
     private fun openFile(f: File) {

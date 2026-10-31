@@ -1,6 +1,6 @@
 # graphify build log
 Name: graphifyy
-Version: 0.9.97
+Version: 0.9.99
 Summary: AI coding assistant skill (Claude Code, CodeBuddy, Codex, OpenCode, Kilo Code, Cursor, Gemini CLI, Aider, OpenClaw, Factory Droid, Trae, Hermes, Kiro, Pi, Devin CLI, Google Antigravity) - turn any folder of code, docs, papers, images, or videos into a queryable knowledge graph
 ERROR: Pipe to stdout was broken
 Usage: graphify <command>
@@ -64,28 +64,28 @@ Commands:
     --context C             explicit edge-context filter (repeatable)
     --seed X                start at node X (id, label or file path; repeatable)
 [graphify extract] scanning /home/runner/work/_temp/src
-[graphify extract] found 78 code, 0 docs, 0 papers, 0 images
-[graphify extract] AST extraction on 78 code files...
-  AST cache: 0/78 files served from cache (0%); 78 to extract
-  warning: 2 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted)
-[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 1985 nodes, 6439 edges, 77 communities
+[graphify extract] found 84 code, 0 docs, 0 papers, 0 images
+[graphify extract] AST extraction on 84 code files...
+  AST cache: 0/84 files served from cache (0%); 84 to extract
+  warning: 3 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/StudioRender.kt (error region at line 1, 37 symbol(s) extracted)
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 2226 nodes, 7209 edges, 85 communities
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
 Loading existing graph...
-Graph: 1985 nodes, 6439 edges
+Graph: 2226 nodes, 7209 edges
 Re-clustering...
-Done - 77 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+Done - 85 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-graph_map: 77 communities named, 78 files mapped
+graph_map: 85 communities named, 84 files mapped
 map exit=0
-total 3356
-drwxr-xr-x 3 runner runner    4096 Oct 30 19:03 .
-drwxr-xr-x 4 runner runner    4096 Oct 30 19:03 ..
--rw-r--r-- 1 runner runner  154524 Oct 30 19:03 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Oct 30 19:03 .graphify_root
--rw-r--r-- 1 runner runner    6266 Oct 30 19:03 BUILD_LOG.txt
--rw-r--r-- 1 runner runner   25578 Oct 30 19:03 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Oct 30 19:03 cache
--rw-r--r-- 1 runner runner 3204369 Oct 30 19:03 graph.json
--rw-r--r-- 1 runner runner   18756 Oct 30 19:03 manifest.json
+total 3772
+drwxr-xr-x 3 runner runner    4096 Oct 31 01:53 .
+drwxr-xr-x 4 runner runner    4096 Oct 31 01:53 ..
+-rw-r--r-- 1 runner runner  174002 Oct 31 01:53 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Oct 31 01:53 .graphify_root
+-rw-r--r-- 1 runner runner    6375 Oct 31 01:53 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner   27102 Oct 31 01:53 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Oct 31 01:53 cache
+-rw-r--r-- 1 runner runner 3611420 Oct 31 01:53 graph.json
+-rw-r--r-- 1 runner runner   20200 Oct 31 01:53 manifest.json

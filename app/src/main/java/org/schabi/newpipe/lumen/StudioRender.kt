@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Matrix
 import android.graphics.Path
@@ -78,7 +79,11 @@ class StudioPlan(
     /** What is drawn over the picture: subtitles and/or schemes. */
     val layers: StudioLayers = StudioLayers.ALL,
     /** Size of a scheme over a background (video, clip, photo), fraction of its full-screen size. */
-    val overScale: Float = 0.6f
+    val overScale: Float = 0.6f,
+    /** Look of the info-schemes (null = auto from the palette) and where they go in a montage. */
+    val schemeStyle: SchemeStyle? = null,
+    val schemePlace: String = "overlay",
+    val schemeAnchor: String = "auto"
 ) {
     val subs get() = layers.subs
     val graphics get() = layers.graphics
@@ -128,14 +133,15 @@ class StudioPlan(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
-            templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.6f
+            templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.6f,
+            schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto"
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK && cast == null
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor)
         }
     }
 }
@@ -219,6 +225,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     private fun insert(i: Int): Boolean {
         if (plan.style != StudioStyle.VIDEO) return false
         plan.clipScenes?.let { return i !in it }
+        if (placed(i)) return false
         return (!plan.overlay && plan.graphics && plan.script.scenes[i].kind != "text") || (plan.script.scenes[i].brollMode != "card" && hasMedia(i))
     }
 
@@ -511,7 +518,20 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     /** Puts a video frame on the canvas with the camera zoom of [tMs]. */
     fun drawVideo(c: Canvas, frame: Bitmap, tMs: Long, paint: Paint) {
         val z = camera(tMs)
+        val fit = videoRect(tMs)
         c.save()
+        if (fit != null) {
+            val (r, p) = fit
+            if (plan.schemePlace == "pip") {
+                // the scheme takes the frame, the speaker shrinks into a rounded corner picture
+                fill.color = sstyle().bg
+                fill.alpha = (255 * p).toInt()
+                c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), fill)
+                c.clipPath(Path().apply { addRoundRect(r, 2.4f * u * p, 2.4f * u * p, Path.Direction.CW) })
+            }
+            c.translate(r.left, r.top)
+            c.scale(r.width() / w, r.height() / h)
+        }
         if (z != 1f) c.scale(z, z, w / 2f, h * focusY)
         c.drawBitmap(frame, null, RectF(0f, 0f, w.toFloat(), h.toFloat()), paint)
         c.restore()
@@ -753,11 +773,12 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 c.restore()
                 return
             }
-            shade.color = bg
+            val styled = sc.kind == "scheme" && plan.schemeStyle != null
+            shade.color = if (styled) sstyle().bg or (0xFF shl 24) else bg
             shade.alpha = (255 * (if (slide) 1f else fade)).toInt()
             c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), shade)
-            glowLight.alpha = shade.alpha
-            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glowLight)
+            glowLight.alpha = if (styled) 0 else shade.alpha
+            if (!styled) c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glowLight)
             glowLight.alpha = 255
             if (a > 0f) {
                 sc.title.takeIf { it.isNotBlank() && sc.kind !in listOf("big", "stat", "quote", "scheme") }?.let { headline(c, it, h * 0.15f, a, local) }
@@ -770,6 +791,15 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             return
         }
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
+        if (placed(i)) {
+            if (a > 0f) {
+                schemeOnVideo(c, sc, i, tMs, a)
+                spokenWord(c, i, tMs, a, h * 0.80f)
+                shapes(c, i, tMs, a)
+                pops(c, i, tMs, a)
+            }
+            return
+        }
         val graphic = plan.overlay && plan.graphics && StudioLayers.hasScheme(sc.kind, sc.items.size)
         if (graphic || plan.graphics && sc.title.isNotBlank()) {
             // a light shade only: the video stays visible behind the scheme
@@ -940,77 +970,103 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         }
     }
 
-    // ---------- info-schemes (lumen.scheme) ----------
+    // ---------- info-schemes (lumen.scheme, styled by lumen.schemestyle) ----------
 
-    /** An info-scheme: nodes pop in on their words, arrows grow between them, the layout's guides behind. */
-    private fun scheme(c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a: Float) {
+    /** The style of the schemes: the chosen one, or "auto" built from the colours of the current palette. */
+    private fun sstyle(): SchemeStyle = plan.schemeStyle ?: SchemeStyle(SchemeStyles.AUTO, "", card = card, ink = ink, muted = muted, accent = accent,
+        line = stroke, fill = "solid", radius = 0.18f, border = 1f, shadow = true)
+
+    private val schP = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val faces = HashMap<String, Typeface>()
+
+    private fun face(font: String, bold: Boolean): Typeface = faces.getOrPut("$font$bold") {
+        val st = if (bold) Typeface.BOLD else Typeface.NORMAL
+        when (font) {
+            "condensed" -> Typeface.create("sans-serif-condensed", st)
+            "serif" -> Typeface.create(Typeface.SERIF, st)
+            "mono" -> Typeface.create(Typeface.MONOSPACE, st)
+            "rounded" -> Typeface.create("sans-serif-rounded", st)
+            else -> Typeface.create(if (bold) "sans-serif-medium" else "sans-serif", st)
+        }
+    }
+
+    private fun schText(st: SchemeStyle, size: Float, color: Int, alpha: Float, bold: Boolean = false, align: Paint.Align = Paint.Align.CENTER): Paint = schP.apply {
+        typeface = face(st.font, bold)
+        textSize = size * st.textScale
+        this.color = color
+        this.alpha = (Color.alpha(color) * alpha).toInt()
+        textAlign = align
+    }
+
+    private fun cased(st: SchemeStyle, s: String) = if (st.upper) s.uppercase() else s
+
+    /** Box of a scheme drawn in the middle of the frame (no placement given). */
+    private fun schemeBox(cx: Float, cy: Float): RectF {
         val bw = if (wide) w * 0.80f else w * 0.92f
-        var bh = if (wide) h * 0.60f else h * 0.44f
-        var top = cy - bh / 2
-        val left = cx - bw / 2
-        val pTitle = Studio.appear(tMs, plan.times[index].startMs, 300)
+        val bh = if (wide) h * 0.60f else h * 0.44f
+        return RectF(cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2)
+    }
+
+    /** An info-scheme in [box]: nodes come in on their words, arrows grow between them, the layout's guides behind. */
+    private fun scheme(c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a: Float, box: RectF = schemeBox(cx, cy)) {
+        val st = sstyle()
+        val acc = st.accent ?: accent
+        val bw = box.width()
+        var bh = box.height()
+        var top = box.top
+        val left = box.left
+        val start = plan.times[index].startMs
         if (s.title.isNotBlank()) {
-            labelP.textSize = 4.4f * u
-            labelP.isFakeBoldText = true
-            labelP.color = ink
-            labelP.alpha = (255 * a * pTitle).toInt()
-            c.drawText(s.title, cx, top + labelP.textSize, labelP)
-            labelP.isFakeBoldText = false
-            top += labelP.textSize * 1.8f
-            bh -= labelP.textSize * 1.8f
+            val p = schText(st, min(4.4f * u, bh * 0.09f), st.ink, a * Studio.appear(tMs, start, 300), bold = true)
+            c.drawText(cased(st, s.title), box.centerX(), top + p.textSize, p)
+            top += p.textSize * 1.8f
+            bh -= p.textSize * 1.8f
         }
         val boxes = StudioScheme.layout(s, bw / bh)
         val times = plan.schemeMs.getOrNull(index).orEmpty()
-        val ps = s.nodes.indices.map { Studio.appear(tMs, times.getOrElse(it) { 0L }, 320) }
+        val ps = s.nodes.indices.map { Studio.appear(tMs, times.getOrElse(it) { 0L }, st.dur.toLong()) }
         val rects = boxes.map { b -> RectF(left + (b.x - b.w / 2) * bw, top + (b.y - b.h / 2) * bh, left + (b.x + b.w / 2) * bw, top + (b.y + b.h / 2) * bh) }
-        val guide = Studio.appear(tMs, plan.times[index].startMs, 400) * a
-        line.color = muted
+        val guide = Studio.appear(tMs, start, 400) * a
+        line.color = st.muted
         line.strokeWidth = max(1.5f, 0.4f * u)
         line.alpha = (150 * guide).toInt()
+        val mx = left + bw / 2
         when (s.layout) {
-            "timeline" -> if (wide) c.drawLine(left, top + bh / 2, left + bw * guide, top + bh / 2, line)
-            else c.drawLine(cx, top, cx, top + bh * guide, line)
+            "timeline" -> if (bw / bh >= 1.2f) c.drawLine(left, top + bh / 2, left + bw * guide, top + bh / 2, line)
+            else c.drawLine(mx, top, mx, top + bh * guide, line)
             "matrix" -> {
-                c.drawLine(cx, top, cx, top + bh, line)
+                c.drawLine(mx, top, mx, top + bh, line)
                 c.drawLine(left, top + bh / 2, left + bw, top + bh / 2, line)
-                labelP.textSize = 3f * u
-                labelP.color = muted
-                labelP.alpha = (255 * guide).toInt()
-                s.axes.getOrNull(0)?.let { c.drawText("$it →", left + bw * 0.80f, top + bh / 2 - 1.2f * u, labelP) }
-                s.axes.getOrNull(1)?.let { c.drawText("↑ $it", cx, top - 1.2f * u, labelP) }
+                val p = schText(st, 3f * u, st.muted, guide)
+                s.axes.getOrNull(0)?.let { c.drawText(cased(st, it) + " →", left + bw * 0.80f, top + bh / 2 - 1.2f * u, p) }
+                s.axes.getOrNull(1)?.let { c.drawText("↑ " + cased(st, it), mx, top - 1.2f * u, p) }
             }
         }
-        // arrows between nodes
         val ids = s.nodes.map { it.id }
         for (l in StudioScheme.links(s)) {
             val i = ids.indexOf(l.from)
             val j = ids.indexOf(l.to)
             if (i < 0 || j < 0) continue
             val p = min(ps[i], ps[j])
-            if (p <= 0f) continue
-            arrow(c, rects[i], boxes[i].shape, rects[j], boxes[j].shape, p, a, l.label)
+            if (p > 0f) arrow(c, st, rects[i], boxes[i].shape, rects[j], boxes[j].shape, p, a, l.label)
         }
-        // timeline ticks from the axis to every event
-        if (s.layout == "timeline") rects.forEachIndexed { i, r ->
-            if (ps[i] <= 0f) return@forEachIndexed
-            line.alpha = (150 * ps[i] * a).toInt()
-            if (wide) c.drawLine(r.centerX(), top + bh / 2, r.centerX(), if (r.centerY() < top + bh / 2) r.bottom else r.top, line)
-            else c.drawLine(cx, r.centerY(), if (r.centerX() < cx) r.right else r.left, r.centerY(), line)
-            fill.color = accent
-            fill.alpha = (255 * ps[i] * a).toInt()
-            if (wide) c.drawCircle(r.centerX(), top + bh / 2, 1.1f * u, fill) else c.drawCircle(cx, r.centerY(), 1.1f * u, fill)
+        if (s.layout == "timeline") {
+            val horiz = bw / bh >= 1.2f
+            rects.forEachIndexed { i, r ->
+                if (ps[i] <= 0f) return@forEachIndexed
+                line.color = st.muted
+                line.alpha = (150 * ps[i] * a).toInt()
+                if (horiz) c.drawLine(r.centerX(), top + bh / 2, r.centerX(), if (r.centerY() < top + bh / 2) r.bottom else r.top, line)
+                else c.drawLine(mx, r.centerY(), if (r.centerX() < mx) r.right else r.left, r.centerY(), line)
+                fill.color = acc
+                fill.alpha = (255 * ps[i] * a).toInt()
+                if (horiz) c.drawCircle(r.centerX(), top + bh / 2, 1.1f * u, fill) else c.drawCircle(mx, r.centerY(), 1.1f * u, fill)
+            }
         }
-        s.nodes.forEachIndexed { i, n -> schemeNode(c, n, rects[i], boxes[i].shape, ps[i], a) }
-        if (s.layout == "venn" && s.center.isNotBlank()) {
-            val p = ps.maxOrNull() ?: 0f
-            labelP.textSize = 3.4f * u
-            labelP.isFakeBoldText = true
-            labelP.color = ink
-            labelP.alpha = (255 * a * Studio.appear(tMs, (times.maxOrNull() ?: 0L) + 300, 300) * p).toInt()
-            val gx = rects.map { it.centerX() }.average().toFloat()
-            val gy = rects.map { it.centerY() }.average().toFloat()
-            c.drawText(s.center, gx, gy + labelP.textSize * 0.35f, labelP)
-            labelP.isFakeBoldText = false
+        s.nodes.forEachIndexed { i, n -> schemeNode(c, st, acc, n, rects[i], boxes[i].shape, ps[i], a) }
+        if (s.layout == "venn" && s.center.isNotBlank() && rects.isNotEmpty()) {
+            val p = schText(st, 3.4f * u, st.ink, a * Studio.appear(tMs, (times.maxOrNull() ?: start) + 300, 300), bold = true)
+            c.drawText(cased(st, s.center), rects.map { it.centerX() }.average().toFloat(), rects.map { it.centerY() }.average().toFloat() + p.textSize * 0.35f, p)
         }
     }
 
@@ -1025,7 +1081,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** An arrow growing from node [a1] to [b1] with an optional small label in the middle. */
-    private fun arrow(c: Canvas, a1: RectF, sa: String, b1: RectF, sb: String, p: Float, a: Float, label: String) {
+    private fun arrow(c: Canvas, st: SchemeStyle, a1: RectF, sa: String, b1: RectF, sb: String, p: Float, a: Float, label: String) {
         val (x0, y0) = edge(a1, sa, b1.centerX(), b1.centerY())
         val (x1e, y1e) = edge(b1, sb, a1.centerX(), a1.centerY())
         val gap = 1.2f * u
@@ -1037,8 +1093,8 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         val sy = y0 + uy * gap
         val ex = sx + (x1e - x0 - 2 * ux * gap) * p
         val ey = sy + (y1e - y0 - 2 * uy * gap) * p
-        line.color = muted
-        line.alpha = (255 * a * p).toInt()
+        line.color = st.muted
+        line.alpha = (Color.alpha(st.muted) * a * p).toInt()
         line.strokeWidth = max(1.5f, 0.55f * u)
         c.drawLine(sx, sy, ex, ey, line)
         val hd = 1.8f * u
@@ -1048,89 +1104,169 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             lineTo(ex - ux * hd + uy * hd * 0.6f, ey - uy * hd - ux * hd * 0.6f)
         }, line)
         if (label.isNotBlank() && p >= 1f) {
-            labelP.textSize = 2.8f * u
-            labelP.color = muted
-            labelP.alpha = (255 * a).toInt()
-            c.drawText(label, (sx + ex) / 2 - uy * 2.2f * u, (sy + ey) / 2 + ux * 2.2f * u + labelP.textSize * 0.35f, labelP)
+            val tp = schText(st, 2.8f * u, st.muted, a)
+            c.drawText(cased(st, label), (sx + ex) / 2 - uy * 2.2f * u, (sy + ey) / 2 + ux * 2.2f * u + tp.textSize * 0.35f, tp)
+        }
+    }
+
+    /** Background of a block in the style: solid or glass fill, outline, or nothing; soft shadow to lift it off the video. */
+    private fun schCard(c: Canvas, st: SchemeStyle, r: RectF, radius: Float, al: Float, border: Int) {
+        if (st.fill == "solid" || st.fill == "glass") {
+            fill.color = st.card
+            fill.alpha = (Color.alpha(st.card) * al).toInt()
+            if (st.shadow) fill.setShadowLayer(1.6f * u, 0f, 0.5f * u, ((0x55 * al).toInt() shl 24))
+            c.drawRoundRect(r, radius, radius, fill)
+            fill.clearShadowLayer()
+        }
+        val bw = if (st.fill == "outline") max(st.border, 0.8f) else st.border
+        if (bw > 0f || border != st.line) {
+            line.color = border
+            line.alpha = (Color.alpha(border) * al).toInt()
+            line.strokeWidth = max(1f, 0.3f * u * max(bw, 0.6f))
+            c.drawRoundRect(r, radius, radius, line)
         }
     }
 
     /** One block of a scheme: a card, a band (funnel, pyramid) or a circle (venn) with emoji, label and value. */
-    private fun schemeNode(c: Canvas, n: SchNode, r: RectF, shape: String, p: Float, a: Float) {
+    private fun schemeNode(c: Canvas, st: SchemeStyle, acc: Int, n: SchNode, r: RectF, shape: String, p: Float, a: Float) {
         if (p <= 0f) return
-        val al = p * a
+        val al = (if (st.enter == "draw") min(1f, p * 1.6f) else p) * a
         c.save()
-        val k = 0.86f + 0.14f * p
-        c.scale(k, k, r.centerX(), r.centerY())
-        val border = if (n.accent) accent else stroke
+        when (st.enter) {
+            "fade" -> Unit
+            "slide" -> c.translate(0f, (1 - p) * 3f * u)
+            "draw" -> c.scale(0.6f + 0.4f * p, 1f, r.left, r.centerY())
+            else -> (0.86f + 0.14f * p).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }
+        }
+        val border = if (n.accent) acc else st.line
         when (shape) {
             "circle" -> {
                 val rad = min(r.width(), r.height()) / 2
-                fill.color = accent
+                fill.color = acc
                 fill.alpha = (46 * al).toInt()
                 c.drawCircle(r.centerX(), r.centerY(), rad, fill)
-                line.color = accent
+                line.color = acc
                 line.alpha = (220 * al).toInt()
                 line.strokeWidth = max(1.5f, 0.5f * u)
                 c.drawCircle(r.centerX(), r.centerY(), rad, line)
-                // the label sits away from the middle, where the circles overlap
                 val ty = r.centerY() - rad * 0.45f
                 if (n.icon.isNotBlank()) emoji(c, n.icon, r.centerX(), ty, rad * 0.3f, al)
-                nodeText(c, n.label, n.value, r.centerX(), ty + rad * 0.22f, rad * 1.2f, rad * 0.16f, al, false)
+                nodeText(c, st, acc, n.label, n.value, r.centerX(), ty + rad * 0.22f, rad * 1.2f, rad * 0.16f, al, false)
             }
             "band" -> {
-                roundCard(c, r, min(r.height() * 0.3f, 3f * u), al, border)
+                schCard(c, st, r, min(r.height() * st.radius * 1.6f, 3f * u), al, border)
                 val fs = min(r.height() * 0.34f, 4.2f * u)
                 var x = r.left + fs * 0.9f
                 if (n.icon.isNotBlank()) {
                     emoji(c, n.icon, x, r.centerY() + fs * 0.38f, fs * 1.1f, al)
                     x += fs * 1.2f
                 }
-                labelP.textAlign = Paint.Align.LEFT
-                labelP.textSize = fs
-                labelP.color = ink
-                labelP.alpha = (255 * al).toInt()
-                c.drawText(wrap(n.label, labelP, r.right - x - fs * 4, 1).firstOrNull() ?: "", x, r.centerY() + fs * 0.36f, labelP)
+                val tp = schText(st, fs, st.ink, al, align = Paint.Align.LEFT)
+                c.drawText(wrap(cased(st, n.label), tp, r.right - x - fs * 4, 1).firstOrNull() ?: "", x, r.centerY() + fs * 0.36f, tp)
                 if (n.value.isNotBlank()) {
-                    labelP.textAlign = Paint.Align.RIGHT
-                    labelP.isFakeBoldText = true
-                    labelP.color = accent
-                    labelP.alpha = (255 * al).toInt()
-                    c.drawText(n.value, r.right - fs * 0.7f, r.centerY() + fs * 0.36f, labelP)
-                    labelP.isFakeBoldText = false
+                    val vp = schText(st, fs, acc, al, bold = true, align = Paint.Align.RIGHT)
+                    c.drawText(n.value, r.right - fs * 0.7f, r.centerY() + fs * 0.36f, vp)
                 }
-                labelP.textAlign = Paint.Align.CENTER
             }
             else -> {
-                roundCard(c, r, min(r.width(), r.height()) * 0.18f, al, border)
+                schCard(c, st, r, min(r.width(), r.height()) * st.radius, al, border)
                 val fs = min(r.height() * 0.15f, r.width() * 0.13f).coerceAtMost(4.4f * u)
                 val hasText = n.label.isNotBlank() || n.value.isNotBlank()
                 val icon = min(r.height() * (if (hasText) 0.34f else 0.5f), r.width() * 0.4f)
                 val iy = if (hasText) r.top + r.height() * 0.12f + icon * 0.85f else r.centerY() + icon * 0.35f
                 if (n.icon.isNotBlank()) emoji(c, n.icon, r.centerX(), iy, icon, al)
                 val ty = if (n.icon.isNotBlank()) iy + icon * 0.25f + fs else r.centerY() - fs * 0.2f
-                nodeText(c, n.label, n.value, r.centerX(), ty, r.width() * 0.9f, fs, al, true)
+                nodeText(c, st, acc, n.label, n.value, r.centerX(), ty, r.width() * 0.9f, fs, al, true)
             }
         }
         c.restore()
     }
 
     /** Label (up to 2 lines) and the value under it in the accent colour. */
-    private fun nodeText(c: Canvas, label: String, value: String, x: Float, y: Float, maxW: Float, fs: Float, al: Float, twoLines: Boolean) {
-        labelP.textAlign = Paint.Align.CENTER
-        labelP.textSize = fs
-        labelP.color = ink
-        labelP.alpha = (255 * al).toInt()
-        val lines = wrap(label, labelP, maxW, if (twoLines) 2 else 1)
-        lines.forEachIndexed { li, s -> c.drawText(s, x, y + li * fs * 1.15f, labelP) }
+    private fun nodeText(c: Canvas, st: SchemeStyle, acc: Int, label: String, value: String, x: Float, y: Float, maxW: Float, fs: Float, al: Float, twoLines: Boolean) {
+        val tp = schText(st, fs, st.ink, al)
+        val lines = wrap(cased(st, label), tp, maxW, if (twoLines) 2 else 1)
+        val step = tp.textSize * 1.15f
+        lines.forEachIndexed { li, s -> c.drawText(s, x, y + li * step, tp) }
         if (value.isNotBlank()) {
-            labelP.textSize = fs * 1.15f
-            labelP.isFakeBoldText = true
-            labelP.color = accent
-            labelP.alpha = (255 * al).toInt()
-            c.drawText(value, x, y + lines.size * fs * 1.15f + fs * 0.2f, labelP)
-            labelP.isFakeBoldText = false
+            val vp = schText(st, fs * 1.15f, acc, al, bold = true)
+            c.drawText(value, x, y + lines.size * step + fs * 0.2f, vp)
         }
+    }
+
+    // ---------- schemes in a video (placement) ----------
+
+    /** Is scene [i] a scheme that takes part in the placement (montage style, schemes on)? */
+    private fun placed(i: Int): Boolean {
+        val sc = plan.script.scenes.getOrNull(i) ?: return false
+        return plan.style == StudioStyle.VIDEO && plan.graphics && sc.kind == "scheme" && sc.scheme != null && plan.clipScenes?.let { i in it } != false
+    }
+
+    /** 0..1: how far the frame has moved into the placement of the scheme of the scene at [tMs] (eases in and out). */
+    private fun fitAt(tMs: Long): Pair<Int, Float> {
+        val i = Studio.sceneAt(plan.times, tMs)
+        if (i < 0 || !placed(i)) return -1 to 0f
+        val st = plan.times[i]
+        val inP = if (placed(i - 1)) 1f else StudioMotion.inOut(Studio.appear(tMs, st.startMs, 380))
+        val outP = if (placed(i + 1) || i == plan.times.lastIndex) 1f else 1f - StudioMotion.inOut(Studio.appear(tMs, st.endMs - 320, 320))
+        return i to inP * outP
+    }
+
+    /** Speaker's frame for side and pip: slid aside or shrunk into a rounded corner picture; null = untouched. */
+    private fun videoRect(tMs: Long): Pair<RectF, Float>? {
+        val place = plan.schemePlace
+        if (place != "side" && place != "pip") return null
+        val (i, p) = fitAt(tMs)
+        if (i < 0 || p <= 0f) return null
+        val vb = SchemeStyles.layout(place, plan.schemeAnchor, w.toFloat() / h, plan.subs).second ?: return null
+        val full = RectF(0f, 0f, w.toFloat(), h.toFloat())
+        val target = if (place == "side") RectF((vb.x - 0.5f) * w, (vb.y - 0.5f) * h, (vb.x + 0.5f) * w, (vb.y + 0.5f) * h)
+        else RectF((vb.x - vb.w / 2) * w, (vb.y - vb.h / 2) * h, (vb.x + vb.w / 2) * w, (vb.y + vb.h / 2) * h)
+        fun lerp(a0: Float, b0: Float) = a0 + (b0 - a0) * p
+        return RectF(lerp(full.left, target.left), lerp(full.top, target.top), lerp(full.right, target.right), lerp(full.bottom, target.bottom)) to p
+    }
+
+    /** A scheme over the speaker in the chosen placement: over, on a panel, beside the slid frame or around the corner picture. */
+    private fun schemeOnVideo(c: Canvas, sc: SScene, i: Int, tMs: Long, a: Float) {
+        val s = sc.scheme ?: return
+        val st = sstyle()
+        val (_, fp) = fitAt(tMs)
+        val place = plan.schemePlace
+        val (b, _) = SchemeStyles.layout(place, plan.schemeAnchor, w.toFloat() / h, plan.subs)
+        val k = when {
+            st.size > 0 -> st.size / 100f
+            place == "side" || place == "pip" -> 0.95f
+            else -> plan.overScale
+        }
+        val bw = b.w * w * k
+        val bh = b.h * h * k
+        val box = RectF(b.x * w - bw / 2, b.y * h - bh / 2, b.x * w + bw / 2, b.y * h + bh / 2)
+        val bgA = when (place) {
+            "panel" -> st.dim
+            "side" -> st.dim
+            else -> 0f
+        } * fp * a
+        if (bgA > 0f) {
+            fill.color = st.bg
+            fill.alpha = (255 * bgA).toInt()
+            if (place == "side") {
+                // a strip from the edge of the frame, the speaker stays visible beside it
+                val r = if (w > h) {
+                    if (b.x < 0.5f) RectF(0f, 0f, box.right + 2f * u, h.toFloat()) else RectF(box.left - 2f * u, 0f, w.toFloat(), h.toFloat())
+                } else RectF(0f, 0f, w.toFloat(), box.bottom + 2f * u)
+                c.drawRect(r, fill)
+            } else {
+                val r = RectF(box.left - 2.5f * u, box.top - 2.5f * u, box.right + 2.5f * u, box.bottom + 2.5f * u)
+                c.drawRoundRect(r, 3f * u, 3f * u, fill)
+            }
+        }
+        if (place == "pip") videoRect(tMs)?.let { (r, _) ->
+            line.color = st.line
+            line.alpha = (Color.alpha(st.line) * a).toInt()
+            line.strokeWidth = max(1.5f, 0.4f * u)
+            c.drawRoundRect(r, 2.4f * u, 2.4f * u, line)
+        }
+        scheme(c, s, i, box.centerX(), box.centerY(), tMs, a * (if (place == "side" || place == "pip") fp else 1f), box)
     }
 
     private fun cardPaint(alpha: Float) = fill.apply {

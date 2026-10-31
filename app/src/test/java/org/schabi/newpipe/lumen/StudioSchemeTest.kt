@@ -130,4 +130,30 @@ class StudioSchemeTest {
         val bad = JSONObject().put("say", "x").put("kind", "scheme").put("scheme", JSONObject().put("layout", "zzz"))
         assertEquals("text", Studio.sceneOf(bad)!!.kind)
     }
+
+    @Test
+    fun dropIndexShiftsWords() {
+        val f = StudioScheme.dropIndex(setOf(1, 4))
+        assertEquals(0, f(0))
+        assertEquals(null, f(1))
+        assertEquals(1, f(2))
+        assertEquals(2, f(3))
+        assertEquals(3, f(5))
+        assertEquals(7, StudioScheme.dropIndex(emptySet())(7))
+    }
+
+    @Test
+    fun schemesSurviveANewDirection() {
+        val s = chain().copy(nodes = chain().nodes.mapIndexed { i, n -> n.copy(at = 4 + i) })
+        // the scheme sat on words 4..7; the director split the speech differently and cut word 1
+        val scenes = listOf(SScene("a", "icons"), SScene("b", "text"), SScene("c", "flow"))
+        val ranges = listOf(0..1, 2..3, 4..6)
+        val out = StudioScheme.carry(listOf(s to 4..7), scenes, ranges, StudioScheme.dropIndex(setOf(1)))
+        // words 4..7 are now 3..6: most of them are in the third scene
+        assertEquals(listOf("icons", "text", "scheme"), out.map { it.kind })
+        assertEquals(listOf(-1, 4, 5), out[2].scheme!!.nodes.map { it.at }) // word 3 left the scene
+        // nothing to carry or no overlap: scenes stay as they are
+        assertEquals(scenes, StudioScheme.carry(emptyList(), scenes, ranges) { it })
+        assertEquals(scenes, StudioScheme.carry(listOf(s to 20..22), scenes, ranges) { it })
+    }
 }

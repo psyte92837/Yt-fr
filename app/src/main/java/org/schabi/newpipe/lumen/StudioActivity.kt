@@ -2676,6 +2676,7 @@ class StudioActivity : LumenBase() {
         val long = task == StudioTask.VIDEO || p0.ms > 180_000
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val roles = script?.let { sc -> ranges?.let { StudioToon.wordRoles(sc.scenes, it, ws.size, cast) } }
+        val schemesBefore = schemeSpans()
         busy = "ai_direct"
         cancel = false
         render()
@@ -2708,7 +2709,8 @@ class StudioActivity : LumenBase() {
                 val (ss, rr) = StudioToon.restore(res.script.scenes, res.ranges, roles, cast, res.words)
                 res = res.copy(script = res.script.copy(scenes = ss), ranges = rr)
             }
-            res
+            // info-schemes made before stay on the scenes with the same speech
+            res.copy(script = res.script.copy(scenes = StudioScheme.carry(schemesBefore, res.script.scenes, res.ranges) { it }))
         }, { e ->
             busy = ""
             render()
@@ -2755,6 +2757,7 @@ class StudioActivity : LumenBase() {
         busy = "ai_direct"
         cancel = false
         render()
+        val schemesBefore = schemeSpans()
         job("ai_direct", {
             val d = aiJson("studio_direct", vars, "You are a video editor and motion designer. Answer with JSON only.",
                 if (ws.size > 600) 16_000 else 8000) { StudioDirector.parse(it, ws.size, cutsNow.map { c -> c.id }.toSet()) }
@@ -2770,6 +2773,8 @@ class StudioActivity : LumenBase() {
             if (cutsNow.isNotEmpty() && ap.script.scenes.none { it.clip.isNotEmpty() }) {
                 ap = ap.copy(script = withClips(ap.script, StudioCuts.autoAssign(ap.script.scenes, cutsNow)))
             }
+            // info-schemes made before stay on the scenes with the same speech (word numbers follow the cut)
+            ap = ap.copy(script = ap.script.copy(scenes = StudioScheme.carry(schemesBefore, ap.script.scenes, ap.ranges, StudioScheme.dropIndex(drop))))
             val np = ap.keep?.let { StudioAudio.Pcm(Studio.cutPcm(p0.data, p0.rate, it), p0.rate) } ?: p0
             val nc = ap.keep?.let { StudioDirector.composeCuts(oldCuts, it) } ?: oldCuts
             Triple(ap, np, nc)
@@ -2946,6 +2951,14 @@ class StudioActivity : LumenBase() {
             busy = ""
             saveStyle(st, notes)
         }
+    }
+
+    /** Schemes of the current scenes with the words they cover: they survive a new direction ([StudioScheme.carry]). */
+    private fun schemeSpans(): List<Pair<SScheme, IntRange>> {
+        val sc = script ?: return emptyList()
+        if (sc.scenes.none { it.scheme != null }) return emptyList()
+        val times = currentPlan()?.times ?: return emptyList()
+        return sc.scenes.indices.mapNotNull { i -> sc.scenes[i].scheme?.let { s -> times.firstOrNull { it.scene == i }?.words?.let { s to it } } }
     }
 
     private fun removeSchemes() {

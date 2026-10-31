@@ -257,6 +257,49 @@ object StudioScheme {
         return range.firstOrNull { it in words.indices && stem(words[it].text).let { w -> w.length >= 4 && keys.any { k -> w == k } } }
     }
 
+    // ---------- keeping schemes through a new direction ----------
+
+    /**
+     * Old word index → new one when the words in [drop] were cut out of the take (null = that word is gone).
+     */
+    fun dropIndex(drop: Set<Int>): (Int) -> Int? {
+        if (drop.isEmpty()) return { it }
+        val sorted = drop.sorted()
+        return { i ->
+            if (i in drop) null
+            else {
+                var lo = 0
+                var hi = sorted.size
+                while (lo < hi) {
+                    val m = (lo + hi) / 2
+                    if (sorted[m] < i) lo = m + 1 else hi = m
+                }
+                i - lo
+            }
+        }
+    }
+
+    /**
+     * Puts the schemes made before a new direction back onto the new scenes: each goes to the scene that covers most of
+     * its words ([schemes] = scheme and the word range of its old scene), one scheme per scene; the words of its
+     * nodes ([SchNode.at]) follow [index].
+     */
+    fun carry(schemes: List<Pair<SScheme, IntRange>>, scenes: List<SScene>, ranges: List<IntRange>, index: (Int) -> Int?): List<SScene> {
+        if (schemes.isEmpty()) return scenes
+        val out = scenes.toMutableList()
+        val used = HashSet<Int>()
+        for ((s, r) in schemes) {
+            val mapped = r.mapNotNull(index)
+            if (mapped.isEmpty()) continue
+            val best = ranges.indices.filter { it !in used && it < out.size }.maxByOrNull { j -> mapped.count { it in ranges[j] } } ?: continue
+            if (mapped.none { it in ranges[best] }) continue
+            used += best
+            val moved = s.copy(nodes = s.nodes.map { n -> n.copy(at = if (n.at >= 0) index(n.at) ?: -1 else -1) })
+            out[best] = out[best].copy(kind = "scheme", scheme = repair(moved, ranges[best]))
+        }
+        return out
+    }
+
     // ---------- prompt blocks ----------
 
     /** Scenes for the prompt: "Сцена 3 [41..58] (kind): [41]слово [42]слово …". */

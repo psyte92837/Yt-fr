@@ -46,7 +46,7 @@ object Updates {
     val brokenAt: Long get() = Lumen.prefs.getLong("extractor_broken_at", 0)
 
     /** Last known published build (may be the one we run). */
-    val latest: UpdateInfo? get() = UpdateLogic.parse(Lumen.prefs.getString("update_info", "") ?: "")
+    val latest: UpdateInfo? get() = UpdateLogic.parse(Lumen.prefs.getString("update_info", "") ?: "")?.forEdition(BuildConfig.LUMEN_LENS)
     val available: UpdateInfo? get() = latest?.takeIf { UpdateLogic.isNewer(currentBuild, appId, it) }
 
     /** Keeps the periodic check (every 12 h, any network) in sync with the setting. Cheap to call often. */
@@ -98,8 +98,9 @@ object Updates {
             if (code == 404) error(t("сборка ещё не опубликована", "no build published yet"))
             if (code !in 200..299) error("HTTP $code")
             val body = c.inputStream.bufferedReader().use { it.readText() }
-            val info = UpdateLogic.parse(body) ?: error(t("неверный update.json", "invalid update.json"))
-            p.edit().putString("update_info", info.toJson()).putLong("update_checked_at", System.currentTimeMillis())
+            val raw = UpdateLogic.parse(body) ?: error(t("неверный update.json", "invalid update.json"))
+            val info = raw.forEdition(BuildConfig.LUMEN_LENS)
+            p.edit().putString("update_info", raw.toJson()).putLong("update_checked_at", System.currentTimeMillis())
                 .putString("update_error", "").apply()
             val newer = UpdateLogic.isNewer(currentBuild, appId, info)
             L.i("update", "latest build ${info.build} (we run $currentBuild), extractor ${info.extractor}, newer=$newer")

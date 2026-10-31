@@ -48,13 +48,15 @@ jobs:
           LUMEN_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           ./gradlew assembleRelease -DskipChecks --stacktrace
-          mkdir -p dist && cp app/build/outputs/apk/release/*.apk "dist/lumen-${GITHUB_REF_NAME}.apk"
+          mkdir -p dist && cp app/build/outputs/apk/std/release/*.apk "dist/lumen-${GITHUB_REF_NAME}.apk"
+          cp app/build/outputs/apk/lens/release/*.apk "dist/lumen-lens-${GITHUB_REF_NAME}.apk"
 
       - name: Build continuous APK (no keystore)
         if: steps.keystore.outputs.signed != 'true'
         run: |
           ./gradlew assembleContinuous -DskipChecks --stacktrace
-          mkdir -p dist && cp app/build/outputs/apk/continuous/*.apk "dist/lumen-${GITHUB_REF_NAME}-unsigned-key.apk"
+          mkdir -p dist && cp app/build/outputs/apk/std/continuous/*.apk "dist/lumen-${GITHUB_REF_NAME}-unsigned-key.apk"
+          cp app/build/outputs/apk/lens/continuous/*.apk "dist/lumen-lens-${GITHUB_REF_NAME}-unsigned-key.apk"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7

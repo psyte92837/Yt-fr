@@ -223,6 +223,10 @@ object Help {
                     "and shows right over YouTube: what is on screen, an AI summary, similar videos, a mini recommendation graph, the channel. " +
                     "Videos can be queued for the full analysis, and the session feed can be reviewed by AI or saved as a project."),
             listOf(
+                t("Кнопка есть только в сборке «Lumen с Lens» (lumen-lens-debug-*.apk): Play Защита блокирует установку приложений со службой спецвозможностей не из магазина. " +
+                    "Обычная сборка показывает на этом экране ссылку на неё; ставится поверх, данные сохраняются.",
+                    "The button is only in the \"Lumen with Lens\" build (lumen-lens-debug-*.apk): Play Protect blocks sideloaded apps with an accessibility service. " +
+                        "The plain build links to it on this screen; it installs over it and keeps the data."),
                 t("Меню ⋮ на главном экране → «Кнопка поверх YouTube» → «Включить» и включите службу Lumen в Спецвозможностях.",
                     "Home menu ⋮ → \"Button over YouTube\" → \"Turn on\" and enable the Lumen service in Accessibility."),
                 t("Откройте YouTube и нажмите «L». Вкладка «Экран» — видео на экране, «Видео» — действия с выбранным, «Лента» — всё, что показал YouTube, «Очередь» — анализы по порядку.",

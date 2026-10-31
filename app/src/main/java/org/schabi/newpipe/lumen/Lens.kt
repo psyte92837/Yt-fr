@@ -30,6 +30,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import org.json.JSONObject
+import org.schabi.newpipe.BuildConfig
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
@@ -1211,6 +1212,13 @@ class LensActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
+        if (!BuildConfig.LUMEN_LENS) {
+            editionCard(c)
+            LensUi.queue(c, this, onOpen = { pid -> startActivity(Intent(this, ProjectActivity::class.java).putExtra("id", pid).putExtra("tab", "overview")) },
+                onChange = { render() }, onStart = { AnalysisQueue.pump(this); render() })
+            page(t("Поверх YouTube", "Over YouTube"), c.root, keepScroll = true)
+            return
+        }
         val on = LensState.isOn(this)
         c.card {
             add(text(ctx, t("🫧 Кнопка Lumen поверх YouTube", "🫧 Lumen button over YouTube"), Type.TITLE_M, bold = true), 0)
@@ -1270,6 +1278,23 @@ class LensActivity : LumenBase() {
                     "Only what you start yourself (summary, feed review) goes to the AI, and you see it before sending."))
         }
         page(t("Поверх YouTube", "Over YouTube"), c.root, keepScroll = true)
+    }
+
+    /** The plain edition has no accessibility service (Play Protect blocks sideloaded apps with one): explain and offer the Lens APK. */
+    private fun editionCard(c: Col) = c.card {
+        add(text(ctx, t("🫧 Кнопка Lumen поверх YouTube", "🫧 Lumen button over YouTube"), Type.TITLE_M, bold = true), 0)
+        p(t("Кнопка читает экран YouTube через спецвозможности Android. Приложения с такой службой Google Play Защита блокирует " +
+            "при установке не из магазина, поэтому кнопка вынесена в отдельную сборку «Lumen с Lens».",
+            "The button reads the YouTube screen through Android accessibility. Google Play Protect blocks sideloaded apps with " +
+                "such a service, so the button lives in a separate build, \"Lumen with Lens\"."), 14f)
+        muted(t("Сборка с Lens ставится поверх этой, данные сохраняются. Устанавливайте не во время телефонного звонка. " +
+            "Если Play Защита блокирует: Play Маркет → профиль → Play Защита → ⚙ → «Сканировать приложения» выкл., установите, включите обратно. " +
+            "Или: adb install. Дальше она обновляется сама.",
+            "The Lens build installs over this one and keeps the data. If Play Protect blocks it: Play Store → profile → Play Protect → ⚙ → " +
+                "turn off \"Scan apps\", install, turn it back on. Or: adb install. After that it updates itself."))
+        button(t("Скачать сборку с Lens", "Download the Lens build"), primary = true) {
+            openUrl(Updates.latest?.lensApk?.takeIf { it.startsWith("https://") } ?: UpdateLogic.PAGE)
+        }
     }
 
     companion object {

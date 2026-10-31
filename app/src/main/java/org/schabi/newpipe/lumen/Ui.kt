@@ -1090,8 +1090,8 @@ abstract class LumenBase : Activity() {
     }
 }
 
-/** List row of a video: small thumbnail, title (2 lines), channel and a metrics line. */
-fun videoListRow(ctx: Context, thumb: String, title: String, sub: String, meta: String, onClick: () -> Unit): LinearLayout {
+/** List row of a video: small thumbnail, title (2 lines), channel and a metrics line; with [url] a "⋮" button (background / download). */
+fun videoListRow(ctx: Context, thumb: String, title: String, sub: String, meta: String, url: String = "", onClick: () -> Unit): LinearLayout {
     val row = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -1115,6 +1115,10 @@ fun videoListRow(ctx: Context, thumb: String, title: String, sub: String, meta: 
     if (sub.isNotBlank()) info.addView(text(ctx, sub, 12f, color = Palette.MUTED).apply { isSingleLine = true })
     if (meta.isNotBlank()) info.addView(text(ctx, meta, 12f, color = Palette.MUTED))
     row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+    if (url.isNotBlank()) {
+        row.setPadding(ctx.dp(8), ctx.dp(8), 0, ctx.dp(8))
+        row.addView(mediaBtn(ctx, url, title), LinearLayout.LayoutParams(ctx.dp(44), ctx.dp(48)))
+    }
     return row
 }
 

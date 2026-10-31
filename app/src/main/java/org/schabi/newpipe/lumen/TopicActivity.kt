@@ -95,7 +95,13 @@ class TopicActivity : LumenBase() {
                 }
             }
             val url = q?.optString("url").orEmpty()
-            if (url.isNotBlank()) card.setOnClickListener { openVideo(url) }
+            if (url.isNotBlank()) {
+                card.setOnClickListener { openVideo(url) }
+                card.setOnLongClickListener {
+                    videoMenu(url, i.optString("video_title")) { openVideo(url) }
+                    true
+                }
+            }
         }
 
         // ---- P3 qualification

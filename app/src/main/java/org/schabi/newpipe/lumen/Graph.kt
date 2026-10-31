@@ -377,7 +377,7 @@ class GraphActivity : LumenBase() {
                 val added = Store.mergeVideos(pid, listOf(n.toVideo("rec")))
                 toast(if (added > 0) t("Добавлено в проект", "Added to project") else t("Уже в проекте", "Already in project"))
             }
-            .setNegativeButton(t("Закрыть", "Close"), null).show()
+            .setNegativeButton(t("Фон / скачать", "Play / download")) { _, _ -> videoMenu(n.url, n.title) }.show()
     }
 
     companion object {

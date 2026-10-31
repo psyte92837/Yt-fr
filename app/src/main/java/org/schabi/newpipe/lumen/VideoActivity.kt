@@ -98,6 +98,11 @@ class VideoActivity : LumenBase() {
                 if (isLocalSource(v.id)) toast(t("Это импортированный файл", "This is an imported file")) else collectNow()
             }
         )
+        if (MediaLink.playable(v.url) != null) c.row(
+            btn(this, t("🎧 В фоне", "🎧 Background"), style = BtnStyle.TONAL) { runMedia(v.url, MediaAction.BACKGROUND) },
+            btn(this, t("⬇ Аудио", "⬇ Audio"), style = BtnStyle.OUTLINED) { runMedia(v.url, MediaAction.AUDIO) },
+            btn(this, t("⬇ Видео", "⬇ Video"), style = BtnStyle.OUTLINED) { runMedia(v.url, MediaAction.VIDEO) }
+        )
         if (v.collectError.isNotEmpty()) c.p("⚠ " + v.collectError, 13f, Palette.BAD)
 
         // AI summary

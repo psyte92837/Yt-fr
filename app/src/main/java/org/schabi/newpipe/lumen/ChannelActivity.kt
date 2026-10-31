@@ -211,7 +211,7 @@ class ChannelActivity : LumenBase() {
     }
 
     private fun videoLine(v: Video) = videoListRow(this, ThumbUrl.mini(v.id, v.thumb), v.title, "",
-        Fmt.num(v.views) + " · " + (if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText) + " · " + Fmt.duration(v.duration)) {
+        Fmt.num(v.views) + " · " + (if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText) + " · " + Fmt.duration(v.duration), url = v.url) {
         chooseLinkAction(v.url)
     }.apply {
         setOnLongClickListener {

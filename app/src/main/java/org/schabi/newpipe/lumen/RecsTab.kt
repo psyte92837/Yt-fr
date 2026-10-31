@@ -308,6 +308,10 @@ private fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
     info.addView(text(this, "×${n.hits} · PR ${String.format("%.1f", n.pr * 1000)} · ${t("шаг", "step")} ${n.depth} · $topic · ${Fmt.num(n.views)}",
         12f, color = if (n.relevant == 0) Palette.OUTLINE else Palette.MUTED))
     row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+    if (n.url.isNotBlank()) {
+        row.setPadding(dp(4), dp(8), 0, dp(8))
+        row.addView(mediaBtn(this, n.url, n.title), LinearLayout.LayoutParams(dp(44), dp(48)))
+    }
     row.setOnClickListener { openVideo(n.url) }
     return row
 }

@@ -113,7 +113,7 @@ fun ProjectActivity.overviewTab(c: Col) {
     if (g.nodes.size > 1) {
         c.h2(t("Похожие и рекомендации", "Similar & recommended") + " (${g.nodes.size - 1})")
         RecEngine.ranked(g, "hits").take(8).forEach { n ->
-            c.add(videoListRow(this, ThumbUrl.mini(n.id, n.thumb), n.title.ifBlank { n.id }, n.channel, "×${n.hits} · ${Fmt.num(n.views)}") { openVideo(n.url) }, 6)
+            c.add(videoListRow(this, ThumbUrl.mini(n.id, n.thumb), n.title.ifBlank { n.id }, n.channel, "×${n.hits} · ${Fmt.num(n.views)}", url = n.url) { openVideo(n.url) }, 6)
         }
         c.row(
             btn(this, t("Граф видео", "Video graph"), style = BtnStyle.TONAL) {

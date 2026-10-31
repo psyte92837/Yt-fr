@@ -607,6 +607,10 @@ class ProjectActivity : LumenBase() {
         }
         info.addView(text(this, status, 12f, color = if (v.collectError.isNotEmpty()) Palette.BAD else Palette.MUTED))
         row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
+        if (v.url.isNotBlank()) {
+            row.setPadding(dp(4), dp(8), 0, dp(8))
+            row.addView(mediaBtn(this, v.url, v.title), LinearLayout.LayoutParams(dp(44), dp(48)))
+        }
         row.setOnClickListener {
             startActivity(Intent(this, VideoActivity::class.java).putExtra("pid", project.id).putExtra("vid", v.id))
         }
@@ -777,7 +781,7 @@ class ProjectActivity : LumenBase() {
                 "velocity" -> Fmt.num(Analytics.velocity(v)) + t("/день", "/day")
                 else -> Fmt.num(v.views)
             }
-            c.add(videoListRow(this, ThumbUrl.mini(v.id, v.thumb), "${i + 1}. ${v.title}", v.channel, metric) {
+            c.add(videoListRow(this, ThumbUrl.mini(v.id, v.thumb), "${i + 1}. ${v.title}", v.channel, metric, url = v.url) {
                 startActivity(Intent(this@ProjectActivity, VideoActivity::class.java).putExtra("pid", project.id).putExtra("vid", v.id))
             }, 6)
         }

@@ -307,7 +307,7 @@ class AuditActivity : LumenBase() {
         val thumbs = HashMap<String, String>()
         run.walks.forEach { w -> w.steps.forEach { s -> s.shown.forEach { thumbs[it.id] = it.thumb } } }
         list.take(10).forEach { a ->
-            c.add(videoListRow(this, thumbs[a.key] ?: "", a.title, a.channel, "${a.count} $unit · ${AuditMath.pct(a.share)}") {
+            c.add(videoListRow(this, thumbs[a.key] ?: "", a.title, a.channel, "${a.count} $unit · ${AuditMath.pct(a.share)}", url = a.key) {
                 openVideo("https://www.youtube.com/watch?v=${a.key}")
             })
         }

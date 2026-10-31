@@ -476,7 +476,10 @@ fun Activity.chooseLinkAction(text: String, onDone: () -> Unit = {}) {
         t("▶ Только похожие и рекомендованные видео", "▶ Only similar & recommended videos") to { harvestSetup(link.url, "related", onDone) },
         t("📅 Похожие видео за период…", "📅 Similar videos by period…") to { harvestSetup(link.url, "period", onDone) },
         t("🎚 Похожие видео по параметрам…", "🎚 Similar videos by filters…") to { harvestSetup(link.url, "params", onDone) },
-        t("🤖 Похожие видео по AI-фильтру…", "🤖 Similar videos by AI filter…") to { harvestSetup(link.url, "ai", onDone) }
+        t("🤖 Похожие видео по AI-фильтру…", "🤖 Similar videos by AI filter…") to { harvestSetup(link.url, "ai", onDone) },
+        MediaLink.label(MediaAction.BACKGROUND) to { runMedia(link.url, MediaAction.BACKGROUND); onDone() },
+        MediaLink.label(MediaAction.AUDIO) to { runMedia(link.url, MediaAction.AUDIO); onDone() },
+        MediaLink.label(MediaAction.VIDEO) to { runMedia(link.url, MediaAction.VIDEO); onDone() }
     )
     AlertDialog.Builder(this, theme).setTitle(if (link.type == "channel") t("Что сделать с каналом?", "What to do with the channel?") else t("Что сделать с видео?", "What to do with the video?"))
         .setItems(actions.map { it.first }.toTypedArray()) { _, which ->

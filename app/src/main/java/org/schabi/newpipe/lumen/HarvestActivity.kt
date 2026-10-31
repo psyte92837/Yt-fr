@@ -325,7 +325,7 @@ class HarvestActivity : LumenBase() {
             Fmt.duration(v.duration),
             if (v.subs >= 0) "👥 " + Fmt.num(v.subs) else "",
             v.note
-        ).filter { it.isNotBlank() }.joinToString(" · ")) { openVideo(v.url) }.apply {
+        ).filter { it.isNotBlank() }.joinToString(" · "), url = v.url) { openVideo(v.url) }.apply {
         setOnLongClickListener {
             itemMenu(v)
             true
@@ -343,7 +343,8 @@ class HarvestActivity : LumenBase() {
     }
 
     private fun itemMenu(v: HarvestItem) {
-        val items = arrayOf(t("Открыть видео", "Open video"), t("Что сделать с видео…", "What to do with the video…"), t("Канал", "Channel"), t("Копировать ссылку", "Copy link"))
+        val items = arrayOf(t("Открыть видео", "Open video"), t("Что сделать с видео…", "What to do with the video…"), t("Канал", "Channel"), t("Копировать ссылку", "Copy link"),
+            MediaLink.label(MediaAction.BACKGROUND), MediaLink.label(MediaAction.AUDIO), MediaLink.label(MediaAction.VIDEO))
         AlertDialog.Builder(this).setTitle(v.title).setItems(items) { _, w ->
             when (w) {
                 0 -> openVideo(v.url)
@@ -354,6 +355,9 @@ class HarvestActivity : LumenBase() {
                         .setPrimaryClip(android.content.ClipData.newPlainText("url", v.url))
                     toast(t("Скопировано", "Copied"))
                 }
+                4 -> runMedia(v.url, MediaAction.BACKGROUND)
+                5 -> runMedia(v.url, MediaAction.AUDIO)
+                6 -> runMedia(v.url, MediaAction.VIDEO)
             }
         }.show()
     }

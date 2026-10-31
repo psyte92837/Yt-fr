@@ -592,12 +592,28 @@ object TtsText {
         return out.joinToString(" ")
     }
 
+    /** Unpacked size limit for one shared DOCX / EPUB: protects against zip bombs (a small file that inflates to gigabytes). */
+    const val MAX_UNZIPPED = 64 * 1024 * 1024
+
+    /** Text-like entries only (images and fonts of an EPUB are skipped); throws when the archive inflates past [MAX_UNZIPPED]. */
     private fun unzip(b: ByteArray): List<Pair<String, ByteArray>> {
         val out = mutableListOf<Pair<String, ByteArray>>()
+        var total = 0L
         java.util.zip.ZipInputStream(b.inputStream()).use { z ->
+            val buf = ByteArray(32 * 1024)
             while (true) {
                 val e = z.nextEntry ?: break
-                if (!e.isDirectory) out.add(e.name to z.readBytes())
+                if (e.isDirectory) continue
+                val keep = e.name.lowercase().let { n -> n.endsWith(".xml") || n.endsWith(".opf") || n.endsWith(".xhtml") || n.endsWith(".html") || n.endsWith(".htm") }
+                val bos = java.io.ByteArrayOutputStream()
+                while (true) {
+                    val n = z.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > MAX_UNZIPPED) error(t("Архив слишком большой после распаковки", "The archive is too large once unpacked"))
+                    if (keep) bos.write(buf, 0, n)
+                }
+                if (keep) out.add(e.name to bos.toByteArray())
             }
         }
         return out
@@ -654,7 +670,17 @@ object TtsText {
                 if (c.moveToFirst()) c.getString(0) else null
             }
         }.getOrNull() ?: uri.lastPathSegment ?: "file"
-        val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error(t("Не удалось открыть файл", "Could not open the file"))
+        // read at most one byte past the limit: a huge shared file must not be loaded into memory
+        val bytes = ctx.contentResolver.openInputStream(uri)?.use { inp ->
+            val bos = java.io.ByteArrayOutputStream()
+            val buf = ByteArray(64 * 1024)
+            while (bos.size() <= maxBytes) {
+                val n = inp.read(buf, 0, minOf(buf.size, maxBytes + 1 - bos.size()))
+                if (n < 0) break
+                bos.write(buf, 0, n)
+            }
+            bos.toByteArray()
+        } ?: error(t("Не удалось открыть файл", "Could not open the file"))
         if (bytes.size > maxBytes) error(t("Файл больше ${maxBytes / 1024 / 1024} МБ", "The file is larger than ${maxBytes / 1024 / 1024} MB"))
         return name to fromFile(name, ctx.contentResolver.getType(uri), bytes)
     }

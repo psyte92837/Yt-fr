@@ -408,6 +408,7 @@ class WizardActivity : LumenBase() {
         step = step.coerceIn(0, WizardSteps.KEYS.size - 1)
         val c = Col(this)
         val total = WizardSteps.KEYS.size
+        var foot: Col? = null
         c.steps(step, total)
         c.muted(t("Шаг ${step + 1} из $total · всё можно изменить позже", "Step ${step + 1} of $total · everything can be changed later"))
         when (WizardSteps.KEYS[step]) {
@@ -428,12 +429,18 @@ class WizardActivity : LumenBase() {
             "look" -> {
                 c.title(t("Оформление", "Appearance"))
                 c.p(t("Нажмите на готовую градиентную тему — она применится сразу.", "Tap a ready-made gradient theme — it applies right away."))
-                nextButton(c)
                 c.h2(t("Светлые", "Light"))
                 themeTiles(c, Palette.lightGradients)
                 c.h2(t("Тёмные", "Dark"))
                 themeTiles(c, Palette.darkGradients)
-                nextButton(c)
+                // "Next" lives in a pinned footer: choosing a tile recreates the screen (scroll resets to the top)
+                foot = Col(this, 12).apply {
+                    button(WizardSteps.nextLabel(step), true) { next() }
+                    if (step > 0) button(t("← Назад", "← Back"), style = BtnStyle.TEXT) {
+                        step--
+                        render()
+                    }
+                }
             }
             "mode" -> {
                 c.title(t("Режим", "Mode"))
@@ -481,11 +488,13 @@ class WizardActivity : LumenBase() {
                 nextButton(c)
             }
         }
-        if (step > 0) c.button(t("← Назад", "← Back"), style = BtnStyle.TEXT) {
+        if (foot == null && step > 0) c.button(t("← Назад", "← Back"), style = BtnStyle.TEXT) {
             step--
             render()
         }
-        page("Lumen", c.root, back = false)
+        page("Lumen", c.root, back = false, footer = foot?.root?.apply {
+            if (Palette.gradient == null) setBackgroundColor(Palette.SURFACE)
+        })
     }
 
     /** Two-column grid of gradient swatches; a tap saves the theme and repaints the wizard on the same step. */

@@ -73,6 +73,18 @@ object StudioPrefs {
     var autoDirect: Boolean
         get() = p.getBoolean("studio_auto_direct", true)
         set(v) = p.edit().putBoolean("studio_auto_direct", v).apply()
+    /** How the voice-over is animated: [StudioApproach.id]. */
+    var approach: String
+        get() = p.getString("studio_approach", StudioApproach.FULL.id) ?: StudioApproach.FULL.id
+        set(v) = p.edit().putString("studio_approach", v).apply()
+    /** The picture pulses with the loudness of the voice. */
+    var pulse: Boolean
+        get() = p.getBoolean("studio_pulse", false)
+        set(v) = p.edit().putBoolean("studio_pulse", v).apply()
+    /** Animated Noto emoji instead of still ones. */
+    var liveEmoji: Boolean
+        get() = p.getBoolean("studio_live_emoji", true)
+        set(v) = p.edit().putBoolean("studio_live_emoji", v).apply()
     /** Find B-roll photos for the scenes the AI director asks for. */
     var broll: Boolean
         get() = p.getBoolean("studio_broll", true)
@@ -405,6 +417,7 @@ class StudioActivity : LumenBase() {
         "music" -> t("музыка", "music")
         "bg" -> t("клипы фона", "background clips")
         "cuts" -> t("загрузка нарезки", "downloading cuts")
+        "emoji" -> t("живые эмодзи", "live emoji")
         else -> t("импорт", "import")
     }
 
@@ -723,21 +736,25 @@ class StudioActivity : LumenBase() {
                 muted(t("Пауз: ${s.pauses} · самая длинная ${s.longestPauseMs / 100 / 10.0} с", "Pauses: ${s.pauses} · longest ${s.longestPauseMs / 100 / 10.0} s"))
                 paceTip(s)?.let { muted("💡 $it") }
             }
-            add(text(ctx, t("AI-режиссёр", "AI director"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            muted(t("AI получает расшифровку с номерами слов и возвращает план: сцены и графику, подсветку ключевых слов, зумы, плашки, звуки и переходы" +
-                (if (StudioPrefs.voiceMode != "edge") ", а также слова-паразиты, которые нужно вырезать." else "."),
-                "AI gets the numbered transcript and returns a plan: scenes and graphics, highlighted words, zooms, stickers, sounds and transitions" +
-                    (if (StudioPrefs.voiceMode != "edge") ", and filler words to cut." else ".")))
-            check(t("Запускать сразу после разбора", "Run right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
-            if (StudioPrefs.voiceMode != "edge") check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
-            check(t("🖼 Подбирать фото B-roll (Openverse, свободные лицензии)", "🖼 Find B-roll photos (Openverse, open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }
-            progress("ai_direct", t("AI-режиссёр размечает ролик…", "The AI director is planning the video…"))
+            add(text(ctx, if (task == StudioTask.VOICE) t("Как анимировать", "How to animate") else t("Режиссура", "Direction"),
+                Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val cur = StudioApproach.of(StudioPrefs.approach)
+            muted(approachHelp(cur))
+            progress("ai_direct", t("Режиссёр размечает ролик…", "The director is planning the video…"))
             if (busy.isEmpty()) {
-                val go = btn(ctx, if (sc.scenes.any { it.cues.isNotEmpty() || it.emph.isNotEmpty() }) t("🎬 Режиссура заново", "🎬 Direct again") else t("🎬 AI-режиссура", "🎬 AI direction"),
-                    style = BtnStyle.TONAL) { direct() }
-                if (transcript.isNotBlank()) row(go, btn(ctx, t("Текст", "Text"), style = BtnStyle.TEXT) { showText(t("Расшифровка", "Transcript"), transcript) })
-                else add(go, 8)
+                fun b(ap: StudioApproach, label: String) = btn(ctx, (if (ap == cur) "● " else "") + label,
+                    style = if (ap == cur) BtnStyle.TONAL else BtnStyle.TEXT) { animate(ap) }
+                row(b(StudioApproach.RULES, t("⚡ Правила", "⚡ Rules")), b(StudioApproach.RHYTHM, t("🥁 Ритм", "🥁 Rhythm")))
+                row(b(StudioApproach.LITE, t("💸 Эконом AI", "💸 Lite AI")), b(StudioApproach.HYBRID, t("🧩 Гибрид", "🧩 Hybrid")))
+                add(b(StudioApproach.FULL, t("🎬 Полный AI-режиссёр", "🎬 Full AI director")), 4)
+                if (transcript.isNotBlank()) button(t("Текст расшифровки", "Transcript"), style = BtnStyle.TEXT) { showText(t("Расшифровка", "Transcript"), transcript) }
             }
+            check(t("Запускать выбранный способ сразу после разбора", "Run the chosen way right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
+            if (cur == StudioApproach.FULL) {
+                if (StudioPrefs.voiceMode != "edge") check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
+                check(t("🖼 Подбирать фото B-roll (Openverse, свободные лицензии)", "🖼 Find B-roll photos (Openverse, open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }
+            }
+            lastTokens?.let { (i, o) -> muted(t("Последний вызов AI: $i → $o токенов", "Last AI call: $i → $o tokens")) }
             progress("broll", t("Поиск фото…", "Finding photos…"))
             val (zooms, pops, sounds) = StudioDirector.summary(sc)
             val figures = sc.scenes.sumOf { it.shapes.size }
@@ -851,6 +868,17 @@ class StudioActivity : LumenBase() {
             StudioPrefs.quality = it
         }
         check(t("🔊 Звуки эффектов: whoosh, pop, click, ding…", "🔊 Sound effects: whoosh, pop, click, ding…"), StudioPrefs.sfx) { StudioPrefs.sfx = it }
+        check(t("💓 Пульс: картинка дышит в такт голосу", "💓 Pulse: the picture breathes with the voice"), StudioPrefs.pulse) {
+            StudioPrefs.pulse = it
+            board = emptyList()
+            render()
+        }
+        check(t("✨ Живые эмодзи (анимированные Noto от Google, загружаются при сборке)", "✨ Live emoji (animated Noto by Google, downloaded when building)"), StudioPrefs.liveEmoji) {
+            StudioPrefs.liveEmoji = it
+            board = emptyList()
+            render()
+        }
+        progress("emoji", t("Загрузка живых эмодзи…", "Downloading live emoji…"))
         musicBlock(this)
         val plan = currentPlan()
         if (plan == null) {
@@ -1599,7 +1627,23 @@ class StudioActivity : LumenBase() {
         val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) readyIds().let { ids -> sc.scenes.indices.filter { sc.scenes[it].clip in ids }.toSet() }
         else null
         return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, StudioPrefs.overlay,
-            StudioPrefs.zooms, StudioPrefs.transitions, clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null)
+            StudioPrefs.zooms, StudioPrefs.transitions,
+            if (StudioPrefs.pulse) pulseOf(voice) else null,
+            if (StudioPrefs.liveEmoji) emojiDir else null,
+            clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null)
+    }
+
+    private val emojiDir get() = File(dir, "emoji")
+    private var pulseKey: ShortArray? = null
+    private var pulseVal: FloatArray? = null
+
+    /** Smoothed loudness of the voice for the pulse (computed once per voice track). */
+    private fun pulseOf(voice: StudioAudio.Pcm): FloatArray {
+        if (pulseKey === voice.data) pulseVal?.let { return it }
+        val v = StudioRhythm.pulse(Studio.frameRms(voice.data, voice.rate))
+        pulseKey = voice.data
+        pulseVal = v
+        return v
     }
 
     private fun detach(v: View): View {
@@ -1854,13 +1898,18 @@ class StudioActivity : LumenBase() {
         aiJson(key, vars, "You write scripts for explainer videos. Answer with JSON only.", limit) { Studio.parseScript(it) }
 
     /** JSON call with a retry and a larger limit when the answer is cut off; [parse] turns the reply into a result. */
-    private fun <T : Any> aiJson(key: String, vars: Map<String, String>, system: String, limit0: Int, parse: (String) -> T?): T {
+    private fun <T : Any> aiJson(key: String, vars: Map<String, String>, system: String, limit0: Int, fast: Boolean = false, parse: (String) -> T?): T {
         val prov = AiTasks.requireProvider()
         var limit = limit0
         var prompt = Prompts.fill(key, vars)
+        var tokIn = 0
+        var tokOut = 0
         repeat(3) { attempt ->
             if (cancel) throw java.util.concurrent.CancellationException()
-            val r = Llm.complete(prov, prov.smartModel, system, prompt, json = true, maxTokens = limit, task = key, pid = "studio")
+            val r = Llm.complete(prov, if (fast) prov.fastModel else prov.smartModel, system, prompt, json = true, maxTokens = limit, task = key, pid = "studio")
+            tokIn += r.inTokens
+            tokOut += r.outTokens
+            lastTokens = tokIn to tokOut
             val v = parse(r.text)
             if (v != null && !r.truncated) return v
             if (v != null && attempt == 2) return v
@@ -2025,7 +2074,10 @@ class StudioActivity : LumenBase() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             previewMs = 0
             render()
-            if ((StudioPrefs.autoDirect || autoAll) && Provider.active() != null) direct() else autoFinish()
+            if (StudioPrefs.autoDirect || autoAll) {
+                val ap = StudioApproach.of(StudioPrefs.approach)
+                animate(if (ap.usesAi && Provider.active() == null) StudioApproach.RULES else ap, remember = false)
+            } else autoFinish()
         }
         val fail = { e: Throwable ->
             busy = ""
@@ -2191,6 +2243,98 @@ class StudioActivity : LumenBase() {
         stats = VoiceStats(take.ms, take.ms, 0, 0, all.size)
     }
 
+    /** Tokens of the last AI direction (in → out), to compare the ways. */
+    @Volatile private var lastTokens: Pair<Int, Int>? = null
+
+    private fun approachHelp(a: StudioApproach) = when (a) {
+        StudioApproach.RULES -> t("⚡ Правила — без AI и токенов: цифры, шаги, сравнения, списки, цитаты и эмодзи по смыслу слов; зум и подсветка на главном слове.",
+            "⚡ Rules: no AI, no tokens. Numbers, steps, comparisons, lists, quotes and emoji from the words; zoom and highlight on the key word.")
+        StudioApproach.RHYTHM -> t("🥁 Ритм — без AI: сцены по паузам, зумы на самых громких словах и долях музыки, «бум» на пике, пульс картинки под голос.",
+            "🥁 Rhythm: no AI. Scenes by pauses, zooms on the loudest words and music beats, a boom on the peak, the picture pulses with the voice.")
+        StudioApproach.LITE -> t("💸 Эконом AI — быстрая модель и сжатый протокол: метки только в начале фраз, ответ короткими строками. В 3–5 раз меньше токенов.",
+            "💸 Lite AI: the fast model and a compact protocol (marks only at clause starts, short string answers). 3–5 times fewer tokens.")
+        StudioApproach.HYBRID -> t("🧩 Гибрид — черновик по правилам, а умная модель переделывает только ключевые сцены (хук, цифры, вывод).",
+            "🧩 Hybrid: a rules draft; the smart model redoes only the key scenes (hook, numbers, ending).")
+        StudioApproach.FULL -> t("🎬 Полный AI-режиссёр — подробный протокол: графика, фигуры на ключевых кадрах, B-roll, звуки, вырезка паразитов. Больше всего токенов.",
+            "🎬 Full AI director: the detailed protocol with graphics, key-frame shapes, B-roll, sounds and cutting fillers. Most tokens.")
+    }
+
+    private fun formatText() = when (task) {
+        StudioTask.SHORTS -> t("короткого вертикального ролика (Shorts 9:16)", "a short vertical video (Shorts 9:16)")
+        StudioTask.VIDEO -> t("горизонтального ролика для YouTube (16:9)", "a horizontal YouTube video (16:9)")
+        StudioTask.VOICE -> t("анимированного ролика по готовой озвучке (кадр ", "an animated video for a ready voice-over (frame ") + aspect().label + ")"
+        StudioTask.CUTS -> t("ролика-нарезки: голос за кадром поверх вставок из чужих видео и графики (кадр ",
+            "a cut video: a voice-over over pieces of other videos and graphics (frame ") + aspect().label + ")"
+        StudioTask.CARTOON -> t("познавательной анимации: персонажи говорят по очереди, графика рядом с ними (кадр ",
+            "an informational animation: characters talk in turns, graphics next to them (frame ") + aspect().label + ")"
+    }
+
+    /** Runs a way of animation; [remember] makes it the chosen one. */
+    private fun animate(ap: StudioApproach, remember: Boolean = true) {
+        if (remember) StudioPrefs.approach = ap.id
+        if (ap == StudioApproach.FULL) direct() else directBy(ap)
+    }
+
+    /** Rules, rhythm, lite AI or hybrid: a plan without cutting the take. */
+    private fun directBy(ap: StudioApproach) {
+        val p0 = pcm ?: return
+        val ws = words
+        if (ws.isEmpty() || busy.isNotEmpty()) return
+        val music = musicFile.takeIf { ap == StudioApproach.RHYTHM && it.exists() }
+        val long = task == StudioTask.VIDEO || p0.ms > 180_000
+        val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
+        val roles = script?.let { sc -> ranges?.let { StudioToon.wordRoles(sc.scenes, it, ws.size, cast) } }
+        busy = "ai_direct"
+        cancel = false
+        render()
+        job("ai_direct", {
+            val d = when (ap) {
+                StudioApproach.RULES -> StudioRules.direct(ws)
+                StudioApproach.RHYTHM -> {
+                    val loud = StudioRhythm.wordLoudness(ws, Studio.frameRms(p0.data, p0.rate))
+                    val beats = music?.let { f -> Studio.readWav(f.readBytes())?.let { (m, rate) -> StudioRhythm.onsets(m, rate) } } ?: emptyList()
+                    StudioRhythm.direct(ws, loud, beats)
+                }
+                StudioApproach.LITE -> aiJson("studio_direct_lite", mapOf(
+                    "format" to formatText(), "long" to if (long) ", в длинном ролике до 12 с" else "", "lang" to aiLang(),
+                    "data" to StudioCompact.transcript(ws)
+                ), "You are a video editor. Answer with compact JSON only.", if (ws.size > 600) 8000 else 3000, fast = true) { StudioCompact.parse(it, ws) }
+                else -> {
+                    val draft = StudioRules.direct(ws)
+                    val n = maxOf(2, draft.scenes.size * 3 / 10)
+                    runCatching {
+                        aiJson("studio_direct_patch", mapOf(
+                            "format" to formatText(), "n" to n.toString(), "lang" to aiLang(), "data" to StudioCompact.listing(draft, ws)
+                        ), "You are a video editor. Answer with compact JSON only.", 2500 + n * 120) { StudioCompact.patch(draft, it, ws) }
+                    }.getOrElse { e -> if (e is java.util.concurrent.CancellationException) throw e else draft }
+                }
+            }
+            var res = StudioDirector.apply(d, ws, p0.ms, emptySet())
+            // cartoon: the speakers of the words come back to the new scenes
+            if (cast.isNotEmpty() && roles != null) {
+                val (ss, rr) = StudioToon.restore(res.script.scenes, res.ranges, roles, cast, res.words)
+                res = res.copy(script = res.script.copy(scenes = ss), ranges = rr)
+            }
+            res
+        }, { e ->
+            busy = ""
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) { ap2 ->
+            busy = ""
+            if (ap2.script.scenes.isEmpty()) return@job
+            // keep photos already found for the same scenes
+            script = ap2.script
+            ranges = ap2.ranges
+            if (ap == StudioApproach.RHYTHM) StudioPrefs.pulse = true
+            board = emptyList()
+            saveAnalysis()
+            render()
+            if (ap.usesAi) lastTokens?.let { (i, o) -> toast(t("AI: $i → $o токенов", "AI: $i → $o tokens")) }
+            if (StudioPrefs.broll && StudioDirector.needBroll(ap2.script).isNotEmpty()) fetchBroll() else autoFinish()
+        }
+    }
+
     /**
      * AI director: the numbered transcript goes to the AI, the plan comes back (scenes, visuals, highlights, zooms,
      * stickers, sounds, transitions, words to cut) and is applied to the take.
@@ -2201,15 +2345,7 @@ class StudioActivity : LumenBase() {
         if (ws.isEmpty() || busy.isNotEmpty()) return
         val allowDrop = StudioPrefs.voiceMode != "edge" && StudioPrefs.dropFillers
         val oldCuts = cuts
-        val format = when (task) {
-            StudioTask.SHORTS -> t("короткого вертикального ролика (Shorts 9:16)", "a short vertical video (Shorts 9:16)")
-            StudioTask.VIDEO -> t("горизонтального ролика для YouTube (16:9)", "a horizontal YouTube video (16:9)")
-            StudioTask.VOICE -> t("анимированного ролика по готовой озвучке (кадр ", "an animated video for a ready voice-over (frame ") + aspect().label + ")"
-            StudioTask.CUTS -> t("ролика-нарезки: голос за кадром поверх вставок из чужих видео и графики (кадр ",
-                "a cut video: a voice-over over pieces of other videos and graphics (frame ") + aspect().label + ")"
-            StudioTask.CARTOON -> t("познавательной анимации: персонажи говорят по очереди, графика рядом с ними (кадр ",
-                "an informational animation: characters talk in turns, graphics next to them (frame ") + aspect().label + ")"
-        }
+        val format = formatText()
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val roles = script?.let { sc -> ranges?.let { StudioToon.wordRoles(sc.scenes, it, ws.size, cast) } }
         val cutsNow = if (task == StudioTask.CUTS) readyCuts() else emptyList()
@@ -2261,6 +2397,7 @@ class StudioActivity : LumenBase() {
             saveAnalysis()
             render()
             if (ap.dropped > 0) toast(t("AI-режиссёр вырезал слов: ${ap.dropped}", "The AI director cut ${ap.dropped} words"))
+            else lastTokens?.let { (i, o) -> toast(t("AI: $i → $o токенов", "AI: $i → $o tokens")) }
             if (StudioPrefs.broll && StudioDirector.needBroll(ap.script).isNotEmpty()) fetchBroll() else autoFinish()
         }
     }
@@ -2333,6 +2470,30 @@ class StudioActivity : LumenBase() {
 
     /** Starts the build in [StudioService]: it goes on with the screen closed or the phone locked. */
     private fun renderVideo() {
+        val sc = script ?: return
+        if (StudioPrefs.liveEmoji && busy.isEmpty()) {
+            val need = StudioLiveEmoji.used(sc).filter { !StudioLottie.file(emojiDir, it).exists() && !StudioLottie.missing(emojiDir, it).exists() }.toSet()
+            if (need.isNotEmpty()) {
+                busy = "emoji"
+                cancel = false
+                render()
+                job("emoji", {
+                    StudioBroll.liveEmoji(need, emojiDir, { cancel }) { i, n -> report("emoji", t("Эмодзи $i/$n", "Emoji $i/$n")) }
+                }, { e ->
+                    busy = ""
+                    render()
+                    if (e !is java.util.concurrent.CancellationException) startRender()
+                }) {
+                    busy = ""
+                    startRender()
+                }
+                return
+            }
+        }
+        startRender()
+    }
+
+    private fun startRender() {
         val plan = currentPlan() ?: return
         val voice = pcm ?: return
         if (StudioJob.running) return

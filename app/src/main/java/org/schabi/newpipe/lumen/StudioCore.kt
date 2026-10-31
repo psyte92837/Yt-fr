@@ -1112,6 +1112,25 @@ val STUDIO_PROMPTS = linkedMapOf(
             "\"items\":[{\"icon\":\"📉\",\"label\":\"досмотров\",\"value\":\"\"}],\"emph\":[\"80%\"],\"transition\":\"zoom\"," +
             "\"cues\":[{\"at\":3,\"do\":\"zoom\"},{\"at\":9,\"do\":\"pop\",\"text\":\"ЗАПОМНИ\",\"icon\":\"⚠️\"},{\"at\":0,\"do\":\"sfx\",\"name\":\"whoosh\"}]}]}\n\n" +
             "Расшифровка:\n{data}"
+        ),
+    "studio_direct_lite" to (
+        "Режиссёр монтажа {format}. В речи [N] — номер слова, с которого может начаться сцена.\n" +
+            "Раздели речь на сцены по смыслу (3-8 с{long}) и для каждой дай массив [N,kind,title,items,emph,fx]. " +
+            "kind: text step icons list flow cycle big stat quote chart compare; " +
+            "items: \"эмодзи подпись|…\" (chart: \"подпись=число|…\", compare: ровно 2 стороны); emph: ключевые слова через ;; " +
+            "fx через ;: z@слово — зум, p@слово:ТЕКСТ:эмодзи — плашка до 3 слов, s@слово:звук (whoosh pop click ding boom riser), t:переход (fade slide zoom whip none). " +
+            "Первая сцена — хук. 0-3 эффекта на сцену, чередуй визуалы. Подписи на языке {lang}.\n" +
+            "Только JSON: {\"t\":\"название\",\"s\":[[0,\"stat\",\"80%\",\"😬 людей\",\"80%\",\"z@80%;t:none\"]]}\n\n{data}"
+        ),
+    "studio_direct_patch" to (
+        "Улучши черновик монтажа {format}. Ниже сцены в виде «#номер вид | текст». Выбери до {n} ключевых сцен " +
+            "(хук, главные мысли, цифры, сравнения, вывод) и дай им лучший визуал и эффекты; остальные не трогай.\n" +
+            "Строка ответа: [номер,kind,title,items,emph,fx]. " +
+            "kind: text step icons list flow cycle big stat quote chart compare; " +
+            "items: \"эмодзи подпись|…\" (chart: \"подпись=число|…\", compare: ровно 2 стороны); emph: ключевые слова через ;; " +
+            "fx через ;: z@слово — зум, p@слово:ТЕКСТ:эмодзи — плашка до 3 слов, s@слово:звук (whoosh pop click ding boom riser), t:переход (fade slide zoom whip none). " +
+            "Подписи на языке {lang}.\n" +
+            "Только JSON: {\"t\":\"название\",\"s\":[[0,\"stat\",\"80%\",\"😬 людей\",\"80%\",\"z@80%;p@людей:ВАЖНО:⚠️\"]]}\n\n{data}"
         )
 )
 

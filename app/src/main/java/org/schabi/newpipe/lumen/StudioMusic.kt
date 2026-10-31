@@ -94,6 +94,34 @@ object StudioBroll {
         }
     }.getOrNull()
 
+    /** Animated Noto emoji of [emojis] into [dir] (Lottie JSON); emoji without an animated version get a marker. Returns how many are ready. */
+    fun liveEmoji(emojis: Set<String>, dir: File, cancelled: () -> Boolean, progress: (Int, Int) -> Unit): Int {
+        dir.mkdirs()
+        var ready = 0
+        emojis.forEachIndexed { i, e ->
+            if (cancelled()) throw java.util.concurrent.CancellationException()
+            progress(i, emojis.size)
+            val f = StudioLottie.file(dir, e)
+            if (f.exists()) {
+                ready++
+                return@forEachIndexed
+            }
+            if (StudioLottie.missing(dir, e).exists()) return@forEachIndexed
+            val code = runCatching {
+                http.newCall(Request.Builder().url(StudioLiveEmoji.url(e)).header("User-Agent", UA).build()).execute().use { r ->
+                    val body = r.body?.string()
+                    if (r.isSuccessful && body != null && body.trimStart().startsWith("{")) {
+                        f.writeText(body)
+                        ready++
+                    }
+                    r.code
+                }
+            }.getOrDefault(0)
+            if (code == 404) StudioLottie.missing(dir, e).writeText("")
+        }
+        return ready
+    }
+
     /** Bitmap of [data] with its long side at most [maxSide]. */
     private fun decode(data: ByteArray, maxSide: Int): android.graphics.Bitmap? {
         val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }

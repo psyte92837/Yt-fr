@@ -359,6 +359,8 @@ class SettingsActivity : LumenBase() {
             "relevance" to t("Фильтр релевантности рекомендаций", "Recommendation relevance filter"),
             "relevance_channels" to t("Фильтр каналов по теме", "Channel topic filter"),
             "topic" to t("Подтверждение темы (домена)", "Topic (domain) confirmation"),
+            "watch_translate" to t("Мониторинг · перевод темы на другие языки", "Monitoring · topic translation"),
+            "watch_digest" to t("Мониторинг · сводка новых видео", "Monitoring · digest of new videos"),
             "audit" to t("Аудит алгоритма: вывод", "Algorithm audit: verdict"),
             "p1_insights" to t("P1 · Извлечение аудитории", "P1 · Audience extraction"),
             "p2_clusters" to t("P2 · Кластеризация", "P2 · Clustering"),

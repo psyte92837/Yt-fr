@@ -506,6 +506,7 @@ class NewProjectActivity : LumenBase() {
     /** Started from "Set a domain to watch": the project is created with monitoring switched on. */
     private val watch by lazy { intent.getBooleanExtra("watch", false) }
     private var aiFilter = true
+    private var anyLang = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -601,9 +602,19 @@ class NewProjectActivity : LumenBase() {
             c.muted(if (Provider.active() != null) t("Новые видео проверяются AI на соответствие теме и домену, остальные отбрасываются.",
                 "New videos are checked by AI against the topic and domain; the rest are dropped.")
                 else t("AI не подключён — отсев будет по ключевым словам темы.", "AI is not connected — the filter will use the topic's keywords."))
-            c.spinner(t("Страна поиска (необязательно)", "Search country (optional)"), Regions.countries, filters.country) { filters.country = it }
-            c.spinner(t("Язык оригинала видео (необязательно)", "Original language of videos (optional)"), Regions.languages, filters.origLang) {
-                filters.origLang = it
+            c.check(t("Искать на всех языках", "Search in all languages"), anyLang) {
+                anyLang = it
+                render()
+            }
+            if (anyLang) {
+                c.muted(if (Provider.active() != null) t("AI переведёт тему на ${WatchLangs.DEFAULT.size} языков; в уведомлении — сколько вышло, на каких языках и о чём.",
+                    "AI will translate the topic into ${WatchLangs.DEFAULT.size} languages; the notification says how many came out, in which languages and what about.")
+                    else t("AI не подключён — поиск только по введённым запросам.", "AI is not connected — only the entered queries are searched."))
+            } else {
+                c.spinner(t("Страна поиска (необязательно)", "Search country (optional)"), Regions.countries, filters.country) { filters.country = it }
+                c.spinner(t("Язык оригинала видео (необязательно)", "Original language of videos (optional)"), Regions.languages, filters.origLang) {
+                    filters.origLang = it
+                }
             }
         }
         c.section(t("Фильтры поиска", "Search filters"), filtersSummary(filters), filtersOpen, { open ->
@@ -625,6 +636,7 @@ class NewProjectActivity : LumenBase() {
                 p.monitor.enabled = true
                 p.monitor.aiSummary = Provider.active() != null
                 p.monitor.aiFilter = aiFilter
+                p.monitor.anyLang = anyLang
             }
             Store.save(p)
             if (watch) Monitoring.apply(this, p)

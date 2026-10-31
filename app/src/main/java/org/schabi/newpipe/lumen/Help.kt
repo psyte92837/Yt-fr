@@ -102,7 +102,8 @@ object Help {
                 t("AI: сводки, отчёт, чат по данным проекта.", "AI: summaries, report, chat over the project data."),
                 t("Ещё → Экспорт: CSV, JSON, Markdown, PDF, GEXF.", "More → Export: CSV, JSON, Markdown, PDF, GEXF.")
             ),
-            listOf(t("Мониторинг в настройках проекта сам проверяет новые видео по расписанию.", "Monitoring in project settings checks for new videos on a schedule."))),
+            listOf(t("Мониторинг в настройках проекта сам проверяет новые видео по расписанию.", "Monitoring in project settings checks for new videos on a schedule."),
+                t("«Искать на всех языках»: тема переводится AI, уведомление сообщает, сколько вышло, на каких языках и о чём.", "\"Search in all languages\": AI translates the topic; the notification says how many came out, in which languages and what about."))),
         HelpTopic("video", t("Карточка видео", "Video card"),
             t("Метаданные, метки, сводка AI, расшифровка и комментарии одного видео.", "Metadata, labels, AI summary, transcript and comments of one video."),
             listOf(t("Откройте видео на YouTube кнопкой в шапке.", "Open the video on YouTube from the top bar."), t("Сводку AI можно пересоздать.", "The AI summary can be regenerated."), t("Текст можно озвучить 🔊.", "Text can be read aloud 🔊."),

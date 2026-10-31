@@ -412,6 +412,19 @@ class StudioActivity : LumenBase() {
             btn(ctx, t("Формат", "Format"), style = BtnStyle.TEXT) { formatHelp() }
         )
         progress("ai_script", t("AI пишет сценарий…", "AI is writing the script…"))
+        if (scriptEdit.text.isNotBlank() && busy.isEmpty()) {
+            val undo = prevScript
+            if (undo != null) row(
+                btn(ctx, t("🪄 AI-помощник", "🪄 AI assistant"), style = BtnStyle.TONAL) { assist() },
+                btn(ctx, t("↩ Вернуть прежний", "↩ Undo"), style = BtnStyle.TEXT) {
+                    scriptEdit.setText(undo)
+                    prevScript = null
+                    resetAnalysis()
+                    render()
+                }
+            ) else button(t("🪄 AI-помощник: улучшить сценарий", "🪄 AI assistant: improve the script"), style = BtnStyle.TONAL) { assist() }
+        }
+        progress("ai_edit", t("AI правит сценарий…", "AI is editing the script…"))
         add(detach(scriptEdit), 8)
         val sc = Studio.parseText(scriptEdit.text.toString())
         if (sc.scenes.isNotEmpty()) {
@@ -1546,6 +1559,7 @@ class StudioActivity : LumenBase() {
         player?.release()
         player = null
         StudioPrefs.task = to.id
+        prevScript = null
         if (to == StudioTask.VOICE && StudioPrefs.voiceMode !in listOf("file", "mic")) StudioPrefs.voiceMode = "file"
         if ((to == StudioTask.CUTS || to == StudioTask.CARTOON) && StudioPrefs.voiceMode == "video") StudioPrefs.voiceMode = "edge"
         clearState()
@@ -1630,6 +1644,7 @@ class StudioActivity : LumenBase() {
                 if (cartoon) sc.copy(scenes = sc.scenes.map { s -> s.copy(who = cast.getOrNull(StudioToon.find(cast, s.who))?.name ?: "") }) else sc
             }, { e -> busy = ""; render(); err(e) }) { sc ->
                 busy = ""
+                prevScript = scriptEdit.text.toString().takeIf { it.isNotBlank() }
                 scriptEdit.setText(Studio.toText(sc))
                 resetAnalysis()
                 render()
@@ -1638,6 +1653,77 @@ class StudioActivity : LumenBase() {
         if (scriptEdit.text.isNotBlank()) confirm(t("Заменить сценарий?", "Replace the script?"),
             t("AI напишет новый сценарий по теме; текущий текст будет учтён как черновик.", "AI will write a new script; the current text is used as a draft."),
             t("Написать", "Write"), go) else go()
+    }
+
+    /** Text of the script before the last edit of the AI assistant (for undo). */
+    private var prevScript: String? = null
+
+    /** AI assistant: ready requests as chips or the author's own words; the script comes back rewritten. */
+    private fun assist() {
+        val cartoon = task == StudioTask.CARTOON
+        val presets = StudioAssist.presets(cartoon)
+        val chosen = mutableSetOf<String>()
+        val askE = edt(this, t("Своими словами: «добавь пример про деньги», «сделай 5 сцен»…", "In your words: \"add an example about money\", \"make it 5 scenes\"…"), multiline = true)
+        val col = Col(this, 20)
+        fun build() {
+            col.root.removeAllViews()
+            col.muted(t("Выберите одну или несколько просьб и/или напишите свою. Прежний текст можно будет вернуть.",
+                "Pick one or more requests and/or write your own. The old text can be restored."))
+            col.chips(presets.map { pr ->
+                chip(this, pr.label, pr.id in chosen) {
+                    if (!chosen.remove(pr.id)) chosen += pr.id
+                    build()
+                }
+            }, collapseAfter = 99)
+            (askE.parent as? ViewGroup)?.removeView(askE)
+            col.add(askE, 12)
+        }
+        build()
+        android.app.AlertDialog.Builder(this).setTitle(t("🪄 AI-помощник", "🪄 AI assistant"))
+            .setView(ScrollView(this).apply { addView(col.root) })
+            .setPositiveButton(t("Улучшить", "Improve")) { _, _ ->
+                val asks = presets.filter { it.id in chosen }.map { it.ask } + listOfNotNull(askE.text.toString().trim().takeIf { it.isNotEmpty() })
+                if (asks.isEmpty()) {
+                    toast(t("Выберите просьбу или напишите свою", "Pick a request or write your own"))
+                    return@setPositiveButton
+                }
+                runAssist(asks.joinToString("\n") { "- $it" })
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    private fun runAssist(ask: String) {
+        val text = scriptEdit.text.toString()
+        val before = Studio.parseText(text)
+        if (before.scenes.isEmpty()) {
+            toast(t("Сценарий пуст", "The script is empty"))
+            return
+        }
+        val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
+        val format = when (task) {
+            StudioTask.VIDEO -> t("горизонтального ролика для YouTube", "a horizontal YouTube video")
+            StudioTask.CARTOON -> t("познавательной анимации с персонажами", "an informational animation with characters")
+            StudioTask.CUTS -> t("ролика-нарезки с голосом за кадром", "a cut video with a voice-over")
+            else -> t("короткого вертикального ролика", "a short vertical video")
+        }
+        busy = "ai_edit"
+        cancel = false
+        render()
+        Lumen.async({
+            aiJson("studio_script_edit", mapOf(
+                "format" to format, "lang" to aiLang(), "ask" to ask, "cast" to StudioAssist.castRule(cast),
+                "visuals" to STUDIO_VISUALS, "script" to Studio.toJson(before)
+            ), "You edit scripts for explainer videos. Answer with JSON only.", if (longScript()) 16_000 else 8000) { StudioAssist.parse(it) }
+        }, { e -> busy = ""; render(); if (e !is java.util.concurrent.CancellationException) err(e) }) { res ->
+            busy = ""
+            val sc = if (cast.isEmpty()) res.script
+            else res.script.copy(scenes = res.script.scenes.map { s -> s.copy(who = cast.getOrNull(StudioToon.find(cast, s.who))?.name ?: "") })
+            prevScript = text
+            scriptEdit.setText(Studio.toText(sc))
+            resetAnalysis()
+            render()
+            showText(t("Сценарий обновлён", "Script updated"), (listOf(StudioAssist.summary(before, sc)) + res.notes.map { "• $it" }).joinToString("\n"))
+        }
     }
 
     private fun aiScript(key: String, vars: Map<String, String>, limit: Int): SScript =

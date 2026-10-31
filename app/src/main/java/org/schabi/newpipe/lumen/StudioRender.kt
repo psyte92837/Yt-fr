@@ -42,8 +42,11 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/** Look of the video. DARK: kinetic word groups on a dark screen; LIGHT: headline + one big word at a time on a light screen. */
-enum class StudioStyle { DARK, LIGHT }
+/**
+ * Look of the video. DARK: kinetic word groups on a dark screen; LIGHT: headline + one big word at a time
+ * on a light screen; VIDEO: the speaker's own video with one word at a time, graphics as light inserts or cards on top.
+ */
+enum class StudioStyle { DARK, LIGHT, VIDEO }
 
 /** Everything needed to draw any frame of the video. */
 class StudioPlan(
@@ -53,31 +56,50 @@ class StudioPlan(
     val captions: List<List<IntRange>>,
     val totalMs: Long,
     val style: StudioStyle,
-    val accent: Int
+    val accent: Int,
+    /** VIDEO style: graphics drawn over the video instead of full-screen light inserts. */
+    val overlay: Boolean = false
 ) {
     val steps = Studio.stepNumbers(script.scenes)
 
     companion object {
         /** [ranges] = words of every scene when known exactly (Edge voice per scene); otherwise split by word counts. */
-        fun build(script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int, ranges: List<IntRange>? = null): StudioPlan {
+        fun build(
+            script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
+            ranges: List<IntRange>? = null, overlay: Boolean = false
+        ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
-            val single = style == StudioStyle.LIGHT
+            val single = style != StudioStyle.DARK
             val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay)
         }
     }
 }
 
 /** Draws frames of a [StudioPlan] on a Canvas (software canvas, so blur and shadows work). */
 class StudioPainter(private val w: Int, private val h: Int, private val plan: StudioPlan) {
-    private val dark = plan.style == StudioStyle.DARK
-    private val bg = if (dark) 0xFF131417.toInt() else 0xFFF1F3F8.toInt()
-    private val card = if (dark) 0xFF1D1F24.toInt() else 0xFFFFFFFF.toInt()
-    private val stroke = if (dark) 0xFF2E3138.toInt() else 0xFFE2E5EC.toInt()
-    private val ink = if (dark) 0xFFF3F4F6.toInt() else 0xFF14161B.toInt()
-    private val muted = if (dark) 0xFF9AA0A9.toInt() else 0xFF6B7280.toInt()
+    private var dark = false
+    private var bg = 0
+    private var card = 0
+    private var stroke = 0
+    private var ink = 0
+    private var muted = 0
+
+    /** Dark or light colours; the VIDEO style switches between them per scene. */
+    private fun palette(isDark: Boolean) {
+        dark = isDark
+        bg = if (dark) 0xFF131417.toInt() else 0xFFF1F3F8.toInt()
+        card = if (dark) 0xFF1D1F24.toInt() else 0xFFFFFFFF.toInt()
+        stroke = if (dark) 0xFF2E3138.toInt() else 0xFFE2E5EC.toInt()
+        ink = if (dark) 0xFFF3F4F6.toInt() else 0xFF14161B.toInt()
+        muted = if (dark) 0xFF9AA0A9.toInt() else 0xFF6B7280.toInt()
+    }
+
+    init {
+        palette(plan.style == StudioStyle.DARK)
+    }
     private val green = 0xFF34C759.toInt()
     private val accent = plan.accent
     private val u = w / 100f // 1 % of the width
@@ -105,20 +127,49 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
-    private val glow = Paint().apply {
-        shader = RadialGradient(w / 2f, h * 0.56f, w * 0.75f, (accent and 0x00FFFFFF) or (if (dark) 0x26000000 else 0x14000000), 0, Shader.TileMode.CLAMP)
+    private fun glowPaint(forDark: Boolean) = Paint().apply {
+        shader = RadialGradient(w / 2f, h * 0.56f, w * 0.75f, (accent and 0x00FFFFFF) or (if (forDark) 0x26000000 else 0x14000000), 0, Shader.TileMode.CLAMP)
+    }
+    private val glowDark = glowPaint(true)
+    private val glowLight = glowPaint(false)
+    private val shade = Paint()
+    private val bottomShade = Paint().apply {
+        shader = android.graphics.LinearGradient(0f, h * 0.55f, 0f, h.toFloat(), 0x00000000, 0x8C000000.toInt(), Shader.TileMode.CLAMP)
+    }
+    private val topShade = Paint().apply {
+        shader = android.graphics.LinearGradient(0f, 0f, 0f, h * 0.7f, 0x73000000, 0x00000000, Shader.TileMode.CLAMP)
     }
     private val layouts = HashMap<IntRange, List<Pair<Int, Pair<Float, Float>>>>()
 
-    fun draw(c: Canvas, tMs: Long) {
-        c.drawColor(bg)
-        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glow)
+    private fun alphaAt(i: Int, tMs: Long): Float {
+        val st = plan.times[i]
+        val last = i == plan.times.lastIndex
+        return Studio.appear(tMs, st.startMs - 1, 260) * (if (last) 1f else 1f - Studio.appear(tMs, st.endMs - 200, 200))
+    }
+
+    /** VIDEO style: is scene [i] a full-screen graphic insert (instead of the speaker)? */
+    private fun insert(i: Int): Boolean =
+        plan.style == StudioStyle.VIDEO && !plan.overlay && plan.script.scenes[i].kind != "text"
+
+    /** True when the caller must put the video frame on the canvas before [draw] (hidden under a full insert). */
+    fun needsVideo(tMs: Long): Boolean {
+        if (plan.style != StudioStyle.VIDEO) return false
         val i = Studio.sceneAt(plan.times, tMs)
+        return i < 0 || !insert(i) || alphaAt(i, tMs) < 1f
+    }
+
+    fun draw(c: Canvas, tMs: Long) {
+        val i = Studio.sceneAt(plan.times, tMs)
+        if (plan.style == StudioStyle.VIDEO) {
+            if (i >= 0) drawOnVideo(c, i, tMs)
+            return
+        }
+        c.drawColor(bg)
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), if (dark) glowDark else glowLight)
         if (i < 0) return
         val st = plan.times[i]
         val sc = plan.script.scenes[i]
-        val last = i == plan.times.lastIndex
-        val a = Studio.appear(tMs, st.startMs - 1, 260) * (if (last) 1f else 1f - Studio.appear(tMs, st.endMs - 200, 200))
+        val a = alphaAt(i, tMs)
         if (a <= 0f) return
         val local = tMs - st.startMs
         val sceneMs = st.endMs - st.startMs
@@ -132,6 +183,70 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             if (sc.kind != "text") visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
             singleWord(c, i, tMs, a, h * 0.80f)
         }
+    }
+
+    /** VIDEO style: the frame is already on the canvas. */
+    private fun drawOnVideo(c: Canvas, i: Int, tMs: Long) {
+        val st = plan.times[i]
+        val sc = plan.script.scenes[i]
+        val local = tMs - st.startMs
+        val sceneMs = st.endMs - st.startMs
+        val a = alphaAt(i, tMs)
+        palette(false)
+        if (insert(i)) {
+            // light insert fades in over the speaker
+            val fade = Studio.appear(tMs, st.startMs - 1, 260)
+            shade.color = bg
+            shade.alpha = (255 * fade).toInt()
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), shade)
+            glowLight.alpha = (255 * fade).toInt()
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), glowLight)
+            glowLight.alpha = 255
+            if (a <= 0f) return
+            sc.title.takeIf { it.isNotBlank() && sc.kind != "big" && sc.kind != "stat" }?.let { headline(c, it, h * 0.15f, a, local) }
+            visual(c, sc, i, w / 2f, h * 0.48f, local, sceneMs, a)
+            singleWord(c, i, tMs, a, h * 0.80f)
+            return
+        }
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
+        val graphic = plan.overlay && sc.kind != "text"
+        if (graphic || sc.title.isNotBlank()) {
+            topShade.alpha = (255 * a).toInt()
+            c.drawRect(0f, 0f, w.toFloat(), h * 0.7f, topShade)
+            topShade.alpha = 255
+        }
+        if (a <= 0f) return
+        if (sc.title.isNotBlank() && sc.kind != "stat") headline(c, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt())
+        if (graphic) visual(c, sc, i, w / 2f, h * 0.36f, local, sceneMs, a)
+        spokenWord(c, i, tMs, a, h * 0.80f)
+    }
+
+    /** One word on the video: white bold with a shadow and an accent underline. */
+    private fun spokenWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float) {
+        val groups = plan.captions.getOrNull(scene) ?: return
+        val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
+        val word = plan.words[g.first]
+        val p = Studio.appear(tMs, word.startMs - 60, 160)
+        val txt = word.text.trim { !it.isLetterOrDigit() }
+        textP.textAlign = Paint.Align.CENTER
+        textP.maskFilter = null
+        textP.textSize = 7.4f * u
+        while (textP.measureText(txt) > w * 0.9f && textP.textSize > 3 * u) textP.textSize *= 0.9f
+        textP.color = 0xFFFFFFFF.toInt()
+        textP.alpha = (255 * p * a).toInt()
+        textP.setShadowLayer(1.6f * u, 0f, 0.4f * u, 0xB0000000.toInt())
+        c.save()
+        val k = 1.1f - 0.1f * p
+        c.scale(k, k, w / 2f, y)
+        c.drawText(txt, w / 2f, y, textP)
+        c.restore()
+        textP.clearShadowLayer()
+        val tw = textP.measureText(txt)
+        fill.color = accent
+        fill.alpha = (255 * p * a).toInt()
+        val lw = tw * Studio.appear(tMs, word.startMs, 220)
+        c.drawRoundRect(RectF(w / 2f - lw / 2, y + 2f * u, w / 2f + lw / 2, y + 2.8f * u), 0.4f * u, 0.4f * u, fill)
+        textP.textAlign = Paint.Align.LEFT
     }
 
     // ---------- captions ----------
@@ -187,7 +302,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** Condensed capitals; the last word in the accent colour (LIGHT style). */
-    private fun headline(c: Canvas, s: String, y: Float, a: Float, local: Long) {
+    private fun headline(c: Canvas, s: String, y: Float, a: Float, local: Long, color: Int = ink) {
         val words = s.uppercase().split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) return
         headP.textSize = 8.6f * u
@@ -200,7 +315,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             var x = (w - lineW) / 2
             for (k in r) {
                 headP.textAlign = Paint.Align.LEFT
-                headP.color = if (k == words.lastIndex && words.size > 1) accent else ink
+                headP.color = if (k == words.lastIndex && words.size > 1) accent else color
                 headP.alpha = (255 * a * p).toInt()
                 c.drawText(words[k], x, y + headP.textSize * 1.05f * li + (1 - p) * 3 * u, headP)
                 x += widths[k] + space
@@ -629,7 +744,7 @@ object StudioVideo {
     /** [progress] gets a message with "done/total" (drives the determinate progress bars). */
     fun render(
         plan: StudioPlan, voice: StudioAudio.Pcm, out: File, w: Int, h: Int, fps: Int,
-        cancelled: () -> Boolean, progress: (String) -> Unit
+        cancelled: () -> Boolean, background: File? = null, progress: (String) -> Unit
     ) {
         out.parentFile?.mkdirs()
         progress(t("Звук: кодирование 0/100", "Audio: encoding 0/100"))
@@ -695,11 +810,13 @@ object StudioVideo {
             }
         }
 
+        val video = if (background != null && plan.style == StudioStyle.VIDEO) StudioFrames(background, w, h) else null
         try {
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             val painter = StudioPainter(w, h, plan)
             val argb = IntArray(w * h)
+            val frameArgb = if (video != null) IntArray(w * h) { 0xFF000000.toInt() } else null
             val y = ByteArray(w * h)
             val u = ByteArray(w * h / 4)
             val v = ByteArray(w * h / 4)
@@ -707,6 +824,11 @@ object StudioVideo {
             for (f in 0 until frames) {
                 if (cancelled()) throw CancellationException()
                 val pts = Studio.frameTimeUs(f, fps)
+                if (video != null && frameArgb != null) {
+                    val need = painter.needsVideo(pts / 1000)
+                    video.advance(pts, frameArgb, need)
+                    if (need) bmp.setPixels(frameArgb, 0, w, 0, 0, w, h)
+                }
                 painter.draw(canvas, pts / 1000)
                 bmp.getPixels(argb, 0, w, 0, 0, w, h)
                 Studio.argbToYuv420(argb, w, h, y, u, v)
@@ -736,6 +858,7 @@ object StudioVideo {
             bmp.recycle()
             ok = true
         } finally {
+            video?.let { v -> runCatching { v.close() } }
             runCatching { enc.stop() }
             enc.release()
             if (started) runCatching { muxer.stop() }
@@ -777,11 +900,197 @@ object StudioVideo {
         }
     }
 
-    /** A still frame for the preview on screen. */
-    fun preview(plan: StudioPlan, tMs: Long, w: Int, h: Int): Bitmap {
+    /** A still frame for the preview on screen; [background] is the speaker's video for the VIDEO style. */
+    fun preview(plan: StudioPlan, tMs: Long, w: Int, h: Int, background: File? = null): Bitmap {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        StudioPainter(w, h, plan).draw(Canvas(bmp), tMs)
+        val c = Canvas(bmp)
+        val painter = StudioPainter(w, h, plan)
+        if (background != null && painter.needsVideo(tMs)) {
+            c.drawColor(0xFF000000.toInt())
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(background.absolutePath)
+                r.getFrameAtTime(tMs * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { f ->
+                    val s = max(w.toFloat() / f.width, h.toFloat() / f.height)
+                    val sw = w / s
+                    val sh = h / s
+                    val src = android.graphics.Rect(((f.width - sw) / 2).toInt(), ((f.height - sh) / 2).toInt(), ((f.width + sw) / 2).toInt(), ((f.height + sh) / 2).toInt())
+                    c.drawBitmap(f, src, android.graphics.Rect(0, 0, w, h), Paint(Paint.FILTER_BITMAP_FLAG))
+                    f.recycle()
+                }
+            } catch (e: Exception) {
+                L.w("studio", "preview frame: ${e.message}")
+            } finally {
+                runCatching { r.release() }
+            }
+        }
+        painter.draw(c, tMs)
         return bmp
+    }
+}
+
+/**
+ * Frames of the speaker's video, decoded in order and centre-cropped to the output size
+ * (rotation of phone videos is taken into account). Pixels are converted only when they are shown.
+ */
+class StudioFrames(file: File, private val w: Int, private val h: Int) : java.io.Closeable {
+    private val ex = MediaExtractor()
+    private val dec: MediaCodec
+    private val rotation: Int
+    private val info = MediaCodec.BufferInfo()
+    private var inEos = false
+    private var outEos = false
+    private var pendIdx = -1
+    private var pendPts = 0L
+    private var shown = false
+    private var yA = ByteArray(0)
+    private var uA = ByteArray(0)
+    private var vA = ByteArray(0)
+    private var axes: Pair<IntArray, IntArray>? = null
+    private var axesKey = ""
+
+    init {
+        ex.setDataSource(file.absolutePath)
+        val track = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+            ?: throw IllegalStateException(t("В файле нет видео", "The file has no video"))
+        ex.selectTrack(track)
+        val fmt = ex.getTrackFormat(track)
+        rotation = (if (fmt.containsKey(MediaFormat.KEY_ROTATION)) fmt.getInteger(MediaFormat.KEY_ROTATION) else retrieverRotation(file)).let { ((it % 360) + 360) % 360 }
+        fmt.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+        dec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+        dec.configure(fmt, null, null, 0)
+        dec.start()
+    }
+
+    private fun retrieverRotation(file: File): Int {
+        val r = android.media.MediaMetadataRetriever()
+        return try {
+            r.setDataSource(file.absolutePath)
+            r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        } catch (e: Exception) {
+            0
+        } finally {
+            runCatching { r.release() }
+        }
+    }
+
+    /** Dequeues the next decoded frame into pendIdx; false at the end of the video. */
+    private fun next(): Boolean {
+        var idle = 0
+        while (true) {
+            if (!inEos) {
+                val i = dec.dequeueInputBuffer(2000)
+                if (i >= 0) {
+                    val n = ex.readSampleData(dec.getInputBuffer(i)!!, 0)
+                    if (n < 0) {
+                        dec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                        inEos = true
+                    } else {
+                        dec.queueInputBuffer(i, 0, n, ex.sampleTime, 0)
+                        ex.advance()
+                    }
+                }
+            }
+            val o = dec.dequeueOutputBuffer(info, 5000)
+            if (o >= 0) {
+                if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                    dec.releaseOutputBuffer(o, false)
+                    outEos = true
+                    return false
+                }
+                pendIdx = o
+                pendPts = info.presentationTimeUs
+                return true
+            }
+            if (o == MediaCodec.INFO_TRY_AGAIN_LATER && ++idle > 400) {
+                outEos = true
+                return false
+            }
+        }
+    }
+
+    /**
+     * Moves to the last frame at or before [tUs]; with [need] its pixels go into [out]
+     * (after the video ends, the last shown frame stays). Returns true when [out] changed.
+     */
+    fun advance(tUs: Long, out: IntArray, need: Boolean): Boolean {
+        var cand = -1
+        while (!outEos) {
+            if (pendIdx < 0 && !next()) break
+            if (pendPts <= tUs) {
+                if (cand >= 0) dec.releaseOutputBuffer(cand, false)
+                cand = pendIdx
+                pendIdx = -1
+            } else break
+        }
+        if (cand < 0) {
+            // the first frame may start a few ms after zero: show it instead of black
+            if (need && !shown && pendIdx >= 0) dec.getOutputImage(pendIdx)?.let { convert(it, out); shown = true; return true }
+            return false
+        }
+        var changed = false
+        if (need) {
+            val img = dec.getOutputImage(cand)
+                ?: throw IllegalStateException(t("Формат этого видео не поддерживается декодером телефона", "The phone's decoder cannot read this video format"))
+            convert(img, out)
+            shown = true
+            changed = true
+        }
+        dec.releaseOutputBuffer(cand, false)
+        return changed
+    }
+
+    private fun copy(p: Image.Plane, old: ByteArray): ByteArray {
+        val b = p.buffer.duplicate()
+        b.rewind()
+        val arr = if (old.size == b.remaining()) old else ByteArray(b.remaining())
+        b.get(arr)
+        return arr
+    }
+
+    private fun convert(img: Image, out: IntArray) {
+        val crop = img.cropRect
+        val rw = crop.width()
+        val rh = crop.height()
+        val (dw, dh) = Studio.displaySize(rw, rh, rotation)
+        val key = "$rw:$rh:$rotation"
+        if (key != axesKey) {
+            axes = Studio.cropAxes(w, h, dw, dh)
+            axesKey = key
+        }
+        val (xs, ys) = axes!!
+        val pl = img.planes
+        yA = copy(pl[0], yA)
+        uA = copy(pl[1], uA)
+        vA = copy(pl[2], vA)
+        val rsY = pl[0].rowStride
+        val psY = pl[0].pixelStride
+        val rsU = pl[1].rowStride
+        val psU = pl[1].pixelStride
+        val rsV = pl[2].rowStride
+        val psV = pl[2].pixelStride
+        val ox = crop.left
+        val oy = crop.top
+        for (y in 0 until h) {
+            val v = ys[y]
+            val row = y * w
+            for (x in 0 until w) {
+                val u = xs[x]
+                val rx = Studio.rawX(u, v, rotation, rw) + ox
+                val ry = Studio.rawY(u, v, rotation, rh) + oy
+                val yy = yA.getOrElse(ry * rsY + rx * psY) { 16 }.toInt() and 0xFF
+                val cu = uA.getOrElse((ry / 2) * rsU + (rx / 2) * psU) { -128 }.toInt() and 0xFF
+                val cv = vA.getOrElse((ry / 2) * rsV + (rx / 2) * psV) { -128 }.toInt() and 0xFF
+                out[row + x] = Studio.yuvToArgb(yy, cu, cv)
+            }
+        }
+    }
+
+    override fun close() {
+        if (pendIdx >= 0) runCatching { dec.releaseOutputBuffer(pendIdx, false) }
+        runCatching { dec.stop() }
+        dec.release()
+        ex.release()
     }
 }
 

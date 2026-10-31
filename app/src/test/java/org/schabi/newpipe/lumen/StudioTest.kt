@@ -283,6 +283,97 @@ class StudioTest {
         assertTrue(STUDIO_PROMPTS["studio_scenes"]!!.contains("{data}"))
     }
 
+    // ---------- montage: video frames ----------
+
+    @Test
+    fun yuvToArgbPrimaries() {
+        assertEquals(0xFFFFFFFF.toInt(), Studio.yuvToArgb(235, 128, 128))
+        assertEquals(0xFF000000.toInt(), Studio.yuvToArgb(16, 128, 128))
+        val red = Studio.yuvToArgb(82, 90, 240)
+        assertTrue((red shr 16 and 0xFF) > 240 && (red and 0xFF) < 20)
+        // round trip through the encoder formula
+        val y = ByteArray(4)
+        val u = ByteArray(1)
+        val v = ByteArray(1)
+        Studio.argbToYuv420(IntArray(4) { 0xFF3366CC.toInt() }, 2, 2, y, u, v)
+        val back = Studio.yuvToArgb(y[0].toInt() and 0xFF, u[0].toInt() and 0xFF, v[0].toInt() and 0xFF)
+        assertTrue(Math.abs((back shr 16 and 0xFF) - 0x33) <= 3)
+        assertTrue(Math.abs((back and 0xFF) - 0xCC) <= 3)
+    }
+
+    @Test
+    fun cropFillsFrameAndCutsEdges() {
+        // landscape 1920x1080 into a 9:16 frame: the middle part of the width is used
+        val (xs, ys) = Studio.cropAxes(90, 160, 1920, 1080)
+        assertEquals(90, xs.size)
+        assertEquals(160, ys.size)
+        assertTrue(xs.first() > 600 && xs.last() < 1320)
+        assertEquals(0, ys.first() / 10)
+        assertTrue(ys.last() >= 1070)
+        for (i in 1 until xs.size) assertTrue(xs[i] >= xs[i - 1])
+        // portrait 1080x1920 into 9:16: the whole picture
+        val (px, py) = Studio.cropAxes(9, 16, 1080, 1920)
+        assertTrue(px.first() < 120 && px.last() > 960)
+        assertTrue(py.first() < 120 && py.last() > 1800)
+    }
+
+    @Test
+    fun rotationMapsDisplayToDecodedPixels() {
+        // a phone portrait video: decoded 1920x1080 (landscape) with rotation 90
+        assertEquals(1080 to 1920, Studio.displaySize(1920, 1080, 90))
+        assertEquals(1920 to 1080, Studio.displaySize(1920, 1080, 180))
+        // top-left of the picture on screen is bottom-left of the decoded frame
+        assertEquals(0, Studio.rawX(0, 0, 90, 1920))
+        assertEquals(1079, Studio.rawY(0, 0, 90, 1080))
+        // top-right on screen (u = 1079) is the top-left of the decoded frame
+        assertEquals(0, Studio.rawY(1079, 0, 90, 1080))
+        assertEquals(1919, Studio.rawX(0, 0, 180, 1920))
+        assertEquals(1919, Studio.rawX(0, 0, 270, 1920))
+        assertEquals(5, Studio.rawY(5, 0, 270, 1080))
+        assertEquals(7, Studio.rawX(7, 3, 0, 100))
+        assertEquals(3, Studio.rawY(7, 3, 0, 100))
+    }
+
+    // ---------- music ----------
+
+    @Test
+    fun spansOfWordsJoinsClosePauses() {
+        val w = listOf(SWord("a", 0, 300), SWord("b", 500, 800), SWord("c", 2000, 2300))
+        assertEquals(listOf(Span(0, 800), Span(2000, 2300)), Studio.spansOfWords(w))
+    }
+
+    @Test
+    fun duckEnvelopeLowersUnderSpeechAndGlides() {
+        val env = Studio.duckEnvelope(5000, listOf(Span(2000, 3000)), duck = 0.3f)
+        assertEquals(1f, env[50], 0.001f) // 0.5 s: silence
+        assertEquals(0.3f, env[280], 0.001f) // 2.8 s: speech
+        assertEquals(1f, env[480], 0.001f) // 4.8 s: silence again
+        val mid = env[(1850 + 120) / 10]
+        assertTrue(mid < 1f && mid > 0.3f) // glides, no jump
+    }
+
+    @Test
+    fun mixMusicLoopsDucksFadesAndClamps() {
+        val rate = 1000
+        val voice = ShortArray(6000)
+        val music = ShortArray(500) { 10_000 }
+        val mixed = Studio.mixMusic(voice, music, rate, 1f, listOf(Span(3000, 4000)), duck = 0.2f, fadeInMs = 100, fadeOutMs = 100)
+        assertEquals(voice.size, mixed.size)
+        assertEquals(0, mixed[0].toInt()) // fade in starts from silence
+        assertEquals(10_000, mixed[1000].toInt()) // looped music at full volume in a pause
+        assertEquals(2_000, mixed[3500].toInt()) // ducked under speech
+        assertTrue(mixed[5999] < 200) // faded out
+        val loud = Studio.mixMusic(ShortArray(10) { 30_000 }, ShortArray(10) { 30_000 }, rate, 1f, emptyList(), fadeInMs = 1, fadeOutMs = 1)
+        assertEquals(32767, loud[5].toInt())
+        assertTrue(Studio.mixMusic(voice, ShortArray(0), rate, 1f, emptyList()) === voice)
+    }
+
+    @Test
+    fun fitPadsOrCuts() {
+        assertArrayEquals(shortArrayOf(1, 2, 0), Studio.fit(shortArrayOf(1, 2), 3))
+        assertArrayEquals(shortArrayOf(1), Studio.fit(shortArrayOf(1, 2), 1))
+    }
+
     @Test
     fun emojiDetection() {
         assertTrue(Studio.startsWithEmoji("🔍 поиск"))

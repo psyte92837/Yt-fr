@@ -585,6 +585,111 @@ object Studio {
         }
     }
 
+    /** One YUV pixel (BT.601, limited range) → opaque ARGB. */
+    fun yuvToArgb(y: Int, u: Int, v: Int): Int {
+        val c = 298 * (y - 16)
+        val d = u - 128
+        val e = v - 128
+        val r = ((c + 409 * e + 128) shr 8).coerceIn(0, 255)
+        val g = ((c - 100 * d - 208 * e + 128) shr 8).coerceIn(0, 255)
+        val b = ((c + 516 * d + 128) shr 8).coerceIn(0, 255)
+        return (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+    }
+
+    /**
+     * Centre crop of a [dispW]×[dispH] picture into [dstW]×[dstH] (the picture fills the frame, edges are cut):
+     * for every destination column / row, the column / row of the picture it shows.
+     */
+    fun cropAxes(dstW: Int, dstH: Int, dispW: Int, dispH: Int): Pair<IntArray, IntArray> {
+        val s = max(dstW.toDouble() / dispW, dstH.toDouble() / dispH)
+        val xs = IntArray(dstW) { x -> ((x + 0.5 - dstW / 2.0) / s + dispW / 2.0).toInt().coerceIn(0, dispW - 1) }
+        val ys = IntArray(dstH) { y -> ((y + 0.5 - dstH / 2.0) / s + dispH / 2.0).toInt().coerceIn(0, dispH - 1) }
+        return xs to ys
+    }
+
+    /** Size of a decoded [rawW]×[rawH] frame once turned by [rotation] degrees for display. */
+    fun displaySize(rawW: Int, rawH: Int, rotation: Int): Pair<Int, Int> =
+        if (rotation % 180 == 0) rawW to rawH else rawH to rawW
+
+    /** Column in the decoded frame for the displayed point (u, v); the frame is turned clockwise by [rotation]. */
+    fun rawX(u: Int, v: Int, rotation: Int, rawW: Int): Int = when (rotation) {
+        90 -> v
+        180 -> rawW - 1 - u
+        270 -> rawW - 1 - v
+        else -> u
+    }
+
+    /** Row in the decoded frame for the displayed point (u, v). */
+    fun rawY(u: Int, v: Int, rotation: Int, rawH: Int): Int = when (rotation) {
+        90 -> rawH - 1 - u
+        180 -> rawH - 1 - v
+        270 -> u
+        else -> v
+    }
+
+    // ---------- music ----------
+
+    /** Speaking parts from word timings: words closer than [joinMs] form one part. */
+    fun spansOfWords(words: List<SWord>, joinMs: Long = 400): List<Span> {
+        val out = mutableListOf<Span>()
+        for (w in words) {
+            val prev = out.lastOrNull()
+            if (prev != null && w.startMs - prev.endMs <= joinMs) out[out.lastIndex] = Span(prev.startMs, max(prev.endMs, w.endMs))
+            else out += Span(w.startMs, w.endMs)
+        }
+        return out
+    }
+
+    /**
+     * Music gain per 10 ms block: [duck] while someone speaks (with a little lead and tail), 1 in pauses,
+     * smoothed so the music glides down and up instead of jumping.
+     */
+    fun duckEnvelope(totalMs: Long, speech: List<Span>, duck: Float = 0.35f, leadMs: Long = 150, tailMs: Long = 300, smoothMs: Long = 250): FloatArray {
+        val n = (totalMs / 10).toInt() + 1
+        val target = FloatArray(n) { 1f }
+        for (s in speech) {
+            val a = ((s.startMs - leadMs) / 10).toInt().coerceIn(0, n - 1)
+            val b = ((s.endMs + tailMs) / 10).toInt().coerceIn(0, n - 1)
+            for (i in a..b) target[i] = duck
+        }
+        val k = max(1, (smoothMs / 10).toInt())
+        val out = FloatArray(n)
+        var sum = 0.0
+        for (i in 0 until n) {
+            sum += target[i]
+            if (i >= k) sum -= target[i - k]
+            out[i] = (sum / min(i + 1, k)).toFloat()
+        }
+        return out
+    }
+
+    /**
+     * Voice + background music → one track as long as [voice]. The music loops when shorter, fades in and out,
+     * plays at [volume] (0..1) and is ducked under speech when [speech] is given.
+     */
+    fun mixMusic(
+        voice: ShortArray, music: ShortArray, rate: Int, volume: Float, speech: List<Span>,
+        duck: Float = 0.35f, fadeInMs: Long = 800, fadeOutMs: Long = 1500
+    ): ShortArray {
+        if (music.isEmpty() || volume <= 0f) return voice
+        val totalMs = durationMs(voice.size, rate)
+        val env = if (speech.isEmpty()) null else duckEnvelope(totalMs, speech, duck)
+        val fadeIn = max(1L, fadeInMs * rate / 1000)
+        val fadeOut = max(1L, fadeOutMs * rate / 1000)
+        return ShortArray(voice.size) { i ->
+            var g = volume
+            if (i < fadeIn) g *= i.toFloat() / fadeIn
+            val left = voice.size - i
+            if (left < fadeOut) g *= left.toFloat() / fadeOut
+            if (env != null) g *= env[min(env.lastIndex, (i.toLong() * 100 / rate).toInt())]
+            val m = music[i % music.size] * g
+            (voice[i] + m).roundToInt().coerceIn(-32768, 32767).toShort()
+        }
+    }
+
+    /** [pcm] padded with silence (or cut) to [samples]. */
+    fun fit(pcm: ShortArray, samples: Int): ShortArray = if (pcm.size == samples) pcm else pcm.copyOf(samples)
+
     /** Frames needed for [ms] at [fps] (at least one). */
     fun frameCount(ms: Long, fps: Int): Int = max(1, ((ms * fps + 999) / 1000).toInt())
 

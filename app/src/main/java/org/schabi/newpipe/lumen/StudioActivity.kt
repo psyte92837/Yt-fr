@@ -63,6 +63,20 @@ object StudioPrefs {
     var prompter: Boolean
         get() = p.getBoolean("studio_prompter", true)
         set(v) = p.edit().putBoolean("studio_prompter", v).apply()
+    /** VIDEO style: graphics as cards over the speaker instead of full-screen inserts. */
+    var overlay: Boolean
+        get() = p.getBoolean("studio_overlay", false)
+        set(v) = p.edit().putBoolean("studio_overlay", v).apply()
+    var musicName: String
+        get() = p.getString("studio_music_name", "") ?: ""
+        set(v) = p.edit().putString("studio_music_name", v).apply()
+    /** Music loudness, 0..1 of full scale. */
+    var musicVolume: Float
+        get() = p.getFloat("studio_music_volume", 0.15f)
+        set(v) = p.edit().putFloat("studio_music_volume", v).apply()
+    var musicDuck: Boolean
+        get() = p.getBoolean("studio_music_duck", true)
+        set(v) = p.edit().putBoolean("studio_music_duck", v).apply()
     /** The take follows the script (teleprompter); otherwise it is recognised. */
     var readScript: Boolean
         get() = p.getBoolean("studio_read_script", true)
@@ -85,6 +99,9 @@ class StudioActivity : LumenBase() {
     companion object {
         private const val REQ_AUDIO = 7401
         private const val REQ_MIC = 7402
+        private const val REQ_VIDEO = 7403
+        private const val REQ_CAPTURE = 7404
+        private const val REQ_MUSIC = 7405
 
         fun open(ctx: Context) {
             ctx.startActivity(Intent(ctx, StudioActivity::class.java)
@@ -94,6 +111,10 @@ class StudioActivity : LumenBase() {
 
     private val dir by lazy { File(filesDir, "lumen/studio").apply { mkdirs() } }
     private val takeFile get() = File(dir, "take.wav")
+    private val sourceFile get() = File(dir, "source.mp4")
+    private val musicFile get() = File(dir, "music.wav")
+    private var previewBusy = false
+    private var previewAgain = false
 
     // results of the analysis
     private var pcm: StudioAudio.Pcm? = null
@@ -219,8 +240,8 @@ class StudioActivity : LumenBase() {
 
     private fun voiceCard(c: Col) = c.card {
         add(text(ctx, t("2. Голос", "2. Voice"), Type.TITLE_M, bold = true), 0)
-        val modes = listOf("edge", "mic", "file")
-        add(segBar(ctx, listOf(t("Голос Microsoft", "Microsoft voice"), t("Микрофон", "Microphone"), t("Аудиофайл", "Audio file")),
+        val modes = listOf("edge", "mic", "file", "video")
+        add(segBar(ctx, listOf("Microsoft", t("Микрофон", "Mic"), t("Аудио", "Audio"), t("Видео", "Video")),
             modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)) {
             StudioPrefs.voiceMode = modes[it]
             resetAnalysis()
@@ -229,6 +250,7 @@ class StudioActivity : LumenBase() {
         when (StudioPrefs.voiceMode) {
             "edge" -> edgeVoice(this)
             "mic" -> micVoice(this)
+            "video" -> videoVoice(this)
             else -> fileVoice(this)
         }
     }
@@ -292,6 +314,88 @@ class StudioActivity : LumenBase() {
         takeControls(c)
     }
 
+    /** The speaker's own video: its sound is the voice, its picture the background (style "Montage"). */
+    private fun videoVoice(c: Col) {
+        c.muted(t("Снимите себя на камеру или выберите готовое видео. Звук станет озвучкой, а картинка — фоном ролика; графика встанет вставками.",
+            "Film yourself or pick a video. Its sound becomes the voice-over, its picture the background; graphics are cut in."))
+        c.check(t("В видео звучит текст сценария", "The video speaks the script text"), StudioPrefs.readScript) {
+            StudioPrefs.readScript = it
+            resetAnalysis()
+        }
+        c.row(
+            btn(this, t("🎥 Снять", "🎥 Film"), style = BtnStyle.TONAL) { captureVideo() },
+            btn(this, t("📎 Выбрать видео", "📎 Pick video"), style = BtnStyle.TONAL) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"), REQ_VIDEO)
+            }
+        )
+        c.progress("import", t("Чтение видео…", "Reading the video…"))
+        if (sourceFile.exists()) c.muted("🎞 " + t("Видео: ", "Video: ") + "${sourceFile.length() / (1024 * 1024)} MB")
+        takeControls(c)
+    }
+
+    private fun captureVideo() {
+        val i = Intent(android.provider.MediaStore.ACTION_VIDEO_CAPTURE)
+            .putExtra("android.intent.extras.CAMERA_FACING", 1)
+            .putExtra("android.intent.extras.LENS_FACING_FRONT", 1)
+            .putExtra("android.intent.extra.USE_FRONT_CAMERA", true)
+            .putExtra(android.provider.MediaStore.EXTRA_VIDEO_QUALITY, 1)
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(i, REQ_CAPTURE)
+        } catch (e: android.content.ActivityNotFoundException) {
+            toast(t("Нет приложения камеры", "No camera app found"))
+        }
+    }
+
+    /** Copies the picked video into the app (the link may expire) and takes its sound as the voice. */
+    private fun importVideo(uri: Uri) {
+        busy = "import"
+        cancel = false
+        render()
+        Lumen.async({
+            val total = runCatching {
+                contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)?.use { c -> if (c.moveToFirst()) c.getLong(0) else -1L }
+            }.getOrNull() ?: -1L
+            val tmp = File(dir, "source.tmp")
+            contentResolver.openInputStream(uri)?.use { inp ->
+                tmp.outputStream().use { out ->
+                    val buf = ByteArray(1 shl 16)
+                    var done = 0L
+                    var last = 0L
+                    while (true) {
+                        if (cancel) throw java.util.concurrent.CancellationException()
+                        val n = inp.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        done += n
+                        if (total > 0 && done - last > total / 50) {
+                            last = done
+                            report("import", t("Копирование ${done * 100 / total}/100", "Copying ${done * 100 / total}/100"))
+                        }
+                    }
+                }
+            } ?: error(t("Не удалось открыть видео", "Cannot open the video"))
+            if (!tmp.renameTo(sourceFile)) {
+                tmp.copyTo(sourceFile, overwrite = true)
+                tmp.delete()
+            }
+            report("import", t("Звук из видео…", "Sound of the video…"))
+            val p = StudioAudio.decode(sourceFile)
+            if (p.data.isEmpty()) error(t("В видео нет звука", "The video has no sound"))
+            writeTake(Studio.resample(p.data, p.rate, 44_100), 44_100)
+        }, { e ->
+            busy = ""
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) {
+            busy = ""
+            StudioPrefs.style = StudioStyle.VIDEO.name
+            resetAnalysis()
+            render()
+        }
+    }
+
     private fun takeControls(c: Col) {
         if (!takeFile.exists()) return
         val ms = runCatching { (takeFile.length() - 44) / 2 * 1000 / 44_100 }.getOrDefault(0)
@@ -302,6 +406,7 @@ class StudioActivity : LumenBase() {
                 player?.release()
                 player = null
                 takeFile.delete()
+                if (StudioPrefs.voiceMode == "video") sourceFile.delete()
                 resetAnalysis()
                 render()
             }
@@ -374,12 +479,24 @@ class StudioActivity : LumenBase() {
 
     private fun videoCard(c: Col) = c.card {
         add(text(ctx, t("4. Ролик", "4. Video"), Type.TITLE_M, bold = true), 0)
-        val styles = listOf(StudioStyle.DARK, StudioStyle.LIGHT)
-        add(segBar(ctx, listOf(t("Тёмный · группы слов", "Dark · word groups"), t("Светлый · одно слово", "Light · one word")),
-            styles.indexOfFirst { it.name == StudioPrefs.style }.coerceAtLeast(0)) {
+        val styles = listOfNotNull(StudioStyle.DARK, StudioStyle.LIGHT, if (videoReady()) StudioStyle.VIDEO else null)
+        val labels = listOf(t("Тёмный", "Dark"), t("Светлый", "Light"), t("Монтаж", "Montage")).take(styles.size)
+        add(segBar(ctx, labels, styles.indexOf(currentStyle()).coerceAtLeast(0)) {
             StudioPrefs.style = styles[it].name
             render()
         }, 8)
+        muted(when (currentStyle()) {
+            StudioStyle.DARK -> t("Слова появляются группами с размытием, схемы из эмодзи на тёмном фоне.", "Word groups blur in, emoji schemes on a dark screen.")
+            StudioStyle.LIGHT -> t("Заголовок капсом и одно крупное слово под голос на светлом фоне.", "A capital headline and one big word at a time on a light screen.")
+            StudioStyle.VIDEO -> t("Ваше видео, слово под голос внизу, графика вставками.", "Your video, the spoken word below, graphics cut in.")
+        })
+        if (currentStyle() == StudioStyle.VIDEO) {
+            add(segBar(ctx, listOf(t("Вставки на весь экран", "Full-screen inserts"), t("Карточки поверх видео", "Cards over video")),
+                if (StudioPrefs.overlay) 1 else 0) {
+                StudioPrefs.overlay = it == 1
+                render()
+            }, 8)
+        }
         add(text(ctx, t("Цвет акцента", "Accent colour"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         chips(StudioPrefs.ACCENTS.map { (col, e) ->
             chip(ctx, e, col == StudioPrefs.accent) {
@@ -390,6 +507,7 @@ class StudioActivity : LumenBase() {
         spinner(t("Качество", "Quality"), listOf(1280 to "720×1280", 1920 to "1080×1920"), StudioPrefs.height) {
             StudioPrefs.height = it
         }
+        musicBlock(this)
         val plan = currentPlan()
         if (plan == null) {
             muted(t("Сначала выполните разбор (шаг 3).", "Run the analysis first (step 3)."))
@@ -429,17 +547,109 @@ class StudioActivity : LumenBase() {
         }
     }
 
+    /** Background music: pick, loudness, ducking under the voice. */
+    private fun musicBlock(c: Col) {
+        c.add(text(this, t("Музыка", "Music"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        c.progress("music", t("Чтение музыки…", "Reading the music…"))
+        if (!musicFile.exists()) {
+            if (busy != "music") c.button(t("🎵 Добавить фоновую музыку", "🎵 Add background music"), style = BtnStyle.TONAL) { pickMusic() }
+            c.muted(t("Музыка зациклится на длину ролика, плавно начнётся и затихнет в конце.", "Music loops to the video length, fades in and out."))
+            return
+        }
+        c.p("🎵 " + StudioPrefs.musicName.ifBlank { t("музыка", "music") })
+        c.spinner(t("Громкость", "Volume"), listOf(0.08f to t("тихо", "quiet"), 0.15f to t("средне", "medium"), 0.25f to t("громко", "loud")), StudioPrefs.musicVolume) {
+            StudioPrefs.musicVolume = it
+        }
+        c.check(t("Приглушать музыку, когда звучит голос", "Lower the music under the voice"), StudioPrefs.musicDuck) { StudioPrefs.musicDuck = it }
+        c.row(
+            btn(this, t("Заменить", "Replace"), style = BtnStyle.TEXT) { pickMusic() },
+            btn(this, t("Убрать", "Remove"), style = BtnStyle.TEXT) {
+                musicFile.delete()
+                StudioPrefs.musicName = ""
+                render()
+            }
+        )
+    }
+
+    private fun pickMusic() {
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"), REQ_MUSIC)
+    }
+
+    private fun importMusic(uri: Uri) {
+        busy = "music"
+        cancel = false
+        render()
+        Lumen.async({
+            report("music", t("Декодирование…", "Decoding…"))
+            val p = StudioAudio.decode(this, uri, 10 * 60_000L)
+            if (p.data.isEmpty()) error(t("В файле нет звука", "No sound in the file"))
+            val pcm44 = Studio.normalize(Studio.resample(p.data, p.rate, 44_100), 0.7)
+            val data = java.nio.ByteBuffer.allocate(pcm44.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            data.asShortBuffer().put(pcm44)
+            musicFile.outputStream().use {
+                it.write(Studio.wavHeader(pcm44.size * 2, 44_100))
+                it.write(data.array())
+            }
+            runCatching {
+                contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            }.getOrNull() ?: "music"
+        }, { e -> busy = ""; render(); err(e) }) { name ->
+            busy = ""
+            StudioPrefs.musicName = name
+            render()
+        }
+    }
+
+    /** Voice padded to the video length, with the background music mixed in when chosen. */
+    private fun finalAudio(plan: StudioPlan, voice: StudioAudio.Pcm, progress: (String) -> Unit): StudioAudio.Pcm {
+        val samples = (plan.totalMs * voice.rate / 1000).toInt()
+        val base = Studio.fit(voice.data, samples)
+        if (!musicFile.exists()) return StudioAudio.Pcm(base, voice.rate)
+        progress(t("Музыка: сведение", "Music: mixing"))
+        val (m, r) = Studio.readWav(musicFile.readBytes()) ?: return StudioAudio.Pcm(base, voice.rate)
+        val music = Studio.resample(m, r, voice.rate)
+        val speech = if (StudioPrefs.musicDuck) Studio.spansOfWords(plan.words) else emptyList()
+        return StudioAudio.Pcm(Studio.mixMusic(base, music, voice.rate, StudioPrefs.musicVolume, speech), voice.rate)
+    }
+
+    private fun videoReady() = StudioPrefs.voiceMode == "video" && sourceFile.exists()
+
+    private fun currentStyle(): StudioStyle {
+        val s = runCatching { StudioStyle.valueOf(StudioPrefs.style) }.getOrDefault(StudioStyle.DARK)
+        return if (s == StudioStyle.VIDEO && !videoReady()) StudioStyle.DARK else s
+    }
+
     private fun drawPreview(plan: StudioPlan) {
         val img = preview ?: return
-        img.setImageBitmap(StudioVideo.preview(plan, previewMs.coerceIn(0, plan.totalMs), 360, 640))
+        val at = previewMs.coerceIn(0, plan.totalMs)
         img.contentDescription = t("Кадр на ", "Frame at ") + Studio.clock(previewMs)
+        if (plan.style != StudioStyle.VIDEO) {
+            img.setImageBitmap(StudioVideo.preview(plan, at, 360, 640))
+            return
+        }
+        // reading a video frame is slow: one at a time in the background, the latest position wins
+        if (previewBusy) {
+            previewAgain = true
+            return
+        }
+        previewBusy = true
+        val src = sourceFile
+        Lumen.async({ StudioVideo.preview(plan, at, 360, 640, src) }, { previewBusy = false }) { bmp ->
+            previewBusy = false
+            if (preview === img) img.setImageBitmap(bmp)
+            if (previewAgain) {
+                previewAgain = false
+                drawPreview(plan)
+            }
+        }
     }
 
     private fun currentPlan(): StudioPlan? {
         val sc = script ?: return null
         val voice = pcm ?: return null
         if (words.isEmpty()) return null
-        return StudioPlan.build(sc, words, voice.ms + 500, StudioStyle.valueOf(StudioPrefs.style), StudioPrefs.accent, ranges)
+        return StudioPlan.build(sc, words, voice.ms + 500, currentStyle(), StudioPrefs.accent, ranges, StudioPrefs.overlay)
     }
 
     private fun detach(v: View): View {
@@ -626,7 +836,12 @@ class StudioActivity : LumenBase() {
         @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         val uri = data?.data
-        if (requestCode == REQ_AUDIO && resultCode == RESULT_OK && uri != null) importAudio(uri)
+        if (resultCode != RESULT_OK || uri == null) return
+        when (requestCode) {
+            REQ_AUDIO -> importAudio(uri)
+            REQ_VIDEO, REQ_CAPTURE -> importVideo(uri)
+            REQ_MUSIC -> importMusic(uri)
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -651,7 +866,11 @@ class StudioActivity : LumenBase() {
             return
         }
         if (mode != "edge" && !takeFile.exists()) {
-            toast(if (mode == "mic") t("Сначала запишите голос (шаг 2)", "Record your voice first (step 2)") else t("Сначала выберите аудио (шаг 2)", "Pick audio first (step 2)"))
+            toast(when (mode) {
+                "mic" -> t("Сначала запишите голос (шаг 2)", "Record your voice first (step 2)")
+                "video" -> t("Сначала снимите или выберите видео (шаг 2)", "Film or pick a video first (step 2)")
+                else -> t("Сначала выберите аудио (шаг 2)", "Pick audio first (step 2)")
+            })
             return
         }
         val useScript = mode != "edge" && StudioPrefs.readScript && sc.scenes.isNotEmpty()
@@ -807,7 +1026,9 @@ class StudioActivity : LumenBase() {
         render()
         val started = System.currentTimeMillis()
         Lumen.async({
-            StudioVideo.render(plan, voice, out, wdt, hgt, 30, { cancel }) { report("render", it) }
+            val audio = finalAudio(plan, voice) { report("render", it) }
+            val bg = if (plan.style == StudioStyle.VIDEO) sourceFile.takeIf { it.exists() } else null
+            StudioVideo.render(plan, audio, out, wdt, hgt, 30, { cancel }, bg) { report("render", it) }
             report("render", t("Сохранение…", "Saving…"))
             saveToMovies(out, name)
         }, { e ->

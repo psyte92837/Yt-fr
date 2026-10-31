@@ -150,17 +150,19 @@ object Help {
             listOf(
                 t("1. Сценарий: напишите сами или нажмите «✨ Написать (AI)» по теме. Каждая сцена — абзац; первая строка может начинаться с [icons], [list], [flow], [cycle], [step: заголовок], [big], [stat: 80%]; строка с «|» — плитки «🔍 подпись».",
                     "1. Script: write it or tap \"✨ Write (AI)\" for a topic. Each scene is a paragraph; the first line may start with [icons], [list], [flow], [cycle], [step: title], [big], [stat: 80%]; a line with \"|\" lists tiles \"🔍 label\"."),
-                t("2. Голос: голос Microsoft (точные тайминги слов), свой микрофон или аудиофайл. При записи можно включить суфлёр.",
-                    "2. Voice: a Microsoft voice (exact word timing), your microphone or an audio file. A teleprompter can be shown while recording."),
+                t("2. Голос: голос Microsoft (точные тайминги слов), свой микрофон, аудиофайл или видео. При записи можно включить суфлёр. «Видео» — снимите себя камерой или выберите ролик: звук станет озвучкой, картинка — фоном.",
+                    "2. Voice: a Microsoft voice (exact word timing), your microphone, an audio file or a video. A teleprompter can be shown while recording. \"Video\": film yourself or pick a clip; its sound is the voice-over, its picture the background."),
                 t("3. Разбор: Lumen находит речь и паузы, считает темп, расставляет слова по времени. Без сценария запись распознаётся (Android 13+), а AI разбивает текст на сцены.",
                     "3. Analysis: Lumen finds speech and pauses, measures the pace and times every word. Without a script the take is recognised (Android 13+) and AI splits the text into scenes."),
-                t("4. Ролик: выберите стиль (тёмный — группы слов; светлый — заголовок и одно крупное слово), цвет и качество, посмотрите кадр в предпросмотре и нажмите «🎬 Создать ролик».",
-                    "4. Video: pick a style (dark: word groups; light: headline and one big word), colour and quality, check a frame in the preview and tap \"🎬 Make video\".")
+                t("4. Ролик: выберите стиль (тёмный — группы слов; светлый — заголовок и одно крупное слово; монтаж — ваше видео со словом внизу и графикой вставками или карточками поверх), цвет, качество и фоновую музыку, посмотрите кадр в предпросмотре и нажмите «🎬 Создать ролик».",
+                    "4. Video: pick a style (dark: word groups; light: headline and one big word; montage: your video with the spoken word below and graphics as inserts or cards on top), colour, quality and background music, check a frame in the preview and tap \"🎬 Make video\".")
             ),
             listOf(
                 t("Готовый ролик сохраняется в «Фильмы/Lumen» и сразу доступен для «Поделиться».", "The video is saved to Movies/Lumen and can be shared right away."),
                 t("Сборка минутного ролика занимает 1–3 минуты; не закрывайте экран.", "Building a one-minute video takes 1–3 minutes; keep the screen open."),
-                t("Голос Microsoft требует интернет; запись с микрофона и сборка работают без сети.", "Microsoft voices need internet; microphone recording and building work offline.")
+                t("Голос Microsoft требует интернет; запись с микрофона и сборка работают без сети.", "Microsoft voices need internet; microphone recording and building work offline."),
+                t("Музыка зацикливается на длину ролика, плавно начинается и затихает, а под голосом сама становится тише.", "Music loops to the video length, fades in and out and gets quieter under the voice."),
+                t("Монтаж с видео собирается дольше: кадры декодируются и кадрируются под 9:16.", "Montage takes longer: frames are decoded and cropped to 9:16.")
             )),
         HelpTopic("settings", t("Настройки", "Settings"),
             t("Язык, тема, режим, AI-провайдеры и модели, промпты, мониторинг, резервные копии, журнал ошибок.", "Language, theme, mode, AI providers and models, prompts, monitoring, backups, error log."),

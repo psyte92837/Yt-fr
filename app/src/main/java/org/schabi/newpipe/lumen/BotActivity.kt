@@ -582,7 +582,7 @@ class BotActivity : LumenBase() {
 
         c.h2(t("Публикация", "Publishing"))
         c.muted(t("Telegram открывает мини-аппы только по адресу https. Lumen бесплатно публикует страницу на GitHub Pages вашего аккаунта (публичный репозиторий «${GhPages.repo}»).",
-            "Telegram opens mini apps only from an https address. Lumen publishes the page for free to GitHub Pages of your account (public repository "${GhPages.repo}")."))
+            "Telegram opens mini apps only from an https address. Lumen publishes the page for free to GitHub Pages of your account (public repository \"${GhPages.repo}\")."))
         if (GhPages.token() == null) {
             c.muted(t("1) Войдите на github.com (или зарегистрируйтесь). 2) Создайте токен: «Получить токен» → Generate token (право public_repo уже отмечено). 3) Вставьте его сюда.",
                 "1) Sign in to github.com (or sign up). 2) Make a token: "Get a token" → Generate token (public_repo is already ticked). 3) Paste it here."))
@@ -798,9 +798,7 @@ class BotActivity : LumenBase() {
             }
             pushMenu()
             stopBusy()
-            showText(t("Опубликовано", "Published"), url + "
-
-" + t(
+            showText(t("Опубликовано", "Published"), url + "\n\n" + t(
                 "GitHub Pages обновляет страницу 1–2 минуты. Кнопки бота уже ведут на новую версию.",
                 "GitHub Pages updates the page in 1–2 minutes. The bot buttons already point to the new version."
             ))

@@ -168,6 +168,7 @@ class LumenActivity : LumenBase() {
                 add(row, 0)
             }
         }
+        if (!showArchived) ideasCard(c)
         if (!showArchived) botsCard(c)
         val all = Store.projects()
         val list = all.filter { it.archived == showArchived }
@@ -239,6 +240,38 @@ class LumenActivity : LumenBase() {
                 }
             }
         )
+    }
+
+    /** Big entry to "Ideas for my business": setup on first tap, then the latest digest headline. */
+    private fun ideasCard(c: Col) {
+        val cfg = Ideas.config()
+        val last = if (cfg.projectId.isNotEmpty()) Ideas.digests().firstOrNull() else null
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(20))
+            background = ripple(this@LumenActivity, roundBg(Palette.ACCENT, 20f, this@LumenActivity), Palette.ON_ACCENT)
+            elevation = dp(2).toFloat()
+            addView(text(context, t("💡 Идеи для моего бизнеса", "💡 Ideas for my business"), Type.TITLE_L, bold = true, color = Palette.ON_ACCENT))
+            val sub = when {
+                cfg.projectId.isEmpty() -> t("Опишите бизнес, выберите рынок (например, США) — Lumen будет следить за свежими видео и комментариями и присылать сводку идей",
+                    "Describe your business, pick a market (e.g. USA): Lumen watches fresh videos and comments and sends a digest of ideas")
+                last != null -> Fmt.dateTime(last.at) + " · " + IdeasLogic.headline(last.text)
+                else -> Ideas.countryName(cfg.country) + " · " + IdeasActivity.freq(cfg.hours) + if (cfg.enabled) "" else t(" · на паузе", " · paused")
+            }
+            addView(text(context, sub, 14f, color = Palette.ON_ACCENT).apply {
+                maxLines = 3
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(6), 0, dp(14))
+            })
+            addView(text(context, if (cfg.projectId.isEmpty()) t("Настроить за минуту  →", "Set up in a minute  →") else t("Открыть сводки  →", "Open digests  →"),
+                15f, bold = true, color = Palette.ACCENT).apply {
+                background = roundBg(Palette.ON_ACCENT, 24f, this@LumenActivity)
+                setPadding(dp(20), dp(12), dp(20), dp(12))
+            }, LinearLayout.LayoutParams(-2, -2))
+            contentDescription = t("Идеи для моего бизнеса", "Ideas for my business")
+            setOnClickListener { IdeasActivity.open(this@LumenActivity) }
+        }
+        c.add(box, 12)
     }
 
     /** Entry to the separate "My Telegram bots" section (it also has its own launcher icon). */

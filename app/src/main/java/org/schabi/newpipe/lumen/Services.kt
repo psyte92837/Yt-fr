@@ -448,7 +448,9 @@ object Monitoring {
             it.runs.add(RunRecord(it.lastRunAt, "monitor", found.size, added))
             Store.save(it)
         }
-        if (added > 0) {
+        if (added > 0 && Ideas.owns(pid)) {
+            Ideas.afterRun(ctx, pid, fresh)
+        } else if (added > 0) {
             val title = WatchDigest.title(p.name, added, fresh)
             val body = WatchDigest.body(fresh, summary, dropped)
             WatchDigest.remember(pid, WatchDigest.Entry(System.currentTimeMillis(), title, body))

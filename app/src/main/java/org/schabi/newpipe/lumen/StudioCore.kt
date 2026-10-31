@@ -825,6 +825,106 @@ object Studio {
     }
 }
 
+/** A track found in a free music catalog. [url] is the audio file, [landing] the page to credit. */
+data class MusicHit(
+    val id: String, val title: String, val creator: String, val url: String, val durationMs: Long,
+    val license: String, val licenseVersion: String, val licenseUrl: String, val landing: String, val source: String
+)
+
+/** Free background music catalogs (official APIs): parsing, licences and credits. Pure, unit-tested. */
+object StudioMusicCatalog {
+    /** Search moods: label → English query (the catalogs are mostly English). */
+    val MOODS = listOf(
+        "спокойная" to "calm ambient", "энергичная" to "upbeat energetic", "вдохновляющая" to "inspiring",
+        "lo-fi" to "lofi chill", "корпоративная" to "corporate", "эпическая" to "epic cinematic",
+        "весёлая" to "happy", "электроника" to "electronic", "пианино" to "piano", "акустика" to "acoustic guitar"
+    )
+
+    fun enc(s: String): String = java.net.URLEncoder.encode(s, "UTF-8")
+
+    /** Openverse (WordPress): no key; CC music from Jamendo, Freesound, ccMixter, Wikimedia and others. */
+    fun openverseUrl(query: String, commercial: Boolean, page: Int = 1): String =
+        "https://api.openverse.org/v1/audio/?q=${enc(query)}&category=music&page_size=20&page=$page" +
+            (if (commercial) "&license_type=commercial" else "")
+
+    /** Freesound API v2 (free key from freesound.org/apiv2/apply). */
+    fun freesoundUrl(query: String, token: String, minSec: Int = 20, maxSec: Int = 600): String =
+        "https://freesound.org/apiv2/search/text/?query=${enc(query)}" +
+            "&filter=${enc("duration:[$minSec TO $maxSec]")}&sort=rating_desc&page_size=20" +
+            "&fields=${enc("id,name,duration,previews,username,license,url")}&token=${enc(token)}"
+
+    fun parseOpenverse(json: String): List<MusicHit> {
+        val arr = runCatching { JSONObject(json).optJSONArray("results") }.getOrNull() ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val url = o.optString("url")
+            if (!url.startsWith("http")) return@mapNotNull null
+            MusicHit(
+                o.optString("id"), o.optString("title").ifBlank { "—" }, o.optString("creator"), url,
+                o.optLong("duration", 0), licenseCode(o.optString("license")), o.optString("license_version"),
+                o.optString("license_url"), o.optString("foreign_landing_url"), "openverse/" + o.optString("source")
+            )
+        }
+    }
+
+    fun parseFreesound(json: String): List<MusicHit> {
+        val arr = runCatching { JSONObject(json).optJSONArray("results") }.getOrNull() ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val o = arr.optJSONObject(i) ?: return@mapNotNull null
+            val p = o.optJSONObject("previews") ?: return@mapNotNull null
+            val url = p.optString("preview-hq-mp3").ifBlank { p.optString("preview-lq-mp3") }
+            if (!url.startsWith("http")) return@mapNotNull null
+            val lic = o.optString("license")
+            MusicHit(
+                o.optString("id"), o.optString("name").ifBlank { "—" }, o.optString("username"), url,
+                (o.optDouble("duration", 0.0) * 1000).toLong(), licenseCode(lic), versionOf(lic), lic.takeIf { it.startsWith("http") } ?: "",
+                o.optString("url"), "freesound"
+            )
+        }
+    }
+
+    /** Normalised Creative Commons code: "cc0", "by", "by-sa", "by-nc", … ("" when unknown). */
+    fun licenseCode(raw: String): String {
+        val s = raw.trim().lowercase()
+        if (s.isEmpty()) return ""
+        if (s.contains("publicdomain/zero") || s == "cc0" || s.contains("creative commons 0")) return "cc0"
+        if (s.contains("publicdomain/mark") || s == "pdm") return "pdm"
+        Regex("""licenses/([a-z-]+)/""").find(s)?.let { return it.groupValues[1] }
+        if (s.startsWith("attribution")) {
+            val nc = s.contains("noncommercial")
+            val nd = s.contains("noderiv")
+            val sa = s.contains("sharealike")
+            return "by" + (if (nc) "-nc" else "") + (if (nd) "-nd" else "") + (if (sa) "-sa" else "")
+        }
+        return s.replace(' ', '-')
+    }
+
+    private fun versionOf(raw: String): String = Regex("""/(\d\.\d)/?""").find(raw)?.groupValues?.get(1) ?: ""
+
+    /** Allowed in a monetised video: public domain, CC0, CC BY, CC BY-SA. Jamendo needs its own commercial licence. */
+    fun commercialOk(h: MusicHit): Boolean =
+        h.license in setOf("cc0", "pdm", "by", "by-sa") && !h.source.endsWith("/jamendo")
+
+    /** Credit is required for every CC licence except CC0 and the public domain mark. */
+    fun needsCredit(h: MusicHit): Boolean = h.license !in setOf("cc0", "pdm")
+
+    fun licenseLabel(h: MusicHit): String = when (h.license) {
+        "cc0" -> "CC0"
+        "pdm" -> "Public Domain"
+        "" -> "?"
+        else -> "CC " + h.license.uppercase() + (if (h.licenseVersion.isNotBlank()) " " + h.licenseVersion else "")
+    }
+
+    /** Text for the video description: "Music: Title by Creator (CC BY 4.0) https://…". */
+    fun credit(h: MusicHit): String = buildString {
+        append("Music: \"").append(h.title).append('"')
+        if (h.creator.isNotBlank()) append(" by ").append(h.creator)
+        append(" (").append(licenseLabel(h)).append(')')
+        val link = h.landing.ifBlank { h.licenseUrl }
+        if (link.isNotBlank()) append(' ').append(link)
+    }
+}
+
 /** Editable prompts of Lumen Studio (added to [Prompts.defaults]). */
 val STUDIO_PROMPTS = linkedMapOf(
     "studio_script" to (

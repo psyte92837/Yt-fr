@@ -441,6 +441,50 @@ class StudioTest {
         assertEquals(a, Studio.analysisFromJson(Studio.analysisToJson(a)))
     }
 
+    // ---------- free music catalogs ----------
+
+    @Test
+    fun parsesOpenverseAudio() {
+        val json = "{\"result_count\":2,\"results\":[" +
+            "{\"id\":\"a1\",\"title\":\"Calm Piano\",\"creator\":\"Ann\",\"url\":\"https://cdn.example/a1.mp3\",\"duration\":125000," +
+            "\"license\":\"by\",\"license_version\":\"4.0\",\"license_url\":\"https://creativecommons.org/licenses/by/4.0/\"," +
+            "\"foreign_landing_url\":\"https://ccmixter.org/files/a1\",\"source\":\"ccmixter\"}," +
+            "{\"id\":\"j2\",\"title\":\"Song\",\"creator\":\"Bob\",\"url\":\"https://jamendo/j2.mp3\",\"duration\":90000," +
+            "\"license\":\"by-nc\",\"license_version\":\"3.0\",\"source\":\"jamendo\"},{\"id\":\"bad\",\"url\":\"\"}]}"
+        val hits = StudioMusicCatalog.parseOpenverse(json)
+        assertEquals(2, hits.size)
+        val a = hits[0]
+        assertEquals(125_000L, a.durationMs)
+        assertEquals("openverse/ccmixter", a.source)
+        assertTrue(StudioMusicCatalog.commercialOk(a))
+        assertTrue(StudioMusicCatalog.needsCredit(a))
+        assertEquals("CC BY 4.0", StudioMusicCatalog.licenseLabel(a))
+        assertEquals("Music: \"Calm Piano\" by Ann (CC BY 4.0) https://ccmixter.org/files/a1", StudioMusicCatalog.credit(a))
+        assertFalse(StudioMusicCatalog.commercialOk(hits[1])) // NC licence and Jamendo
+        assertTrue(StudioMusicCatalog.parseOpenverse("oops").isEmpty())
+    }
+
+    @Test
+    fun parsesFreesoundAndLicences() {
+        val json = "{\"count\":1,\"results\":[{\"id\":7,\"name\":\"Loop\",\"duration\":61.5,\"username\":\"zed\"," +
+            "\"license\":\"http://creativecommons.org/publicdomain/zero/1.0/\",\"url\":\"https://freesound.org/people/zed/sounds/7/\"," +
+            "\"previews\":{\"preview-hq-mp3\":\"https://cdn.freesound.org/7-hq.mp3\",\"preview-lq-mp3\":\"https://cdn.freesound.org/7-lq.mp3\"}}]}"
+        val h = StudioMusicCatalog.parseFreesound(json).single()
+        assertEquals("https://cdn.freesound.org/7-hq.mp3", h.url)
+        assertEquals(61_500L, h.durationMs)
+        assertEquals("cc0", h.license)
+        assertFalse(StudioMusicCatalog.needsCredit(h))
+        assertTrue(StudioMusicCatalog.commercialOk(h))
+        assertEquals("by-nc", StudioMusicCatalog.licenseCode("https://creativecommons.org/licenses/by-nc/4.0/"))
+        assertEquals("by-nc", StudioMusicCatalog.licenseCode("Attribution Noncommercial"))
+        assertEquals("by", StudioMusicCatalog.licenseCode("Attribution"))
+        assertEquals("cc0", StudioMusicCatalog.licenseCode("Creative Commons 0"))
+        assertTrue(StudioMusicCatalog.openverseUrl("calm piano", true).contains("q=calm+piano"))
+        assertTrue(StudioMusicCatalog.openverseUrl("x", true).contains("license_type=commercial"))
+        assertFalse(StudioMusicCatalog.openverseUrl("x", false).contains("license_type"))
+        assertTrue(StudioMusicCatalog.freesoundUrl("lofi", "KEY").contains("token=KEY"))
+    }
+
     @Test
     fun emojiDetection() {
         assertTrue(Studio.startsWithEmoji("🔍 поиск"))

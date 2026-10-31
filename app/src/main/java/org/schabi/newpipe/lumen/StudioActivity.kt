@@ -71,6 +71,16 @@ object StudioPrefs {
     var musicVolume: Float
         get() = p.getFloat("studio_music_volume", 0.15f)
         set(v) = p.edit().putFloat("studio_music_volume", v).apply()
+    /** Credit line of the chosen track ("" for own files and CC0). */
+    var musicCredit: String
+        get() = p.getString("studio_music_credit", "") ?: ""
+        set(v) = p.edit().putString("studio_music_credit", v).apply()
+    var musicCommercial: Boolean
+        get() = p.getBoolean("studio_music_commercial", true)
+        set(v) = p.edit().putBoolean("studio_music_commercial", v).apply()
+    var musicSource: String
+        get() = p.getString("studio_music_source", StudioMusic.SRC_OPENVERSE) ?: StudioMusic.SRC_OPENVERSE
+        set(v) = p.edit().putString("studio_music_source", v).apply()
     var musicDuck: Boolean
         get() = p.getBoolean("studio_music_duck", true)
         set(v) = p.edit().putBoolean("studio_music_duck", v).apply()
@@ -245,6 +255,8 @@ class StudioActivity : LumenBase() {
     }
 
     override fun onDestroy() {
+        musicPreview?.release()
+        musicPreview = null
         cancel = true
         recorder?.stop()
         player?.release()
@@ -647,6 +659,7 @@ class StudioActivity : LumenBase() {
         }
         lastVideo?.takeIf { it.exists() }?.let { f ->
             p("✅ " + t("Готово: ", "Done: ") + savedAs.ifBlank { f.name })
+            if (StudioPrefs.musicCredit.isNotBlank() && musicFile.exists()) button(t("⧉ Подпись музыки для описания", "⧉ Music credit for the description"), style = BtnStyle.TEXT) { copyCredit() }
             row(
                 btn(ctx, t("▶ Открыть", "▶ Open"), style = BtnStyle.TONAL) { openFile(f) },
                 btn(ctx, t("Поделиться", "Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioActivity, f, false, f.name, "video/mp4") }
@@ -714,23 +727,194 @@ class StudioActivity : LumenBase() {
         c.add(text(this, t("Музыка", "Music"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         c.progress("music", t("Чтение музыки…", "Reading the music…"))
         if (!musicFile.exists()) {
-            if (busy != "music") c.button(t("🎵 Добавить фоновую музыку", "🎵 Add background music"), style = BtnStyle.TONAL) { pickMusic() }
+            if (busy != "music") c.row(
+                btn(this, t("🔎 Найти бесплатную", "🔎 Find free music"), style = BtnStyle.TONAL) { musicSearch() },
+                btn(this, t("📎 Свой файл", "📎 Own file"), style = BtnStyle.TEXT) { pickMusic() }
+            )
             c.muted(t("Музыка зациклится на длину ролика, плавно начнётся и затихнет в конце.", "Music loops to the video length, fades in and out."))
             return
         }
         c.p("🎵 " + StudioPrefs.musicName.ifBlank { t("музыка", "music") })
+        creditLine(c)
         c.spinner(t("Громкость", "Volume"), listOf(0.08f to t("тихо", "quiet"), 0.15f to t("средне", "medium"), 0.25f to t("громко", "loud")), StudioPrefs.musicVolume) {
             StudioPrefs.musicVolume = it
         }
         c.check(t("Приглушать музыку, когда звучит голос", "Lower the music under the voice"), StudioPrefs.musicDuck) { StudioPrefs.musicDuck = it }
         c.row(
-            btn(this, t("Заменить", "Replace"), style = BtnStyle.TEXT) { pickMusic() },
+            btn(this, t("🔎 Другая", "🔎 Another"), style = BtnStyle.TEXT) { musicSearch() },
+            btn(this, t("📎 Файл", "📎 File"), style = BtnStyle.TEXT) { pickMusic() },
             btn(this, t("Убрать", "Remove"), style = BtnStyle.TEXT) {
                 musicFile.delete()
                 StudioPrefs.musicName = ""
+                StudioPrefs.musicCredit = ""
                 render()
             }
         )
+    }
+
+    /** The credit the licence asks for: shown with a copy button (paste it into the video description). */
+    private fun creditLine(c: Col) {
+        val credit = StudioPrefs.musicCredit
+        if (credit.isBlank()) return
+        c.muted(t("Лицензия требует подпись в описании ролика:", "The licence asks for a credit in the video description:"))
+        c.add(text(this, credit, 13f).apply { setTextIsSelectable(true) }, 2)
+        c.button(t("⧉ Скопировать подпись", "⧉ Copy the credit"), style = BtnStyle.TEXT) { copyCredit() }
+    }
+
+    private fun copyCredit() {
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm.setPrimaryClip(android.content.ClipData.newPlainText("credit", StudioPrefs.musicCredit))
+        toast(t("Подпись скопирована", "Credit copied"))
+    }
+
+    // ---------- free music search ----------
+
+    private var musicPreview: MediaPlayer? = null
+
+    /** Bottom sheet: search free catalogs by mood or words, listen, take a track. */
+    private fun musicSearch() {
+        var results: List<MusicHit> = emptyList()
+        lateinit var box: LinearLayout
+        lateinit var status: Pair<TextView, ProgressBar>
+        var playing = ""
+        var dismissSheet: () -> Unit = {}
+        lateinit var query: EditText
+
+        fun stopPreview() {
+            musicPreview?.let { runCatching { it.stop() }; it.release() }
+            musicPreview = null
+            playing = ""
+        }
+
+        fun fill() {
+            box.removeAllViews()
+            for (h in results) {
+                val row = Col(this, 12)
+                row.root.background = roundBg(Palette.CARD, 12f, this)
+                row.add(text(this, h.title, 15f, bold = true).apply { maxLines = 2 }, 0)
+                row.muted(listOf(h.creator, Studio.clock(h.durationMs), StudioMusicCatalog.licenseLabel(h), h.source.substringAfter('/'))
+                    .filter { it.isNotBlank() && it != "0:00" }.joinToString(" · ") +
+                    if (!StudioMusicCatalog.commercialOk(h)) t(" · ⚠ без монетизации", " · ⚠ non-commercial") else "")
+                row.row(
+                    btn(this, if (playing == h.id) "■" else "▶", style = BtnStyle.TONAL) {
+                        if (playing == h.id) {
+                            stopPreview()
+                        } else {
+                            stopPreview()
+                            playing = h.id
+                            musicPreview = MediaPlayer().apply {
+                                setDataSource(h.url)
+                                setOnPreparedListener { it.start() }
+                                setOnErrorListener { _, _, _ -> toast(t("Не удалось проиграть", "Cannot play")); true }
+                                prepareAsync()
+                            }
+                        }
+                        fill()
+                    },
+                    btn(this, t("Взять", "Use"), style = BtnStyle.FILLED) {
+                        stopPreview()
+                        dismissSheet()
+                        takeTrack(h)
+                    }
+                )
+                box.addView(row.root, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+            }
+        }
+
+        fun search(q: String) {
+            if (q.isBlank()) return
+            if (StudioPrefs.musicSource == StudioMusic.SRC_FREESOUND && !KeyVault.has(StudioMusic.FREESOUND_KEY)) {
+                toast(t("Сначала вставьте ключ Freesound", "Paste a Freesound key first"))
+                return
+            }
+            stopPreview()
+            status.first.text = t("Поиск…", "Searching…")
+            status.first.visibility = View.VISIBLE
+            status.second.visibility = View.VISIBLE
+            Lumen.async({ StudioMusic.search(StudioPrefs.musicSource, q, StudioPrefs.musicCommercial) }, { e ->
+                status.second.visibility = View.GONE
+                status.first.text = (e.message ?: e.javaClass.simpleName).take(200)
+            }) { list ->
+                status.second.visibility = View.GONE
+                status.first.text = if (list.isEmpty()) t("Ничего не нашлось. Попробуйте другие слова (лучше по-английски).", "Nothing found. Try other words.")
+                else t("Найдено: ${list.size}", "Found: ${list.size}")
+                results = list
+                fill()
+            }
+        }
+
+        bottomSheet(t("Бесплатная музыка", "Free music"), { stopPreview() }) { dismiss ->
+            dismissSheet = dismiss
+            muted(t("Официальные каталоги с лицензиями Creative Commons. На сервер уходят только слова поиска.",
+                "Official catalogs with Creative Commons licences. Only the search words are sent."))
+            add(segBar(ctx, listOf(t("Openverse · без ключа", "Openverse · no key"), t("Freesound · ключ", "Freesound · key")),
+                if (StudioPrefs.musicSource == StudioMusic.SRC_FREESOUND) 1 else 0) {
+                StudioPrefs.musicSource = if (it == 1) StudioMusic.SRC_FREESOUND else StudioMusic.SRC_OPENVERSE
+                dismiss()
+                musicSearch()
+            }, 8)
+            if (StudioPrefs.musicSource == StudioMusic.SRC_FREESOUND && !KeyVault.has(StudioMusic.FREESOUND_KEY)) {
+                muted(t("Бесплатный ключ: зарегистрируйтесь на freesound.org и создайте ключ API. Он хранится только на телефоне.",
+                    "Free key: sign up at freesound.org and create an API key. It stays on the phone."))
+                val key = edit(t("Ключ Freesound", "Freesound key"))
+                row(
+                    btn(ctx, t("Получить ключ", "Get a key"), style = BtnStyle.TEXT) { openUrl(StudioMusic.FREESOUND_KEY_URL) },
+                    btn(ctx, t("Сохранить", "Save"), style = BtnStyle.TONAL) {
+                        val k = key.text.toString().trim()
+                        if (k.length < 10) return@btn
+                        KeyVault.put(StudioMusic.FREESOUND_KEY, k)
+                        dismiss()
+                        musicSearch()
+                    }
+                )
+            }
+            check(t("Только с правом на монетизацию (CC0, CC BY, CC BY-SA)", "Only usable in monetised videos (CC0, CC BY, CC BY-SA)"), StudioPrefs.musicCommercial) {
+                StudioPrefs.musicCommercial = it
+            }
+            query = edit(t("Настроение или слова, напр. calm piano", "Mood or words, e.g. calm piano"))
+            chips(StudioMusicCatalog.MOODS.map { (label, q) ->
+                chip(ctx, if (Settings.lang == "en") q else label) {
+                    query.setText(q)
+                    search(q)
+                }
+            })
+            button(t("🔎 Искать", "🔎 Search"), primary = true) { search(query.text.toString()) }
+            status = working("")
+            status.first.visibility = View.GONE
+            status.second.visibility = View.GONE
+            box = add(LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL })
+        }
+    }
+
+    /** Downloads the chosen track, decodes it and keeps its credit. */
+    private fun takeTrack(h: MusicHit) {
+        busy = "music"
+        cancel = false
+        render()
+        Lumen.async({
+            val f = File(cacheDir, "studio_music_dl")
+            StudioMusic.download(h, f, { cancel }) { pct -> report("music", t("Загрузка $pct/100", "Downloading $pct/100")) }
+            report("music", t("Декодирование…", "Decoding…"))
+            val p = StudioAudio.decode(f, 10 * 60_000L)
+            f.delete()
+            storeMusic(p)
+        }, { e ->
+            busy = ""
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) {
+            busy = ""
+            StudioPrefs.musicName = h.title + if (h.creator.isNotBlank()) " — " + h.creator else ""
+            StudioPrefs.musicCredit = if (StudioMusicCatalog.needsCredit(h)) StudioMusicCatalog.credit(h) else ""
+            render()
+            if (StudioPrefs.musicCredit.isNotBlank()) toast(t("Не забудьте подпись автора в описании ролика", "Remember to credit the author in the description"))
+        }
+    }
+
+    private fun storeMusic(p: StudioAudio.Pcm) {
+        if (p.data.isEmpty()) error(t("В файле нет звука", "No sound in the file"))
+        val pcm44 = Studio.normalize(Studio.resample(p.data, p.rate, 44_100), 0.7)
+        writeWav(musicFile, pcm44, 44_100)
     }
 
     private fun pickMusic() {
@@ -744,21 +928,14 @@ class StudioActivity : LumenBase() {
         render()
         Lumen.async({
             report("music", t("Декодирование…", "Decoding…"))
-            val p = StudioAudio.decode(this, uri, 10 * 60_000L)
-            if (p.data.isEmpty()) error(t("В файле нет звука", "No sound in the file"))
-            val pcm44 = Studio.normalize(Studio.resample(p.data, p.rate, 44_100), 0.7)
-            val data = java.nio.ByteBuffer.allocate(pcm44.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-            data.asShortBuffer().put(pcm44)
-            musicFile.outputStream().use {
-                it.write(Studio.wavHeader(pcm44.size * 2, 44_100))
-                it.write(data.array())
-            }
+            storeMusic(StudioAudio.decode(this, uri, 10 * 60_000L))
             runCatching {
                 contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
             }.getOrNull() ?: "music"
         }, { e -> busy = ""; render(); err(e) }) { name ->
             busy = ""
             StudioPrefs.musicName = name
+            StudioPrefs.musicCredit = ""
             render()
         }
     }

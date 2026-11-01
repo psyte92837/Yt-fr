@@ -7,10 +7,74 @@ package org.schabi.newpipe.lumen
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 
 class WebLayerTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    @Test
+    fun nameOfCode() {
+        assertEquals("Неоновые плашки", WebLayer.nameOf("// name: Неоновые плашки\nfunction frame(t){}", "x"))
+        assertEquals("Тикток-стиль", WebLayer.nameOf("  // Название: Тикток-стиль\nfunction frame(t){}", "x"))
+        assertEquals("слой с прогрессом", WebLayer.nameOf("// слой с прогрессом\nfunction frame(t){}", "x"))
+        assertEquals("моё пожелание", WebLayer.nameOf("function frame(t){}", "моё пожелание"))
+        assertEquals("Слой", WebLayer.nameOf("function frame(t){}", " "))
+        assertEquals("Пример: драйв-плашки", WebLayer.nameOf(WebLayer.EXAMPLE, "x"))
+    }
+
+    @Test
+    fun storeKeepsEveryLayerOnce() {
+        val st = LayerStore(tmp.newFolder("layers"))
+        val a = st.add("// name: Первый\nfunction frame(t){}", "ask1", "paste", 1000)
+        val b = st.add("// name: Второй\nfunction frame(t){ return false }", "", "ai", 2000)
+        assertNotEquals(a.id, b.id)
+        assertEquals(listOf("Второй", "Первый"), st.list().map { it.name })
+        // the same code again: no copy, it only goes to the top
+        val again = st.add("  // name: Первый\nfunction frame(t){}  ", "", "paste", 3000)
+        assertEquals(a.id, again.id)
+        assertEquals(2, st.list().size)
+        assertEquals("Первый", st.list().first().name)
+        // a fix keeps the template, a rename changes only the name
+        st.update(b.id, "// name: Второй\nfunction frame(t){ return true }", 4000)
+        assertEquals("function frame(t){ return true }", st.get(b.id)!!.code.substringAfter("\n"))
+        assertEquals("Новое имя", st.rename(b.id, "  Новое имя ")!!.name)
+        assertEquals("ask1", st.get(a.id)!!.ask)
+        st.delete(a.id)
+        assertNull(st.get(a.id))
+        assertEquals(1, st.list().size)
+    }
+
+    @Test
+    fun storeIdsDoNotClashAtTheSameMoment() {
+        val st = LayerStore(tmp.newFolder("same"))
+        val a = st.add("function frame(t){ return 1 }", "", "ai", 5000)
+        val b = st.add("function frame(t){ return 2 }", "", "ai", 5000)
+        assertNotEquals(a.id, b.id)
+        assertEquals("Слой 2", b.name)
+    }
+
+    @Test
+    fun layerInClipboard() {
+        assertTrue(WebLayer.looksLikeLayer("Вот код:\n```javascript\nfunction frame(t, ctx){ ctx.fill() }\n```"))
+        assertFalse(WebLayer.looksLikeLayer("просто текст про монтаж без кода"))
+        assertFalse(WebLayer.looksLikeLayer(RelayText.request("studio_weblayer", "s", WebLayer.PROTOCOL + " function frame(t)", false, null, false, "")))
+        assertFalse(WebLayer.looksLikeLayer(null))
+    }
+
+    @Test
+    fun templateBriefHasNoVideoData() {
+        val b = WebLayer.templateBrief("неон и глитч", true)
+        assertTrue(b.contains("УНИВЕРСАЛЬНЫЙ"))
+        assertTrue(b.contains("неон и глитч"))
+        assertTrue(b.contains("9:16"))
+        assertTrue(b.contains("// name:"))
+    }
 
     @Test
     fun extractPicksJavascriptBlock() {
@@ -63,7 +127,8 @@ class WebLayerTest {
     @Test
     fun dataAndBrief() {
         val d = WebLayer.dataJson(listOf(Triple("Привет", 120L, 480L), Triple("мир", 520L, 900L)), listOf(Triple("Хук", 0L, 900L)), "Тема", "Russian")
-        val o = WebLayer.withVideo(d, 720, 1280, 9_050, "#FFD60A")
+        val o = WebLayer.withVideo(JSONObject(d).put("video", "/data/x.mp4").toString(), 720, 1280, 9_050, "#FFD60A")
+        assertFalse(o.has("video"))
         assertEquals(0.12, o.getJSONArray("words").getJSONObject(0).getDouble("s"), 1e-9)
         assertEquals(9.05, o.getDouble("duration"), 1e-9)
         assertEquals(720, o.getInt("w"))

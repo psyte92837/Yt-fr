@@ -550,10 +550,13 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix")), task.ordinal) {
-            // the Mix is its own screen
-            if (it == StudioTask.entries.size) StudioMixActivity.open(this) else switchTask(StudioTask.entries[it])
+        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
+            switchTask(StudioTask.entries[it])
         }, 0)
+        // the Mix and the Montage (hand editor + JS layers by the protocol) are their own screens: a second row of tabs
+        c.add(segBar(this, listOf(t("🔀 Микс", "🔀 Mix"), t("🎛 Монтаж", "🎛 Montage")), -1) {
+            if (it == 0) StudioMixActivity.open(this) else openMontage()
+        }, 6)
         if (!foreign) {
             val n = StudioDrafts.count(draftsDir, task.id)
             c.row(
@@ -1326,12 +1329,18 @@ class StudioActivity : LumenBase() {
             button(t("✏️ Открыть редактор: схемы, картинки, надписи", "✏️ Open the editor: schemes, pictures, captions"), primary = true) {
                 StudioEditorActivity.open(this@StudioActivity, f, plan.words)
             }
-            button(t("🧪 JS-слой поверх (второй рендер, WebView)", "🧪 JS layer on top (second renderer, WebView)"), style = BtnStyle.TEXT) { openLayer(f, plan) }
+            button(t("🎛 Монтаж по протоколу: шаблоны от ИИ (JS-слой)", "🎛 Montage by the protocol: AI templates (JS layer)"), style = BtnStyle.TEXT) { openLayer(f, plan.layers.subs) }
         }
     }
 
-    /** The second renderer: the finished video with its speech and scenes goes to the JS layer screen (lumen.canvas). */
-    private fun openLayer(f: File, plan: StudioPlan) {
+    /** The Montage tab: with the finished video of this task (and its speech) when there is one. */
+    private fun openMontage() {
+        val f = lastVideo?.takeIf { it.exists() }
+        if (f != null && words.isNotEmpty()) openLayer(f, StudioLayers.of(StudioPrefs.layers).subs) else WebLayerActivity.open(this, null, false)
+    }
+
+    /** The second renderer: the finished video with its speech and scenes goes to the Montage tab (lumen.canvas). */
+    private fun openLayer(f: File, subs: Boolean) {
         val sc = script
         val rr = ranges
         val ws = words
@@ -1339,8 +1348,8 @@ class StudioActivity : LumenBase() {
             ws.getOrNull(r.first)?.let { a -> Triple(s.title, a.startMs, ws.getOrNull(r.last)?.endMs ?: a.endMs) }
         } else emptyList()
         val json = WebLayer.dataJson(ws.map { Triple(it.text, it.startMs, it.endMs) }, scenes, sc?.title.orEmpty(), aiLang())
-        File(WebLayerActivity.dir(this), "data.json").writeText(json)
-        WebLayerActivity.open(this, f, true, plan.layers.subs)
+        File(WebLayerActivity.dir(this), "data.json").writeText(org.json.JSONObject(json).put("video", f.absolutePath).toString())
+        WebLayerActivity.open(this, f, subs)
     }
 
     /** Storyboard: a small frame of every scene; a tap shows that scene in the preview. */

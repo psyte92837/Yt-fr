@@ -37,12 +37,14 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
 • Шрифты системные: 'sans-serif', 'serif', 'monospace', 'cursive'; жирность 400–900; эмодзи можно.
 • Безопасные зоны: в вертикальном кадре не рисуй в нижних 18% и правых 12% (интерфейс Shorts/Reels/TikTok). Субтитры могут уже быть в видео — это уточняется в задании.
 • Скорость: до 15 мс на кадр; без getImageData, без shadowBlur больше 30 на больших площадях, без тысяч фигур.
-• Ответ: один блок ```javascript с function frame(t, ctx, W, H, data) { … } (и при желании function setup(data) { … }). Без HTML и пояснений.
+• Лучше всего — шаблон: тексты и моменты бери из data (words, scenes, title, duration, accent), а не вписывай руками — тогда слой подойдёт к любому ролику. Надписи под конкретный ролик — только если об этом просит автор.
+• Ответ: один блок ```javascript; первая строка — комментарий // name: короткое название шаблона (2–4 слова); дальше function frame(t, ctx, W, H, data) { … } (и при желании function setup(data) { … }). Без HTML и пояснений.
 """.trim()
 
     /** A ready layer to try the renderer without AI: progress, hook title, stickers on numbers and names, subscribe call. */
     val EXAMPLE = """
-// Пример слоя lumen.canvas: прогресс, хук-титр, плашки на числах и именах, финальный призыв
+// name: Пример: драйв-плашки
+// прогресс, хук-титр, плашки на числах и именах, финальный призыв
 function setup(d) {
   var ws = d.words || [], keys = [], last = -9;
   for (var i = 0; i < ws.length; i++) {
@@ -191,6 +193,7 @@ frame:function(t){window.__t=t;__seed(1+Math.round(t*30));
         if (!o.has("words")) o.put("words", JSONArray())
         if (!o.has("scenes")) o.put("scenes", JSONArray())
         if (!o.has("title")) o.put("title", "")
+        o.remove("video")
         return o.put("w", w).put("h", h).put("duration", Math.round(durationMs / 10.0) / 100.0).put("accent", accent)
     }
 
@@ -239,6 +242,33 @@ frame:function(t){window.__t=t;__seed(1+Math.round(t*30));
         append("\nТекущий код:\n```javascript\n").append(code.trim()).append("\n```")
     }
 
+    private val NAME = Regex("""^\s*//\s*(?:name|название|имя)\s*[:：]\s*(.+)$""", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
+
+    /** Name of a layer: its "// name: …" line, else the first comment line, else [fallback]. */
+    fun nameOf(code: String, fallback: String): String {
+        NAME.find(code.take(2000))?.let { return it.groupValues[1].trim().trimEnd('*', '/').trim().take(40) }
+        val first = code.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+        if (first.startsWith("//")) first.removePrefix("//").trim().takeIf { it.length >= 3 }?.let { return it.take(40) }
+        return fallback.trim().take(40).ifBlank { "Слой" }
+    }
+
+    /** A request for a reusable template without the data of a video: protocol, sample data, the wish. */
+    fun templateBrief(ask: String, vertical: Boolean): String = buildString {
+        append(PROTOCOL).append("\n\n")
+        append("ЗАДАНИЕ. Сделай УНИВЕРСАЛЬНЫЙ шаблон монтажа: всё бери из data, без надписей под конкретный ролик. ")
+        append(if (vertical) "Кадр вертикальный 9:16 (Shorts/Reels).\n" else "Кадр любой: опирайся на W и H.\n")
+        append("Что за стиль: ").append(ask.trim().ifEmpty { "современный моушн-дизайн с драйвом: хук-титр, плашки с ключевыми словами и числами в момент, когда они звучат, прогресс, финальный призыв" }).append('\n')
+        append("\nПример data: {\"duration\":42.5,\"w\":720,\"h\":1280,\"title\":\"Как снять ролик за час\",\"lang\":\"Russian\",\"accent\":\"#FFD60A\",")
+        append("\"words\":[{\"w\":\"Итак\",\"s\":0.12,\"e\":0.4},{\"w\":\"20\",\"s\":3.1,\"e\":3.4}],\"scenes\":[{\"title\":\"Хук\",\"s\":0,\"e\":4.2}]}\n")
+    }
+
+    /** Clipboard text that looks like layer code (answer of another AI), not our own request. */
+    fun looksLikeLayer(s: String?): Boolean {
+        val v = s?.trim().orEmpty()
+        return v.length in 30..MAX_CODE * 2 && !RelayText.isOwnRequest(v) && !v.startsWith("lumen.canvas v1") &&
+            Regex("""function\s+frame\s*\(|(?:const|let|var)\s+frame\s*=""").containsMatchIn(v)
+    }
+
     /** What frame() gave back through evaluateJavascript (a JSON string): PNG bytes, nothing to draw, or an error. */
     sealed class Frame {
         object Empty : Frame()
@@ -262,6 +292,57 @@ frame:function(t){window.__t=t;__seed(1+Math.round(t*30));
 
     /** Frame times of the preview: four moments spread over the video. */
     fun previewTimes(durationMs: Long): List<Double> = listOf(0.08, 0.33, 0.6, 0.86).map { Math.round(durationMs * it / 10.0) / 100.0 }
+}
+
+/** A saved montage template: the layer code and where it came from (ai, paste, example, edit). */
+data class SavedLayer(val id: String, val name: String, val code: String, val ask: String, val source: String, val created: Long, val updated: Long) {
+    fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("code", code).put("ask", ask).put("source", source)
+        .put("created", created).put("updated", updated).put("protocol", "lumen.canvas v1")
+
+    companion object {
+        fun of(o: JSONObject): SavedLayer? {
+            val code = o.optString("code")
+            if (code.isBlank()) return null
+            val id = o.optString("id").ifBlank { return null }
+            return SavedLayer(id, o.optString("name").ifBlank { "Слой" }, code, o.optString("ask"), o.optString("source"),
+                o.optLong("created"), o.optLong("updated", o.optLong("created")))
+        }
+    }
+}
+
+/** Every layer the user tried, one JSON file each in [dir]; the same code is never stored twice. */
+class LayerStore(private val dir: File) {
+    private fun file(id: String) = File(dir, "$id.json")
+
+    fun list(): List<SavedLayer> = dir.listFiles { f -> f.name.endsWith(".json") }.orEmpty()
+        .mapNotNull { f -> runCatching { SavedLayer.of(JSONObject(f.readText())) }.getOrNull() }
+        .sortedByDescending { it.updated }
+
+    fun get(id: String): SavedLayer? = runCatching { SavedLayer.of(JSONObject(file(id).readText())) }.getOrNull()
+
+    private fun put(l: SavedLayer): SavedLayer {
+        dir.mkdirs()
+        file(l.id).writeText(l.json().toString(1))
+        return l
+    }
+
+    /** Stores [code] as a new template (or brings the identical one to the top); the name comes from the code. */
+    fun add(code: String, ask: String, source: String, now: Long): SavedLayer {
+        val c = code.trim()
+        list().firstOrNull { it.code.trim() == c }?.let { return put(it.copy(updated = now)) }
+        val n = list().size + 1
+        var id = "l" + now.toString(36)
+        var k = 1
+        while (file(id).exists()) id = "l" + now.toString(36) + "_" + k++
+        return put(SavedLayer(id, WebLayer.nameOf(c, ask.ifBlank { "Слой $n" }), c, ask, source, now, now))
+    }
+
+    /** New code for the same template (a fix or a hand edit). */
+    fun update(id: String, code: String, now: Long): SavedLayer? = get(id)?.let { put(it.copy(code = code.trim(), updated = now)) }
+
+    fun rename(id: String, name: String): SavedLayer? = get(id)?.let { put(it.copy(name = name.trim().take(40).ifBlank { it.name })) }
+
+    fun delete(id: String) = file(id).delete()
 }
 
 /** H.264 + AAC writer fed with ARGB frames in order (the [StudioVideo] pipeline without the Studio painter). */

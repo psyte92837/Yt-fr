@@ -26,7 +26,7 @@ data class FreeCatalog(val version: String, val upstream: String, val hash: Stri
     fun prov(id: String): FreeProv? = providers.firstOrNull { it.id == id }
 }
 
-/** Today's use of one model (or of a whole provider under "id/*"). */
+/** Today's use of one model (or of a whole provider under "id/" + "*"). */
 data class FreeSlot(var n: Int = 0, var tok: Long = 0, var coolUntil: Long = 0, var fails: Int = 0, var err: String = "")
 
 /** Use counters; they start over on a new UTC day, cooldowns stay. */

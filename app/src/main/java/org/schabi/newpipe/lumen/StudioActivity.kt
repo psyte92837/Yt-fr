@@ -42,6 +42,10 @@ object StudioPrefs {
     var topic: String
         get() = p.getString(key("studio_topic"), "") ?: ""
         set(v) = p.edit().putString(key("studio_topic"), v).apply()
+    /** Language of the voice-over, subtitles and schemes ([Studio.VOICE_LANGS]); empty = by the script. */
+    var voiceLang: String
+        get() = p.getString("studio_voice_lang", "") ?: ""
+        set(v) = p.edit().putString("studio_voice_lang", v).apply()
     /** Length of a horizontal YouTube video, seconds. */
     var videoSeconds: Int
         get() = p.getInt("studio_video_seconds", 300)
@@ -538,8 +542,7 @@ class StudioActivity : LumenBase() {
         StudioPrefs.topic = topicEdit.text.toString()
     }
 
-    private fun lang(): String = EdgeTts.detectLang(scriptEdit.text.toString())
-        ?: if (Settings.lang == "en") "en" else "ru"
+    private fun lang(): String = Studio.voiceLang(StudioPrefs.voiceLang, EdgeTts.detectLang(scriptEdit.text.toString()), Settings.lang == "en")
 
     // ---------- layout ----------
 
@@ -745,6 +748,7 @@ class StudioActivity : LumenBase() {
         }
         val labels = if (task == StudioTask.VOICE) listOf(t("Аудиофайл", "Audio file"), t("Микрофон", "Mic"))
         else listOf("Microsoft", t("Микрофон", "Mic"), t("Аудио", "Audio"), t("Видео", "Video")).take(modes.size)
+        langPicker(this)
         add(segBar(ctx, labels, modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)) {
             StudioPrefs.voiceMode = modes[it]
             resetAnalysis()
@@ -755,6 +759,28 @@ class StudioActivity : LumenBase() {
             "mic" -> micVoice(this)
             "video" -> videoVoice(this)
             else -> fileVoice(this)
+        }
+    }
+
+    /** Language of the voice-over; subtitles and schemes follow it (AI prompts get its name). */
+    private fun langPicker(c: Col) {
+        val auto = t("Авто — по сценарию", "Auto — by the script")
+        val opts = listOf("" to auto) + Studio.VOICE_LANGS.map { it to Studio.langName(it) }
+        c.spinner(t("Язык озвучки, субтитров и схем", "Language of the voice-over, subtitles and schemes"), opts, StudioPrefs.voiceLang) { code ->
+            if (code == StudioPrefs.voiceLang) return@spinner
+            StudioPrefs.voiceLang = code
+            resetAnalysis()
+            render()
+            val text = scriptEdit.text.toString()
+            if (code.isEmpty() || text.isBlank() || foreign) return@spinner
+            val name = Studio.langName(code)
+            confirm(t("Перевести сценарий?", "Translate the script?"),
+                t("Озвучка, субтитры и схемы будут на языке «$name». Перевести сценарий на этот язык с помощью AI? Прежний текст можно вернуть отменой правки.",
+                    "The voice-over, subtitles and schemes will be in $name. Translate the script into it with AI? The previous text can be restored by undoing the edit."),
+                t("Перевести", "Translate")) {
+                runAssist("- Переведи весь сценарий на язык: $name — текст озвучки (say), заголовки и подписи плиток (title, items). " +
+                    "Сохрани смысл, порядок и число сцен, вид сцен, эмодзи, числа и имена персонажей; пиши естественно для носителя языка.")
+            }
         }
     }
 
@@ -2214,7 +2240,7 @@ class StudioActivity : LumenBase() {
 
     // ---------- step 1: AI script ----------
 
-    private fun aiLang() = if (lang() == "en" || Settings.lang == "en" && scriptEdit.text.isBlank()) "English" else "русский"
+    private fun aiLang() = Studio.langName(lang())
 
     private fun writeScript() {
         val topic = topicEdit.text.toString().trim().ifBlank { scriptEdit.text.toString().trim().take(300) }

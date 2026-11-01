@@ -551,6 +551,42 @@ object Studio {
         return low + "-" + (region[low] ?: low.uppercase())
     }
 
+    /** Languages offered for the voice-over: codes for Edge TTS, the recogniser and AI prompts. */
+    val VOICE_LANGS = listOf("ru", "en", "uk", "de", "es", "fr", "it", "pt", "pl", "tr", "kk", "uz", "ar", "hi", "ja", "ko", "zh")
+
+    /** Language of the voice-over: the author's [chosen] code, else the script's [detected] one, else by the UI language. */
+    fun voiceLang(chosen: String, detected: String?, uiEn: Boolean): String =
+        chosen.trim().lowercase().ifBlank { detected ?: if (uiEn) "en" else "ru" }
+
+    /** Name of [lang] in that language, capitalised: "Русский", "English", "Deutsch"; the code if unknown. */
+    fun langName(lang: String): String {
+        val loc = java.util.Locale(lang)
+        val n = loc.getDisplayLanguage(loc)
+        return if (n.isBlank() || n.equals(lang, true)) lang else n.replaceFirstChar { it.titlecase(loc) }
+    }
+
+    private val CYRILLIC = setOf("ru", "uk", "be", "bg", "kk", "sr", "mk", "mn", "ky", "tg")
+    private val LATIN = setOf("en", "de", "es", "fr", "it", "pt", "pl", "tr", "uz", "nl", "cs", "sv", "da", "vi", "ro", "hu", "fi", "id")
+
+    /**
+     * Language of the words on screen (chapter labels): the [chosen] voice language when the script's alphabet
+     * ([detected] by [EdgeTts.detectLang]: ru/uk/en) fits it, else the detected one.
+     */
+    fun textLang(chosen: String, detected: String?): String {
+        val c = chosen.trim().lowercase()
+        if (c.isEmpty()) return detected ?: "en"
+        if (detected == null) return c
+        fun family(l: String) = when (l) { in CYRILLIC -> "cyr"; in LATIN -> "lat"; else -> l }
+        return if (family(c) == family(detected)) c else detected
+    }
+
+    /** "QUESTION" in [lang] for the chapter cards of the Explainer style. */
+    fun questionWord(lang: String): String = when (lang) {
+        "ru" -> "ВОПРОС"; "uk" -> "ПИТАННЯ"; "be" -> "ПЫТАННЕ"; "kk" -> "СҰРАҚ"; "de" -> "FRAGE"; "es" -> "PREGUNTA"
+        "fr" -> "QUESTION"; "it" -> "DOMANDA"; "pt" -> "PERGUNTA"; "pl" -> "PYTANIE"; "tr" -> "SORU"; "uz" -> "SAVOL"
+        else -> "QUESTION"
+    }
+
     /** Joins neighbouring speech parts into pieces of at most [maxMs] (for a recogniser with a length limit). */
     fun groupSpans(speech: List<Span>, maxMs: Long = 12_000): List<Span> {
         val out = mutableListOf<Span>()

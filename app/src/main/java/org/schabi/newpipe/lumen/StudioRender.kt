@@ -680,11 +680,16 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** Chapter card: «ВОПРОС 02 / 04», a big outlined number, an accent bar and the question in capitals. */
+    /** Language of the words on screen: the chosen voice language if the script is written in its alphabet. */
+    private val textLang by lazy {
+        Studio.textLang(StudioPrefs.voiceLang, EdgeTts.detectLang(plan.words.take(400).joinToString(" ") { it.text }))
+    }
+
     private fun chapterCard(c: Canvas, k: Int, sc: SScene, local: Long, a: Float) {
         if (!plan.graphics) return
         val n = plan.chapters.size
         val top = if (wide) 0.14f else 0.22f
-        kicker(c, t("ВОПРОС", "QUESTION") + " %02d / %02d".format(k + 1, n), h * top, muted, a * Studio.appear(local, 80, 300))
+        kicker(c, Studio.questionWord(textLang) + " %02d / %02d".format(k + 1, n), h * top, muted, a * Studio.appear(local, 80, 300))
         val p = Studio.appear(local, 0, 520)
         exOutline.textSize = (if (wide) 22f else 30f) * u
         exOutline.strokeWidth = 0.55f * u

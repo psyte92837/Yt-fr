@@ -178,7 +178,7 @@ class StudioMixActivity : LumenBase() {
 
     private fun aspect() = StudioAspect.of(Prefs.format)
 
-    private fun lang() = if (Settings.lang == "en") "en" else "ru"
+    private fun lang() = Studio.voiceLang(StudioPrefs.voiceLang, null, Settings.lang == "en")
 
     private fun notes(): Map<String, String> = clips.associate { it.id to it.note.ifBlank { it.title } }
 
@@ -542,6 +542,8 @@ class StudioMixActivity : LumenBase() {
         if (busy.isNotEmpty() || rendering()) return@card
         button(t("🎬 Получить видео-микс", "🎬 Get the video mix"), primary = true) { build(false) }
         if (!voice) button(t("🎙 Начать озвучку", "🎙 Start the voice-over"), style = BtnStyle.TONAL) { startVoice() }
+        spinner(t("Язык озвучки, субтитров и схем", "Language of the voice-over, subtitles and schemes"),
+            Studio.VOICE_LANGS.map { it to Studio.langName(it) }, lang()) { StudioPrefs.voiceLang = it }
         check(t("Только на отмеченных элементах", "Only on ticked elements"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
         row(
             btn(ctx, if (schemes > 0) t("🧩 Схемы заново", "🧩 Schemes again") else t("🧩 Добавить схемы", "🧩 Add schemes"), style = BtnStyle.TONAL) { addSchemes() },
@@ -846,7 +848,7 @@ class StudioMixActivity : LumenBase() {
         val format = if (aspect() == StudioAspect.PORTRAIT) t("видео-микса 9:16 (Shorts / Stories)", "a 9:16 video mix (Shorts / Stories)")
         else t("горизонтального видео-микса 16:9", "a horizontal 16:9 video mix")
         val vars = mapOf(
-            "format" to format, "lang" to if (lang() == "en") "English" else "русский",
+            "format" to format, "lang" to Studio.langName(lang()),
             "max" to (if (Prefs.onlyMarked) sel.size.coerceAtMost(12) else StudioScheme.maxSchemes(sel.size)).toString(),
             "wish" to "", "protocol" to StudioScheme.PROTOCOL,
             "scenes" to StudioScheme.scenesBlock(scenes, words, selRanges)

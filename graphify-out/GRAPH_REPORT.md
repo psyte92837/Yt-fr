@@ -322,7 +322,7 @@
 - `StudioDirect.kt` (64): StudioDirector:100, StudioDirect.kt:1, StudioAspect:31, .apply():324, .parse():147, .shapeOf():479
 - `StudioDrafts.kt` (17): StudioDrafts:17, SDraft:11, .stash():58, .list():70, .count():77, .restore():80
 - `StudioEdit.kt` (77): EBlock:22, StudioEdit:76, EProject:53, .clock():539, StudioEdit.kt:1, .find():96
-- `StudioEditRender.kt` (62): StudioEditRender.kt:1, .renderCpu():429, .render():915, StudioEditPainter:39, .block():61, StudioEditStore:295
+- `StudioEditRender.kt` (62): StudioEditRender.kt:1, .renderCpu():429, .render():918, StudioEditPainter:39, .block():61, StudioEditStore:295
 - `StudioEditViews.kt` (33): EditTimeline:330, StudioEditViews.kt:1, .onTouchEvent():822, EditStage:36, .onTouchEvent():181, .onDraw():472
 - `StudioEditorActivity.kt` (129): StudioEditorActivity:54, .tools():607, StudioEditorActivity.kt:1, .runAiScheme():1368, .captionSheet():1882, .buildEditor():365
 - `StudioExplain.kt` (10): StudioExplain:12, .headline():87, .chapters():25, .title():45, .label():80, .sfx():103

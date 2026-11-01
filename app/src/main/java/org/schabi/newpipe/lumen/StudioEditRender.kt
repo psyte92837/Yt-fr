@@ -400,8 +400,11 @@ object StudioEditRender {
         // a scheme still being drawn by the AI is not exported
         val job = p.copy(blocks = p.blocks.filter { it.kind != "scheme" || it.scheme != null })
         val started = System.currentTimeMillis()
+        val clips = EditTrack.of(p)
+        // a cut track: the sound is put together once, for the GPU and (if needed) the CPU way
+        val sound = if (EditTrack.plain(clips, p.durMs)) null else EditAudio.build(File(dir, StudioEditStore.BASE), clips, cancelled, progress)
         try {
-            val n = StudioEditGl.render(job, dir, words, accent, styleDir, out, maxSide, cancelled, progress)
+            val n = StudioEditGl.render(job, dir, words, accent, styleDir, out, maxSide, sound, cancelled, progress)
             L.i("studio", "edit export on GPU: $n frames in ${(System.currentTimeMillis() - started) / 1000} s")
             return
         } catch (e: CancellationException) {
@@ -412,27 +415,30 @@ object StudioEditRender {
             out.delete()
             progress(t("Медленный режим: кадры на процессоре", "Slow mode: frames on the CPU"))
         }
-        renderCpu(job, dir, words, accent, styleDir, out, maxSide, cancelled, progress)
+        renderCpu(job, dir, words, accent, styleDir, out, maxSide, sound, cancelled, progress)
         L.i("studio", "edit export on CPU in ${(System.currentTimeMillis() - started) / 1000} s")
     }
 
     /** The slow way: every frame decoded into pixels, the blocks drawn with Canvas, the pixels encoded. */
     private fun renderCpu(
-        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int,
+        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int, sound: EditAudio?,
         cancelled: () -> Boolean, progress: (String) -> Unit
     ) {
         val base = File(dir, StudioEditStore.BASE)
         val pr = probe(base)
         val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
         val fps = pr.fps
-        val totalMs = pr.durMs
+        val clips = EditTrack.of(p)
+        val starts = EditTrack.starts(clips)
+        val plain = EditTrack.plain(clips, pr.durMs)
+        val totalMs = if (plain) pr.durMs else EditTrack.total(clips)
         val frames = Studio.frameCount(totalMs, fps)
         out.parentFile?.mkdirs()
         val enc = MediaCodec.createEncoderByType(MIME)
         enc.configure(videoFormat(w, h, fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         enc.start()
         val muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val audio = AudioCopy(base, totalMs * 1000)
+        val audio: AudioOut = sound?.out() ?: if (plain) AudioCopy(base, totalMs * 1000) else NoAudio
         val sink = VideoSink(enc, muxer, audio)
         var ok = false
         var src: StudioFrames? = null
@@ -443,6 +449,10 @@ object StudioEditRender {
             val mixed = IntArray(w * h)
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
+            // mirrored or zoomed pieces: the frame is drawn turned / enlarged into a second picture
+            var lookBmp: Bitmap? = null
+            val lookPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+            var lastSrc = Long.MIN_VALUE
             val y = ByteArray(w * h)
             val u = ByteArray(w * h / 4)
             val v = ByteArray(w * h / 4)
@@ -451,14 +461,37 @@ object StudioEditRender {
                 if (cancelled()) throw CancellationException()
                 val pts = Studio.frameTimeUs(f, fps)
                 val tMs = pts / 1000
-                src.advance(pts, frame, true)
+                // the moment of the original shown now (pieces of the main track: cut, reordered, sped up, frozen)
+                val pos = EditTrack.locate(clips, tMs)
+                val clip = clips[pos.index]
+                val srcUs = if (plain) pts else if (clip.isHold) clip.fromMs * 1000
+                else clip.fromMs * 1000 + ((pts - starts[pos.index] * 1000) * clip.speed.toDouble()).toLong()
+                if (srcUs < lastSrc - 1000) {
+                    // back in time (another order, a copy): the decoder starts over
+                    src.close()
+                    src = StudioFrames(base, w, h)
+                }
+                lastSrc = srcUs
+                src.advance(srcUs, frame, true)
                 val shown = StudioEdit.active(p.blocks, tMs)
-                if (shown.isEmpty()) Studio.argbToYuv420(frame, w, h, y, u, v)
+                val look = clip.mirror || clip.zoom > 1.001f
+                if (shown.isEmpty() && !look) Studio.argbToYuv420(frame, w, h, y, u, v)
                 else {
                     // drawn on a copy: the next frame may keep this picture of the video when the source has fewer frames
                     bmp.setPixels(frame, 0, w, 0, 0, w, h)
-                    painter.draw(canvas, shown, tMs)
-                    bmp.getPixels(mixed, 0, w, 0, 0, w, h)
+                    var target = bmp
+                    if (look) {
+                        val lb = lookBmp ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { lookBmp = it }
+                        val lc = Canvas(lb)
+                        lc.drawColor(Color.BLACK)
+                        lc.save()
+                        lc.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, w / 2f, h / 2f)
+                        lc.drawBitmap(bmp, 0f, 0f, lookPaint)
+                        lc.restore()
+                        target = lb
+                    }
+                    if (shown.isNotEmpty()) painter.draw(if (target === bmp) canvas else Canvas(target), shown, tMs)
+                    target.getPixels(mixed, 0, w, 0, 0, w, h)
                     Studio.argbToYuv420(mixed, w, h, y, u, v)
                 }
                 var idx: Int
@@ -485,6 +518,7 @@ object StudioEditRender {
             sink.drain(true)
             audio.write(muxer, Long.MAX_VALUE)
             bmp.recycle()
+            lookBmp?.recycle()
             ok = true
         } finally {
             painter.close()
@@ -509,8 +543,21 @@ object StudioEditRender {
     }
 }
 
+/** The sound track of an export: added to the muxer before it starts, then written along with the video. */
+internal interface AudioOut : java.io.Closeable {
+    fun add(m: MediaMuxer)
+    fun write(m: MediaMuxer, untilUs: Long)
+}
+
+/** A video without sound. */
+internal object NoAudio : AudioOut {
+    override fun add(m: MediaMuxer) {}
+    override fun write(m: MediaMuxer, untilUs: Long) {}
+    override fun close() {}
+}
+
 /** The sound of the original copied sample by sample into the new file (no re-encoding). */
-internal class AudioCopy(base: File, private val endUs: Long) : java.io.Closeable {
+internal class AudioCopy(base: File, private val endUs: Long) : AudioOut {
     private val ex = MediaExtractor()
     private val format: MediaFormat?
     private var done: Boolean
@@ -530,7 +577,7 @@ internal class AudioCopy(base: File, private val endUs: Long) : java.io.Closeabl
     }
 
     /** Adds the audio track to [m] (before it starts); a codec the muxer cannot take is left out. */
-    fun add(m: MediaMuxer) {
+    override fun add(m: MediaMuxer) {
         track = format?.let { f ->
             runCatching { m.addTrack(f) }.getOrElse {
                 L.w("studio", "edit export: audio ${f.getString(MediaFormat.KEY_MIME)} cannot be copied: ${it.message}")
@@ -540,7 +587,7 @@ internal class AudioCopy(base: File, private val endUs: Long) : java.io.Closeabl
     }
 
     /** Writes the samples up to [untilUs]. */
-    fun write(m: MediaMuxer, untilUs: Long) {
+    override fun write(m: MediaMuxer, untilUs: Long) {
         if (track < 0) return
         while (!done) {
             val pts = ex.sampleTime
@@ -567,7 +614,7 @@ internal class AudioCopy(base: File, private val endUs: Long) : java.io.Closeabl
 }
 
 /** Moves encoded video to the muxer (starting it with the audio track) and the sound along with it. */
-internal class VideoSink(private val enc: MediaCodec, private val muxer: MediaMuxer, private val audio: AudioCopy) {
+internal class VideoSink(private val enc: MediaCodec, private val muxer: MediaMuxer, private val audio: AudioOut) {
     var started = false
         private set
     var ended = false
@@ -701,13 +748,16 @@ private object StudioEditGl {
 
     /** Returns the number of frames written. */
     fun render(
-        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int,
+        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int, sound: EditAudio?,
         cancelled: () -> Boolean, progress: (String) -> Unit
     ): Int {
         val base = File(dir, StudioEditStore.BASE)
         val pr = StudioEditRender.probe(base)
         val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
-        val totalMs = pr.durMs
+        val clips = EditTrack.of(p)
+        val starts = EditTrack.starts(clips)
+        val plain = EditTrack.plain(clips, pr.durMs)
+        val totalMs = if (plain) pr.durMs else EditTrack.total(clips)
         val expected = max(1, (totalMs * pr.fps / 1000).toInt())
         out.parentFile?.mkdirs()
 
@@ -715,7 +765,7 @@ private object StudioEditGl {
         var dec: MediaCodec? = null
         var enc: MediaCodec? = null
         var muxer: MediaMuxer? = null
-        var audio: AudioCopy? = null
+        var audio: AudioOut? = null
         var inputSurface: android.view.Surface? = null
         var decSurface: android.view.Surface? = null
         var st: android.graphics.SurfaceTexture? = null
@@ -743,7 +793,7 @@ private object StudioEditGl {
             e.start()
             val m = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             muxer = m
-            val a = AudioCopy(base, totalMs * 1000)
+            val a = sound?.out() ?: if (plain) AudioCopy(base, totalMs * 1000) else NoAudio
             audio = a
             val sk = VideoSink(e, m, a)
             sink = sk
@@ -807,7 +857,8 @@ private object StudioEditGl {
                 android.opengl.Matrix.translateM(it, 0, 0f, 1f, 0f)
                 android.opengl.Matrix.scaleM(it, 0, 1f, -1f, 1f)
             }
-            fun draw(prog: Int, target: Int, id: Int, mat: FloatArray) {
+            var vidPos = pos
+            fun draw(prog: Int, target: Int, id: Int, mat: FloatArray, at: java.nio.FloatBuffer = pos) {
                 android.opengl.GLES20.glUseProgram(prog)
                 android.opengl.GLES20.glActiveTexture(android.opengl.GLES20.GL_TEXTURE0)
                 android.opengl.GLES20.glBindTexture(target, id)
@@ -816,7 +867,7 @@ private object StudioEditGl {
                 val aPos = android.opengl.GLES20.glGetAttribLocation(prog, "aPos")
                 val aUv = android.opengl.GLES20.glGetAttribLocation(prog, "aUv")
                 android.opengl.GLES20.glEnableVertexAttribArray(aPos)
-                android.opengl.GLES20.glVertexAttribPointer(aPos, 2, android.opengl.GLES20.GL_FLOAT, false, 8, pos)
+                android.opengl.GLES20.glVertexAttribPointer(aPos, 2, android.opengl.GLES20.GL_FLOAT, false, 8, at)
                 android.opengl.GLES20.glEnableVertexAttribArray(aUv)
                 android.opengl.GLES20.glVertexAttribPointer(aUv, 2, android.opengl.GLES20.GL_FLOAT, false, 8, uv)
                 android.opengl.GLES20.glDrawArrays(android.opengl.GLES20.GL_TRIANGLE_STRIP, 0, 4)
@@ -832,74 +883,108 @@ private object StudioEditGl {
             }
             var lastKey = ""
             val dInfo = MediaCodec.BufferInfo()
-            var inDone = false
-            var outDone = false
-            var idle = 0
-            while (!sk.ended) {
-                if (cancelled()) throw CancellationException()
-                // the decoder gives nothing for ~15 s: this phone's path does not work, the CPU one takes over
-                if (++idle > 3000) error("decoder stalled")
-                if (!inDone) {
-                    val i = d.dequeueInputBuffer(5000)
-                    if (i >= 0) {
-                        val n = ex.readSampleData(d.getInputBuffer(i)!!, 0)
-                        if (n < 0) {
-                            d.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            inDone = true
-                        } else {
-                            d.queueInputBuffer(i, 0, n, ex.sampleTime, 0)
-                            ex.advance()
-                        }
+            val stepUs = 1_000_000L / max(1, pr.fps)
+            var lastOut = -1L
+            /** The picture now in the texture, with the blocks of output moment [outUs], to the encoder. */
+            fun present(outUs: Long) {
+                android.opengl.GLES20.glViewport(0, 0, w, h)
+                android.opengl.GLES20.glClearColor(0f, 0f, 0f, 1f)
+                android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
+                draw(progOes, OES, oes, texM, vidPos)
+                val tMs = outUs / 1000
+                val shown = StudioEdit.active(p.blocks, tMs)
+                if (shown.isNotEmpty()) {
+                    val key = StudioEdit.overlayKey(shown, tMs, settle)
+                    if (key != lastKey) {
+                        layer.eraseColor(0)
+                        painter.draw(canvas, shown, tMs)
+                        android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, ov)
+                        android.opengl.GLUtils.texSubImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, 0, 0, layer)
+                        lastKey = key
                     }
+                    android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
+                    // Android bitmaps keep premultiplied colours
+                    android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_ONE, android.opengl.GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                    draw(prog2d, android.opengl.GLES20.GL_TEXTURE_2D, ov, flip)
+                    android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
                 }
+                val err = android.opengl.GLES20.glGetError()
+                if (err != android.opengl.GLES20.GL_NO_ERROR) error("GL error $err")
+                android.opengl.EGLExt.eglPresentationTimeANDROID(dpy, surf, outUs * 1000)
+                check(android.opengl.EGL14.eglSwapBuffers(dpy, surf)) { "EGL swap" }
+                lastOut = outUs
+                written++
+                if (written % 15 == 0) progress(t("Кадры ${min(written, expected - 1)}/$expected", "Frames ${min(written, expected - 1)}/$expected"))
                 sk.drain(false)
-                if (!outDone) {
-                    val o = d.dequeueOutputBuffer(dInfo, 5000)
-                    if (o >= 0) {
-                        idle = 0
-                        val eos = dInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                        val ptsUs = dInfo.presentationTimeUs
-                        val show = dInfo.size != 0 && ptsUs >= 0
-                        d.releaseOutputBuffer(o, show)
-                        if (show) {
-                            frames.await(texture)
-                            texture.getTransformMatrix(texM)
-                            android.opengl.GLES20.glViewport(0, 0, w, h)
-                            android.opengl.GLES20.glClearColor(0f, 0f, 0f, 1f)
-                            android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
-                            draw(progOes, OES, oes, texM)
-                            val tMs = ptsUs / 1000
-                            val shown = StudioEdit.active(p.blocks, tMs)
-                            if (shown.isNotEmpty()) {
-                                val key = StudioEdit.overlayKey(shown, tMs, settle)
-                                if (key != lastKey) {
-                                    layer.eraseColor(0)
-                                    painter.draw(canvas, shown, tMs)
-                                    android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, ov)
-                                    android.opengl.GLUtils.texSubImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, 0, 0, layer)
-                                    lastKey = key
-                                }
-                                android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
-                                // Android bitmaps keep premultiplied colours
-                                android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_ONE, android.opengl.GLES20.GL_ONE_MINUS_SRC_ALPHA)
-                                draw(prog2d, android.opengl.GLES20.GL_TEXTURE_2D, ov, flip)
-                                android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
+            }
+            // the pieces of the main track one after another; the whole video untouched is one piece from 0 to the end
+            for ((k, c) in clips.withIndex()) {
+                if (cancelled()) throw CancellationException()
+                val segStart = starts[k] * 1000
+                val segEnd = segStart + c.outMs * 1000
+                val fromUs = if (plain) 0L else c.fromMs * 1000
+                val toUs = when {
+                    plain || (!c.isHold && c.toMs >= pr.durMs - 1) -> Long.MAX_VALUE
+                    c.isHold -> fromUs + stepUs
+                    else -> c.toMs * 1000
+                }
+                val sx = if (c.mirror) -c.zoom else c.zoom
+                vidPos = if (sx == 1f && c.zoom == 1f) pos else floats(-sx, -c.zoom, sx, -c.zoom, -sx, c.zoom, sx, c.zoom)
+                if (k > 0) d.flush()
+                ex.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                var inDone = false
+                var got = false
+                var idle = 0
+                while (true) {
+                    if (cancelled()) throw CancellationException()
+                    // the decoder gives nothing for ~15 s: this phone's path does not work, the CPU one takes over
+                    if (++idle > 3000) error("decoder stalled")
+                    if (!inDone) {
+                        val i = d.dequeueInputBuffer(5000)
+                        if (i >= 0) {
+                            val tUs = ex.sampleTime
+                            // a little past the end of the piece: frames shown earlier may be decoded later
+                            val past = tUs < 0 || (toUs != Long.MAX_VALUE && tUs > toUs + 600_000) || (c.isHold && got)
+                            val n = if (past) -1 else ex.readSampleData(d.getInputBuffer(i)!!, 0)
+                            if (n < 0) {
+                                d.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inDone = true
+                            } else {
+                                d.queueInputBuffer(i, 0, n, tUs, 0)
+                                ex.advance()
                             }
-                            val err = android.opengl.GLES20.glGetError()
-                            if (err != android.opengl.GLES20.GL_NO_ERROR) error("GL error $err")
-                            android.opengl.EGLExt.eglPresentationTimeANDROID(dpy, surf, ptsUs * 1000)
-                            check(android.opengl.EGL14.eglSwapBuffers(dpy, surf)) { "EGL swap" }
-                            written++
-                            if (written % 15 == 0) progress(t("Кадры ${min(written, expected - 1)}/$expected", "Frames ${min(written, expected - 1)}/$expected"))
-                        }
-                        if (eos) {
-                            e.signalEndOfInputStream()
-                            outDone = true
                         }
                     }
+                    sk.drain(false)
+                    val o = d.dequeueOutputBuffer(dInfo, 5000)
+                    if (o < 0) continue
+                    idle = 0
+                    val eos = dInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                    val src = dInfo.presentationTimeUs
+                    var outUs = -1L
+                    val inPiece = dInfo.size != 0 && (if (c.isHold) !got && src >= fromUs - stepUs else src >= fromUs && src < toUs)
+                    if (inPiece) {
+                        val at = if (c.isHold || plain) (if (plain) src else segStart) else segStart + ((src - fromUs) / c.speed.toDouble()).toLong()
+                        // faster than recorded: frames closer than ~a frame apart are skipped
+                        val crowded = c.speed > 1f && lastOut >= 0 && at - lastOut < stepUs * 3 / 4
+                        if ((plain || at < segEnd) && at > lastOut && !crowded) outUs = at
+                    }
+                    // slower than recorded: the previous picture again until this one is due
+                    if (outUs >= 0 && got && c.speed < 1f) while (lastOut + stepUs <= outUs - stepUs / 2) present(lastOut + stepUs)
+                    d.releaseOutputBuffer(o, outUs >= 0)
+                    if (outUs >= 0) {
+                        frames.await(texture)
+                        texture.getTransformMatrix(texM)
+                        present(outUs)
+                        got = true
+                    }
+                    if (eos) break
                 }
-                if (outDone) sk.drain(true)
+                // a still picture or slow motion: the last frame stays until the piece ends
+                if (got && (c.isHold || c.speed < 1f)) while (lastOut + stepUs < segEnd - stepUs / 2) present(lastOut + stepUs)
             }
+            e.signalEndOfInputStream()
+            sk.drain(true)
             if (written == 0) error("no frames")
             a.write(m, Long.MAX_VALUE)
             progress(t("Кадры $expected/$expected", "Frames $expected/$expected"))

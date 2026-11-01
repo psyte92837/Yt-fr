@@ -353,6 +353,19 @@ class EditTimeline(ctx: Context) : View(ctx) {
             invalidate()
         }
 
+    /** Pieces of the main track (empty = the whole video as one). */
+    var clips: List<VClip> = emptyList()
+        set(v) {
+            field = v
+            clipStarts = EditTrack.starts(v)
+            invalidate()
+        }
+    private var clipStarts = LongArray(0)
+    /** The selected piece of the main track, -1 = none. */
+    var clipSel = -1
+        set(v) { field = v; invalidate() }
+    var onClip: (Int) -> Unit = {}
+
     /** The user moved the time ([dragging] while the finger or the fling still moves it). */
     var onScrub: (Long, Boolean) -> Unit = { _, _ -> }
     var onSelect: (String?) -> Unit = {}
@@ -384,6 +397,10 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val tagBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6000000.toInt() }
     private val wordP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD9FFFFFF.toInt(); textSize = 11 * dp }
     private val wordTick = Paint().apply { color = 0x66FFFFFF; strokeWidth = 1 * dp }
+    private val sepP = Paint().apply { color = 0xFF15171B.toInt() }
+    private val holdP = Paint().apply { color = 0x4D7DD3FC }
+    private val badgeP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); textSize = 10 * dp; typeface = Typeface.DEFAULT_BOLD }
+    private val clipSelP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * dp; color = 0xFFFFD60A.toInt() }
 
     private fun relayout() {
         lanes = StudioEdit.lanes(blocks)
@@ -470,32 +487,59 @@ class EditTimeline(ctx: Context) : View(ctx) {
             c.save()
             c.clipPath(Path().apply { addRoundRect(strip, 6 * dp, 6 * dp, Path.Direction.CW) })
             c.drawRect(strip, stripBg)
-            if (thumbs.isNotEmpty()) {
-                val cw = max(16 * dp, stripH * aspect)
-                var x = xOf(0) + ((sx0 - xOf(0)) / cw).toInt() * cw
-                val src = Rect()
-                val dst = RectF()
-                while (x < sx1) {
-                    val at = msAt(x + cw / 2).coerceIn(0, totalMs)
-                    val bmp = nearest(at)
-                    if (bmp != null) {
-                        val ratio = cw / stripH
-                        val bw = bmp.width.toFloat()
-                        val bh = bmp.height.toFloat()
-                        if (bw / bh > ratio) {
-                            val sw = bh * ratio
-                            src.set(((bw - sw) / 2).toInt(), 0, ((bw + sw) / 2).toInt(), bh.toInt())
-                        } else {
-                            val sh = bw / ratio
-                            src.set(0, ((bh - sh) / 2).toInt(), bw.toInt(), ((bh + sh) / 2).toInt())
+            val cl = clips.ifEmpty { listOf(VClip("c0", 0, totalMs)) }
+            val st = if (clips.isEmpty()) longArrayOf(0) else clipStarts
+            val cw = max(16 * dp, stripH * aspect)
+            val src = Rect()
+            val dst = RectF()
+            for (i in cl.indices) {
+                val ck = cl[i]
+                val l = xOf(st[i])
+                val r = xOf(st[i] + ck.outMs)
+                if (r < 0 || l > w) continue
+                c.save()
+                c.clipRect(l, stripTop, r, stripTop + stripH)
+                if (thumbs.isNotEmpty()) {
+                    // frames of this piece from its own left edge: a cut is seen as a seam
+                    var x = l + ((max(l, 0f) - l) / cw).toInt() * cw
+                    while (x < min(r, w)) {
+                        val off = msAt(x + cw / 2) - st[i]
+                        val at = if (ck.isHold) ck.fromMs else (ck.fromMs + (off * ck.speed).toLong()).coerceIn(ck.fromMs, ck.toMs)
+                        val bmp = nearest(at)
+                        if (bmp != null) {
+                            val ratio = cw / stripH
+                            val bw = bmp.width.toFloat()
+                            val bh = bmp.height.toFloat()
+                            if (bw / bh > ratio) {
+                                val sw = bh * ratio
+                                src.set(((bw - sw) / 2).toInt(), 0, ((bw + sw) / 2).toInt(), bh.toInt())
+                            } else {
+                                val sh = bw / ratio
+                                src.set(0, ((bh - sh) / 2).toInt(), bw.toInt(), ((bh + sh) / 2).toInt())
+                            }
+                            dst.set(x, stripTop, x + cw, stripTop + stripH)
+                            c.drawBitmap(bmp, src, dst, thumbP)
                         }
-                        dst.set(x, stripTop, x + cw, stripTop + stripH)
-                        c.drawBitmap(bmp, src, dst, thumbP)
+                        x += cw
                     }
-                    x += cw
                 }
+                if (ck.isHold) c.drawRect(l, stripTop, r, stripTop + stripH, holdP)
+                val badge = EditTrack.badges(ck)
+                if (badge.isNotEmpty() && r - l > 24 * dp) {
+                    val bw = badgeP.measureText(badge) + 8 * dp
+                    val bx = max(l, 0f) + 4 * dp
+                    c.drawRoundRect(bx, stripTop + 4 * dp, bx + bw, stripTop + 18 * dp, 5 * dp, 5 * dp, tagBg)
+                    c.drawText(badge, bx + 4 * dp, stripTop + 15 * dp, badgeP)
+                }
+                c.restore()
+                if (i > 0) c.drawRect(l - 1.5f * dp, stripTop, l + 1.5f * dp, stripTop + stripH, sepP)
             }
             c.restore()
+            if (clipSel in cl.indices) {
+                val l = xOf(st[clipSel])
+                val r = xOf(st[clipSel] + cl[clipSel].outMs)
+                c.drawRoundRect(RectF(l + dp, stripTop + dp, r - dp, stripTop + stripH - dp), 6 * dp, 6 * dp, clipSelP)
+            }
         }
         // words of the voice: a label where there is room, a tick for every word
         if (words.isNotEmpty()) {
@@ -756,11 +800,16 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 when (m) {
                     PENDING -> if (e.actionMasked == MotionEvent.ACTION_UP) {
                         val wordsTop = rulerH + stripH
+                        val inStrip = target == null && e.y >= rulerH && e.y < wordsTop
+                        val at = msAt(e.x)
                         val hitWord = if (target == null && words.isNotEmpty() && e.y >= wordsTop && e.y < wordsTop + wordsH) {
                             val at = msAt(e.x)
                             words.minByOrNull { kotlin.math.abs(it.startMs - at) }?.takeIf { kotlin.math.abs(xOf(it.startMs) - e.x) < 40 * dp }
                         } else null
-                        if (hitWord != null) {
+                        if (inStrip && at in 0 until totalMs) {
+                            // a tap on the frames selects that piece of the main track
+                            onClip(if (clips.isEmpty()) 0 else EditTrack.locate(clips, at).index)
+                        } else if (hitWord != null) {
                             // a tap on a word puts the playhead on it
                             setPlayhead(hitWord.startMs)
                             onScrub(playMs, false)

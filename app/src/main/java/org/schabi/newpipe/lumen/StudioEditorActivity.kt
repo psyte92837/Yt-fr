@@ -30,9 +30,11 @@ import android.widget.TextView
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.MediaItem
 import com.google.android.exoplayer2.PlaybackException
+import com.google.android.exoplayer2.PlaybackParameters
 import com.google.android.exoplayer2.Player
 import com.google.android.exoplayer2.SeekParameters
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.text.DateFormat
 import java.text.SimpleDateFormat
@@ -83,8 +85,17 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private var project: EProject? = null
+    /** Words of the voice in output time (after cuts and speed changes of the main track). */
     private var words: List<SWord> = emptyList()
+    /** The same words in the time of the original video. */
+    private var srcWords: List<SWord> = emptyList()
     private var selected: String? = null
+    /** Selected piece of the main track, -1 = none. */
+    private var clipSel = -1
+    /** Playing as the user sees it (during a freeze frame the player itself stands still). */
+    private var playing = false
+    private var curClip = -1
+    private var holdT0 = 0L
     private val history = EditHistory()
     /** Blocks before the gesture now going on (for undo). */
     private var gestureBase: String? = null
@@ -113,7 +124,9 @@ class StudioEditorActivity : LumenBase() {
     private val blocks: List<EBlock> get() = project?.blocks.orEmpty()
     private val dir: File get() = StudioEditStore.dir(applicationContext, project?.id ?: "none")
     private val styleDir: File get() = StudioEditStore.styleDir(applicationContext)
-    private val total: Long get() = project?.durMs ?: 1L
+    private val clips: List<VClip> get() = project?.let { EditTrack.of(it) } ?: emptyList()
+    private val total: Long get() = project?.let { outLen(it) } ?: 1L
+    private fun outLen(p: EProject): Long = EditTrack.total(EditTrack.of(p))
     private val watcher: () -> Unit = { watch() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -142,7 +155,7 @@ class StudioEditorActivity : LumenBase() {
         super.onPause()
         resumed = false
         BgTasks.watchers -= watcher
-        player?.pause()
+        pause()
         save()
     }
 
@@ -153,7 +166,7 @@ class StudioEditorActivity : LumenBase() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (selected != null) select(null) else {
+        if (selected != null) select(null) else if (clipSel >= 0) selectClip(-1) else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
         }
@@ -321,10 +334,14 @@ class StudioEditorActivity : LumenBase() {
         stopPlayer()
         project = p
         intent = Intent(intent).putExtra(EXTRA_PROJECT, p.id)
-        words = StudioEditStore.words(this, p.id)
+        srcWords = StudioEditStore.words(this, p.id)
+        words = EditTrack.words(srcWords, EditTrack.of(p), p.durMs)
         history.clear()
         gestureBase = null
         selected = null
+        clipSel = -1
+        playing = false
+        curClip = -1
         curMs = 0
         buildEditor()
         loadThumbs(p)
@@ -347,7 +364,8 @@ class StudioEditorActivity : LumenBase() {
         root.addView(status())
         root.addView(transport())
         val tl = EditTimeline(this).apply {
-            totalMs = p.durMs
+            totalMs = outLen(p)
+            clips = p.clips
             aspect = p.w.toFloat() / p.h
             blocks = p.blocks
             words = this@StudioEditorActivity.words
@@ -359,7 +377,7 @@ class StudioEditorActivity : LumenBase() {
         })
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setPadding(dp(6), dp(2), dp(6), dp(6))
         }
         root.addView(HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
@@ -372,7 +390,7 @@ class StudioEditorActivity : LumenBase() {
         st.blocks = p.blocks
         st.portrait = p.h > p.w * 1.1f
         st.onSelect = { id ->
-            player?.pause()
+            pause()
             select(id, seek = false)
         }
         st.onChange = { b, done -> live(b, done) }
@@ -386,12 +404,16 @@ class StudioEditorActivity : LumenBase() {
         st.onEmptyTap = { toggle() }
         st.onDoubleTap = { id -> StudioEdit.find(blocks, id)?.let { edit(it) } }
         tl.onScrub = { ms, dragging ->
-            player?.takeIf { it.isPlaying }?.pause()
+            if (playing) pause()
             seekTo(ms, !dragging, fromTimeline = true)
         }
         tl.onSelect = { id ->
-            player?.pause()
+            pause()
             select(id, seek = true)
+        }
+        tl.onClip = { i ->
+            pause()
+            selectClip(if (i == clipSel) -1 else i)
         }
         tl.onChange = { b, done -> live(b, done) }
         page(t("Редактор", "Editor"), root, actions = listOf("☰" to { blocksSheet() }), scroll = false)
@@ -416,6 +438,8 @@ class StudioEditorActivity : LumenBase() {
             p(t("1. Остановите видео в нужном месте (тап по кадру или прокрутка таймлайна) и нажмите «＋».", "1. Stop the video at a moment (tap the frame or scroll the timeline) and tap \"＋\"."))
             p(t("2. Блок на кадре: тяните пальцем, угол ⤡ или два пальца — размер и поворот, ↔ — ширина текста.", "2. A block on the frame: drag it; the ⤡ corner or two fingers scale and turn it, ↔ sets the text width."))
             p(t("3. На таймлайне: выбранный блок тянется целиком, края — длительность; края прилипают к словам и курсору.", "3. On the timeline: drag the selected block, its edges set the length and stick to words and the playhead."))
+            p(t("Монтаж как в CapCut: тап по кадрам ролика внизу выделяет кусок — ✂ разрезать, удалить, переставить, скорость, громкость, стоп-кадр, зеркало.",
+                "Editing like CapCut: tap the frames of the video below to select a piece — ✂ split, delete, reorder, speed, volume, freeze, mirror."))
             if (words.isNotEmpty()) p(t("4. «📝 Текст» — вся речь: тап по слову ставит курсор, выделите фразу — и схема или надпись встанет ровно на неё.",
                 "4. \"📝 Text\" is the whole speech: tap a word to go there, select a phrase to put a scheme or caption exactly on it."))
             button(t("Понятно", "Got it"), primary = true) { dismiss() }
@@ -523,42 +547,94 @@ class StudioEditorActivity : LumenBase() {
         statusStop?.setOnClickListener { BgTasks.stop(task) }
     }
 
-    /** Bottom bar: insert actions, or the actions of the selected block. */
+    /** A button of the quick bar like in CapCut: an icon over a short name. */
+    private fun tool(row: LinearLayout, icon: String, label: String, on: () -> Unit) {
+        val v = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(2), dp(6), dp(2), dp(6))
+            background = ripple(this@StudioEditorActivity, roundBg(0x00000000, 12f, this@StudioEditorActivity), Palette.ON_SURFACE)
+            contentDescription = label
+            setOnClickListener { on() }
+        }
+        v.addView(text(this, icon, 20f).apply { gravity = Gravity.CENTER; isSingleLine = true })
+        v.addView(text(this, label, 11f, color = Palette.MUTED).apply {
+            gravity = Gravity.CENTER
+            maxLines = 2
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
+        row.addView(v, LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    private fun act(icon: String, label: String, f: () -> Unit): Triple<String, String, () -> Unit> = Triple(icon, label, f)
+
+    /** Quick bar at the bottom: editing of the video and inserting; of the selected piece; of the selected block. */
     private fun tools() {
         val row = toolsRow ?: return
         row.removeAllViews()
         val b = StudioEdit.find(blocks, selected)
-        val items: List<Pair<String, () -> Unit>> = if (b == null) listOfNotNull(
-            t("＋ Вставить", "＋ Insert") to { insertSheet() },
-            if (words.isNotEmpty()) t("📝 Текст", "📝 Text") to { textSheet() } else null,
-            if (words.isNotEmpty()) t("🤖 Схемы на весь ролик", "🤖 Schemes for all") to { autoSchemes() } else null,
-            t("🧩 Схема ИИ", "🧩 AI scheme") to { aiSchemeSheet(null) },
-            t("✍️ Схема текстом", "✍️ Scheme from text") to { textSchemeSheet(null) },
-            t("🖼 Картинка", "🖼 Picture") to { pickImage(null) },
-            t("🌐 Фото по запросу", "🌐 Photo search") to { photoSheet(null) },
-            t("T Надпись", "T Caption") to { captionSheet(null) },
-            t("😀 Эмодзи", "😀 Emoji") to { emojiSheet(null) },
-            t("☰ Блоки", "☰ Blocks") to { blocksSheet() },
-            t("📂 Проекты", "📂 Projects") to { chooser() }
-        ) else buildList {
-            add(t("✓ Готово", "✓ Done") to { select(null) })
-            add(t("✎ Изменить", "✎ Edit") to { edit(b) })
-            if (b.kind != "emoji") add(t("🎨 Вид", "🎨 Look") to { lookSheet(b) })
-            add(t("⏱ Время", "⏱ Timing") to { timingSheet(b) })
-            add(t("✂ Разрезать", "✂ Split") to { split(b) })
-            add(t("⧉ Дубль", "⧉ Duplicate") to { duplicate(b.id) })
-            add(t("⇤ Начало сюда", "⇤ Start here") to { change(b.id) { StudioEdit.startAt(it, curMs, total) } })
-            add(t("⇥ Конец сюда", "⇥ End here") to { change(b.id) { StudioEdit.endAt(it, curMs, total) } })
-            add(t("🎞 Анимация", "🎞 Animation") to { animSheet(b) })
-            add(t("◐ Прозрачность", "◐ Opacity") to { opacitySheet(b) })
-            add(t("⬆ Выше", "⬆ Forward") to { commit(StudioEdit.reorder(blocks, b.id, 1)) })
-            add(t("⬇ Ниже", "⬇ Backward") to { commit(StudioEdit.reorder(blocks, b.id, -1)) })
-            add(t("⊙ В центр", "⊙ Centre") to { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
-            if (b.kind == "scheme") add(t("🤖 Переделать ИИ", "🤖 Redo with AI") to { aiSchemeSheet(b) })
-            add(t("🗑 Удалить", "🗑 Delete") to { delete(b.id) })
+        val ci = clipSel.takeIf { b == null && it in clips.indices }
+        val items: List<Triple<String, String, () -> Unit>> = when {
+            b != null -> buildList {
+                add(act("✓", t("Готово", "Done")) { select(null) })
+                add(act("✎", t("Изменить", "Edit")) { edit(b) })
+                if (b.kind != "emoji") add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                add(act("⏱", t("Время", "Timing")) { timingSheet(b) })
+                add(act("✂", t("Разделить", "Split")) { split(b) })
+                add(act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) })
+                add(act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } })
+                add(act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } })
+                add(act("🎞", t("Анимация", "Animation")) { animSheet(b) })
+                add(act("◐", t("Прозрач\u00adность", "Opacity")) { opacitySheet(b) })
+                add(act("⬆", t("Выше", "Forward")) { commit(StudioEdit.reorder(blocks, b.id, 1)) })
+                add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
+                add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
+                if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
+                add(act("🗑", t("Удалить", "Delete")) { delete(b.id) })
+            }
+            ci != null -> {
+                val c = clips[ci]
+                buildList {
+                    add(act("✓", t("Готово", "Done")) { selectClip(-1) })
+                    add(act("✂", t("Разделить", "Split")) { clipSplit() })
+                    if (c.isHold) add(act("⏱", t("Длина", "Length")) { holdSheet(ci) })
+                    else {
+                        add(act("⏩", t("Скорость", "Speed")) { speedSheet(ci) })
+                        add(act("🔊", t("Громкость", "Volume")) { volumeSheet(ci) })
+                        add(if (c.volume > 0f) act("🔇", t("Без звука", "Mute")) { clipUpdate(ci) { it.copy(volume = 0f) } }
+                        else act("🔈", t("Со звуком", "Unmute")) { clipUpdate(ci) { it.copy(volume = 1f) } })
+                    }
+                    add(act("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
+                    add(act("⧉", t("Дубль", "Duplicate")) { clipDuplicate(ci) })
+                    add(act("◀", t("Переставить раньше", "Move earlier")) { clipMove(ci, -1) })
+                    add(act("▶", t("Переставить позже", "Move later")) { clipMove(ci, 1) })
+                    add(act("⇤", t("Обрезать начало", "Trim start")) { clipTrim(ci, true) })
+                    add(act("⇥", t("Обрезать конец", "Trim end")) { clipTrim(ci, false) })
+                    if (!c.isHold) add(act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() })
+                    add(act("⇋", t("Зеркало", "Mirror")) { clipUpdate(ci) { it.copy(mirror = !it.mirror) } })
+                    add(act("🔍", t("Масштаб", "Zoom")) { zoomSheet(ci) })
+                    if (!c.looksPlain || c.isHold) add(act("↺", t("Сбросить", "Reset")) {
+                        clipUpdate(ci) { it.copy(speed = 1f, volume = if (it.isHold) 0f else 1f, mirror = false, zoom = 1f) }
+                    })
+                }
+            }
+            else -> listOfNotNull(
+                act("✂", t("Разделить", "Split")) { clipSplit() },
+                act("🎬", t("Монтаж", "Edit")) { selectClip(EditTrack.locate(clips, curMs).index) },
+                act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() },
+                act("＋", t("Вставить", "Insert")) { insertSheet() },
+                act("T", t("Надпись", "Caption")) { captionSheet(null) },
+                act("😀", t("Эмодзи", "Emoji")) { emojiSheet(null) },
+                act("🖼", t("Картинка", "Picture")) { pickImage(null) },
+                act("🌐", t("Фото", "Photo")) { photoSheet(null) },
+                act("🧩", t("Схема ИИ", "AI scheme")) { aiSchemeSheet(null) },
+                act("✍️", t("Схема текстом", "Text scheme")) { textSchemeSheet(null) },
+                if (words.isNotEmpty()) act("📝", t("Текст", "Text")) { textSheet() } else null,
+                if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
+                act("☰", t("Блоки", "Blocks")) { blocksSheet() },
+                act("📂", t("Проекты", "Projects")) { chooser() }
+            )
         }
-        for ((label, f) in items) row.addView(chip(this, label, selected != null && label == items.first().first) { f() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginEnd = dp(8) })
+        for ((icon, label, f) in items) tool(row, icon, label, f)
         (row.parent as? HorizontalScrollView)?.scrollTo(0, 0)
     }
 
@@ -573,23 +649,95 @@ class StudioEditorActivity : LumenBase() {
             ex.addListener(object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) = updatePlay()
 
-                override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED) {
-                        curMs = total
-                        sync()
-                        updatePlay()
-                    }
-                }
-
                 override fun onPlayerError(error: PlaybackException) {
                     toast(t("Видео не играет: ", "Cannot play: ") + (error.message ?: error.errorCodeName))
                 }
             })
             ex.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(StudioEditStore.dir(this, p.id), StudioEditStore.BASE))))
             ex.prepare()
-            ex.seekTo(curMs)
+            curClip = -1
+            place(true)
         }
         ex.setVideoTextureView(tv)
+    }
+
+    /** Speed, sound and look of piece [i] on the player and the picture. */
+    private fun applyClip(i: Int) {
+        val c = clips.getOrNull(i) ?: return
+        curClip = i
+        player?.let { ex ->
+            if (ex.playbackParameters.speed != c.speed) ex.setPlaybackParameters(PlaybackParameters(c.speed))
+            ex.volume = c.volume.coerceIn(0f, 1f)
+        }
+        texture?.let { tv ->
+            tv.scaleX = if (c.mirror) -c.zoom else c.zoom
+            tv.scaleY = c.zoom
+        }
+    }
+
+    /** Puts the player on the moment of the original under [curMs]; while the finger moves ([final] false) at most every 40 ms. */
+    private fun place(final: Boolean) {
+        val ex = player ?: return
+        val list = clips
+        if (list.isEmpty()) return
+        val pos = EditTrack.locate(list, curMs)
+        if (pos.index != curClip) applyClip(pos.index)
+        val c = list[pos.index]
+        val now = SystemClock.uptimeMillis()
+        if (final || now - lastSeekAt > 40) {
+            lastSeekAt = now
+            // while the finger moves: the nearest key frame (fast); at the end: the exact frame
+            ex.setSeekParameters(if (final) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
+            ex.seekTo(pos.srcMs)
+        }
+        if (c.isHold) {
+            holdT0 = now - pos.offMs
+            if (ex.playWhenReady) ex.pause()
+        } else if (playing && !ex.playWhenReady) ex.play()
+    }
+
+    /** While playing: the output time from the player (or the clock of a freeze frame), the next piece at the end of this one. */
+    private fun follow(ex: ExoPlayer) {
+        val list = clips
+        val c = list.getOrNull(curClip) ?: return place(true)
+        val start = EditTrack.starts(list)[curClip]
+        val done = if (c.isHold) {
+            val off = SystemClock.uptimeMillis() - holdT0
+            curMs = start + off.coerceIn(0, c.outMs)
+            off >= c.outMs
+        } else {
+            val pos = ex.currentPosition
+            curMs = start + ((pos - c.fromMs).coerceAtLeast(0) / c.speed.toDouble()).toLong().coerceAtMost(c.outMs)
+            pos >= c.toMs - 20 || ex.playbackState == Player.STATE_ENDED
+        }
+        if (done) nextClip(ex)
+        sync()
+    }
+
+    private fun nextClip(ex: ExoPlayer) {
+        val list = clips
+        val i = curClip + 1
+        if (i >= list.size) {
+            playing = false
+            ex.pause()
+            curMs = total
+            updatePlay()
+            return
+        }
+        val prev = list[curClip]
+        val n = list[i]
+        curMs = EditTrack.starts(list)[i]
+        applyClip(i)
+        // the next piece right after this one in the original plays on without a seek
+        val seamless = !prev.isHold && !n.isHold && prev.toMs == n.fromMs
+        if (!seamless) {
+            ex.setSeekParameters(SeekParameters.EXACT)
+            ex.seekTo(n.fromMs)
+        }
+        if (n.isHold) {
+            ex.pause()
+            holdT0 = SystemClock.uptimeMillis()
+        } else ex.play()
     }
 
     private fun stopPlayer() {
@@ -601,10 +749,7 @@ class StudioEditorActivity : LumenBase() {
         override fun run() {
             if (!resumed || isDestroyed) return
             val ex = player
-            if (ex != null && ex.isPlaying) {
-                curMs = ex.currentPosition.coerceIn(0, total)
-                sync()
-            }
+            if (ex != null && playing) follow(ex)
             window.decorView.postOnAnimation(this)
         }
     }
@@ -616,19 +761,26 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private fun updatePlay() {
-        playBtn?.text = if (player?.isPlaying == true) "⏸" else "▶"
+        playBtn?.text = if (playing) "⏸" else "▶"
     }
 
     private fun pause() {
+        playing = false
         player?.pause()
+        updatePlay()
+    }
+
+    private fun play() {
+        if (player == null) return
+        if (curMs >= total - 100) curMs = 0
+        playing = true
+        sync()
+        place(true)
+        updatePlay()
     }
 
     private fun toggle() {
-        val ex = player ?: return
-        if (ex.isPlaying) ex.pause() else {
-            if (curMs >= total - 100) seekTo(0)
-            ex.play()
-        }
+        if (playing) pause() else play()
     }
 
     private fun goToTime() {
@@ -642,14 +794,7 @@ class StudioEditorActivity : LumenBase() {
     private fun seekTo(ms: Long, final: Boolean = true, fromTimeline: Boolean = false) {
         curMs = ms.coerceIn(0, total)
         sync(fromTimeline)
-        val ex = player ?: return
-        val now = SystemClock.uptimeMillis()
-        if (final || now - lastSeekAt > 40) {
-            lastSeekAt = now
-            // while the finger moves: the nearest key frame (fast); at the end: the exact frame
-            ex.setSeekParameters(if (final) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
-            ex.seekTo(curMs)
-        }
+        place(final)
     }
 
     private fun loadThumbs(p: EProject) {
@@ -684,7 +829,8 @@ class StudioEditorActivity : LumenBase() {
 
     // ---------- changes ----------
 
-    private fun snapshot(): String = StudioEdit.blocksJson(blocks).toString()
+    private fun snapshot(): String = JSONObject().put("b", StudioEdit.blocksJson(blocks))
+        .put("c", EditTrack.json(project?.clips.orEmpty())).toString()
 
     private fun setBlocks(list: List<EBlock>) {
         val p = project ?: return
@@ -729,6 +875,10 @@ class StudioEditorActivity : LumenBase() {
 
     private fun select(id: String?, seek: Boolean = true) {
         selected = id
+        if (id != null && clipSel >= 0) {
+            clipSel = -1
+            timeline?.clipSel = -1
+        }
         stage?.selected = id
         timeline?.selected = id
         if (seek && id != null) StudioEdit.find(blocks, id)?.let { b ->
@@ -748,11 +898,148 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private fun restore(s: String) {
-        setBlocks(StudioEdit.blocksFrom(runCatching { JSONArray(s) }.getOrNull()))
+        val p = project ?: return
+        val o = runCatching { JSONObject(s) }.getOrNull()
+        val list = StudioEdit.blocksFrom(o?.optJSONArray("b") ?: runCatching { JSONArray(s) }.getOrNull())
+        setTrack(EditTrack.from(o?.optJSONArray("c")).ifEmpty { EditTrack.initial(p.durMs) }, list)
         save()
         refreshUndo()
-        stage?.refresh()
+        if (clipSel >= clips.size) clipSel = -1
+        timeline?.clipSel = clipSel
+        seekTo(curMs)
         select(selected?.takeIf { id -> blocks.any { it.id == id } }, seek = false)
+    }
+
+    /** New pieces of the main track [new] with blocks [list]: words, timeline and picture follow. */
+    private fun setTrack(new: List<VClip>, list: List<EBlock>) {
+        val p = project ?: return
+        val keep = if (EditTrack.plain(new, p.durMs)) emptyList() else new
+        val np = p.copy(clips = keep, blocks = list)
+        project = np
+        words = EditTrack.words(srcWords, EditTrack.of(np), p.durMs)
+        curClip = -1
+        timeline?.let { tl ->
+            tl.totalMs = outLen(np)
+            tl.clips = keep
+            tl.words = words
+            tl.blocks = list
+        }
+        stage?.blocks = list
+        stage?.refresh()
+    }
+
+    /** A finished change of the main track: blocks move with their pieces, the same picture stays under the playhead. */
+    private fun commitClips(new: List<VClip>, sel: Int = clipSel) {
+        val p = project ?: return
+        val old = EditTrack.of(p)
+        history.push(snapshot())
+        val at = EditTrack.remap(old, new, curMs)
+        setTrack(new, EditTrack.remapBlocks(p.blocks, old, new))
+        save()
+        refreshUndo()
+        clipSel = if (sel in new.indices) sel else -1
+        timeline?.clipSel = clipSel
+        seekTo(at)
+        tools()
+    }
+
+    private fun selectClip(i: Int) {
+        clipSel = if (i in clips.indices) i else -1
+        if (clipSel >= 0) {
+            selected = null
+            stage?.selected = null
+            timeline?.selected = null
+        }
+        timeline?.clipSel = clipSel
+        tools()
+    }
+
+    private fun clipSplit() {
+        val (list, right) = EditTrack.split(clips, curMs)
+            ?: return toast(t("Поставьте курсор внутрь куска, не у самого шва", "Put the playhead inside a piece, not at a seam"))
+        commitClips(list, if (clipSel >= 0) right - 1 else -1)
+        toast(t("✂ Разрезано", "✂ Split"))
+    }
+
+    private fun clipDelete(i: Int) {
+        val list = EditTrack.remove(clips, i) ?: return toast(t("Это единственный кусок ролика", "This is the only piece of the video"))
+        commitClips(list, -1)
+    }
+
+    private fun clipDuplicate(i: Int) {
+        val (list, j) = EditTrack.duplicate(clips, i) ?: return
+        commitClips(list, j)
+    }
+
+    private fun clipMove(i: Int, dir: Int) {
+        val (list, j) = EditTrack.move(clips, i, dir) ?: return toast(if (dir < 0) t("Это уже первый кусок", "This is already the first piece") else t("Это уже последний кусок", "This is already the last piece"))
+        commitClips(list, j)
+    }
+
+    private fun clipFreeze() {
+        val (list, j) = EditTrack.freeze(clips, curMs) ?: return toast(t("Курсор уже на стоп-кадре", "The playhead is already on a freeze frame"))
+        commitClips(list, j)
+        toast(t("❄ Стоп-кадр на ${EditTrack.HOLD_MS / 1000} с", "❄ Freeze frame for ${EditTrack.HOLD_MS / 1000} s"))
+    }
+
+    private fun clipTrim(i: Int, start: Boolean) {
+        val list = (if (start) EditTrack.trimStart(clips, i, curMs) else EditTrack.trimEnd(clips, i, curMs))
+            ?: return toast(t("Поставьте курсор внутрь выбранного куска", "Put the playhead inside the selected piece"))
+        commitClips(list, i)
+    }
+
+    private fun clipUpdate(i: Int, f: (VClip) -> VClip) {
+        if (i !in clips.indices) return
+        commitClips(EditTrack.update(clips, i, f), i)
+    }
+
+    private fun speedSheet(i: Int) {
+        val c = clips.getOrNull(i) ?: return
+        bottomSheet(t("⏩ Скорость куска", "⏩ Speed of the piece")) { dismiss ->
+            muted(t("Длина сейчас ${StudioEdit.clock(c.outMs).substringBefore('.')} с. Голос ускоряется вместе с картинкой, тон меняется.",
+                "Now ${StudioEdit.clock(c.outMs).substringBefore('.')} long. The voice speeds up with the picture, its pitch changes."))
+            add(choiceChips(ctx, EditTrack.SPEEDS.map { it to EditTrack.speedLabel(it) }, c.speed) { v ->
+                clipUpdate(i) { it.copy(speed = v) }
+                dismiss()
+            })
+            if (clips.size > 1) button(t("Эту скорость — всем кускам", "This speed for all pieces"), style = BtnStyle.TEXT) {
+                dismiss()
+                val sp = clips.getOrNull(i)?.speed ?: return@button
+                commitClips(clips.map { if (it.isHold) it else it.copy(speed = sp) }, i)
+            }
+        }
+    }
+
+    private fun volumeSheet(i: Int) {
+        val c = clips.getOrNull(i) ?: return
+        bottomSheet(t("🔊 Громкость куска", "🔊 Volume of the piece")) { dismiss ->
+            muted(t("Больше 100 % слышно только в готовом ролике.", "Above 100 % is heard in the exported video only."))
+            add(choiceChips(ctx, EditTrack.VOLUMES.map { it to "$it %" }, (c.volume * 100).toInt()) { v ->
+                clipUpdate(i) { it.copy(volume = v / 100f) }
+                dismiss()
+            })
+        }
+    }
+
+    private fun zoomSheet(i: Int) {
+        val c = clips.getOrNull(i) ?: return
+        bottomSheet(t("🔍 Масштаб кадра", "🔍 Frame zoom")) { dismiss ->
+            muted(t("Кадр увеличивается от центра, края обрезаются — как приближение в CapCut.", "The frame is enlarged around its centre, the edges are cut off."))
+            add(choiceChips(ctx, EditTrack.ZOOMS.map { it to "$it %" }, (c.zoom * 100).toInt()) { v ->
+                clipUpdate(i) { it.copy(zoom = v / 100f) }
+                dismiss()
+            })
+        }
+    }
+
+    private fun holdSheet(i: Int) {
+        val c = clips.getOrNull(i) ?: return
+        bottomSheet(t("❄ Длина стоп-кадра", "❄ Freeze frame length")) { dismiss ->
+            add(choiceChips(ctx, listOf(500L, 1000L, 2000L, 3000L, 5000L, 8000L).map { it to StudioEdit.secs(it) + t(" с", " s") }, c.holdMs) { v ->
+                clipUpdate(i) { it.copy(holdMs = v) }
+                dismiss()
+            })
+        }
     }
 
     private fun delete(id: String) = commit(StudioEdit.remove(blocks, id), null)
@@ -771,7 +1058,7 @@ class StudioEditorActivity : LumenBase() {
 
     /** A new block at [at] of project [p] (list [list]); its place and size by kind. */
     private fun newBlock(p: EProject, list: List<EBlock>, kind: String, at: Long, durMs: Long, ratio: Float, build: (EBlock) -> EBlock): EBlock {
-        val (s, d) = StudioEdit.placeAt(at, p.durMs, durMs)
+        val (s, d) = StudioEdit.placeAt(at, outLen(p), durMs)
         val portrait = p.h >= p.w
         val w = StudioEdit.fitWidth(StudioEdit.defaultWidth(kind, portrait), ratio, p.w, p.h)
         val y = when (kind) {
@@ -895,7 +1182,7 @@ class StudioEditorActivity : LumenBase() {
         pause()
         val p = project ?: return
         if (BgTasks.has(TASK_AI)) return toast(t("ИИ уже работает — дождитесь или остановите", "The AI is already working — wait or stop it"))
-        val at = old?.startMs ?: span?.let { StudioEdit.spanOf(words, it, p.durMs).first } ?: curMs
+        val at = old?.startMs ?: span?.let { StudioEdit.spanOf(words, it, outLen(p)).first } ?: curMs
         var layout = old?.scheme?.layout ?: "auto"
         var durMs = 5000L
         var style = old?.look?.ifEmpty { null } ?: lastStyle
@@ -935,7 +1222,7 @@ class StudioEditorActivity : LumenBase() {
         val system = "You are an infographic designer for videos. Answer with JSON only."
         // a placeholder shows at once where the scheme goes; it can be moved and trimmed while the AI works
         val ph: EBlock? = if (replaceId == null) {
-            val (st, du) = span?.let { StudioEdit.spanOf(words, it, p.durMs) } ?: (at to durMs)
+            val (st, du) = span?.let { StudioEdit.spanOf(words, it, outLen(p)) } ?: (at to durMs)
             newBlock(p, blocks, "scheme", st, du, StudioEdit.schemeRatio(p.w, p.h)) { it.copy(look = style, ask = wish, animIn = "fade", animOut = "fade") }
                 .also { commit(blocks + it, it.id) }
         } else null
@@ -1043,7 +1330,7 @@ class StudioEditorActivity : LumenBase() {
             deliver(p.id) { pr, list ->
                 var cur = list
                 for ((i, sc) in found) {
-                    val (st, du) = StudioEdit.spanOf(ws, segs[i], pr.durMs)
+                    val (st, du) = StudioEdit.spanOf(ws, segs[i], outLen(pr))
                     cur = cur + newBlock(pr, cur, "scheme", st, du, StudioEdit.schemeRatio(pr.w, pr.h)) {
                         it.copy(scheme = sc, look = style, animIn = "fade", animOut = "fade")
                     }
@@ -1118,7 +1405,7 @@ class StudioEditorActivity : LumenBase() {
                 tv.text = sb
                 acts.removeAllViews()
                 if (r == null) info.text = "" else {
-                    val (st, du) = StudioEdit.spanOf(words, r, p.durMs)
+                    val (st, du) = StudioEdit.spanOf(words, r, outLen(p))
                     info.text = StudioEdit.clock(st) + " – " + StudioEdit.clock(st + du) + "  ·  " + r.joinToString(" ") { words[it].text }.take(90)
                     acts.addView(chip(ctx, t("🧩 Схема ИИ", "🧩 AI scheme")) {
                         dismiss()
@@ -1135,7 +1422,7 @@ class StudioEditorActivity : LumenBase() {
                     acts.addView(chip(ctx, t("▶ Отсюда", "▶ From here")) {
                         dismiss()
                         seekTo(st)
-                        player?.play()
+                        play()
                     })
                     acts.addView(chip(ctx, "✕") {
                         a = -1
@@ -1293,7 +1580,7 @@ class StudioEditorActivity : LumenBase() {
     private fun photoSheet(old: EBlock?, span: IntRange? = null) {
         pause()
         val p = project ?: return
-        val placed = span?.let { StudioEdit.spanOf(words, it, p.durMs) }
+        val placed = span?.let { StudioEdit.spanOf(words, it, outLen(p)) }
         val at = old?.startMs ?: placed?.first ?: curMs
         bottomSheet(t("🌐 Фото по запросу", "🌐 Photo search")) { dismiss ->
             muted(t("Бесплатные фото Openverse (Wikimedia, Flickr и др.). С телефона уходит только запрос; автор и лицензия сохраняются для описания.",
@@ -1357,7 +1644,7 @@ class StudioEditorActivity : LumenBase() {
     private fun captionSheet(old: EBlock?, span: IntRange? = null) {
         pause()
         val p = project ?: return
-        val placed = span?.let { StudioEdit.spanOf(words, it, p.durMs) }
+        val placed = span?.let { StudioEdit.spanOf(words, it, outLen(p)) }
         val at = old?.startMs ?: placed?.first ?: curMs
         var look = old?.look?.ifEmpty { null } ?: "plate"
         bottomSheet(if (old == null) t("T Надпись", "T Caption") else t("✎ Надпись", "✎ Caption")) { dismiss ->
@@ -1481,7 +1768,7 @@ class StudioEditorActivity : LumenBase() {
                 dismiss()
                 val cur = StudioEdit.find(blocks, b.id) ?: return@button
                 seekTo(max(0L, cur.startMs - 300))
-                player?.play()
+                play()
             }
             if (blocks.size > 1) button(t("Применить ко всем блокам", "Apply to all blocks"), style = BtnStyle.TEXT) {
                 dismiss()
@@ -1520,14 +1807,19 @@ class StudioEditorActivity : LumenBase() {
     private fun exportSheet() {
         val p = project ?: return
         if (BgTasks.has(TASK_EXPORT)) return toast(t("Экспорт уже идёт", "The export is already running"))
-        if (p.blocks.none { it.kind != "scheme" || it.scheme != null }) return toast(t("Добавьте хотя бы один блок: «＋»", "Add at least one block: \"＋\""))
+        val cut = !EditTrack.plain(EditTrack.of(p), p.durMs)
+        if (!cut && p.blocks.none { it.kind != "scheme" || it.scheme != null }) return toast(t("Добавьте блок «＋» или измените ролик: ✂ Разделить, скорость…", "Add a block \"＋\" or edit the video: ✂ Split, speed…"))
         pause()
         val prefs = Lumen.prefs
         var side = prefs.getInt("studio_edit_side", 1920)
         val (ow, oh) = StudioEdit.outSize(p.w, p.h)
         bottomSheet(t("⬆ Экспорт ролика", "⬆ Export the video")) { dismiss ->
-            muted(t("Блоков: ${p.blocks.size} · длина ${StudioEdit.clock(p.durMs).substringBefore('.')} · звук оригинала копируется без потерь.",
-                "Blocks: ${p.blocks.size} · length ${StudioEdit.clock(p.durMs).substringBefore('.')} · the original sound is copied without loss."))
+            val len = StudioEdit.clock(outLen(p)).substringBefore('.')
+            val pieces = EditTrack.of(p).size
+            muted(if (cut) t("Блоков: ${p.blocks.size} · кусков: $pieces · длина $len · звук собирается заново по кускам.",
+                "Blocks: ${p.blocks.size} · pieces: $pieces · length $len · the sound is rebuilt piece by piece.")
+            else t("Блоков: ${p.blocks.size} · длина $len · звук оригинала копируется без потерь.",
+                "Blocks: ${p.blocks.size} · length $len · the original sound is copied without loss."))
             label(this, t("Качество", "Quality"))
             add(choiceChips(ctx, listOf(1920 to t("Как оригинал ($ow×$oh)", "As the original ($ow×$oh)"), 1280 to t("720p — быстрее и легче", "720p — faster and smaller")), side) { side = it })
             muted(t("Ролик собирается на видеокарте телефона (обычно быстрее реального времени); если она откажет — на процессоре, медленнее. Экран можно закрыть: прогресс в уведомлении.",

@@ -55,7 +55,9 @@ data class EProject(
     val blocks: List<EBlock> = emptyList(),
     val created: Long = 0,
     /** Last exported file (path), empty before the first export. */
-    val exported: String = ""
+    val exported: String = "",
+    /** Pieces of the main track (see [EditTrack]); empty = the whole video as it is. */
+    val clips: List<VClip> = emptyList()
 )
 
 /** Look of a block at a moment of its in / out animation: opacity, scale and shift (fractions of the frame). */
@@ -610,6 +612,7 @@ object StudioEdit {
         .put("id", p.id).put("source", p.source).put("w", p.w).put("h", p.h).put("dur", p.durMs)
         .put("created", p.created).put("exported", p.exported)
         .put("blocks", blocksJson(p.blocks))
+        .apply { if (p.clips.isNotEmpty()) put("clips", EditTrack.json(p.clips)) }
 
     fun fromJson(s: String): EProject? = runCatching {
         val o = JSONObject(s)
@@ -617,7 +620,8 @@ object StudioEdit {
         val w = o.optInt("w")
         val h = o.optInt("h")
         if (w <= 0 || h <= 0) return null
-        EProject(o.getString("id"), o.optString("source"), w, h, o.optLong("dur"), blocksFrom(o.optJSONArray("blocks")), o.optLong("created"), o.optString("exported"))
+        EProject(o.getString("id"), o.optString("source"), w, h, o.optLong("dur"), blocksFrom(o.optJSONArray("blocks")), o.optLong("created"), o.optString("exported"),
+            EditTrack.from(o.optJSONArray("clips")))
     }.getOrNull()
 }
 

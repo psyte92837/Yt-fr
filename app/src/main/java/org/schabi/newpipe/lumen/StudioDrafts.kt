@@ -16,7 +16,7 @@ data class SDraft(val id: String, val task: String, val title: String, val at: L
  */
 object StudioDrafts {
     /** Files of one task's work inside its folder (Shorts shares the folder with music, caches and templates). */
-    val FILES = listOf("take.wav", "source.mp4", "clips.json", "clips", "analysis.json", "voice.wav", "broll")
+    val FILES = listOf("take.wav", "source.mp4", "clips.json", "clips", "analysis.json", "voice.wav", "broll", "prompter.json")
     private const val META = "meta.json"
 
     /** Name for the list: the topic, else the first line of the script without a [visual] mark. */

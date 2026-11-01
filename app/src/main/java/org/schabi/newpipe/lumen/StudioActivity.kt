@@ -192,6 +192,10 @@ object StudioPrefs {
     var readScript: Boolean
         get() = p.getBoolean("studio_read_script", true)
         set(v) = p.edit().putBoolean("studio_read_script", v).apply()
+    /** Speed of the word highlight of the teleprompter, words per minute. */
+    var prompterWpm: Int
+        get() = p.getInt("studio_prompter_wpm", StudioPrompter.DEFAULT_WPM)
+        set(v) = p.edit().putInt("studio_prompter_wpm", v).apply()
 
     val ACCENTS = listOf(
         0xFF4F8BFF.toInt() to "🔵",
@@ -228,6 +232,7 @@ class StudioActivity : LumenBase() {
     /** Take, video and analysis of the current task (Shorts keeps the old place); music and clips are shared. */
     private val tdir get() = (if (task == StudioTask.SHORTS) dir else File(dir, task.id)).apply { mkdirs() }
     private val takeFile get() = File(tdir, "take.wav")
+    private val prompterFile get() = File(tdir, "prompter.json")
     private val sourceFile get() = File(tdir, "source.mp4")
     private val musicFile get() = File(dir, "music.wav")
     /** Cuts task: marked YouTube pieces and their cut files. */
@@ -269,6 +274,14 @@ class StudioActivity : LumenBase() {
     private var levelBar: ProgressBar? = null
     private var timerText: TextView? = null
     private var prompterScroll: ScrollView? = null
+    /** Word highlight of the teleprompter while recording, with the log of what lit up when. */
+    private var prompterClock: PrompterClock? = null
+    private var prompterText: TextView? = null
+    private var prompterSpeed: TextView? = null
+    private var prompterRanges: List<IntRange> = emptyList()
+    private var prompterBody = ""
+    /** Time of the take now (from the recorder), for taps on the prompter. */
+    private var recMs = 0L
     private var preview: ImageView? = null
     private var previewMs = 0L
 
@@ -763,7 +776,19 @@ class StudioActivity : LumenBase() {
         }
         c.muted(t("Запись до ${StudioRecorder.MAX_MIN} минут. Говорите в 15–20 см от телефона, в тихом месте.",
             "Up to ${StudioRecorder.MAX_MIN} minutes. Speak 15–20 cm from the phone, somewhere quiet."))
-        c.check(t("Суфлёр: показывать сценарий при записи", "Teleprompter: show the script while recording"), StudioPrefs.prompter) { StudioPrefs.prompter = it }
+        c.check(t("Суфлёр: показывать сценарий при записи", "Teleprompter: show the script while recording"), StudioPrefs.prompter) {
+            StudioPrefs.prompter = it
+            render()
+        }
+        if (StudioPrefs.prompter) {
+            c.spinner(t("Скорость подсветки слов, слов в минуту", "Word highlight speed, words per minute"),
+                StudioPrompter.SPEEDS.map { it to it.toString() }.let { l -> if (StudioPrefs.prompterWpm in StudioPrompter.SPEEDS) l else l + (StudioPrefs.prompterWpm to StudioPrefs.prompterWpm.toString()) },
+                StudioPrefs.prompterWpm) { StudioPrefs.prompterWpm = it }
+            c.muted(t("Суфлёр подсвечивает слово за словом; скорость меняется и во время записи, ⏸ — пауза, тап по слову — «я здесь». " +
+                "Что и когда подсветилось, запоминается: по этому слова встанут в ролике, если вы читаете сценарий.",
+                "The teleprompter lights up word by word; change the speed while recording too, ⏸ pauses, tap a word to say \"I am here\". " +
+                    "What lit up when is remembered and times the words in the video when you read the script."))
+        }
         if (task != StudioTask.VOICE) c.check(t("Я читаю сценарий (иначе запись распознаётся)", "I read the script (otherwise the take is recognised)"), StudioPrefs.readScript) {
             StudioPrefs.readScript = it
             resetAnalysis()
@@ -896,16 +921,81 @@ class StudioActivity : LumenBase() {
     }
 
     /** Big script text that scrolls with the expected pace of reading. */
+    private fun prompterScenes(): List<List<String>> = Studio.parseText(scriptEdit.text.toString()).scenes.map { Studio.tokens(it.say) }
+
     private fun prompter(c: Col) {
-        val tv = text(this, Studio.parseText(scriptEdit.text.toString()).scenes.joinToString("\n\n") { it.say }, 24f, bold = true).apply {
+        val (body, ranges) = StudioPrompter.layout(prompterScenes())
+        prompterBody = body
+        prompterRanges = ranges
+        val clock = prompterClock
+        if (clock != null) {
+            prompterSpeed = text(this, "", 14f, bold = true).apply { gravity = android.view.Gravity.CENTER }
+            val pause = btn(this, "⏸", style = BtnStyle.TONAL) {}
+            pause.setOnClickListener {
+                clock.togglePause(recMs)
+                pause.text = if (clock.paused) "▶" else "⏸"
+                paintPrompter()
+            }
+            c.row(
+                btn(this, "−", style = BtnStyle.TONAL) { changeWpm(-StudioPrompter.STEP_WPM) },
+                prompterSpeed!!,
+                btn(this, "＋", style = BtnStyle.TONAL) { changeWpm(StudioPrompter.STEP_WPM) },
+                pause
+            )
+        }
+        val tv = text(this, body, 24f, bold = true).apply {
             setPadding(dp(16), dp(80), dp(16), dp(200))
         }
+        // tap on a word: the reader is there now
+        tv.setOnTouchListener { v, e ->
+            if (e.action == android.view.MotionEvent.ACTION_UP && clock != null) {
+                val off = (v as TextView).getOffsetForPosition(e.x, e.y)
+                val i = StudioPrompter.wordAt(prompterRanges, off)
+                if (i >= 0 && clock.jump(i, recMs)) paintPrompter()
+                v.performClick()
+            }
+            true
+        }
+        prompterText = tv
         val sv = ScrollView(this).apply {
             addView(tv)
             background = roundBg(Palette.SURFACE, 12f, this@StudioActivity)
         }
         prompterScroll = sv
         c.add(sv, 12).layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(280))
+        paintPrompter()
+    }
+
+    private fun changeWpm(d: Int) {
+        val clock = prompterClock ?: return
+        clock.tick(recMs)
+        clock.wpm += d
+        StudioPrefs.prompterWpm = clock.wpm
+        paintPrompter()
+    }
+
+    /** Read words dimmed, the lit one on the accent, the line of the lit word kept in the upper third. */
+    private fun paintPrompter() {
+        val clock = prompterClock
+        prompterSpeed?.text = clock?.let { t("${it.wpm} сл/мин", "${it.wpm} wpm") + if (it.paused) t(" · пауза", " · paused") else "" }.orEmpty()
+        val tv = prompterText ?: return
+        val i = clock?.index ?: -1
+        val r = prompterRanges.getOrNull(i)
+        if (r == null) {
+            tv.text = prompterBody
+            return
+        }
+        val sp = android.text.SpannableString(prompterBody)
+        if (r.first > 0) sp.setSpan(android.text.style.ForegroundColorSpan(Palette.MUTED), 0, r.first, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sp.setSpan(android.text.style.BackgroundColorSpan(Palette.ACCENT), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        sp.setSpan(android.text.style.ForegroundColorSpan(Palette.ON_ACCENT), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        tv.text = sp
+        val sv = prompterScroll ?: return
+        tv.post {
+            val lay = tv.layout ?: return@post
+            val y = lay.getLineTop(lay.getLineForOffset(r.first)) + tv.paddingTop
+            sv.smoothScrollTo(0, (y - sv.height / 3).coerceAtLeast(0))
+        }
     }
 
     private fun analyseCard(c: Col) = c.card {
@@ -2304,16 +2394,14 @@ class StudioActivity : LumenBase() {
         player?.release()
         player = null
         resetAnalysis()
+        prompterFile.delete()
+        recMs = 0
+        prompterClock = if (StudioPrefs.prompter) prompterScenes().flatten().takeIf { it.isNotEmpty() }?.let { PrompterClock(it, StudioPrefs.prompterWpm) } else null
         val rec = StudioRecorder { level, ms ->
             levelBar?.progress = (level * 3000).toInt().coerceAtMost(1000)
             timerText?.text = Studio.clock(ms)
-            prompterScroll?.let { sv ->
-                // expected reading time at ~2.4 words per second
-                val n = Studio.parseText(scriptEdit.text.toString()).scenes.sumOf { Studio.tokens(it.say).size }.coerceAtLeast(1)
-                val total = n * 1000L * 10 / 24
-                val range = (sv.getChildAt(0)?.height ?: 0) - sv.height
-                if (range > 0) sv.smoothScrollTo(0, (range * (ms.toFloat() / total)).toInt().coerceIn(0, range))
-            }
+            recMs = ms
+            if (prompterClock?.tick(ms) == true) paintPrompter()
         }
         try {
             rec.start()
@@ -2335,6 +2423,15 @@ class StudioActivity : LumenBase() {
         levelBar = null
         timerText = null
         prompterScroll = null
+        prompterText = null
+        prompterSpeed = null
+        prompterClock?.let { clock ->
+            // what lit up when: the word timing of the take
+            if (clock.log.isNotEmpty()) runCatching {
+                prompterFile.writeText(StudioPrompter.toJson(clock.tokens, clock.log, Studio.durationMs(take.size, rec.rate)))
+            }.onFailure { L.w("studio", "prompter log: ${it.message}") }
+        }
+        prompterClock = null
         Lumen.async({ writeTake(take, rec.rate) }, ::err) { render() }
     }
 
@@ -2607,10 +2704,15 @@ class StudioActivity : LumenBase() {
     }
 
     private fun analyseTake(sc: SScript) {
-        val (take, speech) = speechOf(loadTake())
+        val take0 = loadTake()
+        val (take, speech) = speechOf(take0)
         report("analyse", t("Расстановка слов…", "Timing the words…"))
         val tokens = sc.scenes.flatMap { Studio.tokens(it.say) }
-        val w = Studio.alignWords(tokens, speech)
+        // the teleprompter log of this take and script times the words; otherwise they are spread over the speech
+        val log = prompterFile.takeIf { it.exists() }?.let { StudioPrompter.fromJson(it.readText(), tokens, take0.ms) }
+        val w = log?.let { StudioPrompter.words(tokens, it, speech, take.ms, cuts).takeIf { ws -> ws.isNotEmpty() } }
+            ?: Studio.alignWords(tokens, speech)
+        if (log != null) L.i("studio", "words from the teleprompter: ${log.size} marks")
         pcm = take
         words = w
         script = sc

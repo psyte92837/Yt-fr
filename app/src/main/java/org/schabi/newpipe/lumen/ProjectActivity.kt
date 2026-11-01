@@ -965,7 +965,15 @@ class ProjectActivity : LumenBase() {
         val base = project.name.replace(Regex("[^\\p{L}\\p{Nd}_-]+"), "_").take(40)
         reportsBlock(c, base)
         c.h2(t("Файлы данных", "Data files"))
+        c.card {
+            add(text(ctx, t("📦 Все артефакты одним файлом", "📦 All artifacts in one file"), Type.TITLE_M, bold = true), 0)
+            muted(t("Без ИИ: каналы, видео с цифрами, тегами и описаниями, расшифровки и комментарии — в Markdown (для людей и чатов с ИИ) или JSON. Отправьте друзьям или в любой ИИ сами.",
+                "No AI: channels, videos with numbers, tags and descriptions, transcripts and comments — as Markdown (for people and AI chats) or JSON. Send it to friends or any AI yourself."))
+            button(t("Собрать и поделиться ↗", "Build and share ↗"), style = BtnStyle.FILLED) { artifactsDialog(project) }
+        }
         listOf(
+            Triple("artifacts_md", t("Markdown — все артефакты (без ИИ)", "Markdown — all artifacts (no AI)"), "$base-artifacts.md"),
+            Triple("artifacts_json", t("JSON — все артефакты (без ИИ)", "JSON — all artifacts (no AI)"), "$base-artifacts.json"),
             Triple("csv_videos", t("CSV — видео", "CSV — videos"), "$base-videos.csv"),
             Triple("csv_comments", t("CSV — комментарии", "CSV — comments"), "$base-comments.csv"),
             Triple("json", t("JSON — весь проект", "JSON — full project"), "$base.json"),
@@ -981,8 +989,8 @@ class ProjectActivity : LumenBase() {
             c.button(label, style = BtnStyle.TONAL) {
                 pendingExport = kind
                 val mime = when (kind) {
-                    "json" -> "application/json"
-                    "md" -> "text/markdown"
+                    "json", "artifacts_json" -> "application/json"
+                    "md", "artifacts_md" -> "text/markdown"
                     "pdf", "graph_pdf", "chgraph_pdf", "dossier_pdf" -> "application/pdf"
                     "graph_png", "chgraph_png", "dossier_png" -> "image/png"
                     "insights_json", "clusters_json" -> "application/json"
@@ -1023,6 +1031,12 @@ class ProjectActivity : LumenBase() {
             }
             button(t("Составить досье (AI)", "Build dossier (AI)"), style = BtnStyle.FILLED) { dossierDialog() }
             shareRow(this, "dossier", "$base-dossier-$day")
+        }
+        c.card {
+            add(text(ctx, t("🗣 Языковая игра аудитории", "🗣 Language game of the audience"), Type.TITLE_M, bold = true), 0)
+            muted(t("Как говорит ниша: слова «своих», обороты, формулы названий, обращение, психолингвистика. По этому протоколу AI пишет сценарий видео, подкаста или SEO — здесь или в ИИ-приложении на телефоне.",
+                "How the niche speaks: insider words, phrases, title formulas, address, psycholinguistics. Using this protocol the AI writes a video or podcast script or SEO — here or in an AI app on the phone."))
+            button(t("Открыть", "Open"), style = BtnStyle.FILLED) { LangGameActivity.open(this@ProjectActivity, project.id) }
         }
         c.card {
             add(text(ctx, t("✍️ Свой отчёт (AI)", "✍️ Custom report (AI)"), Type.TITLE_M, bold = true), 0)

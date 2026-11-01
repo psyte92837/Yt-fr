@@ -21,6 +21,7 @@ object Export {
             "csv_comments" -> out.write(("﻿" + csvComments(projectId)).toByteArray())
             "json" -> out.write(Store.projectJson(projectId).toString(2).toByteArray())
             "md" -> out.write(markdown(projectId).toByteArray())
+            "artifacts_md", "artifacts_json" -> Artifacts.write(projectId, kind.endsWith("json"), out)
             "pdf" -> pdf(ctx, projectId, out)
             "voc_csv" -> out.write(("\uFEFF" + vocCsv(projectId)).toByteArray())
             "insights_json" -> out.write(org.json.JSONObject().put("insights", org.json.JSONArray(Seo.insights(projectId))).toString(2).toByteArray())

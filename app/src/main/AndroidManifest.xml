@@ -355,6 +355,11 @@
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".lumen.LangGameActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- notification tap → back to the screen it belongs to, in its own task (Nav.kt) -->
         <activity
             android:name=".lumen.NavRouter"

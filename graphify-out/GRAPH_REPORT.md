@@ -4,206 +4,198 @@
 - cluster-only mode — file stats not available
 
 ## Summary
-- 4494 nodes · 15149 edges · 171 communities (92 shown, 79 thin omitted)
-- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 1657 edges (avg confidence: 0.85)
+- 4708 nodes · 15997 edges · 163 communities (96 shown, 67 thin omitted)
+- Extraction: 89% EXTRACTED · 11% INFERRED · 0% AMBIGUOUS · INFERRED: 1779 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Community Hubs (Navigation)
-- Community 0: StudioActivity + StudioAuto (StudioActivity) — 136 симв.
-- Community 1: Ui + TtsActivity (Col) — 122 симв.
-- Community 2: ProjectActivity + Graph (t) — 100 симв.
-- Community 3: Seo + Voc (Seo) — 93 симв.
-- Community 4: BotActivity + BotCore (BotActivity) — 87 симв.
-- Community 5: Ideas + IdeasActivity (IdeasLogic) — 78 симв.
-- Community 6: LumenCoreTest + Llm (Test) — 68 симв.
-- Community 7: StudioTest + StudioCore (Studio) — 66 симв.
-- Community 8: Outbox + SendReviewActivity (SendGate) — 64 симв.
-- Community 9: VideoActivity + AiJournal (.dateTime) — 63 симв.
-- Community 10: Nav + NavTest (Nav) — 62 симв.
-- Community 11: Audit + AuditTest (.run) — 62 симв.
-- Community 12: StudioAuto + StudioDirect (SWord) — 61 симв.
-- Community 14: Recs + Core (.w) — 56 симв.
-- Community 15: StudioCuts + StudioCutsTest (StudioCuts) — 56 симв.
-- Community 13: AiStatsTest + AuditTest (assertequals) — 56 симв.
-- Community 16: Pains + CommentDigest (Pains) — 52 симв.
-- Community 17: StudioRender + StudioCore (StudioPainter) — 52 симв.
-- Community 18: KnowledgeMap + KnowledgeMapTest (KnowledgeMap.kt) — 51 симв.
-- Community 19: StudioAudioTest + StudioCore (StudioAudioTest) — 50 симв.
-- Community 20: Analysis + Llm (Project) — 49 симв.
-- Community 21: TtsService (TtsService) — 46 симв.
-- Community 22: BotService + UpdateService (BotService.kt) — 45 симв.
-- Community 23: Style + StyleTest (.measure) — 44 симв.
-- Community 24: StudioChar + StudioCharTest (.parse) — 43 симв.
-- Community 25: BotPostsTab + ChannelActivity (linearlayout) — 41 симв.
-- Community 26: HomeActivities + Backup (.render) — 41 симв.
-- Community 27: BotCoreTest + BotCore (BotCoreTest) — 41 симв.
-- Community 28: BotJs (BotRuntime) — 40 симв.
-- Community 29: StudioCartoon + StudioCartoonTest (SChar) — 40 симв.
-- Community 30: TtsActivity + Tts (TtsActivity) — 40 симв.
-- Community 31: Channels + LumenCoreTest (.run) — 39 симв.
-- Community 32: StudioExplain + StudioRender (StudioPlan) — 39 симв.
-- Community 33: StudioScheme + StudioSchemeTest (StudioScheme) — 39 симв.
-- Community 34: BotPostsCore + BotPostsTest (PostCore) — 37 симв.
-- Community 35: BotService + BotsActivity (BotManager) — 36 симв.
-- Community 36: StudioCharEditor + StudioChar (StudioCharEditor) — 36 симв.
-- Community 37: Models + LumenCoreTest (.comments) — 35 симв.
-- Community 38: Services + Outbox (Services.kt) — 35 симв.
-- Community 39: StudioRender + StudioCutsLoad (StudioRender.kt) — 35 симв.
-- Community 40: BotService + BotStore (BotWorker) — 34 симв.
-- Community 41: Dossier + ReportsTest (Dossier) — 34 симв.
-- Community 42: Tts + BotPostsTab (EdgeTts) — 33 симв.
-- Community 43: YouTube + Models (.collect) — 33 симв.
-- Community 44: Core + StudioActivity (StudioActivity.kt) — 33 симв.
-- Community 45: Media (Media.kt) — 33 симв.
-- Community 46: StudioCore + StudioTest (SScene) — 33 симв.
-- Community 47: Topic + Watch (.firstObject) — 32 симв.
-- Community 48: TtsService + StudioService (TtsService.kt) — 32 симв.
-- Community 49: StudioSchemeStyle + SchemeStylesTest (SchemeStyles) — 31 симв.
-- Community 50: Harvest + HarvestTest (HarvestSpec) — 30 симв.
-- Community 51: StudioTemplatesActivity + StudioActivity (StudioTemplatesActivity) — 30 симв.
-- Community 52: Watch + WatchDigestTest (WatchDigest) — 30 симв.
-- Community 53: AiStats + AiStatsTest (AiStats) — 28 симв.
-- Community 54: BotCore + BotCoreTest (BotCore.kt) — 28 симв.
-- Community 55: BotPostsCore + BotPostsTest (PostsData) — 28 симв.
-- Community 56: GraphReport + GraphAlgo (.blocks) — 28 симв.
-- Community 57: StudioStock + StudioDirect (StudioAspect) — 28 симв.
-- Community 58: StudioDirect + Style (jsonarray) — 26 симв.
-- Community 59: Analysis + LumenCoreTest (Video) — 26 симв.
-- Community 60: BotPostsTab + BotPosts (.build) — 26 симв.
-- Community 61: SettingsActivity + Log (.muted) — 26 симв.
-- Community 62: StudioTemplatesTest + StudioTemplates (StudioTemplatesTest) — 26 симв.
-- Community 63: TtsPoolTest + Tts (.render) — 26 симв.
-- Community 64: Diagram (Diagram) — 25 симв.
-- Community 65: StudioService + Services (StudioService) — 25 симв.
-- Community 66: StudioCartoon + StudioActivity (StudioToonArt) — 25 симв.
-- Community 67: StudioDirectTest + StudioDirect (Test) — 25 симв.
-- Community 68: BotTelegram + BotCore (TgApi) — 23 симв.
-- Community 69: KnowledgeMapView (KnowledgeMapView) — 23 симв.
-- Community 70: Log + UpdateService (.i) — 23 симв.
-- Community 71: Text + TextTest (Text.kt) — 23 симв.
-- Community 72: Tts + EdgeTtsTest (Tts.kt) — 23 симв.
-- Community 73: BotService + BotMiniApp (BotAi) — 22 симв.
-- Community 75: Ui + ProjectActivity (Ic) — 22 симв.
-- Community 76: ReportKit (ReportKit) — 22 симв.
-- Community 77: StudioCore + StudioParTest (.analyseEdge) — 22 симв.
-- Community 78: StudioDrafts + StudioDraftsTest (StudioDrafts) — 22 симв.
-- Community 74: ReportKit + GraphReport (.card) — 22 симв.
-- Community 79: CustomReport + Export (ReportKit.kt) — 21 симв.
-- Community 80: Graph (Graph.kt) — 21 симв.
-- Community 81: StudioCore + StudioMusic (StudioMusicCatalog) — 21 симв.
-- Community 82: StudioDirect + StudioDirectTest (StudioCore.kt) — 21 симв.
-- Community 83: Tasks (BgTasks) — 21 симв.
-- Community 84: BotMiniApp + Browser (BotMiniApp.kt) — 20 симв.
-- Community 85: Browser (.finishRec) — 20 симв.
-- Community 86: Harvest + HarvestActivity (.videos) — 20 симв.
-- Community 87: Quick (Quick.kt) — 20 симв.
-- Community 88: StudioLayers + StudioLayersTest (StudioLayers) — 20 симв.
-- Community 89: TaskHub + Tasks (.dismiss) — 20 симв.
-- Community 90: Tasks + TaskHealthTest (TaskHealth) — 20 симв.
-- Community 91: BotStore (Bots) — 19 симв.
-- Community 92: Browser (Browser.kt) — 19 симв.
-- Community 93: Watch + WatchTest (WatchTest) — 19 симв.
-- Community 94: DiagramActivity + BotActivity (BotActivity.kt) — 18 симв.
-- Community 95: Export + Text (.videos) — 18 симв.
-- Community 100: StudioDirect + StudioRender (.characters) — 17 симв.
-- Community 101: StudioRender + StudioSchemeStyle (SchemeStyle) — 17 симв.
-- Community 102: UpdateService + Updates (.check) — 17 симв.
-- Community 103: YtFallback + YtFallbackTest (YtFallbackTest) — 17 симв.
-- Community 96: BotPosts + BotPostsCore (.runPlan) — 17 симв.
-- Community 97: DiagramDraw (DiagramDraw) — 17 симв.
-- Community 98: EdgeGec (EdgeGec) — 17 симв.
-- Community 99: Help + TtsShare (intent) — 17 симв.
-- Community 104: AskAiTest + AskAi (AskAi) — 16 симв.
-- Community 105: Browser (BrowserActivity) — 16 симв.
-- Community 106: BrowserUiTest + Browser (BrowserUiTest) — 16 симв.
-- Community 107: Store + Diagram (Store) — 16 симв.
-- Community 108: StudioCharEditor + StudioCartoon (StudioCharEditor.kt) — 16 симв.
-- Community 109: Tasks (Tasks.kt) — 16 симв.
-- Community 110: EdgeTtsTest (EdgeTtsTest) — 16 симв.
-- Community 112: AuditActivity + Audit (.report) — 15 симв.
-- Community 113: BotJs (BotHost) — 15 симв.
-- Community 114: KeyVault + StudioMusic (KeyVault.kt) — 15 симв.
-- Community 115: TasksTest + Tasks (TasksTest) — 15 симв.
-- Community 116: StudioRender (.at) — 15 симв.
-- Community 117: Tasks (ActivityLifecycleCallbacks) — 15 симв.
-- Community 111: DossierReport + GraphReport (DossierReport.kt) — 15 симв.
-- Community 118: Tts + BotCore (.error) — 14 симв.
-- Community 119: HarvestActivity (harvestSetup) — 14 симв.
-- Community 120: StudioAssist + StudioAssistTest (.parse) — 14 симв.
-- Community 121: StudioCore + StudioMusicRetryTest (.retrying) — 14 симв.
-- Community 122: Updates + UpdatesTest (ExtractorHealth) — 14 симв.
-- Community 123: DiagramTest + Diagram (DiagramTest) — 13 симв.
-- Community 124: Media + MediaTest (videoMenu) — 13 симв.
-- Community 125: StudioDirect + StudioMusic (.fetch) — 13 симв.
-- Community 126: Updates + UpdatesTest (UpdatesTest) — 13 симв.
-- Community 127: AiJournal (AiJournal) — 12 симв.
-- Community 128: DiagramDraw (DiagramDraw.kt) — 12 симв.
-- Community 129: StudioTemplates + StudioTemplatesTest (StudioTemplates.kt) — 12 симв.
-- Community 130: StudioTemplates (EditTpl) — 12 симв.
-- Community 131: TtsRetryTest + Tts (TtsRetry) — 12 симв.
-- Community 132: Ui + GradientThemesTest (Palette) — 12 симв.
-- Community 133: ParTest + StudioMusicRetryTest (TtsPoolTest.kt) — 12 симв.
-- Community 134: StudioAutoTest (StudioAutoTest) — 12 симв.
-- Community 135: Backup + ProjectActivity (AutoBackup) — 11 симв.
-- Community 136: BotMiniApp (GhPages) — 11 симв.
-- Community 137: BotCore + BotCoreTest (MiniApp) — 10 симв.
-- Community 138: BotsActivity + BotStore (.render) — 10 симв.
-- Community 139: BotStore (BotDb) — 10 симв.
-- Community 140: Charts (BarChartView) — 10 симв.
-- Community 141: Diagram + DiagramActivity (schemesTab) — 10 симв.
-- Community 142: DiagramActivity (DiagramActivity) — 10 симв.
-- Community 143: KeyTextTest + KeyText (.clean) — 10 симв.
-- Community 144: StudioRender + StudioAuto (.code) — 10 симв.
-- Community 146: CustomReportTest (CustomReportTest) — 10 симв.
-- Community 147: LiveYouTubeTest (LiveYouTubeTest.kt) — 10 симв.
-- Community 145: StudioTemplatesActivity (StudioTemplatesActivity.kt) — 10 симв.
-- Community 148: StudioStockTest + StudioStock (StudioStockTest) — 9 симв.
-- Community 149: ProgressTextTest + Ui (.fraction) — 9 симв.
-- Community 150: Updates + LiveYouTubeTest (ProbeResult) — 9 симв.
-- Community 151: BotCore (Cmd) — 8 симв.
-- Community 153: HelpMapTest + Help (HelpMapTest.kt) — 8 симв.
-- Community 154: StudioTemplates (.factor) — 8 симв.
-- Community 155: StudioTemplates + StudioTemplatesTest (StudioVideoTpl) — 8 симв.
-- Community 156: StudioTemplates + StudioTemplatesTest (.compile) — 8 симв.
-- Community 157: TaskHub + Tasks (.render) — 8 симв.
-- Community 152: Harvest (.toJson) — 8 симв.
-- Community 158: Diagram (DKind) — 7 симв.
-- Community 159: DossierReport (.blocks) — 7 симв.
-- Community 160: StudioBeatsTest + StudioCore (.beatWords) — 7 симв.
-- Community 161: BotCoreTest (NoopBotHost) — 7 симв.
-- Community 162: Quick (QuickConfig) — 6 симв.
-- Community 163: StudioActivity (OnSeekBarChangeListener) — 6 симв.
-- Community 164: StudioChar (StudioCharImage) — 6 симв.
-- Community 165: StudioTemplates + StudioTemplatesTest (MotionTpl) — 6 симв.
-- Community 166: BackupTest + Backup (BackupTest.kt) — 5 симв.
-- Community 167: StudioCartoon (.get) — 5 симв.
-- Community 168: WizardStepsTest (WizardStepsTest) — 5 симв.
-- Community 169: Services (.summary) — 3 симв.
-- Community 170: StudioMusic (StudioMusic.kt) — 3 симв.
+- Community 0: StudioActivity + StudioAuto (StudioActivity) — 126 симв.
+- Community 1: Audit + AuditActivity (.report) — 100 симв.
+- Community 2: StudioTest + StudioCore (Studio) — 99 симв.
+- Community 3: Ui + TtsActivity (Col) — 97 симв.
+- Community 4: Pains + KnowledgeMap (KnowledgeMap.kt) — 87 симв.
+- Community 5: StudioAuto + StudioDirect (SWord) — 83 симв.
+- Community 6: Ideas + IdeasActivity (IdeasLogic) — 81 симв.
+- Community 7: StudioMixActivity + StudioMix (StudioMixActivity) — 81 симв.
+- Community 8: Updates + UpdateService (.updates) — 80 симв.
+- Community 9: Harvest + HarvestTest (.render) — 77 симв.
+- Community 10: LumenCoreTest + Llm (Test) — 67 симв.
+- Community 11: AiStats + StudioDrafts (file) — 63 симв.
+- Community 12: Recs + ParTest (.w) — 62 симв.
+- Community 14: Nav + NavTest (Nav) — 61 симв.
+- Community 15: StudioMixActivity + KnowledgeMapActivity (StudioMixActivity.kt) — 61 симв.
+- Community 13: StudioCartoon + AuditTest (assertequals) — 61 симв.
+- Community 16: StudioDirectTest + StudioDirect (StudioPlan) — 59 симв.
+- Community 17: StudioRender + StudioCore (StudioPainter) — 59 симв.
+- Community 18: Analysis + LangGameActivity (Project) — 55 симв.
+- Community 19: BotActivity + BotService (.async) — 55 симв.
+- Community 20: Quick + YouTube (.run) — 55 симв.
+- Community 21: LangGame + LangGameTest (LangGame) — 53 симв.
+- Community 22: Outbox + OutgoingTest (SendGate) — 51 симв.
+- Community 23: StudioCuts + StudioCutsTest (SClip) — 51 симв.
+- Community 24: TtsActivity + TtsService (TtsActivity) — 51 симв.
+- Community 25: LangGameActivity + ProjectActivity (.err) — 49 симв.
+- Community 26: BotService + BotsActivity (BotService.kt) — 46 симв.
+- Community 27: ReportKit + GraphReport (ReportKit) — 44 симв.
+- Community 28: StudioChar + StudioCharTest (.parse) — 44 симв.
+- Community 29: Store + Export (.project) — 43 симв.
+- Community 30: StudioAudioTest + StudioCore (StudioAudioTest) — 43 симв.
+- Community 31: TtsService (TtsService) — 42 симв.
+- Community 32: VideoActivity + Core (.dateTime) — 40 симв.
+- Community 33: StudioScheme + StudioSchemeTest (SScheme) — 40 симв.
+- Community 34: Ui + Help (LumenBase) — 39 симв.
+- Community 35: Diagram (Diagram) — 39 симв.
+- Community 36: StudioCartoon + StudioCartoonTest (SChar) — 39 симв.
+- Community 37: Media + AskAi (t) — 38 симв.
+- Community 38: Tts + BotPostsTab (EdgeTts) — 38 симв.
+- Community 39: Tasks + Core (BgTasks) — 38 симв.
+- Community 40: Channels + LumenCoreTest (ChannelData) — 37 симв.
+- Community 41: Models + LumenCoreTest (Comment) — 35 симв.
+- Community 42: StudioCharEditor + StudioChar (StudioCharEditor) — 35 симв.
+- Community 43: Dossier + ReportsTest (Dossier) — 34 симв.
+- Community 44: Watch + WatchDigestTest (.runOnce) — 34 симв.
+- Community 45: StudioService (StudioService) — 33 симв.
+- Community 46: BotCore + BotCoreTest (BotCore.kt) — 32 симв.
+- Community 47: HomeActivities + WizardStepsTest (HomeActivities.kt) — 32 симв.
+- Community 48: Media (Media.kt) — 32 симв.
+- Community 49: StudioSchemeStyle + SchemeStylesTest (SchemeStyle) — 32 симв.
+- Community 50: GraphAlgo + CustomReport (DossierReport.kt) — 31 симв.
+- Community 51: Analysis + LumenCoreTest (Video) — 31 симв.
+- Community 52: BotCore + BotService (BotAi) — 31 симв.
+- Community 53: Services + UpdateService (UpdateService.kt) — 31 симв.
+- Community 54: Style + StyleTest (StyleMath) — 31 симв.
+- Community 55: Ui + StudioTemplatesActivity (.muted) — 30 симв.
+- Community 56: TaskHub + Tasks (.rows) — 30 симв.
+- Community 57: SettingsActivity + Style (toast) — 30 симв.
+- Community 58: DiagramDraw (DiagramDraw.kt) — 30 симв.
+- Community 59: Seo + SeoTab (Seo) — 30 симв.
+- Community 60: BotCoreTest (BotCoreTest) — 30 симв.
+- Community 61: DiagramActivity + BotActivity (BotActivity.kt) — 29 симв.
+- Community 62: BotStore + BotsActivity (Bots) — 29 симв.
+- Community 63: Services + TaskHub (.builder) — 29 симв.
+- Community 64: GraphReport + GraphAlgo (.blocks) — 28 симв.
+- Community 65: Voc + SeoGraphTest (.extractInsights) — 27 симв.
+- Community 66: StudioRender + StudioAuto (.at) — 27 симв.
+- Community 67: EdgeTtsTest + Tts (EdgeTtsTest) — 27 симв.
+- Community 68: Browser (Browser.kt) — 26 симв.
+- Community 69: StudioCartoon + StudioChar (StudioToonArt) — 26 симв.
+- Community 70: TtsPoolTest + Tts (.render) — 26 симв.
+- Community 71: BotJs (BotRuntime) — 25 симв.
+- Community 72: BotPostsCore + BotPostsTest (PostsData) — 25 симв.
+- Community 73: BotTelegram + BotCore (TgApi) — 24 симв.
+- Community 74: BotPostsCore + BotPostsTest (PostCore) — 24 симв.
+- Community 75: ProjectActivity + Store (ProjectActivity) — 24 симв.
+- Community 76: StudioActivity (StudioActivity.kt) — 24 симв.
+- Community 77: StudioTemplatesActivity (StudioTemplatesActivity) — 24 симв.
+- Community 78: Text + TextTest (.top) — 24 симв.
+- Community 79: DiagramTest + Diagram (schemesTab) — 22 симв.
+- Community 80: Ui + ProjectActivity (Ic) — 22 симв.
+- Community 81: StudioCore + StudioMusic (StudioMusicCatalog) — 22 симв.
+- Community 82: Tts + StudioCore (Tts.kt) — 22 симв.
+- Community 83: BotMiniApp + Browser (BotMiniApp.kt) — 21 симв.
+- Community 84: Browser (BrowserActivity) — 21 симв.
+- Community 85: StudioDirect + StudioDirectTest (StudioCore.kt) — 21 симв.
+- Community 87: StudioRender (StudioRender.kt) — 21 симв.
+- Community 88: Tasks + TaskHealthTest (TaskHealth) — 21 симв.
+- Community 86: StudioRender + StudioCore (Paint) — 21 симв.
+- Community 89: AiJournal + TopicActivity (.render) — 20 симв.
+- Community 90: BotCore + BotCoreTest (Tg) — 20 симв.
+- Community 91: BotPostsTab + BotPosts (.build) — 20 симв.
+- Community 92: Graph (Graph.kt) — 20 симв.
+- Community 93: StudioActivity + StudioDirect (.onCreate) — 20 симв.
+- Community 94: StudioLayers + StudioLayersTest (StudioLayers) — 20 симв.
+- Community 95: StudioStock + StudioMusic (StudioStock) — 20 симв.
+- Community 96: Topic + TopicFilterTest (.ensure) — 20 симв.
+- Community 100: StudioDirect + StudioStock (StudioDirect.kt) — 19 симв.
+- Community 101: StudioTemplatesTest + StudioTemplates (StudioTemplatesTest) — 19 симв.
+- Community 97: Artifacts + ArtifactsTest (Artifacts) — 19 симв.
+- Community 98: BotActivity + BotCore (SimHost) — 19 симв.
+- Community 99: Seo + TopicActivity (.render) — 19 симв.
+- Community 102: Watch + WatchTest (WatchTest) — 18 симв.
+- Community 103: Log + Llm (.i) — 18 симв.
+- Community 104: SendReviewActivity (SendReviewActivity) — 18 симв.
+- Community 105: StudioAssist + StudioAssistTest (.autoDialog) — 18 симв.
+- Community 106: BotService + BotStore (Host) — 17 симв.
+- Community 107: Core + Log (Core.kt) — 17 симв.
+- Community 108: EdgeGec (EdgeGec) — 17 симв.
+- Community 109: StudioCore + StudioParTest (.ttsCacheKeyAndWords) — 17 симв.
+- Community 110: TtsService (TtsService.kt) — 17 симв.
+- Community 111: Backup + ProjectActivity (AutoBackup) — 16 симв.
+- Community 112: BotService + BotStore (BotWorker) — 16 симв.
+- Community 113: CommentDigest + CommentDigestTest (CommentDigest) — 16 симв.
+- Community 114: DiagramActivity (DiagramActivity) — 16 симв.
+- Community 115: KnowledgeMapView (KnowledgeMapView) — 16 симв.
+- Community 116: BotJs (BotHost) — 15 симв.
+- Community 117: BotJs (.install) — 15 симв.
+- Community 118: BotPosts + BotStore (.runPlan) — 15 симв.
+- Community 119: Browser + BrowserUiTest (BrowserUiTest) — 15 симв.
+- Community 120: StudioCharEditor + StudioCartoon (StudioCharEditor.kt) — 15 симв.
+- Community 121: StudioMusicRetryTest + StudioCore (StudioMusicRetryTest.kt) — 15 симв.
+- Community 122: Tasks (ActivityLifecycleCallbacks) — 15 симв.
+- Community 123: KeyVault (KeyVault.kt) — 14 симв.
+- Community 124: Style + StyleTest (Style.kt) — 14 симв.
+- Community 125: TopicActivity (alertdialog) — 13 симв.
+- Community 126: TtsShare + Artifacts (TtsShareBase) — 13 симв.
+- Community 127: BotPostsTest + BotPostsCore (BotPostsTest) — 13 симв.
+- Community 128: StudioTemplates (EditTpl) — 13 симв.
+- Community 129: Ui + GradientThemesTest (Palette) — 13 симв.
+- Community 130: AskAiTest + AskAi (AskAi) — 12 симв.
+- Community 132: StudioDirect + StudioRender (.characters) — 12 симв.
+- Community 133: StudioTemplates + StudioTemplatesTest (StudioTemplates.kt) — 12 симв.
+- Community 134: TtsRetryTest + Tts (TtsRetry) — 12 симв.
+- Community 131: StudioCutsLoad (StudioCutsLoad.kt) — 12 симв.
+- Community 135: BotMiniApp (GhPages) — 11 симв.
+- Community 136: BotPostsTab (viewgroup) — 11 симв.
+- Community 137: TasksTest + Tasks (TasksTest) — 11 симв.
+- Community 138: BotPosts + BotPostsCore (.update) — 10 симв.
+- Community 139: KeyTextTest + KeyText (.clean) — 10 симв.
+- Community 140: CustomReportTest (CustomReportTest) — 10 симв.
+- Community 141: Browser (WebChromeClient) — 9 симв.
+- Community 143: StudioCutsLoad + StudioCuts (.fetch) — 9 симв.
+- Community 144: StudioStockTest + StudioStock (StudioStockTest) — 9 симв.
+- Community 145: ProgressTextTest + Ui (.fraction) — 9 симв.
+- Community 142: KnowledgeMapView (KnowledgeMapView.kt) — 9 симв.
+- Community 146: BotCore (Cmd) — 8 симв.
+- Community 147: StudioTemplates (.factor) — 8 симв.
+- Community 148: StudioTemplates + StudioTemplatesTest (StudioVideoTpl) — 8 симв.
+- Community 149: StudioTemplates + StudioTemplatesTest (.compile) — 8 симв.
+- Community 151: DossierReport (.blocks) — 7 симв.
+- Community 152: HelpMapTest + Help (HelpMapTest.kt) — 7 симв.
+- Community 150: AudienceTab (audienceTab) — 7 симв.
+- Community 153: StudioChar (StudioCharImage) — 6 симв.
+- Community 154: MediaTest (MediaTest) — 6 симв.
+- Community 155: BackupTest + Backup (BackupTest.kt) — 5 симв.
+- Community 157: StudioCartoon (.get) — 5 симв.
+- Community 158: StudioTemplates (MotionTpl) — 5 симв.
+- Community 156: LlmParse + StudioCuts (jsonarray) — 5 симв.
+- Community 159: Ui (OnItemSelectedListener) — 4 симв.
+- Community 161: StudioMusic (.decode) — 4 симв.
+- Community 160: UpdatesTest (UpdatesTest.kt) — 4 симв.
+- Community 162: BotsActivity (.onCreate) — 3 симв.
 
 ## God Nodes (most connected - your core abstractions)
-1. `t()` - 502 edges
-2. `StudioActivity` - 158 edges
-3. `toast()` - 135 edges
-4. `Col` - 106 edges
-5. `Video` - 97 edges
-6. `StudioPainter` - 74 edges
-7. `Project` - 71 edges
-8. `SWord` - 70 edges
-9. `Studio` - 67 edges
-10. `btn()` - 66 edges
+1. `t()` - 535 edges
+2. `StudioActivity` - 159 edges
+3. `toast()` - 148 edges
+4. `Col` - 112 edges
+5. `Video` - 101 edges
+6. `Project` - 77 edges
+7. `SWord` - 76 edges
+8. `StudioPainter` - 74 edges
+9. `btn()` - 71 edges
+10. `Studio` - 67 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `render()` --calls--> `Col`  [INFERRED]
-  app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt → app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
-- `harvestSetup()` --calls--> `Col`  [INFERRED]
-  app/src/main/java/org/schabi/newpipe/lumen/HarvestActivity.kt → app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
-- `charLibrary()` --calls--> `Col`  [INFERRED]
-  app/src/main/java/org/schabi/newpipe/lumen/StudioCharEditor.kt → app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
-- `StudioCharEditor` --calls--> `Col`  [INFERRED]
-  app/src/main/java/org/schabi/newpipe/lumen/StudioCharEditor.kt → app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
-- `KnowledgeMapActivity` --inherits--> `LumenBase`  [EXTRACTED]
-  app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMapActivity.kt → app/src/main/java/org/schabi/newpipe/lumen/Ui.kt
+- `recsTab()` --calls--> `BarChartView`  [INFERRED]
+  app/src/main/java/org/schabi/newpipe/lumen/RecsTab.kt → app/src/main/java/org/schabi/newpipe/lumen/Charts.kt
+- `BotWorker` --calls--> `AiLimiter`  [INFERRED]
+  app/src/main/java/org/schabi/newpipe/lumen/BotService.kt → app/src/main/java/org/schabi/newpipe/lumen/BotCore.kt
+- `BotActivity` --calls--> `NoopBotHost`  [INFERRED]
+  app/src/main/java/org/schabi/newpipe/lumen/BotActivity.kt → app/src/main/java/org/schabi/newpipe/lumen/BotJs.kt
+- `KnowledgeMapTest` --calls--> `RecNode`  [INFERRED]
+  app/src/test/java/org/schabi/newpipe/lumen/KnowledgeMapTest.kt → app/src/main/java/org/schabi/newpipe/lumen/Recs.kt
+- `ToonPreview` --calls--> `StudioToonArt`  [INFERRED]
+  app/src/main/java/org/schabi/newpipe/lumen/StudioCharEditor.kt → app/src/main/java/org/schabi/newpipe/lumen/StudioCartoon.kt
 
 ## Import Cycles
 - None detected.
@@ -212,6 +204,7 @@
 - `AiJournal.kt` (16): .render():141, .list():79, AiJournal:17, .full():113, Entry:22, .record():54
 - `AiStats.kt` (19): AiStats:14, Group:28, Rec:15, .aggregate():73, .importJournal():46, .toJson():61
 - `Analysis.kt` (32): .requireProvider():141, AiTasks:133, .videoSummary():173, .projectSummary():222, .sentiment():243, .chat():279
+- `Artifacts.kt` (14): Artifacts:18, .markdown():51, Source:32, .source():156, .videoJson():123, .json():142
 - `AskAi.kt` (11): .append():60, askAiSheet():111, AskAi.kt:1, askAiBar():65, AskAi:18, listen():99
 - `AudienceTab.kt` (5): audienceTab():30, insightCard():164, AudienceTab.kt:1, confidenceLabel():23, vocLabel():10
 - `Audit.kt` (50): .run():517, AuditRun:106, Audit.kt:1, AuditMath:219, .report():263, .markdown():401
@@ -224,9 +217,9 @@
 - `BotPosts.kt` (20): .runPlan():150, PostEngine:66, .update():27, .publish():77, .tick():212, .api():72
 - `BotPostsCore.kt` (50): PostCore:144, PostsData:108, BotPostsCore.kt:1, PostPlan:56, .parseFeed():223, FeedItem:141
 - `BotPostsTab.kt` (27): .build():67, BotPostsTab:17, .planCard():242, .postCard():198, .work():47, .editPlan():432
-- `BotService.kt` (78): BotService.kt:1, BotWorker:330, Host:605, .run():349, .owner():569, .handle():528
-- `BotStore.kt` (36): Bots:15, .update():55, .get():42, .list():31, .token():72, .delete():63
-- `BotTelegram.kt` (17): TgApi:14, .call():26, .post():89, .send():125, BotTelegram.kt:1, .getUpdates():62
+- `BotService.kt` (78): BotService.kt:1, BotWorker:330, Host:605, .run():349, .handle():528, .owner():569
+- `BotStore.kt` (36): Bots:15, .update():55, .get():42, .token():72, .list():31, .delete():63
+- `BotTelegram.kt` (17): TgApi:14, .call():26, .post():89, .send():125, BotTelegram.kt:1, .edit():146
 - `BotsActivity.kt` (19): .render():40, .render():168, BotNewActivity:148, .create():228, BotsActivity.kt:1, .save():268
 - `Browser.kt` (47): Browser.kt:1, BrowserActivity:206, .onCreate():223, .finishRec():489, WebChromeClient:258, WebViewClient:234
 - `ChannelActivity.kt` (6): render():55, ChannelActivity.kt:1, load():40, onCreate():23, fold():35, folded():33
@@ -241,13 +234,13 @@
 - `Dossier.kt` (29): Dossier:36, .runChannel():222, .runOverview():242, .run():262, .channelData():163, .group():144
 - `DossierReport.kt` (10): DossierReport.kt:1, .blocks():39, VideoBlock:162, DossierReport:27, ChannelHeader:147, .write():28
 - `EdgeGec.kt` (15): EdgeGec:11, .init():76, .sha256():93, .cs64():120, .expand():66, .rounds():53
-- `Export.kt` (12): .markdown():126, .write():18, Export:17, .pdf():219, Export.kt:1, .vocCsv():69
-- `Graph.kt` (19): .build():246, Graph.kt:1, GraphView:65, .showNode():349, GraphActivity:224, .exportMenu():306
+- `Export.kt` (12): .markdown():127, .write():18, Export:17, .pdf():220, Export.kt:1, .vocCsv():70
+- `Graph.kt` (19): .build():246, Graph.kt:1, GraphView:65, GraphActivity:224, .showNode():349, .exportMenu():306
 - `GraphAlgo.kt` (17): .story():249, .keywords():119, GraphStats:147, .matches():121, GraphAlgo.kt:1, .of():183
 - `GraphReport.kt` (14): .blocks():182, GraphReport.kt:1, GraphReport:24, Picture:69, Input:25, .input():57
 - `Harvest.kt` (42): HarvestSpec:21, .videos():378, HarvestRules:153, HarvestItem:67, HarvestState:105, Harvest.kt:1
 - `HarvestActivity.kt` (16): .render():235, harvestSetup():49, HarvestActivity.kt:1, HarvestActivity:203, startHarvest():21, .videoRow():321
-- `Help.kt` (11): .render():355, Help.kt:1, .open():340, HelpActivity:338, .onCreate():348, .topics():60
+- `Help.kt` (11): .render():357, Help.kt:1, .open():342, HelpActivity:340, .topics():62, .onCreate():350
 - `HomeActivities.kt` (34): .render():597, .render():149, HomeActivities.kt:1, .ideasCard():258, SimpleWatcher:94, WizardActivity:387
 - `Ideas.kt` (39): IdeasLogic:46, .apply():262, IdeasConfig:19, Ideas:184, .configs():192, .digest():331
 - `IdeasActivity.kt` (20): .dashboard():219, IdeasActivity:16, .render():77, .setup():127, .list():94, .start():173
@@ -256,72 +249,77 @@
 - `KnowledgeMap.kt` (21): KnowledgeMap.kt:1, KInput:39, aspects():67, video():232, KNode:19, group():159
 - `KnowledgeMapActivity.kt` (3): KnowledgeMapActivity.kt:1, onCreate():32, KnowledgeMapActivity:19
 - `KnowledgeMapView.kt` (16): KnowledgeMapView:29, KnowledgeMapView.kt:1, .onDraw():157, .hit():245, .setLayout():68, .cx():120
-- `Llm.kt` (31): .active():60, .complete():132, .fill():372, Provider:15, .get():362, LlmException:71
+- `LangGame.kt` (38): LangGame:22, .analyse():238, Term:109, .titles():179, Kind:326, .address():203
+- `LangGameActivity.kt` (25): .render():201, LangGameActivity:176, .read():89, LangGameData:32, .brief():104, .build():260
+- `Llm.kt` (31): .active():60, .complete():132, .fill():373, Provider:15, LlmException:71, .get():363
 - `LlmParse.kt` (7): .openAi():22, LlmParse:11, .anthropic():45, .gemini():60, .errorMessage():12, .models():85
 - `Log.kt` (20): .w():69, .i():68, L:21, .e():70, .report():167, .write():78
 - `Media.kt` (20): Media.kt:1, MediaAction:32, videoMenu():75, runMedia():63, mediaBtn():90, MediaActivity:98
 - `Models.kt` (35): Video:258, Project:192, AiResult:348, Comment:327, SearchFilters:19, Models.kt:1
-- `Nav.kt` (36): Nav:31, .plan():69, .pending():153, .show():166, Nav.kt:1, ActivityLifecycleCallbacks:100
-- `Outbox.kt` (35): SendGate:117, Outgoing:19, .assemble():42, .review():190, .show():230, .blocks():25
+- `Nav.kt` (36): Nav:31, .plan():69, .show():166, .pending():153, Nav.kt:1, ActivityLifecycleCallbacks:100
+- `Outbox.kt` (35): SendGate:117, Outgoing:19, .assemble():42, .review():190, .blocks():25, .show():230
 - `OverviewTabs.kt` (7): overviewTab():10, channelsTab():168, painsCard():255, digestCard():338, sharePains():328, channelRows():148
 - `Pains.kt` (24): Pains:16, .parse():102, .ai():239, .projectMessages():231, .write():267, .local():71
-- `ProjectActivity.kt` (39): ProjectActivity:22, .render():143, .aiTab():881, .analyticsTab():717, .reportsBlock():1003, .settingsTab():1218
+- `ProjectActivity.kt` (39): ProjectActivity:22, .render():143, .aiTab():881, .analyticsTab():717, .reportsBlock():1011, .settingsTab():1232
 - `Quick.kt` (28): .run():178, Quick.kt:1, .summary():128, .classify():23, chooseLinkAction():478, .start():450
 - `Recs.kt` (41): RecNode:15, RecEngine:153, RecGraph:69, .load():117, Ctx:156, .run():328
 - `RecsTab.kt` (5): recsTab():37, recRow():276, RecsTab.kt:1, startRecs():15, state():35
 - `ReportKit.kt` (38): ReportKit:34, .paint():62, ReportKit.kt:1, Block:57, .card():89, .fill():69
 - `SendReviewActivity.kt` (16): SendReviewActivity:14, .render():89, .answer():54, .rules():233, .blockCard():169, .refreshSummary():77
-- `Seo.kt` (53): Seo:135, .aiJson():179, .extractInsights():270, .qualify():513, .ideas():595, .keywordResearch():423
+- `Seo.kt` (53): Seo:135, .aiJson():179, .extractInsights():270, .qualify():513, .keywordResearch():423, .ideas():595
 - `SeoTab.kt` (2): seoTab():10, SeoTab.kt:1
 - `Services.kt` (30): .runOnce():386, Services.kt:1, .builder():49, .onStartCommand():128, .channels():35, .apply():366
 - `SettingsActivity.kt` (20): .updates():591, SettingsActivity:16, .render():54, .logs():519, .backup():405, .usage():97
-- `Store.kt` (26): .project():50, .videos():73, Store:21, .save():55, .writeFile():128, .readFile():123
-- `StudioActivity.kt` (143): StudioActivity:209, .render():512, .videoCard():1022, .directBy():2752, .analyseCard():907, .direct():2818
-- `StudioAssist.kt` (11): .parse():54, .summary():66, StudioAssist.kt:1, StudioAssist:22, .presets():23, .castRule():49
+- `Store.kt` (26): .project():50, .videos():73, Store:21, .writeFile():128, .save():55, .comments():139
+- `StudioActivity.kt` (144): StudioActivity:209, .render():533, .videoCard():1044, .directBy():2774, .analyseCard():929, .direct():2840
+- `StudioAssist.kt` (11): .parse():54, StudioAssist.kt:1, StudioAssist:22, .presets():23, .summary():66, .castRule():49
 - `StudioAuto.kt` (40): .scene():122, .split():83, StudioCompact:289, .row():335, .direct():245, StudioAuto.kt:1
 - `StudioCartoon.kt` (54): SChar:32, StudioToon:63, StudioToonArt:403, .drawParts():446, StudioCartoon.kt:1, ToonPose:45
 - `StudioChar.kt` (33): .parse():373, ToonParts:19, ToonImage:46, StudioCharProto:311, StudioParts:62, .normalize():162
 - `StudioCharEditor.kt` (38): StudioCharEditor:139, .build():194, StudioCharEditor.kt:1, .runAi():501, .copy():595, .facePoints():404
 - `StudioCore.kt` (101): SWord:22, Studio:85, SScene:55, Span:73, SScript:70, SItem:25
-- `StudioCuts.kt` (29): StudioCuts:46, SClip:18, .parseSidx():134, StudioCuts.kt:1, .addHits():329, .autoAssign():263
+- `StudioCuts.kt` (29): SClip:18, StudioCuts:46, .stamp():81, .addHits():329, .parseSidx():134, StudioCuts.kt:1
 - `StudioCutsLoad.kt` (8): StudioCutsLoad.kt:1, .fetch():44, StudioCutsLoad:30, .cut():155, .open():91, .get():115
 - `StudioDirect.kt` (64): StudioDirector:100, StudioDirect.kt:1, StudioAspect:31, .apply():324, .parse():147, .shapeOf():479
 - `StudioDrafts.kt` (17): StudioDrafts:17, SDraft:11, .stash():58, .list():70, .count():77, .restore():80
-- `StudioExplain.kt` (10): StudioExplain:12, .headline():87, .chapters():25, .title():45, .label():80, .sfx():103
+- `StudioExplain.kt` (10): StudioExplain:12, .chapters():25, .title():45, .headline():87, .label():80, .sfx():103
 - `StudioLayers.kt` (14): StudioLayers:8, .hasScheme():20, .toonMode():30, .of():12, .toonScale():33, .toonSchemeScale():36
+- `StudioMix.kt` (20): MixItem:21, StudioMix:32, .times():94, .fromJson():183, .mix():50, .totalMs():91
+- `StudioMixActivity.kt` (57): StudioMixActivity:42, StudioMixActivity.kt:1, .addSchemes():810, .render():209, .finalCard():488, .download():980
 - `StudioMusic.kt` (16): StudioBroll:82, .search():33, .search():200, .fetch():243, .fetchClip():215, StudioMusic.kt:1
 - `StudioRender.kt` (94): StudioPainter:159, StudioRender.kt:1, StudioPlan:56, .drawOnVideo():981, .draw():557, .visual():1181
-- `StudioScheme.kt` (24): StudioScheme:32, SScheme:19, .carry():287, .fromJson():60, .layout():180, .reveal():239
+- `StudioScheme.kt` (24): SScheme:19, StudioScheme:32, SchNode:11, .carry():287, .fromJson():60, .layout():180
 - `StudioSchemeStyle.kt` (22): SchemeStyle:19, SchemeStyles:31, .f():161, .fromJson():164, .enforce():134, .contrast():108
 - `StudioService.kt` (24): StudioService:113, StudioService.kt:1, .finalAudio():57, .build():223, .begin():182, StudioJob:26
 - `StudioStock.kt` (17): StudioStock:26, StockClip:16, .credit():164, .parseCommons():104, StudioStock.kt:1, .isVideo():38
 - `StudioTemplates.kt` (57): StudioTemplates.kt:1, MotionTpl:150, .compile():259, .direct():420, EditTpl:154, StudioTplStore:557
-- `StudioTemplatesActivity.kt` (31): StudioTemplatesActivity:22, .fromVideo():349, .checkAndSave():171, .render():86, .run():223, .motionCard():116
+- `StudioTemplatesActivity.kt` (31): StudioTemplatesActivity:22, .fromVideo():349, .render():86, .checkAndSave():171, .run():223, .motionCard():116
 - `Style.kt` (39): .measure():345, styleCard():526, Style.kt:1, StyleMath:24, .ai():477, StyleMetrics:220
-- `TaskHub.kt` (24): .dismiss():124, .render():223, .rows():50, TaskHub:23, TaskHub.kt:1, .warn():154
+- `TaskHub.kt` (24): .dismiss():124, .rows():50, .render():223, TaskHub:23, TaskHub.kt:1, .watchdog():132
 - `Tasks.kt` (65): BgTasks:115, bgTask():450, Tasks.kt:1, Task:116, .run():188, TaskService:347
-- `Text.kt` (24): .firstObject():10, .videoIdFromUrl():246, .array():47, .mini():265, .row():185, Text.kt:1
+- `Text.kt` (24): .firstObject():10, .videoIdFromUrl():246, .array():47, .row():185, .mini():265, .top():134
 - `Topic.kt` (15): .ensure():88, .judgeChannels():114, TopicFilter:31, .keywordsOf():79, .load():77, TopicProfile:11
 - `TopicActivity.kt` (13): .render():65, TopicActivity:14, .onActivityResult():333, .run():37, .answerLink():58, .exportMarkdown():311
 - `Tts.kt` (71): EdgeTts:48, Tts.kt:1, .fromFile():656, TtsOptions:41, TtsText:529, .connect():438
 - `TtsActivity.kt` (42): TtsActivity:30, TtsActivity.kt:1, .build():109, .render():310, .start():381, .buildBar():175
 - `TtsService.kt` (50): TtsService:71, TtsService.kt:1, .start():102, .build():514, .finishJob():188, .playPart():315
-- `TtsShare.kt` (8): TtsShareBase:14, .onCreate():17, .startSave():68, .go():32, .onRequestPermissionsResult():60, TtsShare.kt:1
-- `Ui.kt` (116): toast():256, Col:771, Ui.kt:1, .err():1129, btn():522, .muted():788
+- `TtsShare.kt` (8): TtsShareBase:14, .go():32, .onCreate():17, .startSave():68, .onRequestPermissionsResult():60, TtsShare.kt:1
+- `Ui.kt` (116): toast():256, Col:771, Ui.kt:1, .err():1129, .muted():788, btn():522
 - `UpdateService.kt` (17): UpdateService.kt:1, .check():93, Updates:29, .onReceive():232, .download():141, .notifyAvailable():118
 - `Updates.kt` (27): UpdateInfo:15, ExtractorHealth:75, Kind:76, UpdateLogic:31, ProbeResult:141, .classify():88
 - `VideoActivity.kt` (10): .render():51, VideoActivity:12, .collectNow():177, .summarise():205, .onCreate():19, VideoActivity.kt:1
-- `Voc.kt` (12): Voc:11, .extract():84, .isSpam():59, .normalize():54, .similarity():148, .quoteFound():135
+- `Voc.kt` (12): Voc:11, .extract():84, .similarity():148, .isSpam():59, .normalize():54, .classify():42
 - `Watch.kt` (34): .apply():156, WatchDigest:266, .translated():241, .ai():314, .guess():33, .body():329
 - `YouTube.kt` (17): .collect():224, YouTube.kt:1, YouTube:25, .search():88, .importList():134, .applyStreamInfo():201
 - `YtFallback.kt` (9): .fetch():56, .parse():41, .hint():27, .message():33, YtFallback.kt:1, OEmbed:37
 - `AiStatsTest.kt` (7): AiStatsTest:11, .jsonRoundTripAndBadLine():36, .periodFilterAndTotals():27, AiStatsTest.kt:1, .formatsTokens():43, .groupsByProjectSortedByTokens():17
+- `ArtifactsTest.kt` (5): ArtifactsTest:9, ArtifactsTest.kt:1, .jsonIsValidAndRespectsLimit():59, .markdownHasEverythingAndHidesAuthors():29, .optionsDropParts():49
 - `AskAiTest.kt` (7): AskAiTest:11, AskAiTest.kt:1, .appendJoinsWithSingleSpace():24, .everyProjectTabHasFocus():37, .framedAddsTabFocusOnlyForKnownTabs():30, .spokenIsNullWithoutSpeech():17
 - `AuditTest.kt` (10): AuditTest:13, .graphAndMarkdown():105, .sampleRun():56, .concentrationAndDiversity():43, AuditTest.kt:1, .runSurvivesJsonAndBrokenEntries():91
 - `BackupTest.kt` (3): BackupTest.kt:1, .autoBackupIsDueOnlyWithDataAfterTheInterval():14, BackupTest:11
-- `BotCoreTest.kt` (36): BotCoreTest:18, Rec:29, BotCoreTest.kt:1, .msg():21, .miniAppLinksAndHtml():395, .miniAppButtonsAndData():371
-- `BotPostsTest.kt` (13): BotPostsTest:16, .postsDataRoundTrip():133, BotPostsTest.kt:1, .freshSkipsSeenAndKeepsOrder():61, .rawPostEscapes():85, .planDueRespectsIntervalAndWindow():94
-- `BrowserUiTest.kt` (9): BrowserUiTest:13, BrowserUiTest.kt:1, .appBarGlyphsHaveIconsAndLabels():58, .filtersSummaryListsOnlyNonDefaults():69, .addressKeepsLinksAndCompletesHosts():14, .addressSearchesPlainText():23
+- `BotCoreTest.kt` (36): BotCoreTest:18, Rec:29, BotCoreTest.kt:1, .msg():21, .miniAppLinksAndHtml():395, .reportsErrorsWithLine():314
+- `BotPostsTest.kt` (13): BotPostsTest:16, .postsDataRoundTrip():133, BotPostsTest.kt:1, .planDueRespectsIntervalAndWindow():94, .rawPostEscapes():85, .freshSkipsSeenAndKeepsOrder():61
+- `BrowserUiTest.kt` (9): BrowserUiTest:13, BrowserUiTest.kt:1, .filtersSummaryListsOnlyNonDefaults():69, .appBarGlyphsHaveIconsAndLabels():58, .addressKeepsLinksAndCompletesHosts():14, .addressSearchesPlainText():23
 - `CommentDigestTest.kt` (6): CommentDigestTest:12, CommentDigestTest.kt:1, .chatDataPutsDigestFirstAndFallsBackWithoutIt():31, .inputHasSourceCountAndIds():23, .plainStripsMarkdown():41, .c():13
 - `CustomReportTest.kt` (8): CustomReportTest:13, CustomReportTest.kt:1, .brokenOrEmptyInputDoesNotThrow():55, .formatKinds():89, .numbersWithSuffixes():68, .parsesTitleSubKpisTableListsAndCallout():38
 - `DiagramTest.kt` (12): DiagramTest:14, DiagramTest.kt:1, .flow():15, .mermaidAndOutline():108, .layersFollowTheFlowAndLoopsAreMarkedBack():59, .noOverlapInWideFlowAndMindMap():74
@@ -333,6 +331,7 @@
 - `KeyTextTest.kt` (6): KeyTextTest:10, .bareKeyIsKept():11, .bearerAndQueryForms():23, .curlExampleYieldsTheKeyFromHeader():16, .wrappedKeyLosesWhitespaceAndQuotes():30, KeyTextTest.kt:1
 - `KnowledgeMapExtrasTest.kt` (13): KnowledgeMapExtrasTest:17, KnowledgeMapExtrasTest.kt:1, .input():27, .radialLayoutLimitsChildren():120, .aiAnswersBecomeBranches():65, .countsAndFreshVideos():29
 - `KnowledgeMapTest.kt` (17): KnowledgeMapTest:15, KnowledgeMapTest.kt:1, .ids():48, .emptyProjectHasOnlyTopic():146, .aspectsCoverTheProject():50, .audienceGroupsByType():113
+- `LangGameTest.kt` (13): LangGameTest:9, LangGameTest.kt:1, .compactFitsLimit():92, .scriptAndTagsFromAnswer():99, .titleShapesAndAddress():53, .briefCarriesProtocolTaskAndData():81
 - `LiveYouTubeTest.kt` (5): LiveYouTubeTest.kt:1, .youtubeWorksThroughExtractor():45, JvmDownloader:25, LiveYouTubeTest:24, .execute():26
 - `LumenCoreTest.kt` (49): LumenCoreTest.kt:1, .modelsRoundTrip():437, video():16, LlmParseTest:182, RecGraphTest:74, .graph():75
 - `MediaTest.kt` (5): MediaTest:11, .menuOrderAndKeys():33, MediaTest.kt:1, .playableNormalisesVideoLinks():14, .playableRejectsNonVideos():23
@@ -343,23 +342,24 @@
 - `ProgressTextTest.kt` (6): ProgressTextTest:7, ProgressTextTest.kt:1, .badCounters():11, .noCounter():10, .parsesCounter():8, .takesLastCounter():9
 - `ReportsTest.kt` (11): ReportsTest.kt:1, DossierTest:77, GraphStatsTest:13, .storyMentionsKeyFacts():52, .garbageIsNull():104, .groupsByChannelStrongestFirst():123
 - `SchemeStylesTest.kt` (8): .store():84, SchemeStylesTest:14, SchemeStylesTest.kt:1, .colours():15, .enforceFixesBadStyles():37, .presetsFollowTheRules():29
-- `SeoGraphTest.kt` (12): SeoGraphTest:12, SeoGraphTest.kt:1, .quoteVerificationAndTimestamps():72, .relevanceStemsRussianAndEnglish():34, .vocClassification():43, .csvParserHandlesQuotes():83
+- `SeoGraphTest.kt` (12): SeoGraphTest:12, SeoGraphTest.kt:1, .quoteVerificationAndTimestamps():72, .relevanceStemsRussianAndEnglish():34, .vocClassification():43, .secretsAreRemoved():100
 - `StudioAssistTest.kt` (6): StudioAssistTest:12, .summaryCountsScenesAndWords():42, StudioAssistTest.kt:1, .castRuleNamesEveryone():35, .cartoonPresetsOnlyForAnimation():14, .parsesScriptAndNotes():24
 - `StudioAudioTest.kt` (31): StudioAudioTest:23, .tone():26, StudioAudioTest.kt:1, .quiet():29, .recordingToJumpCutChain():124, .take():31
-- `StudioAutoTest.kt` (14): StudioAutoTest:13, .words():15, .liveEmojiCodes():158, .hybridPatchesOnlyNamedScenes():142, StudioAutoTest.kt:1, .loudnessOnsetsAndPulse():96
+- `StudioAutoTest.kt` (14): StudioAutoTest:13, .words():15, .liveEmojiCodes():158, .hybridPatchesOnlyNamedScenes():142, StudioAutoTest.kt:1, .compactParse():120
 - `StudioBeatsTest.kt` (5): .rhythmTemplateWorksWithoutText():30, StudioBeatsTest:11, .beatsCoverSpeech():12, StudioBeatsTest.kt:1, .noSpeechUsesWholeTake():22
-- `StudioCartoonTest.kt` (12): StudioCartoonTest:12, .restoresSpeakersAfterDirector():116, .picksDifferentVoices():59, .parsesSpeakerInText():16, .castJsonRoundTrip():50, .everyLookHasItsOwnFace():98
+- `StudioCartoonTest.kt` (12): StudioCartoonTest:12, .restoresSpeakersAfterDirector():116, .parsesSpeakerInText():16, .picksDifferentVoices():59, .castJsonRoundTrip():50, .everyLookHasItsOwnFace():98
 - `StudioCharTest.kt` (15): StudioCharTest:15, .castKeepsOwnCharacters():130, StudioCharTest.kt:1, .everyLookIsAPresetOfKnownParts():17, .externalPromptCarriesTheSchema():157, .protocolRoundTrip():65
-- `StudioCutsTest.kt` (21): StudioCutsTest:14, .bareScenesKeepTheClip():252, .slotsFollowScenes():149, StudioCutsTest.kt:1, .idsAndJson():54, .sidx():67
+- `StudioCutsTest.kt` (21): StudioCutsTest:14, .bareScenesKeepTheClip():252, .slotsFollowScenes():149, StudioCutsTest.kt:1, .sceneClipIsSaved():216, .idsAndJson():54
 - `StudioDirectTest.kt` (26): StudioDirectTest:14, .sceneFieldsSurviveSaving():179, .effectEventsAndMix():205, StudioKeysTest:222, .directorCarriesShapesAndBroll():280, StudioDirectTest.kt:1
 - `StudioDraftsTest.kt` (6): .stashListRestoreDelete():33, StudioDraftsTest.kt:1, StudioDraftsTest:15, .jsonRoundTrip():25, .sizeLabel():70, .titleFromTopicOrScript():17
 - `StudioExplainTest.kt` (8): StudioExplainTest:12, .questionsBecomeChapters():16, .soundsOnCutsAndChapters():57, StudioExplainTest.kt:1, .bigWordsOfAPlainScene():47, .chapterTitle():34
 - `StudioLayersTest.kt` (7): StudioLayersTest:12, .toonModes():49, StudioLayersTest.kt:1, .schemesAndPlace():29, .modes():13, .readableScale():40
+- `StudioMixTest.kt` (12): StudioMixTest:12, .savesAndReads():98, .timesAndSlotsGoOneAfterAnother():68, .movesAndRemoves():56, .wordsGoToTheirElements():86, StudioMixTest.kt:1
 - `StudioMusicRetryTest.kt` (7): StudioMusicRetryTest.kt:1, StudioMusicRetryTest:12, StudioSpeechPackTest:37, .secondTryWins():13, .timeoutBecomesReadable():26, .downloadOncePerWeek():46
 - `StudioParTest.kt` (7): .ttsCacheKeyAndWords():42, StudioParTest:12, StudioParTest.kt:1, .concatKeepsOrder():14, .cpuWorkersBounded():31, .frameWorkersLeaveACoreForTheEncoder():21
 - `StudioSchemeTest.kt` (14): StudioSchemeTest:14, .chain():17, .sceneKeepsItsScheme():123, .naturalLinks():64, StudioSchemeTest.kt:1, .problemsAreFound():39
 - `StudioStockTest.kt` (8): StudioStockTest:8, StudioStockTest.kt:1, .commonsUsesVp9Transcodes():40, .pexelsTakesTheBiggestMp4UpToFullHd():16, .ladderWidensTheSearch():9, .pixabayTiers():30
-- `StudioTemplatesTest.kt` (18): StudioTemplatesTest:15, .alignSurvivesSaving():90, StudioTemplatesTest.kt:1, .compilesWithWordsAndItems():64, .videoBriefAndReply():231, .editTemplateDirects():134
+- `StudioTemplatesTest.kt` (18): StudioTemplatesTest:15, .alignSurvivesSaving():90, StudioTemplatesTest.kt:1, .compilesWithWordsAndItems():64, .editTemplateDirects():134, .emptyTextDropsItsFrame():171
 - `StudioTest.kt` (47): StudioTest:17, StudioTest.kt:1, .analysisKeepsCuts():446, .analysisSurvivesSaveAndLoad():386, .frameMathAndNames():280, .parsesFreesoundAndLicences():476
 - `StyleTest.kt` (13): StyleTest:14, StyleTest.kt:1, .frameColoursAndCuts():70, .descriptionCounters():60, .metricsJsonRoundTrip():95, .paletteKeepsDominantColours():85
 - `TaskHealthTest.kt` (7): TaskHealthTest:12, TaskHealthTest.kt:1, .outcomeAndHistory():49, .autoStopOnlyWhenEnabledAndNotWaiting():26, .forceAfterGrace():42, .stateFollowsIdleTime():15
@@ -374,395 +374,411 @@
 - `WizardStepsTest.kt` (4): WizardStepsTest:10, .everyStepHasNextAndLastFinishes():18, WizardStepsTest.kt:1, .appearanceComesRightAfterLanguage():11
 - `YtFallbackTest.kt` (6): YtFallbackTest:12, YtFallbackTest.kt:1, .parsesOEmbed():28, .detectsBotCheckInMessageAndCause():13, .messageUsesHintOnlyForBotCheck():22, .rejectsOEmbedWithoutTitle():38
 
-## Communities (171 total, 79 thin omitted)
+## Communities (163 total, 67 thin omitted)
 
 ### Community 0 - "StudioActivity + StudioAuto (StudioActivity)"
 Cohesion: 0.05
 Nodes (7): StudioActivity, StudioApproach, FULL, HYBRID, LITE, RHYTHM, RULES
 
-### Community 1 - "Ui + TtsActivity (Col)"
+### Community 1 - "Audit + AuditActivity (.report)"
 Cohesion: 0.05
-Nodes (36): askAiBar(), HelpActivity, bottomNav(), btn(), BtnStyle, FILLED, OUTLINED, TEXT (+28 more)
+Nodes (16): AuditConfig, AuditCount, AuditEngine, AuditItem, AuditMath, AuditReport, AuditRun, AuditStep (+8 more)
 
-### Community 2 - "ProjectActivity + Graph (t)"
-Cohesion: 0.07
-Nodes (9): askAiSheet(), listen(), load(), t(), GraphActivity, sharePains(), ProjectActivity, bgTask() (+1 more)
+### Community 2 - "StudioTest + StudioCore (Studio)"
+Cohesion: 0.05
+Nodes (7): Analysis, Span, SScript, Studio, VoiceStats, StudioBeatsTest, StudioTest
 
-### Community 3 - "Seo + Voc (Seo)"
+### Community 3 - "Ui + TtsActivity (Col)"
 Cohesion: 0.06
-Nodes (9): GraphAlgo, Seo, SeoChecklist, seoTab(), TopicActivity, Item, Msg, Voc (+1 more)
+Nodes (32): mediaBtn(), recRow(), bottomNav(), busyBar(), chip(), chipRow(), chipScroller(), chk() (+24 more)
 
-### Community 4 - "BotActivity + BotCore (BotActivity)"
-Cohesion: 0.07
-Nodes (8): BotActivity, Msg, SimHost, BotInfo, TgUpdate, BotsActivity, confirm(), prompt()
+### Community 4 - "Pains + KnowledgeMap (KnowledgeMap.kt)"
+Cohesion: 0.06
+Nodes (30): aspects(), build(), commentsNode(), countSub(), fresh(), gaps(), group(), key() (+22 more)
 
-### Community 5 - "Ideas + IdeasActivity (IdeasLogic)"
+### Community 5 - "StudioAuto + StudioDirect (SWord)"
+Cohesion: 0.06
+Nodes (11): StudioCompact, StudioRhythm, StudioRules, StudioWords, SWord, Applied, Direction, DScene (+3 more)
+
+### Community 6 - "Ideas + IdeasActivity (IdeasLogic)"
 Cohesion: 0.08
 Nodes (6): Digest, Ideas, IdeasConfig, IdeasLogic, IdeasActivity, IdeasTest
 
-### Community 6 - "LumenCoreTest + Llm (Test)"
+### Community 7 - "StudioMixActivity + StudioMix (StudioMixActivity)"
+Cohesion: 0.07
+Nodes (5): MixItem, StudioMix, Prefs, StudioMixActivity, StudioMixTest
+
+### Community 8 - "Updates + UpdateService (.updates)"
 Cohesion: 0.05
-Nodes (25): ApiKind, ANTHROPIC, GEMINI, OPENAI_COMPAT, Llm, LlmReply, Provider, ANTHROPIC (+17 more)
+Nodes (18): ExtractorHealth, Kind, BOT, BROKEN, CONTENT, NETWORK, OTHER, ProbeResult (+10 more)
 
-### Community 7 - "StudioTest + StudioCore (Studio)"
-Cohesion: 0.07
-Nodes (3): Span, Studio, StudioTest
+### Community 9 - "Harvest + HarvestTest (.render)"
+Cohesion: 0.06
+Nodes (11): Harvest, HarvestItem, HarvestRules, HarvestSpec, HarvestState, Page, HarvestActivity, openProjectScreen() (+3 more)
 
-### Community 8 - "Outbox + SendReviewActivity (SendGate)"
-Cohesion: 0.08
-Nodes (14): Block, Outgoing, Pending, Request, Result, Rule, ASK, BLOCK (+6 more)
+### Community 10 - "LumenCoreTest + Llm (Test)"
+Cohesion: 0.05
+Nodes (24): ApiKind, ANTHROPIC, GEMINI, OPENAI_COMPAT, Llm, LlmReply, Provider, ANTHROPIC (+16 more)
 
-### Community 9 - "VideoActivity + AiJournal (.dateTime)"
-Cohesion: 0.07
-Nodes (24): AiJournalActivity, audienceTab(), confidenceLabel(), insightCard(), vocLabel(), render(), Fmt, isLocalSource() (+16 more)
+### Community 11 - "AiStats + StudioDrafts (file)"
+Cohesion: 0.06
+Nodes (14): AiStats, Group, DAY, MODEL, PROJECT, PROVIDER, TASK, Rec (+6 more)
 
-### Community 10 - "Nav + NavTest (Nav)"
+### Community 12 - "Recs + ParTest (.w)"
+Cohesion: 0.09
+Nodes (10): ChannelExplorer, Config, Par, Ctx, DepthStat, RecEdge, RecEngine, RecGraph (+2 more)
+
+### Community 14 - "Nav + NavTest (Nav)"
 Cohesion: 0.08
 Nodes (11): Fresh, Front, Live, Nav, ActivityLifecycleCallbacks, NavPlan, NavRouter, NavScreen (+3 more)
 
-### Community 11 - "Audit + AuditTest (.run)"
-Cohesion: 0.09
-Nodes (12): AuditConfig, AuditCount, AuditEngine, AuditItem, AuditMath, AuditReport, AuditRun, AuditStep (+4 more)
+### Community 15 - "StudioMixActivity + KnowledgeMapActivity (StudioMixActivity.kt)"
+Cohesion: 0.05
+Nodes (6): KnowledgeMapActivity, onCreate(), state(), BoardAdapter, SimpleCallback, Tile
 
-### Community 12 - "StudioAuto + StudioDirect (SWord)"
-Cohesion: 0.09
-Nodes (9): StudioCompact, StudioRhythm, StudioRules, StudioWords, SWord, Applied, Direction, DScene (+1 more)
-
-### Community 14 - "Recs + Core (.w)"
-Cohesion: 0.09
-Nodes (9): ChannelExplorer, Config, Par, Ctx, DepthStat, RecEdge, RecEngine, RecGraph (+1 more)
-
-### Community 15 - "StudioCuts + StudioCutsTest (StudioCuts)"
-Cohesion: 0.09
-Nodes (7): ClipSlot, CutHit, DashSeg, SClip, StudioCuts, StudioCutsLoad, StudioCutsTest
-
-### Community 16 - "Pains + CommentDigest (Pains)"
-Cohesion: 0.09
-Nodes (10): CommentDigest, Case, Local, Msg, Pain, Pains, Quote, Report (+2 more)
-
-### Community 18 - "KnowledgeMap + KnowledgeMapTest (KnowledgeMap.kt)"
-Cohesion: 0.10
-Nodes (22): aspects(), build(), commentsNode(), countSub(), fresh(), gaps(), group(), key() (+14 more)
-
-### Community 20 - "Analysis + Llm (Project)"
-Cohesion: 0.15
-Nodes (8): AiTasks, sha1(), LlmException, Prompts, AiResult, Project, ChannelAi, VideoStyle
-
-### Community 21 - "TtsService (TtsService)"
-Cohesion: 0.12
-Nodes (6): TtsMode, LISTEN, PREVIEW, SAVE, TtsService, Callback
-
-### Community 22 - "BotService + UpdateService (BotService.kt)"
-Cohesion: 0.07
-Nodes (6): BotBootReceiver, BotWatchJob, SendCancelled, TaskStopReceiver, BroadcastReceiver, UpdateJob
-
-### Community 23 - "Style + StyleTest (.measure)"
-Cohesion: 0.10
-Nodes (8): Cue, Frame, Speech, StyleExtra, StyleMath, StyleMetrics, styleTokenEstimate(), StyleTest
-
-### Community 24 - "StudioChar + StudioCharTest (.parse)"
-Cohesion: 0.11
-Nodes (5): Parsed, StudioCharProto, StudioParts, ToonParts, StudioCharTest
-
-### Community 25 - "BotPostsTab + ChannelActivity (linearlayout)"
+### Community 16 - "StudioDirectTest + StudioDirect (StudioPlan)"
 Cohesion: 0.06
-Nodes (7): voiceIntent(), TextWatcher, fold(), folded(), onCreate(), KnowledgeMapActivity, onCreate()
+Nodes (12): SceneTime, SCue, StudioSfx, StudioExplain, StudioPlan, StudioStyle, DARK, EXPLAIN (+4 more)
 
-### Community 26 - "HomeActivities + Backup (.render)"
-Cohesion: 0.10
-Nodes (8): filtersEditor(), LumenActivity, NewProjectActivity, openProjectScreen(), restoreFrom(), SimpleWatcher, WizardActivity, WizardSteps
-
-### Community 27 - "BotCoreTest + BotCore (BotCoreTest)"
-Cohesion: 0.11
-Nodes (5): AiLimiter, Batch, Tg, BotCoreTest, Rec
-
-### Community 28 - "BotJs (BotRuntime)"
-Cohesion: 0.08
-Nodes (5): BotJsError, BotRuntime, BotTimeout, Meta, NoopBotHost
-
-### Community 29 - "StudioCartoon + StudioCartoonTest (SChar)"
+### Community 17 - "StudioRender + StudioCore (StudioPainter)"
 Cohesion: 0.13
-Nodes (3): SChar, StudioToon, StudioCartoonTest
+Nodes (3): SItem, SScene, StudioPainter
 
-### Community 30 - "TtsActivity + Tts (TtsActivity)"
-Cohesion: 0.09
-Nodes (3): TtsActivity, TextWatcher, OnSeekBarChangeListener
+### Community 18 - "Analysis + LangGameActivity (Project)"
+Cohesion: 0.14
+Nodes (8): AiTasks, sha1(), LangGameData, LlmException, Prompts, AiResult, Project, ChannelAi
 
-### Community 31 - "Channels + LumenCoreTest (.run)"
+### Community 19 - "BotActivity + BotService (.async)"
+Cohesion: 0.13
+Nodes (4): BotActivity, BotInfo, TgUpdate, prompt()
+
+### Community 20 - "Quick + YouTube (.run)"
+Cohesion: 0.07
+Nodes (8): CollectConfig, SearchFilters, LinkActivity, QuickAnalysis, QuickConfig, QuickState, Step, YouTube
+
+### Community 21 - "LangGame + LangGameTest (LangGame)"
 Cohesion: 0.10
-Nodes (7): ChannelData, ChannelFetch, ChannelStats, ChannelStore, PlaylistRef, Result, QuickAndChannelsTest
+Nodes (9): Doc, Kind, PODCAST, SEO, SHORTS, VIDEO, LangGame, Term (+1 more)
 
-### Community 32 - "StudioExplain + StudioRender (StudioPlan)"
+### Community 22 - "Outbox + OutgoingTest (SendGate)"
 Cohesion: 0.09
-Nodes (10): SceneTime, StudioExplain, StudioPlan, StudioStyle, DARK, EXPLAIN, LIGHT, VIDEO (+2 more)
+Nodes (14): Block, Outgoing, Pending, Request, Result, Rule, ASK, BLOCK (+6 more)
 
-### Community 33 - "StudioScheme + StudioSchemeTest (StudioScheme)"
+### Community 23 - "StudioCuts + StudioCutsTest (SClip)"
+Cohesion: 0.10
+Nodes (6): ClipSlot, CutHit, DashSeg, SClip, StudioCuts, StudioCutsTest
+
+### Community 24 - "TtsActivity + TtsService (TtsActivity)"
+Cohesion: 0.07
+Nodes (7): TtsActivity, TextWatcher, OnSeekBarChangeListener, TtsMode, LISTEN, PREVIEW, SAVE
+
+### Community 25 - "LangGameActivity + ProjectActivity (.err)"
+Cohesion: 0.11
+Nodes (10): askAiSheet(), LangGameActivity, digestCard(), painsCard(), sharePains(), startRecs(), bgTask(), confirm() (+2 more)
+
+### Community 26 - "BotService + BotsActivity (BotService.kt)"
+Cohesion: 0.10
+Nodes (5): BotManager, BotRun, BotService, BotWatchJob, Status
+
+### Community 27 - "ReportKit + GraphReport (ReportKit)"
+Cohesion: 0.13
+Nodes (13): Bars, Block, Footer, Gap, Hero, Insight, Kpis, Paragraph (+5 more)
+
+### Community 28 - "StudioChar + StudioCharTest (.parse)"
+Cohesion: 0.10
+Nodes (4): Parsed, StudioCharProto, StudioParts, StudioCharTest
+
+### Community 29 - "Store + Export (.project)"
+Cohesion: 0.11
+Nodes (5): Export, Store, StyleExtra, VideoStyle, Csv
+
+### Community 32 - "VideoActivity + Core (.dateTime)"
+Cohesion: 0.11
+Nodes (12): fold(), folded(), load(), onCreate(), render(), Fmt, isLocalSource(), channelRows() (+4 more)
+
+### Community 33 - "StudioScheme + StudioSchemeTest (SScheme)"
 Cohesion: 0.14
 Nodes (6): SchBox, SchLink, SchNode, SScheme, StudioScheme, StudioSchemeTest
 
-### Community 34 - "BotPostsCore + BotPostsTest (PostCore)"
+### Community 34 - "Ui + Help (LumenBase)"
+Cohesion: 0.07
+Nodes (7): BotsActivity, Help, HelpActivity, HelpMap, HelpTopic, LumenActivity, LumenBase
+
+### Community 35 - "Diagram (Diagram)"
+Cohesion: 0.12
+Nodes (16): DBox, DEdge, Diagram, DiagramLayout, DiagramStore, DiagramText, DKind, DECISION (+8 more)
+
+### Community 36 - "StudioCartoon + StudioCartoonTest (SChar)"
+Cohesion: 0.13
+Nodes (3): SChar, StudioToon, StudioCartoonTest
+
+### Community 37 - "Media + AskAi (t)"
+Cohesion: 0.09
+Nodes (12): askAiBar(), listen(), voiceIntent(), t(), dialogTheme(), harvestSetup(), startHarvest(), MediaLink (+4 more)
+
+### Community 38 - "Tts + BotPostsTab (EdgeTts)"
 Cohesion: 0.11
-Nodes (3): FeedItem, PostCore, BotPostsTest
+Nodes (5): EdgeTts, Forbidden, TtsException, TtsOptions, TtsVoice
 
-### Community 36 - "StudioCharEditor + StudioChar (StudioCharEditor)"
-Cohesion: 0.18
-Nodes (3): ToonImage, StudioCharEditor, choiceChips()
+### Community 39 - "Tasks + Core (BgTasks)"
+Cohesion: 0.12
+Nodes (3): BgTasks, Task, TaskService
 
-### Community 37 - "Models + LumenCoreTest (.comments)"
+### Community 40 - "Channels + LumenCoreTest (ChannelData)"
+Cohesion: 0.11
+Nodes (7): ChannelData, ChannelFetch, ChannelStats, ChannelStore, PlaylistRef, Result, QuickAndChannelsTest
+
+### Community 41 - "Models + LumenCoreTest (Comment)"
 Cohesion: 0.09
 Nodes (8): Comment, MonitorConfig, RecConfig, RunRecord, SeoContext, strings(), toJsonArray(), ModelsTest
 
-### Community 38 - "Services + Outbox (Services.kt)"
-Cohesion: 0.13
-Nodes (4): CollectService, Monitoring, MonitorJob, Notify
-
-### Community 40 - "BotService + BotStore (BotWorker)"
-Cohesion: 0.14
-Nodes (4): BotRun, BotWorker, Host, Status
-
-### Community 41 - "Dossier + ReportsTest (Dossier)"
+### Community 43 - "Dossier + ReportsTest (Dossier)"
 Cohesion: 0.12
 Nodes (7): ChannelCard, Config, Dossier, Group, Overview, VideoCard, DossierTest
 
-### Community 42 - "Tts + BotPostsTab (EdgeTts)"
-Cohesion: 0.12
-Nodes (5): EdgeTts, Forbidden, TtsException, TtsOptions, TtsVoice
-
-### Community 43 - "YouTube + Models (.collect)"
-Cohesion: 0.11
-Nodes (3): CollectConfig, SearchFilters, YouTube
-
-### Community 44 - "Core + StudioActivity (StudioActivity.kt)"
-Cohesion: 0.07
-Nodes (3): Lumen, LumenEnv, Settings
-
-### Community 45 - "Media (Media.kt)"
-Cohesion: 0.09
-Nodes (7): MediaAction, AUDIO, BACKGROUND, VIDEO, MediaActivity, FragmentLifecycleCallbacks, mediaBtn()
-
-### Community 46 - "StudioCore + StudioTest (SScene)"
-Cohesion: 0.17
-Nodes (6): Analysis, SCue, SItem, SScene, SScript, VoiceStats
-
-### Community 47 - "Topic + Watch (.firstObject)"
-Cohesion: 0.12
-Nodes (5): Relevance, TopicFilter, TopicProfile, WatchFilter, TopicFilterTest
-
-### Community 50 - "Harvest + HarvestTest (HarvestSpec)"
-Cohesion: 0.15
-Nodes (4): HarvestItem, HarvestRules, HarvestSpec, HarvestTest
-
-### Community 52 - "Watch + WatchDigestTest (WatchDigest)"
-Cohesion: 0.15
+### Community 44 - "Watch + WatchDigestTest (.runOnce)"
+Cohesion: 0.14
 Nodes (4): Entry, WatchDigest, WatchLangs, WatchDigestTest
 
-### Community 53 - "AiStats + AiStatsTest (AiStats)"
+### Community 45 - "StudioService (StudioService)"
+Cohesion: 0.14
+Nodes (3): Request, StudioJob, StudioService
+
+### Community 46 - "BotCore + BotCoreTest (BotCore.kt)"
+Cohesion: 0.10
+Nodes (11): AiLimiter, BotAccess, BotLogEntry, BotNet, BotSchedule, BotStats, Daily, Every (+3 more)
+
+### Community 47 - "HomeActivities + WizardStepsTest (HomeActivities.kt)"
+Cohesion: 0.10
+Nodes (7): filtersEditor(), NewProjectActivity, restoreFrom(), SimpleWatcher, WizardActivity, WizardSteps, WizardStepsTest
+
+### Community 48 - "Media (Media.kt)"
+Cohesion: 0.09
+Nodes (6): MediaAction, AUDIO, BACKGROUND, VIDEO, MediaActivity, FragmentLifecycleCallbacks
+
+### Community 49 - "StudioSchemeStyle + SchemeStylesTest (SchemeStyle)"
+Cohesion: 0.17
+Nodes (3): SchemeStyle, SchemeStyles, SchemeStylesTest
+
+### Community 51 - "Analysis + LumenCoreTest (Video)"
+Cohesion: 0.16
+Nodes (9): Analytics, Bucket, ChannelStat, Compare, Stats, Video, WatchFilter, AnalyticsTest (+1 more)
+
+### Community 52 - "BotCore + BotService (BotAi)"
 Cohesion: 0.15
-Nodes (10): AiStats, Group, DAY, MODEL, PROJECT, PROVIDER, TASK, Rec (+2 more)
+Nodes (5): BotCode, MiniApp, MiniAppAi, BotAi, Result
 
-### Community 54 - "BotCore + BotCoreTest (BotCore.kt)"
-Cohesion: 0.11
-Nodes (10): BotAccess, BotLogEntry, BotNet, BotSchedule, BotStats, Daily, Every, Spec (+2 more)
+### Community 53 - "Services + UpdateService (UpdateService.kt)"
+Cohesion: 0.09
+Nodes (4): CollectState, MonitorJob, UpdateInstallReceiver, UpdateJob
 
-### Community 55 - "BotPostsCore + BotPostsTest (PostsData)"
+### Community 54 - "Style + StyleTest (StyleMath)"
+Cohesion: 0.14
+Nodes (5): Cue, Frame, Speech, StyleMath, StyleTest
+
+### Community 55 - "Ui + StudioTemplatesActivity (.muted)"
+Cohesion: 0.17
+Nodes (7): recsTab(), btn(), BtnStyle, FILLED, OUTLINED, TEXT, TONAL
+
+### Community 56 - "TaskHub + Tasks (.rows)"
 Cohesion: 0.15
-Nodes (6): BotPost, PostLog, PostPlan, PostsData, PostSource, PostTarget
+Nodes (7): BotBootReceiver, Row, Seen, TaskHub, TasksActivity, TaskStopReceiver, BroadcastReceiver
 
-### Community 56 - "GraphReport + GraphAlgo (.blocks)"
+### Community 57 - "SettingsActivity + Style (toast)"
+Cohesion: 0.13
+Nodes (4): SettingsActivity, Runnable, openUrl(), toast()
+
+### Community 58 - "DiagramDraw (DiagramDraw.kt)"
+Cohesion: 0.14
+Nodes (5): DiagramDraw, DiagramView, Look, Page, Prepared
+
+### Community 59 - "Seo + SeoTab (Seo)"
+Cohesion: 0.15
+Nodes (3): Seo, SeoChecklist, seoTab()
+
+### Community 60 - "BotCoreTest (BotCoreTest)"
+Cohesion: 0.14
+Nodes (4): BotCoreTest, NoopBotHost, NoopBotHost, Rec
+
+### Community 62 - "BotStore + BotsActivity (Bots)"
+Cohesion: 0.14
+Nodes (3): BotNewActivity, Bots, Version
+
+### Community 63 - "Services + TaskHub (.builder)"
+Cohesion: 0.16
+Nodes (3): CollectService, Monitoring, Notify
+
+### Community 64 - "GraphReport + GraphAlgo (.blocks)"
 Cohesion: 0.15
 Nodes (9): GraphStats, Plural, Summary, GraphReport, Input, LinkRow, NodeCard, Picture (+1 more)
 
-### Community 57 - "StudioStock + StudioDirect (StudioAspect)"
+### Community 65 - "Voc + SeoGraphTest (.extractInsights)"
 Cohesion: 0.14
-Nodes (7): StudioAspect, LANDSCAPE, PORTRAIT, SQUARE, StudioBroll, StockClip, StudioStock
+Nodes (5): Item, Msg, Voc, LogRedactTest, SeoGraphTest
 
-### Community 58 - "StudioDirect + Style (jsonarray)"
+### Community 66 - "StudioRender + StudioAuto (.at)"
+Cohesion: 0.13
+Nodes (4): StudioLiveEmoji, StudioClipPhoto, StudioLottie, StudioPhotos
+
+### Community 68 - "Browser (Browser.kt)"
 Cohesion: 0.10
-Nodes (6): StudioTask, CARTOON, CUTS, SHORTS, VIDEO, VOICE
+Nodes (3): RecKeepAlive, TabRec, TabWriter
 
-### Community 59 - "Analysis + LumenCoreTest (Video)"
-Cohesion: 0.20
-Nodes (8): Analytics, Bucket, ChannelStat, Compare, Stats, Video, AnalyticsTest, video()
+### Community 69 - "StudioCartoon + StudioChar (StudioToonArt)"
+Cohesion: 0.35
+Nodes (3): StudioToonArt, ToonPose, ToonParts
 
-### Community 62 - "StudioTemplatesTest + StudioTemplates (StudioTemplatesTest)"
-Cohesion: 0.16
-Nodes (4): ERule, StudioEditTpl, TplResult, StudioTemplatesTest
-
-### Community 63 - "TtsPoolTest + Tts (.render)"
+### Community 70 - "TtsPoolTest + Tts (.render)"
 Cohesion: 0.14
 Nodes (4): TtsProgress, TtsQueue, TtsPoolTest, TtsQueueTest
 
-### Community 64 - "Diagram (Diagram)"
-Cohesion: 0.21
-Nodes (7): DBox, DEdge, Diagram, DiagramLayout, DiagramText, DLayout, DNode
+### Community 71 - "BotJs (BotRuntime)"
+Cohesion: 0.11
+Nodes (4): BotJsError, BotRuntime, BotTimeout, Meta
 
-### Community 70 - "Log + UpdateService (.i)"
+### Community 72 - "BotPostsCore + BotPostsTest (PostsData)"
+Cohesion: 0.17
+Nodes (6): BotPost, PostLog, PostPlan, PostsData, PostSource, PostTarget
+
+### Community 78 - "Text + TextTest (.top)"
 Cohesion: 0.14
-Nodes (4): L, LumenCrashHandler, UpdateInstallReceiver, LogRedactTest
+Nodes (8): Chunks, JsonSalvage, JsonText, ThumbUrl, Vtt, Words, YtQuery, TextTest
 
-### Community 71 - "Text + TextTest (Text.kt)"
-Cohesion: 0.15
-Nodes (7): Chunks, JsonText, ThumbUrl, Vtt, Words, YtQuery, TextTest
+### Community 79 - "DiagramTest + Diagram (schemesTab)"
+Cohesion: 0.19
+Nodes (4): DiagramBuild, Funnel, schemesTab(), DiagramTest
 
-### Community 72 - "Tts + EdgeTtsTest (Tts.kt)"
-Cohesion: 0.14
-Nodes (3): WebSocketListener, TtsPool, TtsPrefs
-
-### Community 73 - "BotService + BotMiniApp (BotAi)"
-Cohesion: 0.22
-Nodes (4): BotCode, MiniAppAi, BotAi, Result
-
-### Community 75 - "Ui + ProjectActivity (Ic)"
+### Community 80 - "Ui + ProjectActivity (Ic)"
 Cohesion: 0.09
 Nodes (22): NavGroup, Ic, ADD, BACK, BUG, CHART, COPY, DELETE (+14 more)
 
-### Community 76 - "ReportKit (ReportKit)"
-Cohesion: 0.23
-Nodes (13): Bars, Block, Footer, Gap, Hero, Insight, Kpis, Paragraph (+5 more)
-
-### Community 77 - "StudioCore + StudioParTest (.analyseEdge)"
-Cohesion: 0.13
-Nodes (3): StudioPrefs, StudioTtsCache, StudioParTest
-
-### Community 78 - "StudioDrafts + StudioDraftsTest (StudioDrafts)"
-Cohesion: 0.20
-Nodes (3): SDraft, StudioDrafts, StudioDraftsTest
-
 ### Community 81 - "StudioCore + StudioMusic (StudioMusicCatalog)"
-Cohesion: 0.26
+Cohesion: 0.25
 Nodes (3): MusicHit, StudioMusicCatalog, StudioMusic
 
-### Community 82 - "StudioDirect + StudioDirectTest (StudioCore.kt)"
+### Community 82 - "Tts + StudioCore (Tts.kt)"
+Cohesion: 0.13
+Nodes (3): WebSocketListener, TtsPool, TtsPrefs
+
+### Community 83 - "BotMiniApp + Browser (BotMiniApp.kt)"
+Cohesion: 0.15
+Nodes (3): Bridge, MiniAppPreview, WebViewClient
+
+### Community 85 - "StudioDirect + StudioDirectTest (StudioCore.kt)"
 Cohesion: 0.20
 Nodes (5): SKey, SShape, State, StudioKeys, StudioKeysTest
 
-### Community 84 - "BotMiniApp + Browser (BotMiniApp.kt)"
+### Community 88 - "Tasks + TaskHealthTest (TaskHealth)"
+Cohesion: 0.15
+Nodes (7): Entry, State, OK, SLOW, STUCK, TaskHealth, TaskHealthTest
+
+### Community 89 - "AiJournal + TopicActivity (.render)"
+Cohesion: 0.22
+Nodes (3): AiJournal, AiJournalActivity, Entry
+
+### Community 92 - "Graph (Graph.kt)"
 Cohesion: 0.16
-Nodes (3): Bridge, MiniAppPreview, WebViewClient
+Nodes (3): GraphActivity, GraphColors, GraphView
 
-### Community 86 - "Harvest + HarvestActivity (.videos)"
-Cohesion: 0.24
-Nodes (3): Harvest, HarvestState, Page
+### Community 93 - "StudioActivity + StudioDirect (.onCreate)"
+Cohesion: 0.15
+Nodes (6): StudioTask, CARTOON, CUTS, SHORTS, VIDEO, VOICE
 
-### Community 87 - "Quick (Quick.kt)"
-Cohesion: 0.20
-Nodes (7): chooseLinkAction(), Link, LinkActivity, QuickAnalysis, QuickState, Step, YtLink
-
-### Community 88 - "StudioLayers + StudioLayersTest (StudioLayers)"
+### Community 94 - "StudioLayers + StudioLayersTest (StudioLayers)"
 Cohesion: 0.16
 Nodes (6): StudioLayers, ALL, GRAPHICS, NONE, SUBS, StudioLayersTest
 
-### Community 89 - "TaskHub + Tasks (.dismiss)"
-Cohesion: 0.29
-Nodes (3): Row, Seen, TaskHub
-
-### Community 90 - "Tasks + TaskHealthTest (TaskHealth)"
-Cohesion: 0.16
-Nodes (7): Entry, State, OK, SLOW, STUCK, TaskHealth, TaskHealthTest
-
-### Community 92 - "Browser (Browser.kt)"
-Cohesion: 0.14
-Nodes (3): RecKeepAlive, TabRec, TabWriter
-
-### Community 93 - "Watch + WatchTest (WatchTest)"
+### Community 95 - "StudioStock + StudioMusic (StudioStock)"
 Cohesion: 0.19
+Nodes (3): StudioBroll, StockClip, StudioStock
+
+### Community 96 - "Topic + TopicFilterTest (.ensure)"
+Cohesion: 0.20
+Nodes (3): TopicFilter, TopicProfile, TopicFilterTest
+
+### Community 97 - "Artifacts + ArtifactsTest (Artifacts)"
+Cohesion: 0.26
+Nodes (4): Artifacts, Opts, Source, ArtifactsTest
+
+### Community 100 - "StudioDirect + StudioStock (StudioDirect.kt)"
+Cohesion: 0.18
+Nodes (6): BrollHit, StudioAspect, LANDSCAPE, PORTRAIT, SQUARE, StudioBrollCatalog
+
+### Community 102 - "Watch + WatchTest (WatchTest)"
+Cohesion: 0.20
 Nodes (4): filtersSummary(), LangGuess, Regions, WatchTest
 
-### Community 97 - "DiagramDraw (DiagramDraw)"
-Cohesion: 0.27
-Nodes (4): DiagramDraw, Look, Page, Prepared
+### Community 105 - "StudioAssist + StudioAssistTest (.autoDialog)"
+Cohesion: 0.16
+Nodes (5): AssistPreset, AssistResult, StudioAssist, StudioAuto, StudioAssistTest
 
-### Community 99 - "Help + TtsShare (intent)"
+### Community 107 - "Core + Log (Core.kt)"
 Cohesion: 0.15
-Nodes (5): Help, HelpTopic, TtsShareBase, TtsShareListen, TtsShareSave
+Nodes (3): Lumen, LumenEnv, Settings
 
-### Community 103 - "YtFallback + YtFallbackTest (YtFallbackTest)"
-Cohesion: 0.20
-Nodes (3): OEmbed, YtBlock, YtFallbackTest
-
-### Community 106 - "BrowserUiTest + Browser (BrowserUiTest)"
+### Community 119 - "Browser + BrowserUiTest (BrowserUiTest)"
 Cohesion: 0.21
-Nodes (4): BrowserText, glyphIcon(), glyphLabel(), BrowserUiTest
+Nodes (3): BrowserText, TabRecJs, BrowserUiTest
 
-### Community 107 - "Store + Diagram (Store)"
-Cohesion: 0.20
-Nodes (3): DiagramStore, Entry, Store
-
-### Community 108 - "StudioCharEditor + StudioCartoon (StudioCharEditor.kt)"
-Cohesion: 0.20
+### Community 120 - "StudioCharEditor + StudioCartoon (StudioCharEditor.kt)"
+Cohesion: 0.22
 Nodes (3): charLibrary(), FaceView, ToonPreview
 
-### Community 115 - "TasksTest + Tasks (TasksTest)"
-Cohesion: 0.24
-Nodes (3): StudioAuto, TaskText, TasksTest
-
-### Community 119 - "HarvestActivity (harvestSetup)"
-Cohesion: 0.21
-Nodes (4): dialogTheme(), HarvestActivity, harvestSetup(), startHarvest()
-
-### Community 120 - "StudioAssist + StudioAssistTest (.parse)"
-Cohesion: 0.23
-Nodes (4): AssistPreset, AssistResult, StudioAssist, StudioAssistTest
-
-### Community 121 - "StudioCore + StudioMusicRetryTest (.retrying)"
+### Community 121 - "StudioMusicRetryTest + StudioCore (StudioMusicRetryTest.kt)"
 Cohesion: 0.19
 Nodes (3): StudioSpeechPack, StudioMusicRetryTest, StudioSpeechPackTest
 
-### Community 122 - "Updates + UpdatesTest (ExtractorHealth)"
-Cohesion: 0.18
-Nodes (7): ExtractorHealth, Kind, BOT, BROKEN, CONTENT, NETWORK, OTHER
+### Community 126 - "TtsShare + Artifacts (TtsShareBase)"
+Cohesion: 0.23
+Nodes (4): artifactsDialog(), TtsShareBase, TtsShareListen, TtsShareSave
 
-### Community 124 - "Media + MediaTest (videoMenu)"
-Cohesion: 0.27
-Nodes (4): MediaLink, runMedia(), videoMenu(), MediaTest
+### Community 128 - "StudioTemplates (EditTpl)"
+Cohesion: 0.28
+Nodes (3): EditTpl, ERule, StudioTplStore
 
-### Community 129 - "StudioTemplates + StudioTemplatesTest (StudioTemplates.kt)"
+### Community 129 - "Ui + GradientThemesTest (Palette)"
+Cohesion: 0.28
+Nodes (3): Grad, Palette, GradientThemesTest
+
+### Community 133 - "StudioTemplates + StudioTemplatesTest (StudioTemplates.kt)"
 Cohesion: 0.29
 Nodes (3): JsonPatch, MKey, MLayer
 
-### Community 131 - "TtsRetryTest + Tts (TtsRetry)"
+### Community 134 - "TtsRetryTest + Tts (TtsRetry)"
 Cohesion: 0.23
 Nodes (3): TtsRetry, TtsRetryTest, TtsStallTest
 
-### Community 132 - "Ui + GradientThemesTest (Palette)"
-Cohesion: 0.30
-Nodes (3): Grad, Palette, GradientThemesTest
-
-### Community 141 - "Diagram + DiagramActivity (schemesTab)"
-Cohesion: 0.38
-Nodes (3): DiagramBuild, Funnel, schemesTab()
-
-### Community 151 - "BotCore (Cmd)"
+### Community 146 - "BotCore (Cmd)"
 Cohesion: 0.32
 Nodes (7): BotOwner, Claim, Cmd, Help, Logs, Stats, Stop
 
-### Community 158 - "Diagram (DKind)"
-Cohesion: 0.29
-Nodes (7): DKind, DECISION, END, NOTE, START, STEP, TOPIC
+### Community 150 - "AudienceTab (audienceTab)"
+Cohesion: 0.57
+Nodes (4): audienceTab(), confidenceLabel(), insightCard(), vocLabel()
 
-### Community 159 - "DossierReport (.blocks)"
-Cohesion: 0.48
+### Community 151 - "DossierReport (.blocks)"
+Cohesion: 0.52
 Nodes (3): ChannelHeader, DossierReport, VideoBlock
 
 ## Knowledge Gaps
-- **88 isolated node(s):** `Help`, `Logs`, `Stats`, `Stop`, `FULL` (+83 more)
-  These have ≤1 connection - possible missing edges. (Counts symbols only; 349 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **79 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **92 isolated node(s):** `Help`, `Logs`, `Stats`, `Stop`, `FULL` (+87 more)
+  These have ≤1 connection - possible missing edges. (Counts symbols only; 368 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **67 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `t()` connect `Community 2` to `Community 0`, `Community 1`, `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 7`, `Community 8`, `Community 9`, `Community 11`, `Community 14`, `Community 15`, `Community 16`, `Community 17`, `Community 18`, `Community 19`, `Community 20`, `Community 21`, `Community 23`, `Community 24`, `Community 25`, `Community 26`, `Community 29`, `Community 30`, `Community 31`, `Community 32`, `Community 34`, `Community 35`, `Community 36`, `Community 38`, `Community 39`, `Community 40`, `Community 42`, `Community 44`, `Community 45`, `Community 47`, `Community 49`, `Community 50`, `Community 51`, `Community 52`, `Community 53`, `Community 56`, `Community 59`, `Community 60`, `Community 61`, `Community 63`, `Community 65`, `Community 70`, `Community 72`, `Community 73`, `Community 77`, `Community 80`, `Community 81`, `Community 83`, `Community 85`, `Community 86`, `Community 87`, `Community 89`, `Community 92`, `Community 93`, `Community 95`, `Community 96`, `Community 99`, `Community 102`, `Community 103`, `Community 104`, `Community 106`, `Community 108`, `Community 109`, `Community 112`, `Community 115`, `Community 118`, `Community 119`, `Community 120`, `Community 121`, `Community 122`, `Community 124`, `Community 125`, `Community 131`, `Community 136`, `Community 138`, `Community 141`, `Community 142`, `Community 157`, `Community 159`, `Community 169`?**
-  _High betweenness centrality (0.467) - this node is a cross-community bridge._
-- **Are the 500 inferred relationships involving `t()` (e.g. with `.full()` and `.statusLabel()`) actually correct?**
-  _`t()` has 500 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `t()` connect `Community 37` to `Community 0`, `Community 1`, `Community 2`, `Community 3`, `Community 4`, `Community 6`, `Community 7`, `Community 8`, `Community 9`, `Community 10`, `Community 11`, `Community 12`, `Community 15`, `Community 16`, `Community 17`, `Community 18`, `Community 19`, `Community 20`, `Community 22`, `Community 23`, `Community 24`, `Community 25`, `Community 26`, `Community 28`, `Community 29`, `Community 31`, `Community 32`, `Community 34`, `Community 35`, `Community 36`, `Community 38`, `Community 39`, `Community 40`, `Community 42`, `Community 44`, `Community 45`, `Community 47`, `Community 48`, `Community 49`, `Community 51`, `Community 52`, `Community 53`, `Community 55`, `Community 56`, `Community 57`, `Community 59`, `Community 62`, `Community 63`, `Community 64`, `Community 67`, `Community 68`, `Community 70`, `Community 74`, `Community 75`, `Community 77`, `Community 79`, `Community 81`, `Community 82`, `Community 84`, `Community 88`, `Community 89`, `Community 91`, `Community 92`, `Community 93`, `Community 95`, `Community 96`, `Community 98`, `Community 99`, `Community 102`, `Community 104`, `Community 105`, `Community 106`, `Community 107`, `Community 112`, `Community 114`, `Community 118`, `Community 120`, `Community 121`, `Community 126`, `Community 130`, `Community 131`, `Community 134`, `Community 135`, `Community 137`, `Community 138`, `Community 143`, `Community 150`, `Community 151`?**
+  _High betweenness centrality (0.452) - this node is a cross-community bridge._
+- **Are the 533 inferred relationships involving `t()` (e.g. with `.full()` and `.statusLabel()`) actually correct?**
+  _`t()` has 533 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `Help`, `Logs`, `Stats` to the rest of the system?**
-  _88 weakly-connected nodes found - possible missing edges._
+  _92 weakly-connected nodes found - possible missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
-  _Cohesion score 0.0514161220043573 - nodes in this community are weakly interconnected._
-- **Why does `Video` connect `Community 59` to `Community 2`, `Community 3`, `Community 5`, `Community 6`, `Community 9`, `Community 141`, `Community 14`, `Community 18`, `Community 20`, `Community 23`, `Community 31`, `Community 37`, `Community 41`, `Community 43`, `Community 47`, `Community 50`, `Community 51`, `Community 52`, `Community 86`, `Community 93`, `Community 95`, `Community 103`?**
-  _High betweenness centrality (0.033) - this node is a cross-community bridge._
-- **Are the 132 inferred relationships involving `toast()` (e.g. with `.render()` and `listen()`) actually correct?**
-  _`toast()` has 132 INFERRED edges - model-reasoned connections that need verification._
+  _Cohesion score 0.05498412698412698 - nodes in this community are weakly interconnected._
+- **Why does `BotActivity` connect `Community 19` to `Community 98`, `Community 3`, `Community 34`, `Community 37`, `Community 71`, `Community 46`, `Community 52`, `Community 117`, `Community 25`, `Community 90`, `Community 91`, `Community 61`, `Community 62`?**
+  _High betweenness centrality (0.043) - this node is a cross-community bridge._
+- **Are the 145 inferred relationships involving `toast()` (e.g. with `.render()` and `listen()`) actually correct?**
+  _`toast()` has 145 INFERRED edges - model-reasoned connections that need verification._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.04647066793117464 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.051111111111111114 - nodes in this community are weakly interconnected._

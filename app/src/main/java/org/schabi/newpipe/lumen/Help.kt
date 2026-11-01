@@ -19,6 +19,7 @@ object HelpMap {
     private val screens = mapOf(
         "LumenActivity" to "home",
         "IdeasActivity" to "home",
+        "LangGameActivity" to "project",
         "WizardActivity" to "wizard",
         "NewProjectActivity" to "new_project",
         "ProjectActivity" to "project",

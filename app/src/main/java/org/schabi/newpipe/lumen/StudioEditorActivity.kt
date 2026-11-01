@@ -196,7 +196,70 @@ class StudioEditorActivity : LumenBase() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"), REQ_VIDEO)
     }
 
-    /** Start screen: the last Studio video, a video from the phone and the saved projects. */
+    /** Small first frames (and lengths) of the videos on the start screen. */
+    private val thumbCache = HashMap<String, Pair<Bitmap?, Long>>()
+
+    private fun loadThumb(iv: android.widget.ImageView, f: File, length: TextView?, prefix: String) {
+        val key = f.absolutePath + ":" + f.lastModified()
+        fun show(v: Pair<Bitmap?, Long>) {
+            v.first?.let { iv.setImageBitmap(it) }
+            if (length != null && v.second > 0) length.text = prefix + " · " + StudioEdit.clock(v.second).substringBefore('.')
+        }
+        thumbCache[key]?.let { return show(it) }
+        val side = dp(96)
+        Lumen.async({
+            val r = MediaMetadataRetriever()
+            try {
+                r.setDataSource(f.absolutePath)
+                val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                val at = min(1_000_000L, dur * 500)
+                val full = r.getFrameAtTime(at, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                val small = full?.let {
+                    val k = side.toFloat() / max(it.width, it.height)
+                    Bitmap.createScaledBitmap(it, max(1, (it.width * k).toInt()), max(1, (it.height * k).toInt()), true).also { s -> if (s !== it) it.recycle() }
+                }
+                small to dur
+            } finally {
+                runCatching { r.release() }
+            }
+        }) { v ->
+            thumbCache[key] = v
+            if (!isDestroyed) show(v)
+        }
+    }
+
+    /** A row with the first frame of [f], a title and a line under it; a tap opens, 🗑 deletes. */
+    private fun videoRow(c: Col, f: File, title: String, sub: String, onOpen: () -> Unit, onDelete: (() -> Unit)? = null) {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(8), dp(4), dp(8))
+            background = ripple(this@StudioEditorActivity, roundBg(Palette.CARD, 16f, this@StudioEditorActivity), Palette.ON_SURFACE)
+            setOnClickListener { onOpen() }
+        }
+        val iv = android.widget.ImageView(this).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = roundBg(0xFF000000.toInt(), 10f, this@StudioEditorActivity)
+            clipToOutline = true
+        }
+        row.addView(iv, LinearLayout.LayoutParams(dp(60), dp(80)))
+        val texts = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        texts.addView(text(this, title, 15f, bold = true).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        val under = text(this, sub, 13f, color = Palette.MUTED)
+        texts.addView(under)
+        row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
+        if (onDelete != null) row.addView(iconBtn(this, "🗑") { onDelete() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        c.add(row, 8)
+        loadThumb(iv, f, under, sub)
+    }
+
+    /**
+     * The Editor section (a tab of the Studio): how it works, the latest finished videos of the Studio and the Mix,
+     * a video from the phone and the saved projects.
+     */
     private fun chooser() {
         stopPlayer()
         project = null
@@ -204,33 +267,45 @@ class StudioEditorActivity : LumenBase() {
         timeline = null
         statusRow = null
         val c = Col(this)
-        c.p(t("Откройте готовый ролик: в нужные моменты можно вставить инфосхемы, картинки, надписи и эмодзи, двигать их и менять размер и длительность.",
-            "Open a finished video: insert info-schemes, pictures, captions and emoji at any moment, move them and change their size and length."), color = Palette.MUTED)
-        StudioJob.result?.takeIf { it.exists() }?.let { f ->
-            c.button(t("🎬 Последний ролик Студии", "🎬 Last Studio video"), primary = true) { openFile(f) }
-            c.muted(f.name)
-        }
-        c.button(t("📂 Видео с телефона", "📂 A video from the phone"), style = BtnStyle.TONAL) { pickVideo() }
+        c.p(t("Готовый ролик → схемы, картинки, надписи и эмодзи в нужные моменты. Остановите видео, нажмите «＋», двигайте блоки на кадре и на таймлайне, затем «⬆ Экспорт».",
+            "A finished video → schemes, pictures, captions and emoji at the right moments. Stop the video, tap \"＋\", move the blocks on the frame and the timeline, then \"⬆ Export\"."), color = Palette.MUTED)
+        c.row(
+            btn(this, t("📂 Видео с телефона", "📂 Video from the phone"), style = BtnStyle.TONAL) { pickVideo() },
+            btn(this, t("❓ Как пользоваться", "❓ How to use"), style = BtnStyle.TEXT) { HelpActivity.open(this, helpTopic) }
+        )
+        val df = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         val list = StudioEditStore.list(this)
-        if (list.isNotEmpty()) {
-            c.h2(t("Проекты", "Projects"))
-            val df = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-            for (pr in list) c.card {
-                p(df.format(Date(pr.created)) + " · " + StudioEdit.clock(pr.durMs).substringBefore('.') + " · ${pr.w}×${pr.h}")
-                muted(summary(pr))
-                row(
-                    btn(ctx, t("Открыть", "Open"), style = BtnStyle.TONAL) { start(pr) },
-                    btn(ctx, t("🗑 Удалить", "🗑 Delete"), style = BtnStyle.TEXT) {
-                        confirm(t("Удалить проект?", "Delete the project?"), t("Блоки и копия видео удалятся; готовые ролики в галерее останутся.",
-                            "The blocks and the copy of the video are deleted; exported videos in the gallery stay.")) {
-                            StudioEditStore.delete(this@StudioEditorActivity, pr.id)
-                            chooser()
-                        }
-                    }
-                )
+        val inProjects = list.map { it.source }.toSet()
+        // finished videos of the Studio, the Mix and this editor (they all go to the shared folder)
+        val recent = ReportKit.shareFile(this, "x.mp4").parentFile?.listFiles { f -> f.name.endsWith(".mp4") && f.length() > 0 }.orEmpty()
+            .sortedByDescending { it.lastModified() }.take(6)
+        if (recent.isNotEmpty()) {
+            c.h2(t("Готовые ролики", "Finished videos"))
+            for (f in recent) {
+                val speech = sidecar(f).exists()
+                val sub = df.format(Date(f.lastModified())) + (if (speech) t(" · 🗣 речь с таймингом", " · 🗣 timed speech") else "") +
+                    if (f.absolutePath in inProjects) t(" · есть проект", " · has a project") else ""
+                videoRow(c, f, f.name.removeSuffix(".mp4"), sub, { openFile(f) })
             }
         }
-        page(t("Редактор Студии", "Studio editor"), c.root)
+        if (list.isNotEmpty()) {
+            c.h2(t("Проекты", "Projects") + " (${list.size})")
+            for (pr in list) {
+                val base = File(StudioEditStore.dir(this, pr.id), StudioEditStore.BASE)
+                videoRow(c, base, summary(pr), df.format(Date(pr.created)) + " · ${pr.w}×${pr.h}", { start(pr) }) {
+                    confirm(t("Удалить проект?", "Delete the project?"), t("Блоки и копия видео удалятся; готовые ролики в галерее останутся.",
+                        "The blocks and the copy of the video are deleted; exported videos in the gallery stay.")) {
+                        StudioEditStore.delete(this@StudioEditorActivity, pr.id)
+                        chooser()
+                    }
+                }
+            }
+        }
+        if (recent.isEmpty() && list.isEmpty()) c.empty(t("Пока нет роликов", "No videos yet"),
+            t("Соберите ролик в Студии или Миксе — он появится здесь. Или откройте любое видео с телефона.",
+                "Build a video in the Studio or the Mix — it shows up here. Or open any video from the phone."),
+            t("📂 Видео с телефона", "📂 Video from the phone")) { pickVideo() }
+        page(t("✏️ Редактор", "✏️ Editor"), c.root)
     }
 
     private fun summary(p: EProject): String {

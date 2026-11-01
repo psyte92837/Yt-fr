@@ -553,9 +553,13 @@ class StudioActivity : LumenBase() {
         c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
-        // the Mix and the Montage (hand editor + JS layers by the protocol) are their own screens: a second row of tabs
-        c.add(segBar(this, listOf(t("🔀 Микс", "🔀 Mix"), t("🎛 Монтаж", "🎛 Montage")), -1) {
-            if (it == 0) StudioMixActivity.open(this) else openMontage()
+        // the Mix, the Montage (hand editor + JS layers by the protocol) and the Editor are their own screens: a second row of tabs
+        c.add(segBar(this, listOf(t("🔀 Микс", "🔀 Mix"), t("🎛 Монтаж", "🎛 Montage"), t("✏️ Редактор", "✏️ Editor")), -1) {
+            when (it) {
+                0 -> StudioMixActivity.open(this)
+                1 -> openMontage()
+                else -> StudioEditorActivity.open(this)
+            }
         }, 6)
         if (!foreign) {
             val n = StudioDrafts.count(draftsDir, task.id)

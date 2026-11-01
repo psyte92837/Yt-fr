@@ -151,6 +151,22 @@ class StudioEditPainter(
 
     // ---------- schemes ----------
 
+    /** A scheme the AI is still drawing: a dashed frame with a note (seen in the editor, never exported). */
+    private fun pending(c: Canvas, box: RectF) {
+        val m = min(box.width(), box.height())
+        fill.color = 0x73000000
+        c.drawRoundRect(box, m * 0.06f, m * 0.06f, fill)
+        line.color = 0xCCFFFFFF.toInt()
+        line.strokeWidth = max(2f, m * 0.012f)
+        line.pathEffect = android.graphics.DashPathEffect(floatArrayOf(m * 0.04f, m * 0.03f), 0f)
+        c.drawRoundRect(box, m * 0.06f, m * 0.06f, line)
+        line.pathEffect = null
+        emoji(c, "🧩", RectF(box.centerX() - m * 0.12f, box.centerY() - m * 0.3f, box.centerX() + m * 0.12f, box.centerY() - m * 0.06f))
+        textP.textSize = m * 0.08f
+        textP.color = Color.WHITE
+        c.drawText(t("ИИ рисует схему…", "The AI is drawing…"), box.centerX(), box.centerY() + m * 0.12f, textP)
+    }
+
     private fun style(id: String): SchemeStyle =
         (if (id.isBlank() || id == SchemeStyles.AUTO) null else SchemeStyles.find(styleDir, id))
             ?: SchemeStyle(SchemeStyles.AUTO, "", card = 0xFFFFFFFF.toInt(), ink = 0xFF14161B.toInt(), muted = 0xFF6B7280.toInt(), accent = accent,
@@ -164,7 +180,7 @@ class StudioEditPainter(
     private fun light(c: Int) = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)) / 255 > 0.5
 
     private fun scheme(c: Canvas, b: EBlock, box: RectF, tMs: Long) {
-        val s = b.scheme ?: return placeholder(c, box, "🧩")
+        val s = b.scheme ?: return pending(c, box)
         val p = painter(b.look)
         val st = p.schemeLook()
         // a panel behind the scheme so its text reads on any video: light under dark text, dark under light text
@@ -339,21 +355,20 @@ object StudioEditStore {
 
 /** Export of the editor: frames of the video with the blocks drawn over them, the sound copied as it is. */
 object StudioEditRender {
-    private const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
-    private const val TIMEOUT = 10_000L
 
     /** Displayed size, length and frame rate of a video file. */
-    data class Probe(val w: Int, val h: Int, val durMs: Long, val fps: Int)
+    data class Probe(val w: Int, val h: Int, val durMs: Long, val fps: Int, val rotation: Int = 0)
 
     fun probe(f: File): Probe {
         val r = MediaMetadataRetriever()
+        var rot = 0
         val (w, h, dur) = try {
             r.setDataSource(f.absolutePath)
             val rw = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
             val rh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            rot = ((r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0) % 360 + 360) % 360
             val d = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            val (dw, dh) = Studio.displaySize(rw, rh, ((rot % 360) + 360) % 360)
+            val (dw, dh) = Studio.displaySize(rw, rh, rot)
             Triple(dw, dh, d)
         } finally {
             runCatching { r.release() }
@@ -369,105 +384,57 @@ object StudioEditRender {
                 ex.release()
             }
         }.getOrDefault(30).let { if (it in 15..60) it else 30 }
-        return Probe(w, h, dur, fps)
+        return Probe(w, h, dur, fps, rot)
     }
 
     /**
-     * Writes the video of project [p] (folder [dir]) with its blocks into [out]; [progress] gets "done/total".
+     * Writes the video of project [p] (folder [dir]) with its blocks into [out], the long side at most [maxSide];
+     * [progress] gets "done/total". On the GPU first (decoder → texture → OpenGL with the layer of blocks → encoder
+     * surface, several times faster); when this phone's codecs or GL refuse, the same picture on the CPU.
      * Worker thread; throws CancellationException when [cancelled].
      */
-    fun render(p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, cancelled: () -> Boolean, progress: (String) -> Unit) {
+    fun render(
+        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int,
+        cancelled: () -> Boolean, progress: (String) -> Unit
+    ) {
+        // a scheme still being drawn by the AI is not exported
+        val job = p.copy(blocks = p.blocks.filter { it.kind != "scheme" || it.scheme != null })
+        val started = System.currentTimeMillis()
+        try {
+            val n = StudioEditGl.render(job, dir, words, accent, styleDir, out, maxSide, cancelled, progress)
+            L.i("studio", "edit export on GPU: $n frames in ${(System.currentTimeMillis() - started) / 1000} s")
+            return
+        } catch (e: CancellationException) {
+            out.delete()
+            throw e
+        } catch (e: Throwable) {
+            L.w("studio", "edit export on GPU failed, CPU instead: ${e.message}", e)
+            out.delete()
+            progress(t("Медленный режим: кадры на процессоре", "Slow mode: frames on the CPU"))
+        }
+        renderCpu(job, dir, words, accent, styleDir, out, maxSide, cancelled, progress)
+        L.i("studio", "edit export on CPU in ${(System.currentTimeMillis() - started) / 1000} s")
+    }
+
+    /** The slow way: every frame decoded into pixels, the blocks drawn with Canvas, the pixels encoded. */
+    private fun renderCpu(
+        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int,
+        cancelled: () -> Boolean, progress: (String) -> Unit
+    ) {
         val base = File(dir, StudioEditStore.BASE)
         val pr = probe(base)
-        val (w, h) = StudioEdit.outSize(pr.w, pr.h)
+        val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
         val fps = pr.fps
         val totalMs = pr.durMs
         val frames = Studio.frameCount(totalMs, fps)
         out.parentFile?.mkdirs()
-        val fmt = MediaFormat.createVideoFormat(MIME, w, h).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
-            setInteger(MediaFormat.KEY_BIT_RATE, Studio.bitrate(w, h, fps))
-            setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
-        }
         val enc = MediaCodec.createEncoderByType(MIME)
-        enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        enc.configure(videoFormat(w, h, fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         enc.start()
         val muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        // the sound goes over untouched: samples of the original audio track
-        val aex = MediaExtractor()
-        aex.setDataSource(base.absolutePath)
-        val aIdx = (0 until aex.trackCount).firstOrNull { aex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
-        val aFmt = aIdx?.let {
-            aex.selectTrack(it)
-            aex.getTrackFormat(it)
-        }
-        val aBuf = ByteBuffer.allocateDirect(max(256 * 1024, aFmt?.takeIf { it.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) }?.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) ?: 0))
-        var aDone = aFmt == null
+        val audio = AudioCopy(base, totalMs * 1000)
+        val sink = VideoSink(enc, muxer, audio)
         var ok = false
-        var started = false
-        var vTrack = -1
-        var aTrack = -1
-        val info = MediaCodec.BufferInfo()
-        val aInfo = MediaCodec.BufferInfo()
-
-        fun writeAudio(untilUs: Long) {
-            if (!started || aTrack < 0) return
-            while (!aDone) {
-                val pts = aex.sampleTime
-                if (pts < 0 || pts > totalMs * 1000) {
-                    aDone = true
-                    break
-                }
-                if (pts > untilUs) break
-                aBuf.clear()
-                val n = aex.readSampleData(aBuf, 0)
-                if (n < 0) {
-                    aDone = true
-                    break
-                }
-                aInfo.set(0, n, pts, if (aex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-                muxer.writeSampleData(aTrack, aBuf, aInfo)
-                aex.advance()
-            }
-        }
-
-        fun drain(end: Boolean) {
-            var idle = 0
-            while (true) {
-                val o = enc.dequeueOutputBuffer(info, if (end) TIMEOUT else 0)
-                when {
-                    o == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                        if (!end) return
-                        if (++idle > 300) error("video encoder stalled")
-                    }
-                    o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                        vTrack = muxer.addTrack(enc.outputFormat)
-                        aTrack = aFmt?.let { f ->
-                            runCatching { muxer.addTrack(f) }.getOrElse {
-                                L.w("studio", "edit export: audio ${f.getString(MediaFormat.KEY_MIME)} cannot be copied: ${it.message}")
-                                -1
-                            }
-                        } ?: -1
-                        muxer.start()
-                        started = true
-                    }
-                    o >= 0 -> {
-                        val b = enc.getOutputBuffer(o)!!
-                        if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
-                        if (info.size > 0 && started) {
-                            writeAudio(info.presentationTimeUs)
-                            b.position(info.offset)
-                            b.limit(info.offset + info.size)
-                            muxer.writeSampleData(vTrack, b, info)
-                        }
-                        enc.releaseOutputBuffer(o, false)
-                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
-                    }
-                }
-            }
-        }
-
         var src: StudioFrames? = null
         val painter = StudioEditPainter(w, h, dir, words, accent, styleDir)
         try {
@@ -498,13 +465,13 @@ object StudioEditRender {
                 while (true) {
                     idx = enc.dequeueInputBuffer(TIMEOUT)
                     if (idx >= 0) break
-                    drain(false)
+                    sink.drain(false)
                     if (cancelled()) throw CancellationException()
                 }
                 val image = enc.getInputImage(idx)
                 if (image != null) StudioVideo.writeImage(image, w, h, y, u, v) else StudioVideo.writeNv12(enc.getInputBuffer(idx)!!, w, h, y, u, v)
                 enc.queueInputBuffer(idx, 0, size, pts, 0)
-                drain(false)
+                sink.drain(false)
                 if (f % 15 == 0 || f == frames - 1) progress(t("Кадры ${f + 1}/$frames", "Frames ${f + 1}/$frames"))
             }
             while (true) {
@@ -513,21 +480,454 @@ object StudioEditRender {
                     enc.queueInputBuffer(idx, 0, 0, Studio.frameTimeUs(frames, fps), MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     break
                 }
-                drain(false)
+                sink.drain(false)
             }
-            drain(true)
-            writeAudio(Long.MAX_VALUE)
+            sink.drain(true)
+            audio.write(muxer, Long.MAX_VALUE)
             bmp.recycle()
             ok = true
         } finally {
             painter.close()
             src?.let { s -> runCatching { s.close() } }
-            runCatching { aex.release() }
+            audio.close()
             runCatching { enc.stop() }
             enc.release()
-            if (started) runCatching { muxer.stop() }
+            if (sink.started) runCatching { muxer.stop() }
             runCatching { muxer.release() }
             if (!ok) out.delete()
         }
+    }
+
+    internal const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
+    internal const val TIMEOUT = 10_000L
+
+    internal fun videoFormat(w: Int, h: Int, fps: Int, color: Int): MediaFormat = MediaFormat.createVideoFormat(MIME, w, h).apply {
+        setInteger(MediaFormat.KEY_COLOR_FORMAT, color)
+        setInteger(MediaFormat.KEY_BIT_RATE, Studio.bitrate(w, h, fps))
+        setInteger(MediaFormat.KEY_FRAME_RATE, fps)
+        setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
+    }
+}
+
+/** The sound of the original copied sample by sample into the new file (no re-encoding). */
+internal class AudioCopy(base: File, private val endUs: Long) : java.io.Closeable {
+    private val ex = MediaExtractor()
+    private val format: MediaFormat?
+    private var done: Boolean
+    private val buf: ByteBuffer
+    private val info = MediaCodec.BufferInfo()
+    private var track = -1
+
+    init {
+        ex.setDataSource(base.absolutePath)
+        val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+        format = idx?.let {
+            ex.selectTrack(it)
+            ex.getTrackFormat(it)
+        }
+        done = format == null
+        buf = ByteBuffer.allocateDirect(max(256 * 1024, format?.takeIf { it.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) }?.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) ?: 0))
+    }
+
+    /** Adds the audio track to [m] (before it starts); a codec the muxer cannot take is left out. */
+    fun add(m: MediaMuxer) {
+        track = format?.let { f ->
+            runCatching { m.addTrack(f) }.getOrElse {
+                L.w("studio", "edit export: audio ${f.getString(MediaFormat.KEY_MIME)} cannot be copied: ${it.message}")
+                -1
+            }
+        } ?: -1
+    }
+
+    /** Writes the samples up to [untilUs]. */
+    fun write(m: MediaMuxer, untilUs: Long) {
+        if (track < 0) return
+        while (!done) {
+            val pts = ex.sampleTime
+            if (pts < 0 || pts > endUs) {
+                done = true
+                break
+            }
+            if (pts > untilUs) break
+            buf.clear()
+            val n = ex.readSampleData(buf, 0)
+            if (n < 0) {
+                done = true
+                break
+            }
+            info.set(0, n, pts, if (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
+            m.writeSampleData(track, buf, info)
+            ex.advance()
+        }
+    }
+
+    override fun close() {
+        runCatching { ex.release() }
+    }
+}
+
+/** Moves encoded video to the muxer (starting it with the audio track) and the sound along with it. */
+internal class VideoSink(private val enc: MediaCodec, private val muxer: MediaMuxer, private val audio: AudioCopy) {
+    var started = false
+        private set
+    var ended = false
+        private set
+    private var track = -1
+    private val info = MediaCodec.BufferInfo()
+
+    /** Takes what the encoder has; with [end] waits for its end of stream. */
+    fun drain(end: Boolean) {
+        var idle = 0
+        while (true) {
+            val o = enc.dequeueOutputBuffer(info, if (end) StudioEditRender.TIMEOUT else 0)
+            when {
+                o == MediaCodec.INFO_TRY_AGAIN_LATER -> {
+                    if (!end) return
+                    if (++idle > 300) error("video encoder stalled")
+                }
+                o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    track = muxer.addTrack(enc.outputFormat)
+                    audio.add(muxer)
+                    muxer.start()
+                    started = true
+                }
+                o >= 0 -> {
+                    val b = enc.getOutputBuffer(o)!!
+                    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) info.size = 0
+                    if (info.size > 0 && started) {
+                        audio.write(muxer, info.presentationTimeUs)
+                        b.position(info.offset)
+                        b.limit(info.offset + info.size)
+                        muxer.writeSampleData(track, b, info)
+                    }
+                    enc.releaseOutputBuffer(o, false)
+                    if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        ended = true
+                        return
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * GPU export: the decoder draws every frame into a SurfaceTexture, OpenGL puts it on the encoder's input
+ * surface and the layer of blocks over it (drawn with Canvas only when it changes, see [StudioEdit.overlayKey]).
+ * The way Media3 Transformer and the CTS DecodeEditEncode test work, without the extra library.
+ */
+private object StudioEditGl {
+    private const val RECORDABLE = 0x3142 // EGL_RECORDABLE_ANDROID
+
+    private val VS = """
+        uniform mat4 uTex;
+        attribute vec4 aPos;
+        attribute vec4 aUv;
+        varying vec2 vUv;
+        void main() {
+            gl_Position = aPos;
+            vUv = (uTex * aUv).xy;
+        }
+    """.trimIndent()
+
+    private val FS_OES = """
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        varying vec2 vUv;
+        uniform samplerExternalOES uS;
+        void main() {
+            gl_FragColor = texture2D(uS, vUv);
+        }
+    """.trimIndent()
+
+    private val FS_2D = """
+        precision mediump float;
+        varying vec2 vUv;
+        uniform sampler2D uS;
+        void main() {
+            gl_FragColor = texture2D(uS, vUv);
+        }
+    """.trimIndent()
+
+    private fun floats(vararg v: Float): java.nio.FloatBuffer =
+        ByteBuffer.allocateDirect(v.size * 4).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply { put(v); position(0) }
+
+    private fun shader(type: Int, src: String): Int {
+        val s = android.opengl.GLES20.glCreateShader(type)
+        android.opengl.GLES20.glShaderSource(s, src)
+        android.opengl.GLES20.glCompileShader(s)
+        val ok = IntArray(1)
+        android.opengl.GLES20.glGetShaderiv(s, android.opengl.GLES20.GL_COMPILE_STATUS, ok, 0)
+        if (ok[0] == 0) error("shader: " + android.opengl.GLES20.glGetShaderInfoLog(s))
+        return s
+    }
+
+    private fun program(fs: String): Int {
+        val p = android.opengl.GLES20.glCreateProgram()
+        android.opengl.GLES20.glAttachShader(p, shader(android.opengl.GLES20.GL_VERTEX_SHADER, VS))
+        android.opengl.GLES20.glAttachShader(p, shader(android.opengl.GLES20.GL_FRAGMENT_SHADER, fs))
+        android.opengl.GLES20.glLinkProgram(p)
+        val ok = IntArray(1)
+        android.opengl.GLES20.glGetProgramiv(p, android.opengl.GLES20.GL_LINK_STATUS, ok, 0)
+        if (ok[0] == 0) error("program: " + android.opengl.GLES20.glGetProgramInfoLog(p))
+        return p
+    }
+
+    /** Waits for the decoder's next frame in the SurfaceTexture. */
+    private class Frames : android.graphics.SurfaceTexture.OnFrameAvailableListener {
+        private val lock = Object()
+        private var ready = false
+
+        override fun onFrameAvailable(st: android.graphics.SurfaceTexture) {
+            synchronized(lock) {
+                ready = true
+                lock.notifyAll()
+            }
+        }
+
+        fun await(st: android.graphics.SurfaceTexture) {
+            synchronized(lock) {
+                val until = System.currentTimeMillis() + 3000
+                while (!ready) {
+                    val left = until - System.currentTimeMillis()
+                    if (left <= 0) error("no frame from the decoder")
+                    lock.wait(left)
+                }
+                ready = false
+            }
+            st.updateTexImage()
+        }
+    }
+
+    /** Returns the number of frames written. */
+    fun render(
+        p: EProject, dir: File, words: List<SWord>, accent: Int, styleDir: File, out: File, maxSide: Int,
+        cancelled: () -> Boolean, progress: (String) -> Unit
+    ): Int {
+        val base = File(dir, StudioEditStore.BASE)
+        val pr = StudioEditRender.probe(base)
+        val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
+        val totalMs = pr.durMs
+        val expected = max(1, (totalMs * pr.fps / 1000).toInt())
+        out.parentFile?.mkdirs()
+
+        val ex = MediaExtractor()
+        var dec: MediaCodec? = null
+        var enc: MediaCodec? = null
+        var muxer: MediaMuxer? = null
+        var audio: AudioCopy? = null
+        var inputSurface: android.view.Surface? = null
+        var decSurface: android.view.Surface? = null
+        var st: android.graphics.SurfaceTexture? = null
+        val thread = android.os.HandlerThread("edit-gl-frames").apply { start() }
+        var dpy = android.opengl.EGL14.EGL_NO_DISPLAY
+        var ctx = android.opengl.EGL14.EGL_NO_CONTEXT
+        var surf = android.opengl.EGL14.EGL_NO_SURFACE
+        val painter = StudioEditPainter(w, h, dir, words, accent, styleDir)
+        val layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        var sink: VideoSink? = null
+        var ok = false
+        var written = 0
+        try {
+            ex.setDataSource(base.absolutePath)
+            val vIdx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                ?: error(t("В файле нет видео", "The file has no video"))
+            ex.selectTrack(vIdx)
+            val inFmt = ex.getTrackFormat(vIdx)
+            if (pr.rotation != 0 && !inFmt.containsKey(MediaFormat.KEY_ROTATION)) inFmt.setInteger(MediaFormat.KEY_ROTATION, pr.rotation)
+
+            val e = MediaCodec.createEncoderByType(StudioEditRender.MIME)
+            enc = e
+            e.configure(StudioEditRender.videoFormat(w, h, pr.fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            inputSurface = e.createInputSurface()
+            e.start()
+            val m = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = m
+            val a = AudioCopy(base, totalMs * 1000)
+            audio = a
+            val sk = VideoSink(e, m, a)
+            sink = sk
+
+            // EGL on the encoder surface
+            dpy = android.opengl.EGL14.eglGetDisplay(android.opengl.EGL14.EGL_DEFAULT_DISPLAY)
+            check(dpy != android.opengl.EGL14.EGL_NO_DISPLAY) { "no EGL display" }
+            val ver = IntArray(2)
+            check(android.opengl.EGL14.eglInitialize(dpy, ver, 0, ver, 1)) { "EGL init" }
+            val configs = arrayOfNulls<android.opengl.EGLConfig>(1)
+            val num = IntArray(1)
+            android.opengl.EGL14.eglChooseConfig(dpy, intArrayOf(
+                android.opengl.EGL14.EGL_RED_SIZE, 8, android.opengl.EGL14.EGL_GREEN_SIZE, 8, android.opengl.EGL14.EGL_BLUE_SIZE, 8,
+                android.opengl.EGL14.EGL_ALPHA_SIZE, 8, android.opengl.EGL14.EGL_RENDERABLE_TYPE, android.opengl.EGL14.EGL_OPENGL_ES2_BIT,
+                RECORDABLE, 1, android.opengl.EGL14.EGL_NONE
+            ), 0, configs, 0, 1, num, 0)
+            val cfg = configs[0]
+            check(num[0] > 0 && cfg != null) { "no recordable EGL config" }
+            ctx = android.opengl.EGL14.eglCreateContext(dpy, cfg, android.opengl.EGL14.EGL_NO_CONTEXT,
+                intArrayOf(android.opengl.EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, android.opengl.EGL14.EGL_NONE), 0)
+            check(ctx != android.opengl.EGL14.EGL_NO_CONTEXT) { "no EGL context" }
+            surf = android.opengl.EGL14.eglCreateWindowSurface(dpy, cfg, inputSurface, intArrayOf(android.opengl.EGL14.EGL_NONE), 0)
+            check(surf != android.opengl.EGL14.EGL_NO_SURFACE) { "no EGL surface" }
+            check(android.opengl.EGL14.eglMakeCurrent(dpy, surf, surf, ctx)) { "EGL make current" }
+
+            val progOes = program(FS_OES)
+            val prog2d = program(FS_2D)
+            val tex = IntArray(2)
+            android.opengl.GLES20.glGenTextures(2, tex, 0)
+            val oes = tex[0]
+            val ov = tex[1]
+            val OES = android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES
+            android.opengl.GLES20.glBindTexture(OES, oes)
+            for ((k, v) in listOf(android.opengl.GLES20.GL_TEXTURE_MIN_FILTER to android.opengl.GLES20.GL_LINEAR, android.opengl.GLES20.GL_TEXTURE_MAG_FILTER to android.opengl.GLES20.GL_LINEAR,
+                android.opengl.GLES20.GL_TEXTURE_WRAP_S to android.opengl.GLES20.GL_CLAMP_TO_EDGE, android.opengl.GLES20.GL_TEXTURE_WRAP_T to android.opengl.GLES20.GL_CLAMP_TO_EDGE)) {
+                android.opengl.GLES20.glTexParameteri(OES, k, v)
+            }
+            android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, ov)
+            for ((k, v) in listOf(android.opengl.GLES20.GL_TEXTURE_MIN_FILTER to android.opengl.GLES20.GL_LINEAR, android.opengl.GLES20.GL_TEXTURE_MAG_FILTER to android.opengl.GLES20.GL_LINEAR,
+                android.opengl.GLES20.GL_TEXTURE_WRAP_S to android.opengl.GLES20.GL_CLAMP_TO_EDGE, android.opengl.GLES20.GL_TEXTURE_WRAP_T to android.opengl.GLES20.GL_CLAMP_TO_EDGE)) {
+                android.opengl.GLES20.glTexParameteri(android.opengl.GLES20.GL_TEXTURE_2D, k, v)
+            }
+            android.opengl.GLUtils.texImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, layer, 0)
+
+            val texture = android.graphics.SurfaceTexture(oes)
+            st = texture
+            val frames = Frames()
+            texture.setOnFrameAvailableListener(frames, android.os.Handler(thread.looper))
+            decSurface = android.view.Surface(texture)
+            val d = MediaCodec.createDecoderByType(inFmt.getString(MediaFormat.KEY_MIME)!!)
+            dec = d
+            d.configure(inFmt, decSurface, null, 0)
+            d.start()
+
+            val pos = floats(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
+            val uv = floats(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
+            val texM = FloatArray(16)
+            // the layer bitmap has its first row at the top: v is turned over
+            val flip = FloatArray(16).also {
+                android.opengl.Matrix.setIdentityM(it, 0)
+                android.opengl.Matrix.translateM(it, 0, 0f, 1f, 0f)
+                android.opengl.Matrix.scaleM(it, 0, 1f, -1f, 1f)
+            }
+            fun draw(prog: Int, target: Int, id: Int, mat: FloatArray) {
+                android.opengl.GLES20.glUseProgram(prog)
+                android.opengl.GLES20.glActiveTexture(android.opengl.GLES20.GL_TEXTURE0)
+                android.opengl.GLES20.glBindTexture(target, id)
+                android.opengl.GLES20.glUniform1i(android.opengl.GLES20.glGetUniformLocation(prog, "uS"), 0)
+                android.opengl.GLES20.glUniformMatrix4fv(android.opengl.GLES20.glGetUniformLocation(prog, "uTex"), 1, false, mat, 0)
+                val aPos = android.opengl.GLES20.glGetAttribLocation(prog, "aPos")
+                val aUv = android.opengl.GLES20.glGetAttribLocation(prog, "aUv")
+                android.opengl.GLES20.glEnableVertexAttribArray(aPos)
+                android.opengl.GLES20.glVertexAttribPointer(aPos, 2, android.opengl.GLES20.GL_FLOAT, false, 8, pos)
+                android.opengl.GLES20.glEnableVertexAttribArray(aUv)
+                android.opengl.GLES20.glVertexAttribPointer(aUv, 2, android.opengl.GLES20.GL_FLOAT, false, 8, uv)
+                android.opengl.GLES20.glDrawArrays(android.opengl.GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            }
+
+            val canvas = Canvas(layer)
+            val settles = HashMap<String, Long>()
+            val settle: (EBlock) -> Long = { b ->
+                settles.getOrPut(b.id + b.hashCode()) {
+                    val times = b.scheme?.let { StudioEdit.schemeTimes(it, words, b) }.orEmpty()
+                    max(b.startMs, times.maxOrNull() ?: b.startMs) + 900
+                }
+            }
+            var lastKey = ""
+            val dInfo = MediaCodec.BufferInfo()
+            var inDone = false
+            var outDone = false
+            var idle = 0
+            while (!sk.ended) {
+                if (cancelled()) throw CancellationException()
+                // the decoder gives nothing for ~15 s: this phone's path does not work, the CPU one takes over
+                if (++idle > 3000) error("decoder stalled")
+                if (!inDone) {
+                    val i = d.dequeueInputBuffer(5000)
+                    if (i >= 0) {
+                        val n = ex.readSampleData(d.getInputBuffer(i)!!, 0)
+                        if (n < 0) {
+                            d.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inDone = true
+                        } else {
+                            d.queueInputBuffer(i, 0, n, ex.sampleTime, 0)
+                            ex.advance()
+                        }
+                    }
+                }
+                sk.drain(false)
+                if (!outDone) {
+                    val o = d.dequeueOutputBuffer(dInfo, 5000)
+                    if (o >= 0) {
+                        idle = 0
+                        val eos = dInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                        val ptsUs = dInfo.presentationTimeUs
+                        val show = dInfo.size != 0 && ptsUs >= 0
+                        d.releaseOutputBuffer(o, show)
+                        if (show) {
+                            frames.await(texture)
+                            texture.getTransformMatrix(texM)
+                            android.opengl.GLES20.glViewport(0, 0, w, h)
+                            android.opengl.GLES20.glClearColor(0f, 0f, 0f, 1f)
+                            android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
+                            draw(progOes, OES, oes, texM)
+                            val tMs = ptsUs / 1000
+                            val shown = StudioEdit.active(p.blocks, tMs)
+                            if (shown.isNotEmpty()) {
+                                val key = StudioEdit.overlayKey(shown, tMs, settle)
+                                if (key != lastKey) {
+                                    layer.eraseColor(0)
+                                    painter.draw(canvas, shown, tMs)
+                                    android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, ov)
+                                    android.opengl.GLUtils.texSubImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, 0, 0, layer)
+                                    lastKey = key
+                                }
+                                android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
+                                // Android bitmaps keep premultiplied colours
+                                android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_ONE, android.opengl.GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                                draw(prog2d, android.opengl.GLES20.GL_TEXTURE_2D, ov, flip)
+                                android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
+                            }
+                            val err = android.opengl.GLES20.glGetError()
+                            if (err != android.opengl.GLES20.GL_NO_ERROR) error("GL error $err")
+                            android.opengl.EGLExt.eglPresentationTimeANDROID(dpy, surf, ptsUs * 1000)
+                            check(android.opengl.EGL14.eglSwapBuffers(dpy, surf)) { "EGL swap" }
+                            written++
+                            if (written % 15 == 0) progress(t("Кадры ${min(written, expected - 1)}/$expected", "Frames ${min(written, expected - 1)}/$expected"))
+                        }
+                        if (eos) {
+                            e.signalEndOfInputStream()
+                            outDone = true
+                        }
+                    }
+                }
+                if (outDone) sk.drain(true)
+            }
+            if (written == 0) error("no frames")
+            a.write(m, Long.MAX_VALUE)
+            progress(t("Кадры $expected/$expected", "Frames $expected/$expected"))
+            ok = true
+        } finally {
+            dec?.let { runCatching { it.stop() }; runCatching { it.release() } }
+            enc?.let { runCatching { it.stop() }; runCatching { it.release() } }
+            if (sink?.started == true) runCatching { muxer?.stop() }
+            runCatching { muxer?.release() }
+            audio?.close()
+            runCatching { ex.release() }
+            if (dpy != android.opengl.EGL14.EGL_NO_DISPLAY) {
+                runCatching {
+                    android.opengl.EGL14.eglMakeCurrent(dpy, android.opengl.EGL14.EGL_NO_SURFACE, android.opengl.EGL14.EGL_NO_SURFACE, android.opengl.EGL14.EGL_NO_CONTEXT)
+                    if (surf != android.opengl.EGL14.EGL_NO_SURFACE) android.opengl.EGL14.eglDestroySurface(dpy, surf)
+                    if (ctx != android.opengl.EGL14.EGL_NO_CONTEXT) android.opengl.EGL14.eglDestroyContext(dpy, ctx)
+                    android.opengl.EGL14.eglReleaseThread()
+                    android.opengl.EGL14.eglTerminate(dpy)
+                }
+            }
+            st?.release()
+            decSurface?.release()
+            inputSurface?.release()
+            thread.quitSafely()
+            painter.close()
+            layer.recycle()
+            if (!ok) out.delete()
+        }
+        return written
     }
 }

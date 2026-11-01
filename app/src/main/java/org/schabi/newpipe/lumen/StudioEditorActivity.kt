@@ -102,6 +102,8 @@ class StudioEditorActivity : LumenBase() {
     private var texture: TextureView? = null
     private var timeText: TextView? = null
     private var playBtn: TextView? = null
+    private var undoBtn: TextView? = null
+    private var redoBtn: TextView? = null
     private var toolsRow: LinearLayout? = null
     private var statusRow: LinearLayout? = null
     private var statusText: TextView? = null
@@ -273,6 +275,7 @@ class StudioEditorActivity : LumenBase() {
             totalMs = p.durMs
             aspect = p.w.toFloat() / p.h
             blocks = p.blocks
+            words = this@StudioEditorActivity.words
         }
         root.addView(FrameLayout(this).apply {
             setBackgroundColor(0xFF15171B.toInt())
@@ -292,6 +295,7 @@ class StudioEditorActivity : LumenBase() {
         texture = tv
         toolsRow = row
         st.blocks = p.blocks
+        st.portrait = p.h > p.w * 1.1f
         st.onSelect = { id ->
             player?.pause()
             select(id, seek = false)
@@ -315,7 +319,7 @@ class StudioEditorActivity : LumenBase() {
             select(id, seek = true)
         }
         tl.onChange = { b, done -> live(b, done) }
-        page(t("Редактор", "Editor"), root, actions = listOf("↶" to { undo() }, "↷" to { redo() }), scroll = false)
+        page(t("Редактор", "Editor"), root, actions = listOf("☰" to { blocksSheet() }), scroll = false)
         tl.post {
             tl.fitAll()
             tl.setPlayhead(curMs)
@@ -324,6 +328,28 @@ class StudioEditorActivity : LumenBase() {
         sync()
         tools()
         watch()
+        refreshUndo()
+        hintOnce()
+    }
+
+    /** The first time: how the editor works, in four lines. */
+    private fun hintOnce() {
+        val prefs = Lumen.prefs
+        if (prefs.getBoolean("studio_edit_hint", false)) return
+        prefs.edit().putBoolean("studio_edit_hint", true).apply()
+        bottomSheet(t("Как работает редактор", "How the editor works")) { dismiss ->
+            p(t("1. Остановите видео в нужном месте (тап по кадру или прокрутка таймлайна) и нажмите «＋».", "1. Stop the video at a moment (tap the frame or scroll the timeline) and tap \"＋\"."))
+            p(t("2. Блок на кадре: тяните пальцем, угол ⤡ или два пальца — размер и поворот, ↔ — ширина текста.", "2. A block on the frame: drag it; the ⤡ corner or two fingers scale and turn it, ↔ sets the text width."))
+            p(t("3. На таймлайне: выбранный блок тянется целиком, края — длительность; края прилипают к словам и курсору.", "3. On the timeline: drag the selected block, its edges set the length and stick to words and the playhead."))
+            if (words.isNotEmpty()) p(t("4. «📝 Текст» — вся речь: тап по слову ставит курсор, выделите фразу — и схема или надпись встанет ровно на неё.",
+                "4. \"📝 Text\" is the whole speech: tap a word to go there, select a phrase to put a scheme or caption exactly on it."))
+            button(t("Понятно", "Got it"), primary = true) { dismiss() }
+        }
+    }
+
+    private fun refreshUndo() {
+        undoBtn?.alpha = if (history.canUndo) 1f else 0.35f
+        redoBtn?.alpha = if (history.canRedo) 1f else 0.35f
     }
 
     /** The video frame keeps the shape of the video inside the black area. */
@@ -357,18 +383,24 @@ class StudioEditorActivity : LumenBase() {
             typeface = Typeface.MONOSPACE
             isSingleLine = true
         }
+        tt.setOnClickListener { goToTime() }
+        tt.contentDescription = t("Время; тап — перейти к моменту", "Time; tap to go to a moment")
         row.addView(tt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(roundBtn("⏪") { step(-100) }.apply { contentDescription = t("Назад на 0,1 с", "Back 0.1 s") })
+        val un = roundBtn("↶") { undo() }.apply { contentDescription = t("Отменить", "Undo") }
+        val re = roundBtn("↷") { redo() }.apply { contentDescription = t("Вернуть", "Redo") }
+        row.addView(un)
+        row.addView(re)
         val play = roundBtn("▶", big = true) { toggle() }.apply { contentDescription = t("Играть / пауза", "Play / pause") }
         row.addView(play)
-        row.addView(roundBtn("⏩") { step(100) }.apply { contentDescription = t("Вперёд на 0,1 с", "Forward 0.1 s") })
+        undoBtn = un
+        redoBtn = re
         row.addView(text(this, "＋", 22f, bold = true, color = Palette.ON_FAB).apply {
             gravity = Gravity.CENTER
             contentDescription = t("Вставить", "Insert")
             background = ripple(this@StudioEditorActivity, roundBg(Palette.FAB, 14f, this@StudioEditorActivity), Palette.ON_FAB)
             setOnClickListener { insertSheet() }
         }, LinearLayout.LayoutParams(dp(48), dp(44)).apply { marginStart = dp(8) })
-        row.addView(btn(this, t("⬆ Экспорт", "⬆ Export"), primary = true) { export() },
+        row.addView(btn(this, t("⬆ Экспорт", "⬆ Export"), primary = true) { exportSheet() },
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
         timeText = tt
         playBtn = play
@@ -409,7 +441,9 @@ class StudioEditorActivity : LumenBase() {
             return
         }
         row.visibility = View.VISIBLE
-        statusText?.text = (if (ex != null) "⬆ " else "🤖 ") + task.message.ifBlank { task.title }
+        val left = ProgressText.fraction(task.message)?.let { StudioEdit.eta(System.currentTimeMillis() - task.startedAt, it) }
+        statusText?.text = (if (ex != null) "⬆ " else "🤖 ") + task.message.ifBlank { task.title } +
+            (left?.let { t(" · осталось ~", " · ~") + StudioEdit.clock(it).substringBefore('.') + t("", " left") } ?: "")
         statusBar?.showProgress(task.message)
         statusStop?.setOnClickListener { BgTasks.stop(task) }
     }
@@ -419,14 +453,17 @@ class StudioEditorActivity : LumenBase() {
         val row = toolsRow ?: return
         row.removeAllViews()
         val b = StudioEdit.find(blocks, selected)
-        val items: List<Pair<String, () -> Unit>> = if (b == null) listOf(
+        val items: List<Pair<String, () -> Unit>> = if (b == null) listOfNotNull(
             t("＋ Вставить", "＋ Insert") to { insertSheet() },
+            if (words.isNotEmpty()) t("📝 Текст", "📝 Text") to { textSheet() } else null,
+            if (words.isNotEmpty()) t("🤖 Схемы на весь ролик", "🤖 Schemes for all") to { autoSchemes() } else null,
             t("🧩 Схема ИИ", "🧩 AI scheme") to { aiSchemeSheet(null) },
             t("✍️ Схема текстом", "✍️ Scheme from text") to { textSchemeSheet(null) },
             t("🖼 Картинка", "🖼 Picture") to { pickImage(null) },
             t("🌐 Фото по запросу", "🌐 Photo search") to { photoSheet(null) },
             t("T Надпись", "T Caption") to { captionSheet(null) },
             t("😀 Эмодзи", "😀 Emoji") to { emojiSheet(null) },
+            t("☰ Блоки", "☰ Blocks") to { blocksSheet() },
             t("📂 Проекты", "📂 Projects") to { chooser() }
         ) else buildList {
             add(t("✓ Готово", "✓ Done") to { select(null) })
@@ -519,9 +556,11 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun step(d: Long) {
+    private fun goToTime() {
         pause()
-        seekTo(curMs + d)
+        prompt(t("Перейти к моменту", "Go to a moment"), t("Секунды или 0:12.5", "Seconds or 0:12.5"), StudioEdit.clock(curMs)) { v ->
+            StudioEdit.parseTime(v)?.let { seekTo(it) } ?: toast(t("Не понял время", "Not a time"))
+        }
     }
 
     /** Moves to [ms]; while the finger still moves ([final] false) the player seeks at most every 40 ms. */
@@ -532,6 +571,8 @@ class StudioEditorActivity : LumenBase() {
         val now = SystemClock.uptimeMillis()
         if (final || now - lastSeekAt > 40) {
             lastSeekAt = now
+            // while the finger moves: the nearest key frame (fast); at the end: the exact frame
+            ex.setSeekParameters(if (final) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
             ex.seekTo(curMs)
         }
     }
@@ -545,14 +586,21 @@ class StudioEditorActivity : LumenBase() {
             try {
                 r.setDataSource(f.absolutePath)
                 val n = (p.durMs / 1000).toInt().coerceIn(8, 48)
-                (0 until n).mapNotNull { i ->
+                val got = ArrayList<Pair<Long, Bitmap>>()
+                (0 until n).forEach { i ->
                     val ms = p.durMs * i / n + p.durMs / (2 * n)
                     val bmp = if (Build.VERSION.SDK_INT >= 27) r.getScaledFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, tw * 2, th * 2)
                     else r.getFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { full ->
                         Bitmap.createScaledBitmap(full, tw * 2, th * 2, true).also { if (it !== full) full.recycle() }
                     }
-                    bmp?.let { ms to it }
+                    if (bmp != null) got += ms to bmp
+                    // the strip fills in as frames come, not after the last one
+                    if (got.size % 8 == 0 && got.isNotEmpty()) {
+                        val part = got.toList()
+                        Lumen.ui { if (project?.id == p.id) timeline?.thumbs = part }
+                    }
                 }
+                got.toList()
             } finally {
                 runCatching { r.release() }
             }
@@ -580,6 +628,7 @@ class StudioEditorActivity : LumenBase() {
         history.push(snapshot())
         setBlocks(list)
         save()
+        refreshUndo()
         select(sel?.takeIf { id -> list.any { it.id == id } }, seek = false)
     }
 
@@ -599,6 +648,7 @@ class StudioEditorActivity : LumenBase() {
             gestureBase?.let { history.push(it) }
             gestureBase = null
             save()
+            refreshUndo()
         }
     }
 
@@ -625,6 +675,7 @@ class StudioEditorActivity : LumenBase() {
     private fun restore(s: String) {
         setBlocks(StudioEdit.blocksFrom(runCatching { JSONArray(s) }.getOrNull()))
         save()
+        refreshUndo()
         stage?.refresh()
         select(selected?.takeIf { id -> blocks.any { it.id == id } }, seek = false)
     }
@@ -661,11 +712,15 @@ class StudioEditorActivity : LumenBase() {
      * Puts the result of background work into project [pid]: on screen when it is open, else straight into its
      * file (the screen may have been closed while the AI worked).
      */
-    private fun deliver(pid: String, mutate: (EProject, List<EBlock>) -> List<EBlock>) {
+    private fun deliver(pid: String, mutate: (EProject, List<EBlock>) -> List<EBlock>) = deliverTo(pid) { pr, list, _ -> mutate(pr, list) }
+
+    /** The same; [mutate] learns whether the project is on screen (true) or only in its file (false). */
+    private fun deliverTo(pid: String, mutate: (EProject, List<EBlock>, Boolean) -> List<EBlock>) {
         val p = project
         if (!isDestroyed && p != null && p.id == pid) {
             val old = p.blocks.map { it.id }.toSet()
-            val list = mutate(p, p.blocks)
+            val list = mutate(p, p.blocks, true)
+            if (list == p.blocks) return
             val added = list.lastOrNull { it.id !in old }?.id
             commit(list, added ?: selected)
             stage?.refresh()
@@ -673,7 +728,7 @@ class StudioEditorActivity : LumenBase() {
         } else {
             val app = applicationContext
             val stored = StudioEditStore.load(StudioEditStore.dir(app, pid)) ?: return
-            StudioEditStore.save(app, stored.copy(blocks = mutate(stored, stored.blocks)))
+            StudioEditStore.save(app, stored.copy(blocks = mutate(stored, stored.blocks, false)))
         }
     }
 
@@ -750,7 +805,9 @@ class StudioEditorActivity : LumenBase() {
                 }, 12)
                 muted(sub)
             }
+            if (words.isNotEmpty()) item(t("📝 По тексту речи", "📝 From the speech text"), t("выделите фразу — блок встанет ровно на неё", "select a phrase — the block goes exactly on it")) { textSheet() }
             item(t("🧩 Инфосхема от ИИ", "🧩 AI info-scheme"), t("по словам этого момента и вашему пожеланию", "from the words of this moment and your wish")) { aiSchemeSheet(null) }
+            if (words.isNotEmpty()) item(t("🤖 Схемы на весь ролик", "🤖 Schemes for the whole video"), t("ИИ сам выберет места и поставит схемы", "the AI picks the places and puts schemes there")) { autoSchemes() }
             item(t("✍️ Схема своим текстом", "✍️ Scheme from your text"), t("строки «эмодзи Подпись — значение», без ИИ", "lines \"emoji Label — value\", no AI")) { textSchemeSheet(null) }
             item(t("🖼 Картинка из галереи", "🖼 Picture from the gallery"), t("фото, скриншот, логотип (PNG с прозрачностью тоже)", "a photo, screenshot or logo (transparent PNG too)")) { pickImage(null) }
             item(t("🌐 Фото по запросу", "🌐 Photo search"), t("бесплатные фото Openverse; запрос может подобрать ИИ", "free Openverse photos; the AI can suggest the query")) { photoSheet(null) }
@@ -759,22 +816,23 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun aiSchemeSheet(old: EBlock?) {
+    private fun aiSchemeSheet(old: EBlock?, span: IntRange? = null) {
         pause()
         val p = project ?: return
         if (BgTasks.has(TASK_AI)) return toast(t("ИИ уже работает — дождитесь или остановите", "The AI is already working — wait or stop it"))
-        val at = old?.startMs ?: curMs
+        val at = old?.startMs ?: span?.let { StudioEdit.spanOf(words, it, p.durMs).first } ?: curMs
         var layout = old?.scheme?.layout ?: "auto"
         var durMs = 5000L
         var style = old?.look?.ifEmpty { null } ?: lastStyle
         bottomSheet(if (old == null) t("🧩 Инфосхема от ИИ", "🧩 AI info-scheme") else t("🤖 Переделать схему", "🤖 Redo the scheme")) { dismiss ->
-            val said = StudioEdit.momentText(words, at, 2000, 10_000)
-            if (said.isNotBlank()) muted(t("Звучит с ", "Spoken from ") + StudioEdit.clock(at) + ": «" + said.take(260) + "»")
+            val said = span?.joinToString(" ") { words[it].text } ?: StudioEdit.momentText(words, at, 2000, 10_000)
+            if (span != null) muted(t("Схема встанет на фразу: ", "The scheme goes on the phrase: ") + "«" + said.take(260) + "»")
+            else if (said.isNotBlank()) muted(t("Звучит с ", "Spoken from ") + StudioEdit.clock(at) + ": «" + said.take(260) + "»")
             else muted(t("У этого видео нет слов с таймингом — опишите, какую схему нарисовать.", "This video has no timed words — describe the scheme to draw."))
             val wish = edit(t("Что показать (необязательно)", "What to show (optional)"), old?.ask.orEmpty(), multiline = true)
             label(this, t("Тип схемы", "Scheme type"))
             add(choiceChips(ctx, listOf("auto" to t("Авто", "Auto")) + StudioScheme.LAYOUTS.map { it to layoutName(it) }, layout) { layout = it })
-            if (old == null) {
+            if (old == null && span == null) {
                 label(this, t("Длительность", "Length"))
                 add(choiceChips(ctx, listOf(3000L to "3 с", 5000L to "5 с", 8000L to "8 с", 12_000L to "12 с"), durMs) { durMs = it })
             }
@@ -785,13 +843,13 @@ class StudioEditorActivity : LumenBase() {
                 if (said.isBlank() && w.isBlank()) return@button toast(t("Опишите схему", "Describe the scheme"))
                 dismiss()
                 lastStyle = style
-                runAiScheme(p, at, w, layout, durMs, style, old?.id)
+                runAiScheme(p, at, w, layout, durMs, style, old?.id, span)
             }
         }
     }
 
-    private fun runAiScheme(p: EProject, at: Long, wish: String, layout: String, durMs: Long, style: String, replaceId: String?) {
-        val (numbered, range) = StudioEdit.momentNumbered(words, at)
+    private fun runAiScheme(p: EProject, at: Long, wish: String, layout: String, durMs: Long, style: String, replaceId: String?, span: IntRange? = null) {
+        val (numbered, range) = if (span != null) StudioEdit.numbered(words, span) to span else StudioEdit.momentNumbered(words, at)
         val vars = mapOf(
             "format" to formatText(p), "lang" to lang(), "at" to StudioEdit.clock(at),
             "moment" to numbered.ifEmpty { t("(речи с таймингом нет — опирайся на пожелание автора)", "(no timed speech — follow the author's wish)") },
@@ -800,6 +858,13 @@ class StudioEditorActivity : LumenBase() {
             "protocol" to StudioScheme.PROTOCOL
         )
         val system = "You are an infographic designer for videos. Answer with JSON only."
+        // a placeholder shows at once where the scheme goes; it can be moved and trimmed while the AI works
+        val ph: EBlock? = if (replaceId == null) {
+            val (st, du) = span?.let { StudioEdit.spanOf(words, it, p.durMs) } ?: (at to durMs)
+            newBlock(p, blocks, "scheme", st, du, StudioEdit.schemeRatio(p.w, p.h)) { it.copy(look = style, ask = wish, animIn = "fade", animOut = "fade") }
+                .also { commit(blocks + it, it.id) }
+        } else null
+        val target = replaceId ?: ph?.id ?: return
         BgTasks.run(this, TASK_AI, t("Редактор: ИИ рисует схему", "Editor: the AI draws a scheme"), BgTasks.reopen(this), {
             val prov = AiTasks.requireProvider()
             val r = Llm.complete(prov, prov.smartModel, system, Prompts.fill("studio_edit_scheme", vars), json = true, maxTokens = 1800,
@@ -817,15 +882,220 @@ class StudioEditorActivity : LumenBase() {
             }
             if (s == null || pr.isNotEmpty()) throw LlmException(t("ИИ не смог составить схему: ", "The AI could not make the scheme: ") + pr.joinToString("; "), r.text)
             StudioScheme.repair(s, range.takeIf { !it.isEmpty() })
-        }, { e -> if (!isDestroyed) err(e) }) { s ->
-            val ask = wish
-            if (replaceId != null) deliver(p.id) { _, list ->
-                list.map { if (it.id == replaceId) it.copy(scheme = s, look = style, ask = ask) else it }
-            } else deliver(p.id) { pr, list ->
-                list + newBlock(pr, list, "scheme", at, durMs, StudioEdit.schemeRatio(pr.w, pr.h)) {
-                    it.copy(scheme = s, look = style, ask = ask, animIn = "fade", animOut = "fade")
+        }, { e ->
+            // the placeholder goes away (not an undo step)
+            if (ph != null && !isDestroyed && project?.id == p.id) {
+                setBlocks(StudioEdit.remove(blocks, ph.id))
+                save()
+                if (selected == ph.id) select(null, seek = false)
+            }
+            if (!isDestroyed) err(e)
+        }) { s ->
+            deliverTo(p.id) { _, list, onScreen ->
+                when {
+                    list.any { it.id == target } -> list.map { if (it.id == target) it.copy(scheme = s, look = if (replaceId != null) style else it.look, ask = wish) else it }
+                    // the screen was closed: placeholders are not kept in the file, the scheme goes where it was
+                    ph != null && !onScreen -> list + ph.copy(id = StudioEdit.nextId(list), scheme = s)
+                    // deleted while the AI worked
+                    else -> list
                 }
             }
+            if (!isDestroyed) stage?.refresh()
+        }
+    }
+
+    /** "🤖 Schemes for the whole video": the AI reads the speech piece by piece and puts schemes where they explain best. */
+    private fun autoSchemes() {
+        val p = project ?: return
+        pause()
+        if (words.isEmpty()) return toast(t("Для этого нужна речь с таймингом (ролик Студии или Микса с озвучкой)", "This needs timed speech (a Studio or Mix video with a voice)"))
+        if (BgTasks.has(TASK_AI)) return toast(t("ИИ уже работает — дождитесь или остановите", "The AI is already working — wait or stop it"))
+        val segs = StudioEdit.segments(words)
+        var style = lastStyle
+        bottomSheet(t("🤖 Схемы по всему ролику", "🤖 Schemes for the whole video")) { dismiss ->
+            muted(t("ИИ прочитает речь (${segs.size} фрагм.) и поставит инфосхемы туда, где они объяснят лучше слов, — до ${StudioScheme.maxSchemes(segs.size)} шт. Каждая встанет ровно на свою фразу; потом их можно двигать и менять, а «↶» уберёт все сразу.",
+                "The AI reads the speech (${segs.size} pieces) and puts info-schemes where they explain better than words — up to ${StudioScheme.maxSchemes(segs.size)}. Each goes exactly on its phrase; move or change them later, \"↶\" removes them all at once."))
+            val wish = edit(t("Пожелание (необязательно)", "Wish (optional)"), "", multiline = true)
+            label(this, t("Стиль", "Style"))
+            add(choiceChips(ctx, styles(), style) { style = it })
+            button(t("🤖 Расставить", "🤖 Place them"), primary = true) {
+                dismiss()
+                lastStyle = style
+                runAutoSchemes(p, segs, wish.text.toString().trim(), style)
+            }
+        }
+    }
+
+    private fun runAutoSchemes(p: EProject, segs: List<IntRange>, wish: String, style: String) {
+        val ws = words
+        val scenes = segs.map { r -> SScene(r.joinToString(" ") { ws[it].text }) }
+        val vars = mapOf(
+            "format" to formatText(p), "lang" to lang(), "max" to StudioScheme.maxSchemes(segs.size).toString(),
+            "wish" to if (wish.isNotEmpty()) "Пожелание автора: $wish" else "", "protocol" to StudioScheme.PROTOCOL,
+            "scenes" to StudioScheme.scenesBlock(scenes, ws, segs)
+        )
+        val system = "You are an infographic designer for videos. Answer with JSON only."
+        BgTasks.run(this, TASK_AI, t("Редактор: ИИ расставляет схемы", "Editor: the AI places schemes"), BgTasks.reopen(this), {
+            val prov = AiTasks.requireProvider()
+            val r = Llm.complete(prov, prov.smartModel, system, Prompts.fill("studio_schemes", vars), json = true,
+                maxTokens = (1200 + segs.size * 250).coerceAtMost(12_000), task = "studio_schemes", pid = "studio")
+            val found = HashMap<Int, SScheme>()
+            val bad = mutableListOf<Pair<org.json.JSONObject, List<String>>>()
+            fun take(list: List<Pair<Int, org.json.JSONObject>>) {
+                bad.clear()
+                for ((n, o) in list) {
+                    val i = n - 1
+                    if (i !in segs.indices) continue
+                    val sc = StudioScheme.fromJson(o)
+                    val pr = StudioScheme.problems(sc, segs[i])
+                    if (sc != null && pr.isEmpty()) found[i] = StudioScheme.repair(sc, segs[i]) else bad += o to pr
+                }
+            }
+            take(StudioScheme.parseAnswer(r.text) ?: throw LlmException(t("ИИ не вернул схемы в нужном формате", "The AI did not return schemes in the expected format"), r.text))
+            if (bad.isNotEmpty()) {
+                BgTasks.progress(TASK_AI, t("Исправляю схемы: ${bad.size}", "Fixing schemes: ${bad.size}"))
+                val errors = bad.joinToString("\n") { (o, pr) -> "Сцена ${o.optInt("scene")}: " + pr.joinToString("; ") }
+                val json = org.json.JSONArray().apply { bad.forEach { put(it.first) } }.toString()
+                runCatching {
+                    val r2 = Llm.complete(prov, prov.smartModel, system, Prompts.fill("studio_scheme_fix", mapOf("errors" to errors, "protocol" to StudioScheme.PROTOCOL, "json" to json)),
+                        json = true, maxTokens = 600 + bad.size * 400, task = "studio_scheme_fix", pid = "studio")
+                    StudioScheme.parseAnswer(r2.text)?.let { take(it) }
+                }.onFailure { if (it is java.util.concurrent.CancellationException) throw it }
+            }
+            found.toSortedMap().toList()
+        }, { e -> if (!isDestroyed) err(e) }) { found ->
+            if (found.isEmpty()) return@run toast(t("ИИ не нашёл мест для схем", "The AI found no places for schemes"))
+            deliver(p.id) { pr, list ->
+                var cur = list
+                for ((i, sc) in found) {
+                    val (st, du) = StudioEdit.spanOf(ws, segs[i], pr.durMs)
+                    cur = cur + newBlock(pr, cur, "scheme", st, du, StudioEdit.schemeRatio(pr.w, pr.h)) {
+                        it.copy(scheme = sc, look = style, animIn = "fade", animOut = "fade")
+                    }
+                }
+                cur
+            }
+            if (!isDestroyed) toast(t("Схем: ${found.size} — ↶ уберёт все", "Schemes: ${found.size} — ↶ removes them all"))
+        }
+    }
+
+    /** The whole speech as text: a tap on a word goes there; a second tap ends a phrase to put a block exactly on it. */
+    private fun textSheet() {
+        val p = project ?: return
+        if (words.isEmpty()) return toast(t("У этого видео нет речи с таймингом", "This video has no timed speech"))
+        pause()
+        var a = -1
+        var b = -1
+        val now = words.indexOfLast { it.startMs <= curMs }
+        bottomSheet(t("📝 Текст ролика", "📝 Video text")) { dismiss ->
+            muted(t("Тап по слову — перейти к нему. Второй тап — конец фразы: схема, надпись или фото встанут ровно на неё.",
+                "Tap a word to go there. A second tap ends a phrase: a scheme, caption or photo goes exactly on it."))
+            val info = text(ctx, "", 13f, bold = true, color = Palette.ACCENT)
+            add(info)
+            val acts = FlowLayout(ctx, dp(6), dp(6))
+            add(acts)
+            val tv = TextView(ctx).apply {
+                textSize = sp(16f)
+                setLineSpacing(0f, 1.3f)
+                setTextColor(Palette.ON_SURFACE)
+                highlightColor = 0
+                movementMethod = android.text.method.LinkMovementMethod.getInstance()
+            }
+            add(tv, 8)
+            fun range() = if (a < 0) null else a..(if (b < 0) a else b)
+            lateinit var paint: () -> Unit
+            fun tap(i: Int) {
+                if (a < 0 || b >= 0) {
+                    a = i
+                    b = -1
+                    seekTo(words[i].startMs)
+                } else if (i < a) {
+                    b = a
+                    a = i
+                } else b = i
+                paint()
+            }
+            paint = {
+                val sb = android.text.SpannableStringBuilder()
+                val r = range()
+                for (para in StudioEdit.paragraphs(words)) {
+                    if (sb.isNotEmpty()) sb.append("\n\n")
+                    val ts = sb.length
+                    sb.append(StudioEdit.clock(words[para.first].startMs).substringBefore('.')).append("  ")
+                    sb.setSpan(android.text.style.ForegroundColorSpan(Palette.MUTED), ts, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    sb.setSpan(android.text.style.RelativeSizeSpan(0.8f), ts, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    for (i in para) {
+                        val st = sb.length
+                        sb.append(words[i].text)
+                        val k = i
+                        sb.setSpan(object : android.text.style.ClickableSpan() {
+                            override fun onClick(widget: View) = tap(k)
+                            override fun updateDrawState(ds: android.text.TextPaint) {
+                                ds.color = Palette.ON_SURFACE
+                                ds.isUnderlineText = false
+                            }
+                        }, st, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        if (r != null && i in r) sb.setSpan(android.text.style.BackgroundColorSpan(Palette.ACCENT_SOFT), st, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        else if (i == now) sb.setSpan(android.text.style.UnderlineSpan(), st, sb.length, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        if (i != para.last) sb.append(' ')
+                    }
+                }
+                tv.text = sb
+                acts.removeAllViews()
+                if (r == null) info.text = "" else {
+                    val (st, du) = StudioEdit.spanOf(words, r, p.durMs)
+                    info.text = StudioEdit.clock(st) + " – " + StudioEdit.clock(st + du) + "  ·  " + r.joinToString(" ") { words[it].text }.take(90)
+                    acts.addView(chip(ctx, t("🧩 Схема ИИ", "🧩 AI scheme")) {
+                        dismiss()
+                        aiSchemeSheet(null, r)
+                    })
+                    acts.addView(chip(ctx, t("T Надпись", "T Caption")) {
+                        dismiss()
+                        captionSheet(null, r)
+                    })
+                    acts.addView(chip(ctx, t("🌐 Фото", "🌐 Photo")) {
+                        dismiss()
+                        photoSheet(null, r)
+                    })
+                    acts.addView(chip(ctx, t("▶ Отсюда", "▶ From here")) {
+                        dismiss()
+                        seekTo(st)
+                        player?.play()
+                    })
+                    acts.addView(chip(ctx, "✕") {
+                        a = -1
+                        b = -1
+                        paint()
+                    })
+                }
+            }
+            paint()
+        }
+    }
+
+    private fun blockName(b: EBlock): String = when (b.kind) {
+        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + t("ИИ рисует…", "AI drawing…")
+        else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.joinToString(" → ") { it.label }.take(40))
+        "image" -> "🖼 " + (b.ask.ifBlank { t("Картинка", "Picture") })
+        "text" -> "T " + b.text.replace('\n', ' ').take(40)
+        else -> b.text + " " + t("эмодзи", "emoji")
+    }
+
+    /** All blocks by time: a tap selects one and goes to it. */
+    private fun blocksSheet() {
+        if (project == null) return
+        pause()
+        bottomSheet(t("☰ Блоки", "☰ Blocks") + " (${blocks.size})") { dismiss ->
+            if (blocks.isEmpty()) muted(t("Пока пусто: остановите видео в нужном месте и нажмите «＋».", "Empty so far: stop the video at a moment and tap \"＋\"."))
+            for (b in blocks.sortedBy { it.startMs }) add(text(ctx, blockName(b) + "\n" + StudioEdit.clock(b.startMs) + " – " + StudioEdit.clock(b.endMs), 15f).apply {
+                setPadding(dp(8), dp(10), dp(8), dp(10))
+                if (b.id == selected) setTextColor(Palette.ACCENT)
+                background = ripple(ctx, roundBg(0x00000000, 12f, ctx), Palette.ON_SURFACE)
+                setOnClickListener {
+                    dismiss()
+                    select(b.id, seek = true)
+                }
+            }, 2)
         }
     }
 
@@ -945,10 +1215,11 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun photoSheet(old: EBlock?) {
+    private fun photoSheet(old: EBlock?, span: IntRange? = null) {
         pause()
         val p = project ?: return
-        val at = old?.startMs ?: curMs
+        val placed = span?.let { StudioEdit.spanOf(words, it, p.durMs) }
+        val at = old?.startMs ?: placed?.first ?: curMs
         bottomSheet(t("🌐 Фото по запросу", "🌐 Photo search")) { dismiss ->
             muted(t("Бесплатные фото Openverse (Wikimedia, Flickr и др.). С телефона уходит только запрос; автор и лицензия сохраняются для описания.",
                 "Free Openverse photos (Wikimedia, Flickr and more). Only the query leaves the phone; the author and licence are kept for the description."))
@@ -980,12 +1251,12 @@ class StudioEditorActivity : LumenBase() {
                 val s = q.text.toString().trim()
                 if (s.isEmpty()) return@button toast(t("Введите запрос", "Enter a query"))
                 dismiss()
-                fetchPhoto(p, at, s, old?.id)
+                fetchPhoto(p, at, s, old?.id, placed?.second ?: StudioEdit.DEFAULT_MS)
             }
         }
     }
 
-    private fun fetchPhoto(p: EProject, at: Long, query: String, replace: String?) {
+    private fun fetchPhoto(p: EProject, at: Long, query: String, replace: String?, durMs: Long = StudioEdit.DEFAULT_MS) {
         if (BgTasks.has(TASK_AI)) return toast(t("Уже идёт поиск или работа ИИ", "A search or AI work is already running"))
         val d = StudioEditStore.dir(applicationContext, p.id)
         val asp = aspect(p)
@@ -1000,7 +1271,7 @@ class StudioEditorActivity : LumenBase() {
             Triple("img/" + out.name, o.outHeight.toFloat() / max(1, o.outWidth), credit)
         }, { e -> if (!isDestroyed) err(e) }) { (file, ratio, credit) ->
             if (replace != null) deliver(p.id) { _, list -> list.map { if (it.id == replace) it.copy(file = file, ratio = ratio, text = credit, ask = query) else it } }
-            else deliver(p.id) { pr, list -> list + newBlock(pr, list, "image", at, StudioEdit.DEFAULT_MS, ratio) { it.copy(file = file, look = "round", text = credit, ask = query) } }
+            else deliver(p.id) { pr, list -> list + newBlock(pr, list, "image", at, durMs, ratio) { it.copy(file = file, look = "round", text = credit, ask = query) } }
             if (!isDestroyed) {
                 stage?.refresh()
                 toast(t("Фото: ", "Photo: ") + credit)
@@ -1008,18 +1279,19 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun captionSheet(old: EBlock?) {
+    private fun captionSheet(old: EBlock?, span: IntRange? = null) {
         pause()
         val p = project ?: return
-        val at = old?.startMs ?: curMs
+        val placed = span?.let { StudioEdit.spanOf(words, it, p.durMs) }
+        val at = old?.startMs ?: placed?.first ?: curMs
         var look = old?.look?.ifEmpty { null } ?: "plate"
         bottomSheet(if (old == null) t("T Надпись", "T Caption") else t("✎ Надпись", "✎ Caption")) { dismiss ->
-            val e = edit(t("Текст надписи", "Caption text"), old?.text.orEmpty(), multiline = true)
+            val e = edit(t("Текст надписи", "Caption text"), old?.text ?: span?.joinToString(" ") { words[it].text }.orEmpty(), multiline = true)
             label(this, t("Вид", "Look"))
             add(choiceChips(ctx, StudioEdit.TEXT_LOOKS.map { it to lookName(it) }, look) { look = it })
             val variants = FlowLayout(ctx, dp(6), dp(6))
             add(variants)
-            val moment = StudioEdit.momentText(words, at, 1000, 6000)
+            val moment = span?.joinToString(" ") { words[it].text } ?: StudioEdit.momentText(words, at, 1000, 6000)
             button(t("🤖 Варианты от ИИ", "🤖 AI suggestions"), style = BtnStyle.TONAL) {
                 val wish = e.text.toString().trim()
                 if (moment.isBlank() && wish.isBlank()) return@button toast(t("Напишите, о чём надпись", "Write what the caption is about"))
@@ -1046,7 +1318,7 @@ class StudioEditorActivity : LumenBase() {
                 dismiss()
                 val ratio = StudioEdit.textRatio(s)
                 if (old != null) change(old.id) { it.copy(text = s, look = look, ratio = ratio) }
-                else addNew("text", at, 3000L, ratio) { it.copy(text = s, look = look) }
+                else addNew("text", at, placed?.second ?: 3000L, ratio) { it.copy(text = s, look = look) }
             }
         }
     }
@@ -1092,12 +1364,19 @@ class StudioEditorActivity : LumenBase() {
             else -> emptyList()
         }
         if (opts.isEmpty()) return
-        bottomSheet(t("🎨 Вид", "🎨 Look")) { _ ->
-            add(choiceChips(ctx, opts, b.look.takeIf { l -> opts.any { it.first == l } } ?: opts.first().first) { v ->
+        var chosen = b.look.takeIf { l -> opts.any { it.first == l } } ?: opts.first().first
+        bottomSheet(t("🎨 Вид", "🎨 Look")) { dismiss ->
+            add(choiceChips(ctx, opts, chosen) { v ->
+                chosen = v
                 change(b.id) { it.copy(look = v) }
                 if (b.kind == "scheme") lastStyle = v
                 stage?.refresh()
             })
+            if (blocks.count { it.kind == b.kind } > 1) button(t("Применить ко всем таким блокам", "Apply to all blocks of this kind"), style = BtnStyle.TEXT) {
+                dismiss()
+                commit(blocks.map { if (it.kind == b.kind) it.copy(look = chosen) else it })
+                stage?.refresh()
+            }
         }
     }
 
@@ -1129,6 +1408,11 @@ class StudioEditorActivity : LumenBase() {
                 seekTo(max(0L, cur.startMs - 300))
                 player?.play()
             }
+            if (blocks.size > 1) button(t("Применить ко всем блокам", "Apply to all blocks"), style = BtnStyle.TEXT) {
+                dismiss()
+                val cur = StudioEdit.find(blocks, b.id) ?: return@button
+                commit(blocks.map { it.copy(animIn = cur.animIn, animOut = cur.animOut) })
+            }
         }
     }
 
@@ -1157,10 +1441,33 @@ class StudioEditorActivity : LumenBase() {
 
     // ---------- export ----------
 
-    private fun export() {
+    /** Quality and a word on how the export works, then the export. */
+    private fun exportSheet() {
         val p = project ?: return
         if (BgTasks.has(TASK_EXPORT)) return toast(t("Экспорт уже идёт", "The export is already running"))
-        if (p.blocks.isEmpty()) return toast(t("Добавьте хотя бы один блок: «＋»", "Add at least one block: \"＋\""))
+        if (p.blocks.none { it.kind != "scheme" || it.scheme != null }) return toast(t("Добавьте хотя бы один блок: «＋»", "Add at least one block: \"＋\""))
+        pause()
+        val prefs = Lumen.prefs
+        var side = prefs.getInt("studio_edit_side", 1920)
+        val (ow, oh) = StudioEdit.outSize(p.w, p.h)
+        bottomSheet(t("⬆ Экспорт ролика", "⬆ Export the video")) { dismiss ->
+            muted(t("Блоков: ${p.blocks.size} · длина ${StudioEdit.clock(p.durMs).substringBefore('.')} · звук оригинала копируется без потерь.",
+                "Blocks: ${p.blocks.size} · length ${StudioEdit.clock(p.durMs).substringBefore('.')} · the original sound is copied without loss."))
+            label(this, t("Качество", "Quality"))
+            add(choiceChips(ctx, listOf(1920 to t("Как оригинал ($ow×$oh)", "As the original ($ow×$oh)"), 1280 to t("720p — быстрее и легче", "720p — faster and smaller")), side) { side = it })
+            muted(t("Ролик собирается на видеокарте телефона (обычно быстрее реального времени); если она откажет — на процессоре, медленнее. Экран можно закрыть: прогресс в уведомлении.",
+                "The video is built on the phone's GPU (usually faster than real time); if it refuses, on the CPU, slower. You can close the screen: progress is in the notification."))
+            button(t("⬆ Экспортировать", "⬆ Export"), primary = true) {
+                prefs.edit().putInt("studio_edit_side", side).apply()
+                dismiss()
+                export(side)
+            }
+        }
+    }
+
+    private fun export(maxSide: Int) {
+        val p = project ?: return
+        if (BgTasks.has(TASK_EXPORT)) return toast(t("Экспорт уже идёт", "The export is already running"))
         pause()
         save()
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
@@ -1175,7 +1482,7 @@ class StudioEditorActivity : LumenBase() {
         val sd = styleDir
         cancelExport = false
         BgTasks.run(this, TASK_EXPORT, t("Редактор: экспорт ролика", "Editor: exporting the video"), BgTasks.reopen(this), { task ->
-            StudioEditRender.render(p, d, ws, acc, sd, out, { cancelExport || task.cancelled }) { m -> BgTasks.progress(TASK_EXPORT, m) }
+            StudioEditRender.render(p, d, ws, acc, sd, out, maxSide, { cancelExport || task.cancelled }) { m -> BgTasks.progress(TASK_EXPORT, m) }
             BgTasks.progress(TASK_EXPORT, t("Сохранение в галерею…", "Saving to the gallery…"))
             out to StudioJob.saveToMovies(app, out, name)
         }, { e -> if (!isDestroyed) err(e) }, { cancelExport = true }) { (f, saved) ->

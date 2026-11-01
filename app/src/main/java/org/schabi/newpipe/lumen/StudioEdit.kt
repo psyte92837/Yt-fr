@@ -182,8 +182,8 @@ object StudioEdit {
     // ---------- snapping on the timeline ----------
 
     /** Times a dragged edge sticks to: start and end of the video, the playhead, edges of the other blocks. */
-    fun snapTargets(blocks: List<EBlock>, exceptId: String?, playheadMs: Long, totalMs: Long): List<Long> =
-        (listOf(0L, totalMs, playheadMs) + blocks.filter { it.id != exceptId }.flatMap { listOf(it.startMs, it.endMs) }).distinct()
+    fun snapTargets(blocks: List<EBlock>, exceptId: String?, playheadMs: Long, totalMs: Long, words: List<SWord> = emptyList()): List<Long> =
+        (listOf(0L, totalMs, playheadMs) + blocks.filter { it.id != exceptId }.flatMap { listOf(it.startMs, it.endMs) } + words.map { it.startMs }).distinct()
 
     fun snap(ms: Long, targets: List<Long>, thresholdMs: Long): Long? =
         targets.minByOrNull { abs(it - ms) }?.takeIf { abs(it - ms) <= thresholdMs }
@@ -419,6 +419,95 @@ object StudioEdit {
         val lines = text.lines().sumOf { l -> max(1, ceil(l.trim().length / 16.0).toInt()) }.coerceIn(1, 5)
         return 0.08f + 0.11f * lines
     }
+
+    /**
+     * Width drag of the side handle ↔ of a caption or scheme: the finger at ([px], [py]) sets the half width along
+     * the block's own axis (the centre stays), the height stays, so the shape (ratio) changes and the text reflows.
+     */
+    fun stretch(b: EBlock, fw: Float, fh: Float, px: Float, py: Float): EBlock {
+        val (hw, hh) = halfSize(b, fw, fh)
+        val a = Math.toRadians(-b.rot.toDouble())
+        val dx = px - b.x * fw
+        val dy = py - b.y * fh
+        val lx = abs(dx * cos(a) - dy * sin(a)).toFloat()
+        val nhw = lx.coerceIn(max(8f, hh * 0.25f), max(hh * 20f, 8f))
+        if (abs(nhw - hw) < 0.5f) return b
+        val w = (nhw * 2 / fw).coerceIn(MIN_W, MAX_W)
+        return b.copy(w = w, ratio = (hh / (w * fw / 2)).coerceIn(0.05f, 20f))
+    }
+
+    // ---------- the text of the voice ----------
+
+    /** Start and length of a block covering words [range]: a little before the first, a little after the last. */
+    fun spanOf(words: List<SWord>, range: IntRange, totalMs: Long): Pair<Long, Long> {
+        val a = words[range.first].startMs - 150
+        val e = words[range.last].endMs + 400
+        val s = a.coerceIn(0, max(0, totalMs - MIN_MS))
+        return s to (min(e, totalMs) - s).coerceAtLeast(MIN_MS)
+    }
+
+    /** Words [range] with their numbers [N] for the AI. */
+    fun numbered(words: List<SWord>, range: IntRange): String = range.filter { it in words.indices }.joinToString(" ") { "[$it]${words[it].text}" }
+
+    private fun sentenceEnd(w: String) = w.trimEnd('"', '»', ')', '\'', '”').let { it.endsWith('.') || it.endsWith('!') || it.endsWith('?') || it.endsWith('…') }
+
+    /**
+     * The voice cut into pieces for automatic schemes: a piece ends on a sentence end or a pause of [pauseMs]
+     * once it lasts [minMs], and is cut at [maxMs] anyway. Returns ranges of word indices.
+     */
+    fun segments(words: List<SWord>, minMs: Long = 4000, maxMs: Long = 14_000, pauseMs: Long = 700): List<IntRange> {
+        val out = mutableListOf<IntRange>()
+        var first = 0
+        for (i in words.indices) {
+            val len = words[i].endMs - words[first].startMs
+            val gap = words.getOrNull(i + 1)?.let { it.startMs - words[i].endMs } ?: Long.MAX_VALUE
+            val end = i == words.lastIndex || len >= maxMs || (len >= minMs && (sentenceEnd(words[i].text) || gap >= pauseMs))
+            if (end) {
+                out += first..i
+                first = i + 1
+            }
+        }
+        // a too short tail joins the piece before it
+        if (out.size >= 2) {
+            val last = out.last()
+            if (words[last.last].endMs - words[last.first].startMs < minMs / 2) {
+                out.removeAt(out.lastIndex)
+                out[out.lastIndex] = out.last().first..last.last
+            }
+        }
+        return out
+    }
+
+    /** Paragraphs of the transcript: a new one after a pause of [pauseMs] (or a shorter one after a sentence end). */
+    fun paragraphs(words: List<SWord>, pauseMs: Long = 1200): List<IntRange> {
+        val out = mutableListOf<IntRange>()
+        var first = 0
+        for (i in words.indices) {
+            val gap = words.getOrNull(i + 1)?.let { it.startMs - words[i].endMs } ?: Long.MAX_VALUE
+            if (i == words.lastIndex || gap >= pauseMs || (gap >= pauseMs / 2 && sentenceEnd(words[i].text) && i - first >= 12)) {
+                out += first..i
+                first = i + 1
+            }
+        }
+        return out
+    }
+
+    // ---------- export ----------
+
+    /**
+     * What the layer of blocks looks like at [tMs], as a key: the same key means the same picture, so the export
+     * draws and uploads it only when it changes. A block is "moving" during its in / out animation and,
+     * for schemes, until [settle] (when the last node has come in).
+     */
+    fun overlayKey(shown: List<EBlock>, tMs: Long, settle: (EBlock) -> Long): String = shown.joinToString("|") { b ->
+        val d = animMs(b)
+        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b))
+        b.id + "@" + b.hashCode() + if (moving) ":$tMs" else ""
+    }
+
+    /** Time left of a job [fraction] done after [elapsedMs]; null while too early to tell. */
+    fun eta(elapsedMs: Long, fraction: Float): Long? =
+        if (fraction < 0.03f || fraction >= 1f || elapsedMs < 1500) null else (elapsedMs * (1 - fraction) / fraction).toLong()
 
     /** Size of the exported video: that of the original, even, its long side at most [maxSide]. */
     fun outSize(w: Int, h: Int, maxSide: Int = 1920): Pair<Int, Int> {

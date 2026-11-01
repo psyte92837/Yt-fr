@@ -49,6 +49,8 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
     var onCorner: (String, Int) -> Unit = { _, _ -> }
     var onEmptyTap: () -> Unit = {}
     var onDoubleTap: (String) -> Unit = {}
+    /** Vertical video: while a block is moved, the places the Shorts / Reels interface covers are shaded. */
+    var portrait = false
 
     private var painter: StudioEditPainter? = null
     private val dp = resources.displayMetrics.density
@@ -67,6 +69,15 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
     }
     private val tagP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); textAlign = Paint.Align.CENTER; textSize = 12 * dp }
     private val tagBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xB3000000.toInt() }
+    private val safeP = Paint().apply { color = 0x38FF3B30 }
+    private val safeText = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xCCFFFFFF.toInt(); textSize = 10 * dp }
+
+    /** Point of the side handle ↔ (middle of the right edge) of a caption or scheme; null for other blocks. */
+    private fun sideKnob(b: EBlock, fw: Float, fh: Float): Pair<Float, Float>? {
+        if (b.kind != "text" && b.kind != "scheme") return null
+        val (a, c) = StudioEdit.corner(b, fw, fh, 1) to StudioEdit.corner(b, fw, fh, 2)
+        return (a.first + c.first) / 2 to (a.second + c.second) / 2
+    }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         painter?.close()
@@ -94,6 +105,13 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
         val fw = width.toFloat()
         val fh = height.toFloat()
         painter?.draw(c, StudioEdit.active(blocks, timeMs), timeMs)
+        if (portrait && moved && (mode == MOVE || mode == SCALE || mode == PINCH || mode == WIDTH)) {
+            // YouTube Shorts / Reels: the title and buttons cover the bottom fifth and the right column
+            c.drawRect(0f, fh * 0.8f, fw, fh, safeP)
+            c.drawRect(fw * 0.85f, fh * 0.42f, fw, fh * 0.8f, safeP)
+            c.drawRect(0f, 0f, fw, fh * 0.07f, safeP)
+            c.drawText(t("закроет интерфейс Shorts", "covered by the Shorts UI"), 8 * dp, fh * 0.8f + 14 * dp, safeText)
+        }
         if (guideX) c.drawLine(fw / 2, 0f, fw / 2, fh, guideP)
         if (guideY) c.drawLine(0f, fh / 2, fw, fh / 2, guideP)
         val b = sel() ?: return
@@ -109,7 +127,8 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
         knob(c, pts[1], 0xFF3E7BFA.toInt(), "✎")
         knob(c, pts[3], 0xFF5B6270.toInt(), "⧉")
         knob(c, pts[2], 0xFFFFFFFF.toInt(), "⤡", 0xFF14161B.toInt())
-        if (mode == SCALE || mode == PINCH) {
+        sideKnob(b, fw, fh)?.let { knob(c, it, 0xFFFFFFFF.toInt(), "↔", 0xFF14161B.toInt()) }
+        if (mode == SCALE || mode == PINCH || mode == WIDTH) {
             val s = "${(b.w * 100).toInt()}% · ${b.rot.toInt()}°"
             val tw = tagP.measureText(s) / 2 + 8 * dp
             c.drawRoundRect(fw / 2 - tw, 8 * dp, fw / 2 + tw, 30 * dp, 11 * dp, 11 * dp, tagBg)
@@ -135,6 +154,7 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
         const val PINCH = 3
         const val CORNER = 4
         const val EMPTY = 5
+        const val WIDTH = 6
     }
 
     private var mode = NONE
@@ -177,7 +197,11 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
                 if (cur != null) {
                     corner = (0..3).firstOrNull { k -> StudioEdit.corner(cur, fw, fh, k).let { hypot(it.first - e.x, it.second - e.y) <= touchR } } ?: -1
                 }
-                if (cur != null && corner == 2) {
+                val side = cur?.let { sideKnob(it, fw, fh) }
+                if (cur != null && corner < 0 && side != null && hypot(side.first - e.x, side.second - e.y) <= touchR) {
+                    mode = WIDTH
+                    start = cur
+                } else if (cur != null && corner == 2) {
                     mode = SCALE
                     start = cur
                     startDist = max(1f, hypot(e.x - cur.x * fw, e.y - cur.y * fh))
@@ -234,6 +258,10 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
                         val ang = Math.toDegrees(atan2((e.y - cy).toDouble(), (e.x - cx).toDouble())).toFloat() - startAngle
                         emit(StudioEdit.resize(b0, b0.w * k).copy(rot = StudioEdit.snapDeg(b0.rot + ang)), false)
                     }
+                    WIDTH -> {
+                        moved = true
+                        emit(StudioEdit.stretch(b0, fw, fh, e.x, e.y), false)
+                    }
                     PINCH -> if (e.pointerCount >= 2) {
                         val k = hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0)) / startDist
                         val ang = Math.toDegrees(atan2((e.getY(1) - e.getY(0)).toDouble(), (e.getX(1) - e.getX(0)).toDouble())).toFloat() - startAngle
@@ -262,7 +290,7 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val cancel = e.actionMasked == MotionEvent.ACTION_CANCEL
                 when (mode) {
-                    MOVE, SCALE, PINCH -> if (moved) live?.let { emit(it, true) } else if (!cancel && mode == MOVE) start?.let { b ->
+                    MOVE, SCALE, PINCH, WIDTH -> if (moved) live?.let { emit(it, true) } else if (!cancel && mode == MOVE) start?.let { b ->
                         val now = System.currentTimeMillis()
                         if (lastTapId == b.id && now - lastTapAt < ViewConfiguration.getDoubleTapTimeout()) {
                             lastTapAt = 0
@@ -317,6 +345,13 @@ class EditTimeline(ctx: Context) : View(ctx) {
         set(v) { field = v; invalidate() }
     /** Width / height of a video frame. */
     var aspect = 9f / 16f
+    /** The voice with times: a row of words under the frames; edges stick to word starts. */
+    var words: List<SWord> = emptyList()
+        set(v) {
+            field = v
+            requestLayout()
+            invalidate()
+        }
 
     /** The user moved the time ([dragging] while the finger or the fling still moves it). */
     var onScrub: (Long, Boolean) -> Unit = { _, _ -> }
@@ -347,6 +382,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val snapP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt(); strokeWidth = 1.5f * dp }
     private val tagP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); textSize = 11 * dp; textAlign = Paint.Align.CENTER }
     private val tagBg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xE6000000.toInt() }
+    private val wordP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xD9FFFFFF.toInt(); textSize = 11 * dp }
+    private val wordTick = Paint().apply { color = 0x66FFFFFF; strokeWidth = 1 * dp }
 
     private fun relayout() {
         lanes = StudioEdit.lanes(blocks)
@@ -358,7 +395,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     }
 
     private fun lanesShown() = (laneCount + 1).coerceIn(2, 5)
-    private val lanesTop get() = rulerH + stripH + gap
+    private val wordsH get() = if (words.isEmpty()) 0f else 20 * dp
+    private val lanesTop get() = rulerH + stripH + wordsH + gap
     private fun laneHeight() = if (laneCount + 1 > 5) laneH * 5 / (laneCount + 1) else laneH
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -395,7 +433,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     }
 
     private fun label(b: EBlock): String = when (b.kind) {
-        "scheme" -> "🧩 " + (b.scheme?.title?.takeIf { it.isNotBlank() } ?: b.scheme?.nodes?.firstOrNull()?.label.orEmpty())
+        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + t("ИИ рисует…", "AI drawing…")
+        else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.firstOrNull()?.label.orEmpty())
         "image" -> "🖼 " + t("Картинка", "Picture")
         "text" -> "T " + b.text.replace('\n', ' ')
         else -> b.text
@@ -457,6 +496,24 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 }
             }
             c.restore()
+        }
+        // words of the voice: a label where there is room, a tick for every word
+        if (words.isNotEmpty()) {
+            val top = rulerH + stripH
+            val from = msAt(-40 * dp)
+            val to = msAt(w + 40 * dp)
+            var lastEnd = -1f
+            for (wd in words) {
+                if (wd.endMs < from) continue
+                if (wd.startMs > to) break
+                val x = xOf(wd.startMs)
+                c.drawLine(x, top + 3 * dp, x, top + 7 * dp, wordTick)
+                val tw = wordP.measureText(wd.text)
+                if (x > lastEnd + 4 * dp) {
+                    c.drawText(wd.text, x + 2 * dp, top + 16 * dp, wordP)
+                    lastEnd = x + 2 * dp + tw
+                }
+            }
         }
         // blocks
         val lay = if (mode == IDLE) lanes else frozen
@@ -551,6 +608,11 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val autoScroll = object : Runnable {
         override fun run() {
             if (mode != MOVE && mode != TRIM_L && mode != TRIM_R) return
+            if (live == null) {
+                // not dragged yet: the finger only rests near the edge
+                postOnAnimation(this)
+                return
+            }
             val dir = when {
                 lastX < edge -> -1
                 lastX > width - edge -> 1
@@ -596,7 +658,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         val b0 = target ?: return
         val delta = msAt(x) - downPointerMs
         val th = (10 * dp / pxPerMs).toLong()
-        val targets = StudioEdit.snapTargets(blocks, b0.id, playMs, totalMs)
+        val targets = StudioEdit.snapTargets(blocks, b0.id, playMs, totalMs, words)
         val old = snapAt
         val b = when (mode) {
             MOVE -> {
@@ -692,7 +754,18 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 val m = mode
                 mode = IDLE
                 when (m) {
-                    PENDING -> if (e.actionMasked == MotionEvent.ACTION_UP) onSelect(target?.id)
+                    PENDING -> if (e.actionMasked == MotionEvent.ACTION_UP) {
+                        val wordsTop = rulerH + stripH
+                        val hitWord = if (target == null && words.isNotEmpty() && e.y >= wordsTop && e.y < wordsTop + wordsH) {
+                            val at = msAt(e.x)
+                            words.minByOrNull { kotlin.math.abs(it.startMs - at) }?.takeIf { kotlin.math.abs(xOf(it.startMs) - e.x) < 40 * dp }
+                        } else null
+                        if (hitWord != null) {
+                            // a tap on a word puts the playhead on it
+                            setPlayhead(hitWord.startMs)
+                            onScrub(playMs, false)
+                        } else onSelect(target?.id)
+                    }
                     SCROLL -> {
                         velocity?.computeCurrentVelocity(1000)
                         val vx = velocity?.xVelocity ?: 0f

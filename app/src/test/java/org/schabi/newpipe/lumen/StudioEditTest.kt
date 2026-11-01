@@ -282,6 +282,69 @@ class StudioEditTest {
         assertEquals(StudioEdit.MAX_W, blocks[0].w, 0.001f)
     }
 
+    private fun ws(vararg t: Pair<String, Long>) = t.map { (w, at) -> SWord(w, at, at + 300) }
+
+    @Test
+    fun voiceCutIntoPiecesForSchemes() {
+        // two sentences of 5 s, then a long run without punctuation cut at 14 s
+        val words = (0 until 10).map { SWord(if (it == 4) "конец." else "слово$it", it * 1000L, it * 1000L + 300) } +
+            (0 until 20).map { SWord("ещё$it", 10_000L + it * 1000L, 10_000L + it * 1000L + 300) }
+        val seg = StudioEdit.segments(words)
+        assertEquals(0..4, seg[0])
+        assertTrue(seg.all { r -> words[r.last].endMs - words[r.first].startMs <= 14_300 })
+        assertEquals(words.lastIndex, seg.last().last)
+        // pieces follow each other without gaps
+        seg.zipWithNext().forEach { (a, b) -> assertEquals(a.last + 1, b.first) }
+        // a short tail joins the piece before it
+        val tail = (0 until 6).map { SWord("w$it.", it * 1000L, it * 1000L + 300) } + SWord("хвост", 6_000, 6_300)
+        assertEquals(listOf(0..6), StudioEdit.segments(tail, minMs = 6_000))
+        assertTrue(StudioEdit.segments(emptyList()).isEmpty())
+    }
+
+    @Test
+    fun transcriptParagraphsAndSpans() {
+        val words = ws("Привет" to 0, "всем." to 400, "Сегодня" to 3_000, "про" to 3_400, "схемы" to 3_800)
+        assertEquals(listOf(0..1, 2..4), StudioEdit.paragraphs(words))
+        assertEquals(0L to 1_100L, StudioEdit.spanOf(words, 0..1, 10_000))
+        assertEquals(2_850L to 1_650L, StudioEdit.spanOf(words, 2..4, 10_000))
+        // never past the end of the video
+        assertEquals(2_850L to 1_150L, StudioEdit.spanOf(words, 2..4, 4_000))
+        assertEquals("[3]про [4]схемы", StudioEdit.numbered(words, 3..4))
+        // word starts are snap targets too
+        assertTrue(3_400L in StudioEdit.snapTargets(emptyList(), null, 0, 10_000, words))
+    }
+
+    @Test
+    fun sideHandleChangesWidthNotHeight() {
+        // 400×100 caption in a 1000×1000 frame; the finger 300 px right of the centre → 600×100
+        val x = EBlock("b1", "text", 0, 1_000, x = 0.5f, y = 0.5f, w = 0.4f, ratio = 0.25f)
+        val s = StudioEdit.stretch(x, 1000f, 1000f, 800f, 500f)
+        assertEquals(0.6f, s.w, 0.001f)
+        assertEquals(100f, s.w * 1000 * s.ratio, 0.5f)
+        // turned by 90°: the block's own axis goes down
+        val r = x.copy(rot = 90f)
+        assertEquals(0.6f, StudioEdit.stretch(r, 1000f, 1000f, 500f, 800f).w, 0.001f)
+        // never thinner than a quarter of its height
+        assertTrue(StudioEdit.stretch(x, 1000f, 1000f, 500f, 500f).w * 1000 >= 25f)
+    }
+
+    @Test
+    fun overlayKeyChangesOnlyWhileSomethingMoves() {
+        val b = EBlock("b1", "text", 1_000, 4_000, animIn = "fade", animOut = "fade", text = "x")
+        val settle: (EBlock) -> Long = { 0L }
+        assertTrue(StudioEdit.overlayKey(listOf(b), 1_100, settle) != StudioEdit.overlayKey(listOf(b), 1_200, settle))
+        assertEquals(StudioEdit.overlayKey(listOf(b), 2_000, settle), StudioEdit.overlayKey(listOf(b), 3_000, settle))
+        assertTrue(StudioEdit.overlayKey(listOf(b), 4_800, settle) != StudioEdit.overlayKey(listOf(b), 4_900, settle))
+        // a scheme keeps changing until its last node is in
+        val s = b.copy(id = "s", kind = "scheme", scheme = SScheme("chain", "", listOf(SchNode("a", label = "A"), SchNode("b", label = "B"))))
+        val late: (EBlock) -> Long = { 3_000L }
+        assertTrue(StudioEdit.overlayKey(listOf(s), 2_000, late) != StudioEdit.overlayKey(listOf(s), 2_100, late))
+        assertEquals(StudioEdit.overlayKey(listOf(s), 3_200, late), StudioEdit.overlayKey(listOf(s), 3_900, late))
+        assertEquals(30_000L, StudioEdit.eta(10_000, 0.25f))
+        assertNull(StudioEdit.eta(10_000, 0.01f))
+        assertNull(StudioEdit.eta(500, 0.5f))
+    }
+
     @Test
     fun undoAndRedo() {
         val h = EditHistory(cap = 3)

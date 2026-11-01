@@ -384,7 +384,8 @@ object EdgeTts {
                 forbiddenRetried = true // retried once with the corrected clock
             } catch (e: java.io.IOException) {
                 serialUntil = System.currentTimeMillis() + TtsRetry.SERIAL_MS
-                val delay = TtsRetry.delayMs(attempt)?.let { TtsRetry.jitter(it, Math.random()) }
+                // other parts still getting through = the server is flaky, not down: keep trying this one
+                val delay = TtsRetry.delayMs(attempt, System.currentTimeMillis() - lastOk)?.let { TtsRetry.jitter(it, Math.random()) }
                 L.w("tts", "part ${i + 1}/$total attempt ${attempt + 1}: ${e.javaClass.simpleName}: ${e.message}")
                 if (delay == null) throw TtsException(TtsRetry.message(e, ready(), total))
                 attempt++
@@ -423,6 +424,8 @@ object EdgeTts {
     ))
 
     @Volatile private var serialUntil = 0L
+    /** When any part last arrived whole (all jobs share it). */
+    @Volatile private var lastOk = 0L
     private val serialLock = java.util.concurrent.locks.ReentrantLock()
 
     /** One connection; for [TtsRetry.SERIAL_MS] after a network error all parallel parts and scenes go one at a time. */
@@ -517,6 +520,7 @@ object EdgeTts {
         val bytes = synchronized(audio) { audio.toByteArray() }
         // an empty answer is the server dropping us (edge-tts #473): worth a retry like a network error
         if (bytes.isEmpty()) throw java.io.IOException(t("Сервис не вернул звук. Проверьте голос и интернет.", "No audio received. Check the voice and the connection."))
+        lastOk = System.currentTimeMillis()
         return bytes
     }
 }
@@ -754,6 +758,17 @@ object TtsRetry {
 
     /** Pause before retry number [attempt] (0-based), null = give up. */
     fun delayMs(attempt: Int): Long? = delays.getOrNull(attempt)
+
+    /** Another part succeeded this recently: the ladder is over, but the server is only flaky. */
+    const val PROGRESS_MS = 4 * 60_000L
+    const val MAX_ATTEMPTS = 20
+
+    /**
+     * Like [delayMs], but past the ladder keeps retrying every minute while other parts still arrive
+     * ([sinceOkMs] = time since any part last succeeded), up to [MAX_ATTEMPTS] tries in all.
+     */
+    fun delayMs(attempt: Int, sinceOkMs: Long): Long? =
+        delayMs(attempt) ?: if (sinceOkMs in 0 until PROGRESS_MS && attempt < MAX_ATTEMPTS - 1) 60_000L else null
 
     /** [ms] ±25 %: parallel parts must not hit the server in lockstep. [r] is 0.0..1.0. */
     fun jitter(ms: Long, r: Double): Long = (ms * (0.75 + 0.5 * r)).toLong()

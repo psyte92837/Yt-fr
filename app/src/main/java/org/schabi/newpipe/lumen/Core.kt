@@ -54,7 +54,9 @@ object Lumen {
                 val r = work()
                 ui { if (BgTasks.end(task)) onDone(r) }
             } catch (t: Throwable) {
-                if (!task.cancelled) L.e("async", t.message ?: t.javaClass.simpleName, t)
+                // a refused send is the user's choice, not a bug: no stack trace in the error log
+                if (t is SendCancelled) L.w("async", t.message.orEmpty())
+                else if (!task.cancelled) L.e("async", t.message ?: t.javaClass.simpleName, t)
                 ui { if (BgTasks.end(task)) onError(t) }
             } finally {
                 BgTasks.adopt(null)

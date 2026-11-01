@@ -215,7 +215,9 @@ object SendGate {
             current = null
             hideNote()
             val r = p.result
-            if (!answered || r == null) throw SendCancelled(t("Отправка отменена пользователем", "Sending cancelled by the user"))
+            if (!answered) throw SendCancelled(t("Нет ответа на запрос отправки «${req.task}» 30 минут — отправка отменена. Откройте уведомление Lumen, когда запустите заново.",
+                "No answer to the sending request \"${req.task}\" for 30 minutes — cancelled. Open Lumen's notification when you start again."))
+            if (r == null) throw SendCancelled(t("Отправка отменена пользователем", "Sending cancelled by the user"))
             synchronized(recent) { recent[key] = System.currentTimeMillis() to r }
             return r
         } finally {

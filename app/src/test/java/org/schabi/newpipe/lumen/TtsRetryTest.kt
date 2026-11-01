@@ -19,6 +19,18 @@ class TtsRetryTest {
     }
 
     @Test
+    fun keepsTryingWhileOthersGetThrough() {
+        assertEquals(2000L, TtsRetry.delayMs(0, Long.MAX_VALUE))
+        // ladder over, nothing arrived lately: give up
+        assertNull(TtsRetry.delayMs(8, Long.MAX_VALUE))
+        assertNull(TtsRetry.delayMs(8, TtsRetry.PROGRESS_MS))
+        // another scene arrived a minute ago: one more try a minute later
+        assertEquals(60_000L, TtsRetry.delayMs(8, 60_000))
+        assertEquals(60_000L, TtsRetry.delayMs(TtsRetry.MAX_ATTEMPTS - 2, 0))
+        assertNull(TtsRetry.delayMs(TtsRetry.MAX_ATTEMPTS - 1, 0))
+    }
+
+    @Test
     fun readableMessages() {
         val dns = TtsRetry.message(java.net.UnknownHostException("speech.platform.bing.com"), 3, 10)
         assertTrue(dns.contains("нет интернета"))

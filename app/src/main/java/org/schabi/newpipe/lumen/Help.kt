@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "browser", "tts", "studio", "bots", "bot_posts", "settings"
+        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -34,7 +34,7 @@ object HelpMap {
         "DiagramActivity" to "diagram",
         "AiJournalActivity" to "journal",
         "SendReviewActivity" to "send_review",
-        "RelayActivity" to "send_review",
+        "RelayActivity" to "relay",
         "BrowserActivity" to "browser",
         "TtsActivity" to "tts",
         "TtsShareListen" to "tts",
@@ -43,7 +43,7 @@ object HelpMap {
         "StudioTemplatesActivity" to "studio",
         "StudioMixActivity" to "studio",
         "StudioEditorActivity" to "studio",
-        "WebLayerActivity" to "studio",
+        "WebLayerActivity" to "montage",
         "BotsActivity" to "bots",
         "BotNewActivity" to "bots",
         "BotActivity" to "bots",
@@ -177,6 +177,29 @@ object Help {
                 t("«Отправить» или «Не отправлять»; фоновые задачи спрашивают через уведомление.", "\"Send\" or \"Don't send\"; background jobs ask via a notification.")
             ),
             listOf(t("Правила по задачам (спрашивать / отправлять / никогда) — в Настройки → AI → Что отправляется.", "Per-task rules (ask / send / never) are in Settings → AI → What is sent."))),
+        HelpTopic("relay", t("Другой ИИ вручную", "Another AI by hand"),
+            t("Любой запрос Lumen к ИИ можно выполнить в Gemini, ChatGPT, Claude или другом чате — без ключа API. Lumen собирает один готовый текст запроса, вы переносите его в чат, а ответ возвращаете обратно; дальше ответ проходит те же проверки, что и ответ по API.",
+                "Any AI request of Lumen can be done in Gemini, ChatGPT, Claude or another chat — without an API key. Lumen builds one ready request text, you move it to the chat and bring the answer back; then it gets the same checks as an API answer."),
+            listOf(
+                t("Включить: Настройки → AI → провайдер «Другой ИИ вручную» (все задачи) или строка «Через другой ИИ вручную» (только Студия и Языковая игра / все задачи). В Студии — галочка «🌐 Через другой ИИ вручную» в шаге 3.",
+                    "Turn on: Settings → AI → the \"Any AI by hand\" provider (every task) or the \"Through another AI by hand\" row (Studio and Language game only / all tasks). In the Studio — the \"🌐 Through another AI by hand\" tick in step 3."),
+                t("Запустите задачу как обычно (например, «🎬 Полный AI-режиссёр»). Откроется экран «Другой ИИ»; если приложение свёрнуто — уведомление «Ждём ответ другого ИИ».",
+                    "Start the task as usual (e.g. \"🎬 Full AI director\"). The \"Another AI\" screen opens; if the app is in the background — the \"Waiting for the other AI\" notification."),
+                t("По желанию допишите своё пожелание в поле — оно встанет в конец запроса.", "Optionally add your wish in the field — it goes to the end of the request."),
+                t("Нажмите «⧉ Скопировать», «↗ Отправить в…» или сразу Gemini / ChatGPT / Claude (запрос копируется и открывается сайт). Вставьте запрос в чат; свою просьбу можно дописать и там.",
+                    "Tap \"⧉ Copy\", \"↗ Send to…\" or Gemini / ChatGPT / Claude right away (the request is copied and the site opens). Paste the request into the chat; you can add your own words there too."),
+                t("Скопируйте ответ ИИ целиком (кнопкой копирования в чате) и вернитесь в Lumen — появится карточка «📋 В буфере ответ ИИ» → «✓ Передать в Lumen».",
+                    "Copy the whole AI answer (with the chat's copy button) and come back to Lumen — the \"📋 AI answer in the clipboard\" card appears → \"✓ Hand to Lumen\"."),
+                t("Или в приложении ИИ: «Поделиться» → «Lumen: ответ ИИ» — ответ уйдёт в Lumen сам. Или вставьте его в поле «Ответ ИИ» и нажмите «✓ Передать».",
+                    "Or in the AI app: \"Share\" → \"Lumen: AI answer\" — the answer goes to Lumen by itself. Or paste it into the \"AI answer\" field and tap \"✓ Hand over\"."),
+                t("Если ИИ ошибся в формате, Lumen попросит исправить — откроется новый запрос, повторите шаги. «Отменить запрос» останавливает задачу.",
+                    "If the AI got the format wrong, Lumen asks for a fix — a new request opens, repeat the steps. \"Cancel the request\" stops the task.")
+            ),
+            listOf(
+                t("Lumen сам чистит ответ: обёртку ```json, комментарии, лишние запятые и «умные» кавычки. Если JSON нет совсем — предупредит.", "Lumen cleans the answer itself: the ```json wrapper, comments, trailing commas and smart quotes. If there is no JSON at all, it warns."),
+                t("Gemini умеет смотреть видео по ссылке YouTube — ссылка уже в запросе. Картинки задачи прикладываются через «↗ Отправить в…».", "Gemini can watch a YouTube link — the link is in the request. Pictures of the task are attached with \"↗ Send to…\"."),
+                t("Ответа ждут до часа; задача в это время не считается зависшей.", "The answer is awaited up to an hour; the task does not count as stuck meanwhile.")
+            )),
         HelpTopic("browser", t("Браузер", "Browser"),
             t("Встроенный браузер. Может записывать звук вкладки.", "Built-in browser. It can record the tab's sound."),
             listOf(t("Введите адрес или запрос в строке сверху.", "Type an address or a query in the top bar."))),
@@ -252,6 +275,38 @@ object Help {
                     "🤖 \"AI makes everything\" (Animation, optional): describe an idea, scenes and/or a script; any field may stay empty. AI writes the lines, voices the characters, adds graphics and editing and builds the video."),
                 t("Длинные задачи (AI, озвучка, импорт, загрузка, сборка) идут в фоне с уведомлением о прогрессе: приложение можно свернуть или закрыть экран — по окончании придёт уведомление.",
                     "Long tasks (AI, voice, import, download, build) run in the background with a progress notification: minimise the app or close the screen, a notification comes when they end."),
+            )),
+        HelpTopic("montage", t("Монтаж: шаблоны ИИ поверх видео", "Montage: AI templates over a video"),
+            t("Второй рендер Студии. ИИ пишет код слоя анимации (протокол lumen.canvas): плашки, титры, стрелки, счётчики, подсветку слов, прогресс. Lumen рисует его кадр за кадром поверх готового ролика и сохраняет новый MP4 со звуком. Каждый ответ ИИ становится шаблоном — их можно переключать и сравнивать на одном видео. Здесь же вход в ручной редактор.",
+                "The Studio's second renderer. AI writes the code of an animation layer (lumen.canvas protocol): stickers, titles, arrows, counters, word highlights, progress. Lumen draws it frame by frame over a finished video and saves a new MP4 with the sound. Every AI answer becomes a template — switch and compare them on one video. The hand editor is opened from here too."),
+            listOf(
+                t("Откройте Студию → второй ряд вкладок → «🎛 Монтаж». Если в Студии уже собран ролик, он откроется сразу вместе с речью и сценами (ИИ будет попадать в слова). Иначе — «🎞 Выбрать видео» или «🎬 Последний ролик Студии».",
+                    "Open the Studio → the second row of tabs → \"🎛 Montage\". If a video is already built in the Studio, it opens right away with its speech and scenes (the AI hits the words). Otherwise — \"🎞 Pick a video\" or \"🎬 Last Studio video\"."),
+                t("Напишите в поле, каким сделать монтаж: например «неоновые плашки с ценами, стрелка к цифре, счётчик подписчиков в конце». Можно оставить пустым — будет драйв по умолчанию.",
+                    "Write what montage you want, e.g. \"neon stickers with prices, an arrow to the number, a subscriber counter at the end\". Leave empty for the default drive style."),
+                t("«⧉ Запрос для другого ИИ» → «Под это видео» (с речью и секундами) или «Универсальный шаблон» (подойдёт к любому ролику). Вставьте в Gemini, ChatGPT или Claude.",
+                    "\"⧉ Request for another AI\" → \"For this video\" (with speech and seconds) or \"Reusable template\" (fits any video). Paste it into Gemini, ChatGPT or Claude."),
+                t("Скопируйте ответ ИИ и вернитесь: появится «📋 В буфере код слоя от ИИ» → «✓ Сохранить и проверить». Или «📥 Вставить ответ». Код сохранится шаблоном, сразу покажется превью 4 моментов ролика.",
+                    "Copy the AI answer and come back: \"📋 Layer code from an AI in the clipboard\" → \"✓ Keep and preview\". Or \"📥 Paste the answer\". The code is kept as a template and a preview of 4 moments appears."),
+                t("Без чата: «✨ Встроенный ИИ» (нужен провайдер в Настройки → AI) или «🧩 Пример» — готовый слой для проверки.",
+                    "Without a chat: \"✨ Built-in AI\" (needs a provider in Settings → AI) or \"🧩 Example\" — a ready layer to try."),
+                t("Если в превью ошибка (✗ с номером строки): «🛠 Исправить (ИИ)» или «⧉ Ошибку — в другой ИИ» — скопируется запрос с ошибкой и кодом, исправленный ответ вставьте так же. Исправление обновляет тот же шаблон.",
+                    "If the preview shows an error (✗ with a line number): \"🛠 Fix (AI)\" or \"⧉ The error — to another AI\" — a request with the error and the code is copied; paste the fixed answer the same way. A fix updates the same template."),
+                t("Пробуйте разные монтажи: просите у ИИ новые варианты — каждый ответ ложится отдельным шаблоном в «📚 Шаблоны монтажа». «▶ Выбрать» делает шаблон текущим и показывает превью, «⇄ Сравнить на этом видео» ставит до 8 шаблонов рядом по 3 одинаковых кадра.",
+                    "Try different montages: ask the AI for new variants — each answer becomes its own template in \"📚 Montage templates\". \"▶ Use\" makes it current and shows the preview, \"⇄ Compare on this video\" puts up to 8 templates side by side, 3 same frames each."),
+                t("«🎬 Рендер с этим монтажом» собирает видео со звуком исходника и сохраняет в «Фильмы» (Lumen_Montage_…). Держите экран открытым: слой рисуется кадр за кадром, примерно 2–5 минут на минуту ролика. «Остановить» прерывает.",
+                    "\"🎬 Render with this montage\" builds the video with the original sound and saves it to Movies (Lumen_Montage_…). Keep the screen open: the layer is drawn frame by frame, about 2–5 minutes per minute of video. \"Stop\" interrupts."),
+                t("Ручные правки (схемы, картинки, надписи на таймлайне) — карточка «✏️ Ручной редактор» вверху экрана или вкладка «✏️ Редактор».",
+                    "Hand edits (schemes, pictures, captions on a timeline) — the \"✏️ Hand editor\" card at the top or the \"✏️ Editor\" tab.")
+            ),
+            listOf(
+                t("Шаблон — это код с первой строкой // name: Название. Имя меняется кнопкой «Имя», код — «✎ Править», «⧉» копирует код, «🗑» удаляет. Одинаковый код дважды не сохраняется.",
+                    "A template is code whose first line is // name: Title. \"Name\" renames, \"✎ Edit\" changes the code, \"⧉\" copies it, \"🗑\" deletes. The same code is never kept twice."),
+                t("Универсальные шаблоны берут тексты и время из речи ролика, поэтому один стиль можно применять к разным видео.", "Reusable templates take texts and times from the video's speech, so one style works on different videos."),
+                t("Слой работает в WebView без интернета: картинки и шрифты по ссылкам не загрузятся, шрифты только системные, эмодзи можно. Текст протокола — кнопка «📄 Протокол».",
+                    "The layer runs in a WebView without internet: pictures and fonts by link do not load, only system fonts, emoji are fine. The protocol text — the \"📄 Protocol\" button."),
+                t("Галочка «Слой в полном разрешении» делает надписи чётче, но рендер медленнее. Если в видео уже есть субтитры из Студии, ИИ получает указание их не перекрывать.",
+                    "The \"Layer at full resolution\" tick makes text sharper but the render slower. If the video already has Studio subtitles, the AI is told not to cover them.")
             )),
         HelpTopic("bots", t("Мои ТГ боты", "My Telegram bots"),
             t("Telegram-боты, которые пишет ИИ по вашему описанию, а телефон работает их сервером. У раздела своя иконка «Lumen Боты» на рабочем столе. " +

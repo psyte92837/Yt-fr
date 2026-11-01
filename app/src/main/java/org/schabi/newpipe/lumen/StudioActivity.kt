@@ -436,12 +436,15 @@ class StudioActivity : LumenBase() {
             board = emptyList()
             if (busy.isEmpty() && recorder == null) render()
         }
-        StudioJob.listener = ::onJob
+        StudioJob.listener = jobListener
         if (wasRunning && !StudioJob.running) onJob()
     }
 
+    /** Kept as one object: the Mix screen sets its own listener and must not lose it when this screen stops. */
+    private val jobListener: () -> Unit = { onJob() }
+
     override fun onStop() {
-        StudioJob.listener = null
+        if (StudioJob.listener === jobListener) StudioJob.listener = null
         super.onStop()
     }
 
@@ -513,8 +516,9 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
-            switchTask(StudioTask.entries[it])
+        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix")), task.ordinal) {
+            // the Mix is its own screen
+            if (it == StudioTask.entries.size) StudioMixActivity.open(this) else switchTask(StudioTask.entries[it])
         }, 0)
         if (!foreign) {
             val n = StudioDrafts.count(draftsDir, task.id)

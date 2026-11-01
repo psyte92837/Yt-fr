@@ -39,6 +39,7 @@ object HelpMap {
         "TtsShareSave" to "tts",
         "StudioActivity" to "studio",
         "StudioTemplatesActivity" to "studio",
+        "StudioMixActivity" to "studio",
         "BotsActivity" to "bots",
         "BotNewActivity" to "bots",
         "BotActivity" to "bots",

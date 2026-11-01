@@ -1025,6 +1025,12 @@ class ProjectActivity : LumenBase() {
             shareRow(this, "dossier", "$base-dossier-$day")
         }
         c.card {
+            add(text(ctx, t("🗣 Языковая игра аудитории", "🗣 Language game of the audience"), Type.TITLE_M, bold = true), 0)
+            muted(t("Как говорит ниша: слова «своих», обороты, формулы названий, обращение, психолингвистика. По этому протоколу AI пишет сценарий видео, подкаста или SEO — здесь или в ИИ-приложении на телефоне.",
+                "How the niche speaks: insider words, phrases, title formulas, address, psycholinguistics. Using this protocol the AI writes a video or podcast script or SEO — here or in an AI app on the phone."))
+            button(t("Открыть", "Open"), style = BtnStyle.FILLED) { LangGameActivity.open(this@ProjectActivity, project.id) }
+        }
+        c.card {
             add(text(ctx, t("✍️ Свой отчёт (AI)", "✍️ Custom report (AI)"), Type.TITLE_M, bold = true), 0)
             muted(t("Напишите, что должно быть в отчёте, и выберите формат: AI соберёт содержание по данным проекта, приложение оформит файл.",
                 "Describe what the report should contain and pick a format: the AI writes the content from the project data, the app lays out the file."))

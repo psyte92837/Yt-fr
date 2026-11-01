@@ -356,6 +356,7 @@ object Prompts {
         defaults.putAll(MINIAPP_PROMPTS)
         defaults.putAll(POST_PROMPTS)
         defaults.putAll(IDEAS_PROMPTS)
+        defaults.putAll(LANGGAME_PROMPTS)
         defaults.putAll(COMMENT_DIGEST_PROMPTS)
     }
 

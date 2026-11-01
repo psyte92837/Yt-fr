@@ -221,6 +221,12 @@ class StudioActivity : LumenBase() {
             ctx.startActivity(Intent(ctx, StudioActivity::class.java).putExtra("fresh", true)
                 .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
         }
+
+        /** Opens [task] with a ready script (e.g. from the language game); the task's old work goes to the drafts. */
+        fun openWith(ctx: Context, task: String, script: String, topic: String) {
+            ctx.startActivity(Intent(ctx, StudioActivity::class.java).putExtra("task", task).putExtra("script", script).putExtra("topic", topic)
+                .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
     private val dir by lazy { File(filesDir, "lumen/studio").apply { mkdirs() } }
@@ -291,7 +297,19 @@ class StudioActivity : LumenBase() {
         savedInstanceState?.getStringArrayList("seen")?.let { seen.addAll(it) }
         // the notification reopens this screen with its intent: it must show the work, not start a new one
         intent.removeExtra("fresh")
-        val stashed = savedInstanceState == null && visit()
+        val given = if (savedInstanceState == null) intent.getStringExtra("script") else null
+        intent.removeExtra("script")
+        if (given != null) {
+            if (foreign || StudioJob.running || BgTasks.has("studio:")) toast(t("Студия занята: сценарий не подставлен", "Studio is busy: the script was not set"))
+            else {
+                StudioPrefs.task = intent.getStringExtra("task") ?: StudioPrefs.task
+                seen.add(task.id)
+                stashCurrent()
+                StudioPrefs.script = given
+                StudioPrefs.topic = intent.getStringExtra("topic").orEmpty()
+            }
+        }
+        val stashed = savedInstanceState == null && given == null && visit()
         scriptEdit = edt(this, t("Сценарий: сцены через пустую строку", "Script: scenes separated by a blank line"), StudioPrefs.script, multiline = true).apply {
             minLines = 8
             maxLines = 18

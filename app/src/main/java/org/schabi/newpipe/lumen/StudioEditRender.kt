@@ -479,13 +479,16 @@ object StudioEditRender {
                 val clip = clips[pos.index]
                 val srcUs = if (plain) pts else if (clip.isHold) clip.fromMs * 1000
                 else clip.fromMs * 1000 + ((pts - starts[pos.index] * 1000) * clip.speed.toDouble()).toLong()
+                var dec: StudioFrames = src ?: StudioFrames(base, w, h)
+                src = dec
                 if (srcUs < lastSrc - 1000) {
                     // back in time (another order, a copy): the decoder starts over
-                    src.close()
-                    src = StudioFrames(base, w, h)
+                    dec.close()
+                    dec = StudioFrames(base, w, h)
+                    src = dec
                 }
                 lastSrc = srcUs
-                src.advance(srcUs, frame, true)
+                dec.advance(srcUs, frame, true)
                 val shown = StudioEdit.active(over, tMs)
                 val look = clip.mirror || clip.zoom > 1.001f
                 var pix = frame

@@ -134,6 +134,17 @@ object EditTrack {
         return list to j
     }
 
+    /** Piece [from] dragged to place [to] (its index after the move); null when nothing changes. */
+    fun moveTo(clips: List<VClip>, from: Int, to: Int): Pair<List<VClip>, Int>? {
+        if (from !in clips.indices || to !in clips.indices || from == to) return null
+        val list = clips.toMutableList()
+        list.add(to, list.removeAt(from))
+        return list to to
+    }
+
+    /** Where a piece dragged from [from] lands when dropped at seam [seam] (0 = before the first piece, size = after the last). */
+    fun dropIndex(from: Int, seam: Int): Int = if (seam > from) seam - 1 else seam
+
     /** A still picture of the moment [outMs] for [holdMs], put in at that moment; returns the track and the still. */
     fun freeze(clips: List<VClip>, outMs: Long, holdMs: Long = HOLD_MS): Pair<List<VClip>, Int>? {
         val pos = locate(clips, outMs)
@@ -281,4 +292,57 @@ object EditTrack {
         clean(VClip(id, from, to, o.optDouble("speed", 1.0).toFloat(), o.optDouble("volume", 1.0).toFloat(),
             o.optBoolean("mirror"), o.optDouble("zoom", 1.0).toFloat(), o.optLong("hold")))
     }
+}
+
+/** A rectangle: fractions of the frame or pixels. */
+data class FRect(val l: Float, val t: Float, val r: Float, val b: Float) {
+    val w: Float get() = r - l
+    val h: Float get() = b - t
+}
+
+/**
+ * Split screen of the editor (block kind "split", like CapCut): for the time of the block the frame is shared by the
+ * main video and a second one ([EBlock.file], from [EBlock.srcMs]); [EBlock.look] is the layout. Pure, no Android.
+ */
+object EditSplit {
+    const val KIND = "split"
+    /** Main video left / right / top / bottom; the second one takes the other half. */
+    val LAYOUTS = listOf("lr", "rl", "tb", "bt")
+
+    fun defaultLayout(w: Int, h: Int): String = if (h > w) "tb" else "lr"
+
+    /** The halves of the frame (fractions): the main video's and the second one's. */
+    fun halves(look: String): Pair<FRect, FRect> {
+        val left = FRect(0f, 0f, 0.5f, 1f)
+        val right = FRect(0.5f, 0f, 1f, 1f)
+        val top = FRect(0f, 0f, 1f, 0.5f)
+        val bottom = FRect(0f, 0.5f, 1f, 1f)
+        return when (look) {
+            "rl" -> right to left
+            "tb" -> top to bottom
+            "bt" -> bottom to top
+            else -> left to right
+        }
+    }
+
+    /** A video [vw]×[vh] scaled to cover [box] (fractions) of a frame [fw]×[fh], centred: its rectangle in pixels, larger than the box. */
+    fun cover(vw: Float, vh: Float, box: FRect, fw: Float, fh: Float): FRect {
+        val bw = box.w * fw
+        val bh = box.h * fh
+        val k = max(bw / max(1f, vw), bh / max(1f, vh))
+        val cw = vw * k
+        val ch = vh * k
+        val cx = (box.l + box.r) / 2 * fw
+        val cy = (box.t + box.b) / 2 * fh
+        return FRect(cx - cw / 2, cy - ch / 2, cx + cw / 2, cy + ch / 2)
+    }
+
+    /** The split screen shown at [tMs] (the top one when several overlap). */
+    fun active(blocks: List<EBlock>, tMs: Long): EBlock? = blocks.lastOrNull { it.kind == KIND && tMs >= it.startMs && tMs < it.endMs }
+
+    /** Moment of the second video at output time [tMs]. */
+    fun srcAt(b: EBlock, tMs: Long): Long = b.srcMs + (tMs - b.startMs).coerceAtLeast(0)
+
+    /** Blocks drawn over the picture (a split screen is not one of them). */
+    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { it.kind != KIND }
 }

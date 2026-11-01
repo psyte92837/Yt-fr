@@ -56,6 +56,7 @@ class StudioEditorActivity : LumenBase() {
         private const val EXTRA_PROJECT = "project"
         private const val REQ_IMAGE = 7711
         private const val REQ_VIDEO = 7712
+        private const val REQ_SPLIT = 7713
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
         private const val TASK_AI = TASK + "ai"
@@ -111,6 +112,16 @@ class StudioEditorActivity : LumenBase() {
     private var stage: EditStage? = null
     private var timeline: EditTimeline? = null
     private var texture: TextureView? = null
+    // split screen preview: the main video and a second player each in its half of the frame
+    private var frameView: FrameLayout? = null
+    private var mainBox: FrameLayout? = null
+    private var sideBox: FrameLayout? = null
+    private var texture2: TextureView? = null
+    private var player2: ExoPlayer? = null
+    private var side2File = ""
+    private var splitKey = ""
+    private var side2SeekAt = 0L
+    private val sideSizes = HashMap<String, Pair<Int, Int>>()
     private var timeText: TextView? = null
     private var playBtn: TextView? = null
     private var undoBtn: TextView? = null
@@ -156,6 +167,7 @@ class StudioEditorActivity : LumenBase() {
         resumed = false
         BgTasks.watchers -= watcher
         pause()
+        player2?.pause()
         save()
     }
 
@@ -356,8 +368,27 @@ class StudioEditorActivity : LumenBase() {
         val frame = FrameLayout(this)
         val tv = TextureView(this)
         val st = EditStage(this) { w, h -> StudioEditPainter(w, h, dir, words, StudioPrefs.accent, styleDir) }
-        frame.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val mb = FrameLayout(this)
+        mb.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val sb = FrameLayout(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(0xFF000000.toInt())
+        }
+        val tv2 = TextureView(this)
+        sb.addView(tv2, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(mb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(sb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(st, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addOnLayoutChangeListener { _, x0, y0, x1, y1, ox0, oy0, ox1, oy1 ->
+            if (x1 - x0 != ox1 - ox0 || y1 - y0 != oy1 - oy0) frame.post {
+                splitKey = ""
+                layoutSplit()
+            }
+        }
+        frameView = frame
+        mainBox = mb
+        sideBox = sb
+        texture2 = tv2
         box.addView(frame, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
         box.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> box.post { fitFrame(box, frame) } }
         root.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -387,7 +418,7 @@ class StudioEditorActivity : LumenBase() {
         timeline = tl
         texture = tv
         toolsRow = row
-        st.blocks = p.blocks
+        st.blocks = EditSplit.overlays(p.blocks)
         st.portrait = p.h > p.w * 1.1f
         st.onSelect = { id ->
             pause()
@@ -415,6 +446,10 @@ class StudioEditorActivity : LumenBase() {
             pause()
             selectClip(if (i == clipSel) -1 else i)
         }
+        tl.onClipDrop = { from, to ->
+            pause()
+            EditTrack.moveTo(clips, from, to)?.let { (list, j) -> commitClips(list, j) }
+        }
         tl.onChange = { b, done -> live(b, done) }
         page(t("Редактор", "Editor"), root, actions = listOf("☰" to { blocksSheet() }), scroll = false)
         tl.post {
@@ -438,8 +473,8 @@ class StudioEditorActivity : LumenBase() {
             p(t("1. Остановите видео в нужном месте (тап по кадру или прокрутка таймлайна) и нажмите «＋».", "1. Stop the video at a moment (tap the frame or scroll the timeline) and tap \"＋\"."))
             p(t("2. Блок на кадре: тяните пальцем, угол ⤡ или два пальца — размер и поворот, ↔ — ширина текста.", "2. A block on the frame: drag it; the ⤡ corner or two fingers scale and turn it, ↔ sets the text width."))
             p(t("3. На таймлайне: выбранный блок тянется целиком, края — длительность; края прилипают к словам и курсору.", "3. On the timeline: drag the selected block, its edges set the length and stick to words and the playhead."))
-            p(t("Монтаж как в CapCut: тап по кадрам ролика внизу выделяет кусок — ✂ разрезать, удалить, переставить, скорость, громкость, стоп-кадр, зеркало.",
-                "Editing like CapCut: tap the frames of the video below to select a piece — ✂ split, delete, reorder, speed, volume, freeze, mirror."))
+            p(t("Монтаж как в CapCut: тап по кадрам ролика внизу выделяет кусок — ✂ разрезать, удалить, скорость, громкость, стоп-кадр, зеркало; удержание и перетаскивание — переставить. «⊟ Разделить экран» — второе видео рядом.",
+                "Editing like CapCut: tap the frames of the video below to select a piece — ✂ split, delete, speed, volume, freeze, mirror; hold and drag to reorder. \"⊟ Split screen\" puts a second video beside."))
             if (words.isNotEmpty()) p(t("4. «📝 Текст» — вся речь: тап по слову ставит курсор, выделите фразу — и схема или надпись встанет ровно на неё.",
                 "4. \"📝 Text\" is the whole speech: tap a word to go there, select a phrase to put a scheme or caption exactly on it."))
             button(t("Понятно", "Got it"), primary = true) { dismiss() }
@@ -574,6 +609,18 @@ class StudioEditorActivity : LumenBase() {
         val b = StudioEdit.find(blocks, selected)
         val ci = clipSel.takeIf { b == null && it in clips.indices }
         val items: List<Triple<String, String, () -> Unit>> = when {
+            b != null && b.kind == EditSplit.KIND -> listOf(
+                act("✓", t("Готово", "Done")) { select(null) },
+                act("⊟", t("Раскладка", "Layout")) { splitSheet(b) },
+                act("⏮", t("Начало 2-го видео", "2nd video from")) { splitFrom(b) },
+                act("⏱", t("Время", "Timing")) { timingSheet(b) },
+                act("✂", t("Разделить", "Split")) { split(b) },
+                act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) },
+                act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } },
+                act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } },
+                act("🔁", t("Заменить видео", "Replace video")) { pickSplit(b.id) },
+                act("🗑", t("Удалить", "Delete")) { delete(b.id) }
+            )
             b != null -> buildList {
                 add(act("✓", t("Готово", "Done")) { select(null) })
                 add(act("✎", t("Изменить", "Edit")) { edit(b) })
@@ -621,6 +668,7 @@ class StudioEditorActivity : LumenBase() {
                 act("✂", t("Разделить", "Split")) { clipSplit() },
                 act("🎬", t("Монтаж", "Edit")) { selectClip(EditTrack.locate(clips, curMs).index) },
                 act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() },
+                act("⊟", t("Разделить экран", "Split screen")) { pickSplit(null) },
                 act("＋", t("Вставить", "Insert")) { insertSheet() },
                 act("T", t("Надпись", "Caption")) { captionSheet(null) },
                 act("😀", t("Эмодзи", "Emoji")) { emojiSheet(null) },
@@ -743,6 +791,101 @@ class StudioEditorActivity : LumenBase() {
     private fun stopPlayer() {
         player?.let { runCatching { it.release() } }
         player = null
+        player2?.let { runCatching { it.release() } }
+        player2 = null
+        side2File = ""
+        splitKey = ""
+    }
+
+    private fun splitName(l: String) = when (l) {
+        "rl" -> t("◨ Основное справа", "◨ Main on the right")
+        "tb" -> t("⬒ Основное сверху", "⬒ Main on top")
+        "bt" -> t("⬓ Основное снизу", "⬓ Main at the bottom")
+        else -> t("◧ Основное слева", "◧ Main on the left")
+    }
+
+    /** Display size of a second video (cached). */
+    private fun sideSize(file: String): Pair<Int, Int> = sideSizes.getOrPut(file) {
+        runCatching { StudioEditRender.probe(File(dir, file)).let { it.w to it.h } }.getOrDefault(1 to 1)
+    }
+
+    /** Split screen on the preview: the halves of the frame for the main and the second video, the second player in step. */
+    private fun layoutSplit() {
+        val fr = frameView ?: return
+        val mb = mainBox ?: return
+        val sb = sideBox ?: return
+        val tv = texture ?: return
+        val tv2 = texture2 ?: return
+        val fw = fr.width.toFloat()
+        val fh = fr.height.toFloat()
+        if (fw <= 0f || fh <= 0f) return
+        val sp = EditSplit.active(blocks, curMs)
+        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh"
+        if (key != splitKey) {
+            splitKey = key
+            if (sp == null) {
+                mb.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                tv.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                sb.visibility = View.GONE
+            } else {
+                val (mh, sh) = EditSplit.halves(sp.look)
+                fun fit(box: View, inner: View, half: FRect, vw: Float, vh: Float) {
+                    box.layoutParams = FrameLayout.LayoutParams((half.w * fw).toInt(), (half.h * fh).toInt()).apply {
+                        gravity = Gravity.TOP or Gravity.START
+                        leftMargin = (half.l * fw).toInt()
+                        topMargin = (half.t * fh).toInt()
+                    }
+                    // the video covers its half, centred; the rest is cut off by the half
+                    val c = EditSplit.cover(vw, vh, half, fw, fh)
+                    inner.layoutParams = FrameLayout.LayoutParams(c.w.toInt(), c.h.toInt()).apply {
+                        gravity = Gravity.TOP or Gravity.START
+                        leftMargin = (c.l - half.l * fw).toInt()
+                        topMargin = (c.t - half.t * fh).toInt()
+                    }
+                }
+                fit(mb, tv, mh, fw, fh)
+                val (vw, vh) = sideSize(sp.file)
+                fit(sb, tv2, sh, vw.toFloat(), vh.toFloat())
+                sb.visibility = View.VISIBLE
+            }
+        }
+        syncSide(sp)
+    }
+
+    private fun syncSide(sp: EBlock?) {
+        if (sp == null) {
+            player2?.takeIf { it.playWhenReady }?.pause()
+            return
+        }
+        val ex2 = player2 ?: ExoPlayer.Builder(this).build().also { ex ->
+            player2 = ex
+            // the sound stays the main video's (in the export too)
+            ex.volume = 0f
+            ex.setVideoTextureView(texture2)
+        }
+        if (side2File != sp.file) {
+            side2File = sp.file
+            ex2.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(dir, sp.file))))
+            ex2.prepare()
+            side2SeekAt = 0L
+        }
+        val want = EditSplit.srcAt(sp, curMs)
+        val now = SystemClock.uptimeMillis()
+        if (playing) {
+            if (!ex2.playWhenReady) {
+                ex2.seekTo(want)
+                ex2.play()
+            } else if (kotlin.math.abs(ex2.currentPosition - want) > 300 && now - side2SeekAt > 500) {
+                side2SeekAt = now
+                ex2.seekTo(want)
+            }
+        } else {
+            if (ex2.playWhenReady) ex2.pause()
+            if (kotlin.math.abs(ex2.currentPosition - want) > 30 && now - side2SeekAt > 50) {
+                side2SeekAt = now
+                ex2.seekTo(want)
+            }
+        }
     }
 
     private val tick = object : Runnable {
@@ -758,6 +901,7 @@ class StudioEditorActivity : LumenBase() {
         stage?.timeMs = curMs
         if (!fromTimeline) timeline?.setPlayhead(curMs)
         timeText?.text = StudioEdit.clock(curMs) + " / " + StudioEdit.clock(total)
+        layoutSplit()
     }
 
     private fun updatePlay() {
@@ -835,8 +979,10 @@ class StudioEditorActivity : LumenBase() {
     private fun setBlocks(list: List<EBlock>) {
         val p = project ?: return
         project = p.copy(blocks = list)
-        stage?.blocks = list
+        stage?.blocks = EditSplit.overlays(list)
         timeline?.blocks = list
+        splitKey = ""
+        layoutSplit()
     }
 
     private fun save() {
@@ -924,8 +1070,10 @@ class StudioEditorActivity : LumenBase() {
             tl.words = words
             tl.blocks = list
         }
-        stage?.blocks = list
+        stage?.blocks = EditSplit.overlays(list)
         stage?.refresh()
+        splitKey = ""
+        layoutSplit()
     }
 
     /** A finished change of the main track: blocks move with their pieces, the same picture stays under the playhead. */
@@ -1440,6 +1588,7 @@ class StudioEditorActivity : LumenBase() {
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.joinToString(" → ") { it.label }.take(40))
         "image" -> "🖼 " + (b.ask.ifBlank { t("Картинка", "Picture") })
         "text" -> "T " + b.text.replace('\n', ' ').take(40)
+        EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
         else -> b.text + " " + t("эмодзи", "emoji")
     }
 
@@ -1505,6 +1654,71 @@ class StudioEditorActivity : LumenBase() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_IMAGE)
     }
 
+    private fun pickSplit(replace: String?) {
+        pause()
+        pickFor = replace
+        pickAt = curMs
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"), REQ_SPLIT)
+    }
+
+    /** A second video for the split screen: copied into the project, put at the playhead for its length (or to the end). */
+    private fun importSplit(uri: Uri) {
+        val p = project ?: return
+        val replace = pickFor
+        val at = pickAt
+        val d = dir
+        val cr = applicationContext.contentResolver
+        toast(t("Копирую второе видео…", "Copying the second video…"))
+        Lumen.async({
+            val name = "img/v${System.currentTimeMillis()}.mp4"
+            val f = File(d, name).apply { parentFile?.mkdirs() }
+            (cr.openInputStream(uri) ?: error(t("Файл не открывается", "The file cannot be opened"))).use { i -> f.outputStream().use { i.copyTo(it) } }
+            val pr = runCatching { StudioEditRender.probe(f) }.getOrElse {
+                f.delete()
+                throw it
+            }
+            name to pr.durMs
+        }, { e -> if (!isDestroyed) err(e) }) { (file, dur) ->
+            if (project?.id != p.id) return@async
+            if (replace != null) change(replace) { it.copy(file = file, srcMs = 0) }
+            else {
+                val len = min(dur, max(StudioEdit.MIN_MS, outLen(p) - at)).coerceAtLeast(StudioEdit.MIN_MS)
+                addNew(EditSplit.KIND, at, len, 1f) {
+                    it.copy(file = file, look = EditSplit.defaultLayout(p.w, p.h), x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "none")
+                }
+            }
+            splitKey = ""
+            layoutSplit()
+        }
+    }
+
+    private fun splitSheet(b: EBlock) {
+        bottomSheet(t("⊟ Разделённый экран", "⊟ Split screen")) { dismiss ->
+            muted(t("Основное видео и второе делят кадр пополам, каждое обрезается по своей половине. Звук — основного видео.",
+                "The main and the second video share the frame, each cropped to its half. The sound is the main video's."))
+            add(choiceChips(ctx, EditSplit.LAYOUTS.map { it to splitName(it) }, b.look) { v ->
+                change(b.id) { it.copy(look = v) }
+                dismiss()
+            })
+            button(t("⏮ Второе видео с ", "⏮ Second video from ") + StudioEdit.clock(b.srcMs), style = BtnStyle.TONAL) {
+                dismiss()
+                splitFrom(b)
+            }
+            button(t("🔁 Другое видео", "🔁 Another video"), style = BtnStyle.TEXT) {
+                dismiss()
+                pickSplit(b.id)
+            }
+        }
+    }
+
+    private fun splitFrom(b: EBlock) {
+        pause()
+        prompt(t("С какого момента второе видео", "Second video from"), t("Секунды или 0:12.5", "Seconds or 0:12.5"), StudioEdit.clock(b.srcMs)) { v ->
+            StudioEdit.parseTime(v)?.let { ms -> change(b.id) { it.copy(srcMs = max(0L, ms)) } } ?: toast(t("Не понял время", "Not a time"))
+        }
+    }
+
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         @Suppress("DEPRECATION")
@@ -1514,6 +1728,7 @@ class StudioEditorActivity : LumenBase() {
         when (requestCode) {
             REQ_IMAGE -> importImage(uri)
             REQ_VIDEO -> importVideo(uri)
+            REQ_SPLIT -> importSplit(uri)
         }
     }
 
@@ -1715,6 +1930,7 @@ class StudioEditorActivity : LumenBase() {
         "scheme" -> textSchemeSheet(b)
         "image" -> imageSheet(b)
         "text" -> captionSheet(b)
+        EditSplit.KIND -> splitSheet(b)
         else -> emojiSheet(b)
     }
 

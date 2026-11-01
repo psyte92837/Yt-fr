@@ -142,4 +142,42 @@ class EditTrackTest {
         assertEquals("", EditTrack.badges(whole[0]))
         assertTrue(EditTrack.badges(whole[0].copy(volume = 0f)).contains("🔇"))
     }
+
+    @Test
+    fun dragAPieceToAnotherPlace() {
+        val (two, _) = EditTrack.split(whole, 4_000)!!
+        val (three, _) = EditTrack.split(two, 7_000)!!
+        // the first piece dropped after the last one
+        val to = EditTrack.dropIndex(0, 3)
+        assertEquals(2, to)
+        val (moved, j) = EditTrack.moveTo(three, 0, to)!!
+        assertEquals(2, j)
+        assertEquals(listOf(4_000L, 7_000L, 0L), moved.map { it.fromMs })
+        // the last one dropped first
+        assertEquals(listOf(7_000L, 0L, 4_000L), EditTrack.moveTo(three, 2, EditTrack.dropIndex(2, 0))!!.first.map { it.fromMs })
+        assertNull(EditTrack.moveTo(three, 1, EditTrack.dropIndex(1, 2)))
+    }
+
+    @Test
+    fun splitScreenHalvesAndCover() {
+        val (main, second) = EditSplit.halves("tb")
+        assertEquals(FRect(0f, 0f, 1f, 0.5f), main)
+        assertEquals(FRect(0f, 0.5f, 1f, 1f), second)
+        assertEquals(FRect(0.5f, 0f, 1f, 1f), EditSplit.halves("rl").first)
+        // a 9:16 frame 1080×1920, its top half 1080×960: the same video covers it at full size, centred
+        val c = EditSplit.cover(1080f, 1920f, main, 1080f, 1920f)
+        assertEquals(0f, c.l, 0.01f)
+        assertEquals(1080f, c.w, 0.01f)
+        assertEquals(1920f, c.h, 0.01f)
+        assertEquals(480f, (c.t + c.b) / 2, 0.01f)
+        // a landscape video in the bottom half: as high as the half, wider than the frame
+        val l = EditSplit.cover(1920f, 1080f, second, 1080f, 1920f)
+        assertEquals(960f, l.h, 0.01f)
+        assertTrue(l.w > 1080f)
+        val b = EBlock("s", "split", 2_000, 5_000, file = "img/v.mp4", srcMs = 1_000)
+        assertEquals(b, EditSplit.active(listOf(b), 3_000))
+        assertNull(EditSplit.active(listOf(b), 7_000))
+        assertEquals(2_500L, EditSplit.srcAt(b, 3_500))
+        assertTrue(EditSplit.overlays(listOf(b)).isEmpty())
+    }
 }

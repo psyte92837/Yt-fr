@@ -365,6 +365,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     var clipSel = -1
         set(v) { field = v; invalidate() }
     var onClip: (Int) -> Unit = {}
+    /** A piece dragged by the finger to another place: (from, its new index). */
+    var onClipDrop: (Int, Int) -> Unit = { _, _ -> }
 
     /** The user moved the time ([dragging] while the finger or the fling still moves it). */
     var onScrub: (Long, Boolean) -> Unit = { _, _ -> }
@@ -401,6 +403,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val holdP = Paint().apply { color = 0x4D7DD3FC }
     private val badgeP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt(); textSize = 10 * dp; typeface = Typeface.DEFAULT_BOLD }
     private val clipSelP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * dp; color = 0xFFFFD60A.toInt() }
+    private val seamP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt(); strokeWidth = 3 * dp; strokeCap = Paint.Cap.ROUND }
+    private val liftP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
 
     private fun relayout() {
         lanes = StudioEdit.lanes(blocks)
@@ -445,6 +449,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private fun color(kind: String) = when (kind) {
         "scheme" -> 0xFF6750A4.toInt()
         "image" -> 0xFF00796B.toInt()
+        EditSplit.KIND -> 0xFF1565C0.toInt()
         "text" -> 0xFFB45309.toInt()
         else -> 0xFFC2185B.toInt()
     }
@@ -453,6 +458,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         "scheme" -> if (b.scheme == null) "🧩 ⏳ " + t("ИИ рисует…", "AI drawing…")
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.firstOrNull()?.label.orEmpty())
         "image" -> "🖼 " + t("Картинка", "Picture")
+        EditSplit.KIND -> "⊟ " + t("Экран надвое", "Split screen")
         "text" -> "T " + b.text.replace('\n', ' ')
         else -> b.text
     }
@@ -535,10 +541,40 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 if (i > 0) c.drawRect(l - 1.5f * dp, stripTop, l + 1.5f * dp, stripTop + stripH, sepP)
             }
             c.restore()
-            if (clipSel in cl.indices) {
+            if (clipSel in cl.indices && mode != REORDER) {
                 val l = xOf(st[clipSel])
                 val r = xOf(st[clipSel] + cl[clipSel].outMs)
                 c.drawRoundRect(RectF(l + dp, stripTop + dp, r - dp, stripTop + stripH - dp), 6 * dp, 6 * dp, clipSelP)
+            }
+            if (mode == REORDER && dragClip in cl.indices) {
+                // the lifted piece: its place dimmed, the place it will go to marked, a copy under the finger
+                val d = cl[dragClip]
+                c.drawRect(xOf(st[dragClip]), stripTop, xOf(st[dragClip] + d.outMs), stripTop + stripH, liftP)
+                if (dropSeam >= 0) {
+                    val sx = if (dropSeam < cl.size) xOf(st[dropSeam]) else xOf(totalMs)
+                    c.drawLine(sx, stripTop - 4 * dp, sx, stripTop + stripH + 4 * dp, seamP)
+                }
+                val bw = max(stripH, min(xOf(d.outMs) - xOf(0), 110 * dp))
+                val box = RectF(lastX - bw / 2, stripTop - 6 * dp, lastX + bw / 2, stripTop + stripH - 6 * dp)
+                val bmp = nearest(if (d.isHold) d.fromMs else (d.fromMs + d.toMs) / 2)
+                c.save()
+                c.clipPath(Path().apply { addRoundRect(box, 6 * dp, 6 * dp, Path.Direction.CW) })
+                c.drawRect(box, stripBg)
+                if (bmp != null) {
+                    val ratio = box.width() / box.height()
+                    val bw2 = bmp.width.toFloat()
+                    val bh2 = bmp.height.toFloat()
+                    if (bw2 / bh2 > ratio) {
+                        val sw = bh2 * ratio
+                        src.set(((bw2 - sw) / 2).toInt(), 0, ((bw2 + sw) / 2).toInt(), bh2.toInt())
+                    } else {
+                        val sh = bw2 / ratio
+                        src.set(0, ((bh2 - sh) / 2).toInt(), bw2.toInt(), ((bh2 + sh) / 2).toInt())
+                    }
+                    c.drawBitmap(bmp, src, box, thumbP)
+                }
+                c.restore()
+                c.drawRoundRect(box, 6 * dp, 6 * dp, clipSelP)
             }
         }
         // words of the voice: a label where there is room, a tick for every word
@@ -623,6 +659,43 @@ class EditTimeline(ctx: Context) : View(ctx) {
         const val TRIM_R = 4
         const val ZOOM = 5
         const val PENDING = 6
+        const val REORDER = 7
+    }
+
+    private var dragClip = -1
+    private var dropSeam = -1
+
+    /** A long press on the frames lifts that piece of the main track to drag it. */
+    private val clipLongPress = Runnable {
+        if (mode != PENDING || clips.size < 2) return@Runnable
+        val at = msAt(downX)
+        if (at < 0 || at >= totalMs) return@Runnable
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        dragClip = EditTrack.locate(clips, at).index
+        frozen = lanes
+        mode = REORDER
+        parent?.requestDisallowInterceptTouchEvent(true)
+        updateSeam(lastX)
+        postOnAnimation(autoScroll)
+        invalidate()
+    }
+
+    /** The seam nearest to the finger at [x]: 0 = before the first piece, size = after the last. */
+    private fun updateSeam(x: Float) {
+        var best = 0
+        var bestD = Float.MAX_VALUE
+        for (k in 0..clips.size) {
+            val sx = if (k < clips.size) xOf(clipStarts[k]) else xOf(totalMs)
+            val d = abs(sx - x)
+            if (d < bestD) {
+                bestD = d
+                best = k
+            }
+        }
+        if (best != dropSeam) {
+            if (dropSeam >= 0) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            dropSeam = best
+        }
     }
 
     private var mode = IDLE
@@ -651,8 +724,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
 
     private val autoScroll = object : Runnable {
         override fun run() {
-            if (mode != MOVE && mode != TRIM_L && mode != TRIM_R) return
-            if (live == null) {
+            if (mode != MOVE && mode != TRIM_L && mode != TRIM_R && mode != REORDER) return
+            if (live == null && mode != REORDER) {
                 // not dragged yet: the finger only rests near the edge
                 postOnAnimation(this)
                 return
@@ -665,7 +738,10 @@ class EditTimeline(ctx: Context) : View(ctx) {
             if (dir != 0) {
                 setPlayhead(playMs + (dir * 8 * dp / pxPerMs).toLong())
                 onScrub(playMs, true)
-                drag(lastX)
+                if (mode == REORDER) {
+                    updateSeam(lastX)
+                    invalidate()
+                } else drag(lastX)
             }
             postOnAnimation(this)
         }
@@ -674,7 +750,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val zoom = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(d: ScaleGestureDetector): Boolean {
             removeCallbacks(longPress)
-            if (mode == MOVE || mode == TRIM_L || mode == TRIM_R) return false
+            if (mode == MOVE || mode == TRIM_L || mode == TRIM_R || mode == REORDER) return false
+            removeCallbacks(clipLongPress)
             mode = ZOOM
             return true
         }
@@ -770,11 +847,13 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 } else {
                     mode = PENDING
                     if (hit != null) postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
+                    else if (clips.size > 1 && e.y >= rulerH && e.y < rulerH + stripH) postDelayed(clipLongPress, ViewConfiguration.getLongPressTimeout().toLong())
                 }
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
                 removeCallbacks(longPress)
+                removeCallbacks(clipLongPress)
                 return true
             }
             MotionEvent.ACTION_MOVE -> {
@@ -782,7 +861,12 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 when (mode) {
                     PENDING -> if (abs(e.x - downX) > slop || abs(e.y - downY) > slop) {
                         removeCallbacks(longPress)
+                        removeCallbacks(clipLongPress)
                         mode = SCROLL
+                    }
+                    REORDER -> {
+                        updateSeam(e.x)
+                        invalidate()
                     }
                     SCROLL -> {
                         setPlayhead(downPlay - ((e.x - downX) / pxPerMs).toLong())
@@ -794,6 +878,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPress)
+                removeCallbacks(clipLongPress)
                 removeCallbacks(autoScroll)
                 val m = mode
                 mode = IDLE
@@ -825,6 +910,15 @@ class EditTimeline(ctx: Context) : View(ctx) {
                     }
                     MOVE, TRIM_L, TRIM_R -> live?.let { onChange(it, true) }
                     ZOOM -> onScrub(playMs, false)
+                    REORDER -> {
+                        if (e.actionMasked == MotionEvent.ACTION_UP && dragClip >= 0 && dropSeam >= 0) {
+                            val to = EditTrack.dropIndex(dragClip, dropSeam)
+                            if (to != dragClip && to in clips.indices) onClipDrop(dragClip, to)
+                        }
+                        onScrub(playMs, false)
+                        dragClip = -1
+                        dropSeam = -1
+                    }
                 }
                 velocity?.recycle()
                 velocity = null

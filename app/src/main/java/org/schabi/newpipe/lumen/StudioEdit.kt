@@ -39,7 +39,9 @@ data class EBlock(
     val file: String = "",
     val scheme: SScheme? = null,
     /** What was asked from the AI, to ask again. */
-    val ask: String = ""
+    val ask: String = "",
+    /** Split screen: the moment of the second video ([file]) shown at [startMs]. */
+    val srcMs: Long = 0
 ) {
     val endMs: Long get() = startMs + durMs
 }
@@ -76,7 +78,7 @@ object StudioEdit {
     const val MIN_W = 0.06f
     const val MAX_W = 2f
 
-    val KINDS = listOf("scheme", "image", "text", "emoji")
+    val KINDS = listOf("scheme", "image", "text", "emoji", "split")
     val ANIMS = listOf("none", "fade", "pop", "slide", "zoom")
     val TEXT_LOOKS = listOf("plate", "shadow", "accent", "light")
     val IMAGE_LOOKS = listOf("plain", "round", "card", "circle")
@@ -135,7 +137,9 @@ object StudioEdit {
     fun trimStart(b: EBlock, startMs: Long): EBlock {
         val end = b.endMs
         val s = startMs.coerceIn(0, max(0, end - MIN_MS))
-        return b.copy(startMs = s, durMs = end - s)
+        // the second video of a split screen keeps its picture: its beginning is cut off along with the block
+        val src = if (b.kind == "split") max(0L, b.srcMs + s - b.startMs) else b.srcMs
+        return b.copy(startMs = s, durMs = end - s, srcMs = src)
     }
 
     /** New end, the start stays. */
@@ -163,7 +167,8 @@ object StudioEdit {
         val b = blocks[i]
         if (atMs < b.startMs + MIN_MS || atMs > b.endMs - MIN_MS) return null
         val left = b.copy(durMs = atMs - b.startMs, animOut = "none")
-        val right = b.copy(id = nextId(blocks), startMs = atMs, durMs = b.endMs - atMs, animIn = "none")
+        val right = b.copy(id = nextId(blocks), startMs = atMs, durMs = b.endMs - atMs, animIn = "none",
+            srcMs = if (b.kind == "split") b.srcMs + atMs - b.startMs else b.srcMs)
         return blocks.toMutableList().apply {
             set(i, left)
             add(i + 1, right)
@@ -587,6 +592,7 @@ object StudioEdit {
             if (b.file.isNotEmpty()) put("file", b.file)
             b.scheme?.let { put("scheme", StudioScheme.toJson(it)) }
             if (b.ask.isNotEmpty()) put("ask", b.ask)
+            if (b.srcMs > 0) put("src", b.srcMs)
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -599,7 +605,7 @@ object StudioEdit {
             o.optString("id").ifEmpty { return null }, kind, max(0L, o.optLong("start")), max(MIN_MS, o.optLong("dur", DEFAULT_MS)),
             f("x", 0.5f), f("y", 0.5f), f("w", 0.6f).coerceIn(MIN_W, MAX_W), f("ratio", 0.6f).coerceIn(0.05f, 20f), f("rot", 0f), f("opacity", 1f).coerceIn(0f, 1f),
             o.optString("in", "pop").takeIf { it in ANIMS } ?: "pop", o.optString("out", "fade").takeIf { it in ANIMS } ?: "fade",
-            o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask")
+            o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask"), max(0L, o.optLong("src"))
         )
     }
 

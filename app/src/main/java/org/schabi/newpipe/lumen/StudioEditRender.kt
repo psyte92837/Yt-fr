@@ -29,6 +29,7 @@ import java.util.Locale
 import java.util.concurrent.CancellationException
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Draws the blocks of the Studio editor on a Canvas of a [w]×[h] frame: the same code for the live preview
@@ -58,6 +59,8 @@ class StudioEditPainter(
     }
 
     private fun block(c: Canvas, b: EBlock, tMs: Long) {
+        // a split screen is a second video, not a picture over the frame
+        if (b.kind == EditSplit.KIND) return
         val pose = StudioEdit.pose(b, tMs)
         val alpha = pose.alpha * b.opacity
         if (alpha <= 0.01f) return
@@ -453,6 +456,13 @@ object StudioEditRender {
             var lookBmp: Bitmap? = null
             val lookPaint = Paint(Paint.FILTER_BITMAP_FLAG)
             var lastSrc = Long.MIN_VALUE
+            // split screen: frames of the second video, already cut to the size of its half
+            val over = EditSplit.overlays(p.blocks)
+            val splits = p.blocks.filter { it.kind == EditSplit.KIND }
+            val splitPix = IntArray(w * h)
+            var sideId = ""
+            var side: StudioFrames? = null
+            var sidePix = IntArray(0)
             val y = ByteArray(w * h)
             val u = ByteArray(w * h / 4)
             val v = ByteArray(w * h / 4)
@@ -473,25 +483,63 @@ object StudioEditRender {
                 }
                 lastSrc = srcUs
                 src.advance(srcUs, frame, true)
-                val shown = StudioEdit.active(p.blocks, tMs)
+                val shown = StudioEdit.active(over, tMs)
                 val look = clip.mirror || clip.zoom > 1.001f
-                if (shown.isEmpty() && !look) Studio.argbToYuv420(frame, w, h, y, u, v)
+                var pix = frame
+                if (look) {
+                    // a mirrored or zoomed piece: the frame turned / enlarged
+                    bmp.setPixels(frame, 0, w, 0, 0, w, h)
+                    val lb = lookBmp ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { lookBmp = it }
+                    val lc = Canvas(lb)
+                    lc.drawColor(Color.BLACK)
+                    lc.save()
+                    lc.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, w / 2f, h / 2f)
+                    lc.drawBitmap(bmp, 0f, 0f, lookPaint)
+                    lc.restore()
+                    lb.getPixels(mixed, 0, w, 0, 0, w, h)
+                    pix = mixed.copyOf()
+                }
+                val sp = EditSplit.active(splits, tMs)
+                if (sp != null) {
+                    val (mh, sh) = EditSplit.halves(sp.look)
+                    val sx0 = (sh.l * w).roundToInt()
+                    val sy0 = (sh.t * h).roundToInt()
+                    val sw = (sh.r * w).roundToInt() - sx0
+                    val shh = (sh.b * h).roundToInt() - sy0
+                    if (sp.id != sideId) {
+                        side?.let { runCatching { it.close() } }
+                        sideId = sp.id
+                        sidePix = IntArray(sw * shh) { 0xFF000000.toInt() }
+                        side = runCatching { StudioFrames(File(dir, sp.file), sw, shh) }
+                            .onFailure { L.w("studio", "split screen: ${it.message}") }.getOrNull()
+                    }
+                    side?.advance(EditSplit.srcAt(sp, tMs) * 1000, sidePix, true)
+                    java.util.Arrays.fill(splitPix, 0xFF000000.toInt())
+                    // the main video at full size, centred in its half (the rest of it is cut off)
+                    val mc = EditSplit.cover(w.toFloat(), h.toFloat(), mh, w.toFloat(), h.toFloat())
+                    val ox = mc.l.roundToInt()
+                    val oy = mc.t.roundToInt()
+                    val mx0 = (mh.l * w).roundToInt()
+                    val mx1 = (mh.r * w).roundToInt()
+                    for (yy in (mh.t * h).roundToInt() until (mh.b * h).roundToInt()) {
+                        val ry = yy - oy
+                        if (ry !in 0 until h) continue
+                        val a = max(mx0, ox)
+                        val b = min(mx1, ox + w)
+                        if (b > a) System.arraycopy(pix, ry * w + (a - ox), splitPix, yy * w + a, b - a)
+                    }
+                    if (sidePix.size == sw * shh) for (yy in 0 until shh) {
+                        if (sy0 + yy >= h) break
+                        System.arraycopy(sidePix, yy * sw, splitPix, (sy0 + yy) * w + sx0, min(sw, w - sx0))
+                    }
+                    pix = splitPix
+                }
+                if (shown.isEmpty()) Studio.argbToYuv420(pix, w, h, y, u, v)
                 else {
                     // drawn on a copy: the next frame may keep this picture of the video when the source has fewer frames
-                    bmp.setPixels(frame, 0, w, 0, 0, w, h)
-                    var target = bmp
-                    if (look) {
-                        val lb = lookBmp ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { lookBmp = it }
-                        val lc = Canvas(lb)
-                        lc.drawColor(Color.BLACK)
-                        lc.save()
-                        lc.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, w / 2f, h / 2f)
-                        lc.drawBitmap(bmp, 0f, 0f, lookPaint)
-                        lc.restore()
-                        target = lb
-                    }
-                    if (shown.isNotEmpty()) painter.draw(if (target === bmp) canvas else Canvas(target), shown, tMs)
-                    target.getPixels(mixed, 0, w, 0, 0, w, h)
+                    bmp.setPixels(pix, 0, w, 0, 0, w, h)
+                    painter.draw(canvas, shown, tMs)
+                    bmp.getPixels(mixed, 0, w, 0, 0, w, h)
                     Studio.argbToYuv420(mixed, w, h, y, u, v)
                 }
                 var idx: Int
@@ -519,6 +567,7 @@ object StudioEditRender {
             audio.write(muxer, Long.MAX_VALUE)
             bmp.recycle()
             lookBmp?.recycle()
+            side?.let { runCatching { it.close() } }
             ok = true
         } finally {
             painter.close()
@@ -721,6 +770,119 @@ private object StudioEditGl {
     }
 
     /** Waits for the decoder's next frame in the SurfaceTexture. */
+    /** The second video of a split screen: decoded in order into its own texture, the frame of a moment on request. */
+    private class GlTrack(file: File, startUs: Long, handler: android.os.Handler) : java.io.Closeable {
+        private val ex = MediaExtractor()
+        private val frames = Frames()
+        private val info = MediaCodec.BufferInfo()
+        private var inEos = false
+        private var outEos = false
+        private var pendIdx = -1
+        private var pendPts = 0L
+        val tex: Int
+        val m = FloatArray(16)
+        val w: Float
+        val h: Float
+        var shown = false
+            private set
+        private val st: android.graphics.SurfaceTexture
+        private val surface: android.view.Surface
+        private val dec: MediaCodec
+
+        init {
+            val pr = StudioEditRender.probe(file)
+            w = pr.w.toFloat()
+            h = pr.h.toFloat()
+            android.opengl.Matrix.setIdentityM(m, 0)
+            val ids = IntArray(1)
+            android.opengl.GLES20.glGenTextures(1, ids, 0)
+            tex = ids[0]
+            val oes = android.opengl.GLES11Ext.GL_TEXTURE_EXTERNAL_OES
+            android.opengl.GLES20.glBindTexture(oes, tex)
+            for ((k, v) in listOf(android.opengl.GLES20.GL_TEXTURE_MIN_FILTER to android.opengl.GLES20.GL_LINEAR, android.opengl.GLES20.GL_TEXTURE_MAG_FILTER to android.opengl.GLES20.GL_LINEAR,
+                android.opengl.GLES20.GL_TEXTURE_WRAP_S to android.opengl.GLES20.GL_CLAMP_TO_EDGE, android.opengl.GLES20.GL_TEXTURE_WRAP_T to android.opengl.GLES20.GL_CLAMP_TO_EDGE)) {
+                android.opengl.GLES20.glTexParameteri(oes, k, v)
+            }
+            st = android.graphics.SurfaceTexture(tex)
+            st.setOnFrameAvailableListener(frames, handler)
+            surface = android.view.Surface(st)
+            ex.setDataSource(file.absolutePath)
+            val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                ?: error(t("Во втором файле нет видео", "The second file has no video"))
+            ex.selectTrack(idx)
+            val fmt = ex.getTrackFormat(idx)
+            if (pr.rotation != 0 && !fmt.containsKey(MediaFormat.KEY_ROTATION)) fmt.setInteger(MediaFormat.KEY_ROTATION, pr.rotation)
+            ex.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            dec = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+            dec.configure(fmt, surface, null, 0)
+            dec.start()
+        }
+
+        /** The next decoded frame into pendIdx; false at the end. */
+        private fun next(): Boolean {
+            var idle = 0
+            while (true) {
+                if (!inEos) {
+                    val i = dec.dequeueInputBuffer(2000)
+                    if (i >= 0) {
+                        val n = ex.readSampleData(dec.getInputBuffer(i)!!, 0)
+                        if (n < 0) {
+                            dec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            inEos = true
+                        } else {
+                            dec.queueInputBuffer(i, 0, n, ex.sampleTime, 0)
+                            ex.advance()
+                        }
+                    }
+                }
+                val o = dec.dequeueOutputBuffer(info, 2000)
+                if (o >= 0) {
+                    val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                    if (eos) outEos = true
+                    if (info.size > 0) {
+                        pendIdx = o
+                        pendPts = info.presentationTimeUs
+                        return true
+                    }
+                    dec.releaseOutputBuffer(o, false)
+                    if (eos) return false
+                } else if (++idle > 2500) error("second video decoder stalled")
+            }
+        }
+
+        /** The texture shows the last frame at or before [tUs] (after its end: the last one). */
+        fun advance(tUs: Long) {
+            var cand = -1
+            while (true) {
+                if (pendIdx < 0 && (outEos || !next())) break
+                if (pendPts <= tUs) {
+                    if (cand >= 0) dec.releaseOutputBuffer(cand, false)
+                    cand = pendIdx
+                    pendIdx = -1
+                } else break
+            }
+            if (cand < 0 && !shown && pendIdx >= 0) {
+                cand = pendIdx
+                pendIdx = -1
+            }
+            if (cand >= 0) {
+                dec.releaseOutputBuffer(cand, true)
+                frames.await(st)
+                st.getTransformMatrix(m)
+                shown = true
+            }
+        }
+
+        override fun close() {
+            runCatching { dec.stop() }
+            runCatching { dec.release() }
+            runCatching { ex.release() }
+            runCatching { st.release() }
+            runCatching { surface.release() }
+            runCatching { android.opengl.GLES20.glDeleteTextures(1, intArrayOf(tex), 0) }
+        }
+    }
+
     private class Frames : android.graphics.SurfaceTexture.OnFrameAvailableListener {
         private val lock = Object()
         private var ready = false
@@ -770,6 +932,11 @@ private object StudioEditGl {
         var decSurface: android.view.Surface? = null
         var st: android.graphics.SurfaceTexture? = null
         val thread = android.os.HandlerThread("edit-gl-frames").apply { start() }
+        // split screen: the second video, decoded into its own texture
+        val over = EditSplit.overlays(p.blocks)
+        val splits = p.blocks.filter { it.kind == EditSplit.KIND }
+        var track: GlTrack? = null
+        var trackId = ""
         var dpy = android.opengl.EGL14.EGL_NO_DISPLAY
         var ctx = android.opengl.EGL14.EGL_NO_CONTEXT
         var surf = android.opengl.EGL14.EGL_NO_SURFACE
@@ -890,9 +1057,35 @@ private object StudioEditGl {
                 android.opengl.GLES20.glViewport(0, 0, w, h)
                 android.opengl.GLES20.glClearColor(0f, 0f, 0f, 1f)
                 android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
-                draw(progOes, OES, oes, texM, vidPos)
                 val tMs = outUs / 1000
-                val shown = StudioEdit.active(p.blocks, tMs)
+                val sp = EditSplit.active(splits, tMs)
+                if (sp == null) draw(progOes, OES, oes, texM, vidPos)
+                else {
+                    if (sp.id != trackId) {
+                        track?.close()
+                        trackId = sp.id
+                        track = runCatching { GlTrack(File(dir, sp.file), sp.srcMs * 1000, android.os.Handler(thread.looper)) }
+                            .onFailure { L.w("studio", "split screen on GPU: ${it.message}") }.getOrNull()
+                    }
+                    val tr = track
+                    tr?.advance(EditSplit.srcAt(sp, tMs) * 1000)
+                    val (mh, sh) = EditSplit.halves(sp.look)
+                    fun scissor(r: FRect) = android.opengl.GLES20.glScissor((r.l * w).roundToInt(), ((1f - r.b) * h).roundToInt(),
+                        (r.w * w).roundToInt(), (r.h * h).roundToInt())
+                    fun viewport(r: FRect) = android.opengl.GLES20.glViewport(r.l.roundToInt(), (h - r.b).roundToInt(), r.w.roundToInt(), r.h.roundToInt())
+                    android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_SCISSOR_TEST)
+                    scissor(mh)
+                    viewport(EditSplit.cover(w.toFloat(), h.toFloat(), mh, w.toFloat(), h.toFloat()))
+                    draw(progOes, OES, oes, texM, vidPos)
+                    if (tr != null && tr.shown) {
+                        scissor(sh)
+                        viewport(EditSplit.cover(tr.w, tr.h, sh, w.toFloat(), h.toFloat()))
+                        draw(progOes, OES, tr.tex, tr.m)
+                    }
+                    android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_SCISSOR_TEST)
+                    android.opengl.GLES20.glViewport(0, 0, w, h)
+                }
+                val shown = StudioEdit.active(over, tMs)
                 if (shown.isNotEmpty()) {
                     val key = StudioEdit.overlayKey(shown, tMs, settle)
                     if (key != lastKey) {
@@ -985,6 +1178,8 @@ private object StudioEditGl {
             }
             e.signalEndOfInputStream()
             sk.drain(true)
+            track?.close()
+            track = null
             if (written == 0) error("no frames")
             a.write(m, Long.MAX_VALUE)
             progress(t("Кадры $expected/$expected", "Frames $expected/$expected"))
@@ -996,6 +1191,7 @@ private object StudioEditGl {
             runCatching { muxer?.release() }
             audio?.close()
             runCatching { ex.release() }
+            track?.let { runCatching { it.close() } }
             if (dpy != android.opengl.EGL14.EGL_NO_DISPLAY) {
                 runCatching {
                     android.opengl.EGL14.eglMakeCurrent(dpy, android.opengl.EGL14.EGL_NO_SURFACE, android.opengl.EGL14.EGL_NO_SURFACE, android.opengl.EGL14.EGL_NO_CONTEXT)

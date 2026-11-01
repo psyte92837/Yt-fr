@@ -1,0 +1,52 @@
+# Lumen: keeps the free-AI catalog (app/src/main/assets/lumen_freeai.json, protocol lumen.freeai v1) in step with FreeLLMAPI.
+# Only data is read: FreeLLMAPI is cloned without installing or running anything, and its signed monthly snapshot
+# is verified with the Ed25519 key pinned in its source. The app ships this file and downloads the newer one from main on its own.
+name: Free AI catalog
+
+on:
+  schedule:
+    - cron: '41 4 * * 1,4'
+  push:
+    branches: [main]
+    paths: ['tools/freeai/sync.py', '.github/workflows/freeai-sync.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: freeai-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Fetch FreeLLMAPI data (no install, no scripts)
+        run: |
+          pip install --quiet cryptography
+          git clone --quiet --depth 1 https://github.com/tashfeenahmed/freellmapi.git "$RUNNER_TEMP/freellmapi"
+          echo "upstream=$(git -C "$RUNNER_TEMP/freellmapi" rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
+      - name: Build catalog
+        run: |
+          python3 -I tools/freeai/sync.py --repo "$RUNNER_TEMP/freellmapi" | tee "$RUNNER_TEMP/sync.txt"
+          { echo "### Free AI catalog"; echo "FreeLLMAPI $upstream"; cat "$RUNNER_TEMP/sync.txt"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/lumen_freeai.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Free AI catalog: $(cat "$RUNNER_TEMP/sync.txt") [skip ci]"
+          git pull --rebase origin main
+          git push

@@ -236,10 +236,17 @@ class SettingsActivity : LumenBase() {
                     text(ctx, if (Settings.activeProvider == p.name && configured) t("● активен", "● active") else if (configured) t("настроен", "configured") else "",
                         12f, bold = true, color = if (Settings.activeProvider == p.name) Palette.ACCENT else Palette.MUTED).apply { gravity = android.view.Gravity.END }
                 ), 0)
-                muted(p.baseUrl)
-                if (configured) muted(p.fastModel + " / " + p.smartModel)
+                if (p == Provider.FREE) muted(t("Ключей: ", "Keys: ") + FreeAiStore.usable().size + t(" · модель выбирается сама, при лимите — следующая", " · the model is picked per call, the next one on a limit"))
+                else muted(p.baseUrl)
+                if (configured && p != Provider.FREE) muted(p.fastModel + " / " + p.smartModel)
             }
-            card.setOnClickListener { if (p == Provider.MANUAL) manualProvider() else editProvider(p) }
+            card.setOnClickListener {
+                when (p) {
+                    Provider.MANUAL -> manualProvider()
+                    Provider.FREE -> FreeAiActivity.open(this)
+                    else -> editProvider(p)
+                }
+            }
         }
         relayRules(c)
         c.h2(t("Стоимость (необязательно)", "Pricing (optional)"))

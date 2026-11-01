@@ -388,6 +388,12 @@
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <!-- ===== Lumen: free AI manager (catalog from FreeLLMAPI, failover between free tiers) ===== -->
+        <activity
+            android:name=".lumen.FreeAiActivity"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- notification tap → back to the screen it belongs to, in its own task (Nav.kt) -->
         <activity
             android:name=".lumen.NavRouter"

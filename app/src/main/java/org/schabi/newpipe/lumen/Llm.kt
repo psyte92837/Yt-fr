@@ -38,6 +38,9 @@ enum class Provider(
     CUSTOM("Custom / Свой (OpenAI-compatible)", ApiKind.OPENAI_COMPAT, "https://",
         "", "", "", needsKey = false),
 
+    /** Free tiers of many providers ([FreeAi]): keys in «Бесплатные ИИ», the best available model per call, failover on limits. */
+    FREE("Бесплатные ИИ (авто) / Free AI (auto)", ApiKind.OPENAI_COMPAT, "free://auto", "", FreeAi.AUTO_FAST, FreeAi.AUTO_SMART, needsKey = false),
+
     /** No API: every request is copied to Gemini, ChatGPT, Claude… by hand and the answer is pasted back ([Relay]). */
     MANUAL("Другой ИИ вручную / Any AI by hand (Gemini, ChatGPT…)", ApiKind.OPENAI_COMPAT, "manual://copy-paste",
         "", "manual", "manual", needsKey = false);
@@ -72,7 +75,17 @@ enum class Provider(
 data class LlmReply(val text: String, val inTokens: Int, val outTokens: Int, val model: String, val truncated: Boolean = false)
 
 /** [raw] keeps the provider response body (shown in the AI journal). */
-class LlmException(msg: String, val raw: String = "") : IOException(msg)
+class LlmException(msg: String, val raw: String = "", val code: Int = 0) : IOException(msg)
+
+/** Where a call goes: a configured [Provider] or one free model ([FreeAi]). */
+data class LlmEndpoint(
+    val kind: ApiKind,
+    val base: String,
+    val key: String,
+    val openAiTokens: Boolean = false,
+    val jsonMode: Boolean = true,
+    val extra: Map<String, String> = emptyMap()
+)
 
 object Llm {
     fun estimateTokens(text: String): Int = (text.length / 3.6).toInt() + 1
@@ -110,23 +123,22 @@ object Llm {
         L.i("llm", "$method $where → $code in ${System.currentTimeMillis() - started}ms, ${text.length}ch")
         if (code !in 200..299) {
             L.e("llm", "$where error $code: ${text.take(500)}")
-            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}", text)
+            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}", text, code)
         }
         return text
     }
 
-    private fun authHeaders(p: Provider): Map<String, String> {
-        val key = p.apiKey.orEmpty()
-        return when (p.kind) {
-            ApiKind.GEMINI -> mapOf("x-goog-api-key" to key)
-            ApiKind.ANTHROPIC -> mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01")
-            ApiKind.OPENAI_COMPAT -> buildMap {
-                if (key.isNotBlank()) put("Authorization", "Bearer $key")
-                if (p == Provider.OPENROUTER) {
-                    put("HTTP-Referer", "https://github.com/lumen-analyzer")
-                    put("X-Title", "Lumen")
-                }
-            }
+    private val openRouterHeaders = mapOf("HTTP-Referer" to "https://github.com/lumen-analyzer", "X-Title" to "Lumen")
+
+    private fun endpoint(p: Provider) = LlmEndpoint(p.kind, p.baseUrl, p.apiKey.orEmpty(), openAiTokens = p == Provider.OPENAI,
+        jsonMode = p != Provider.OLLAMA && p != Provider.CUSTOM, extra = if (p == Provider.OPENROUTER) openRouterHeaders else emptyMap())
+
+    private fun authHeaders(e: LlmEndpoint): Map<String, String> = when (e.kind) {
+        ApiKind.GEMINI -> mapOf("x-goog-api-key" to e.key)
+        ApiKind.ANTHROPIC -> mapOf("x-api-key" to e.key, "anthropic-version" to "2023-06-01")
+        ApiKind.OPENAI_COMPAT -> buildMap {
+            if (e.key.isNotBlank()) put("Authorization", "Bearer ${e.key}")
+            putAll(e.extra)
         }
     }
 
@@ -163,7 +175,8 @@ object Llm {
         val sent = out.user
         val file = out.fileUri
         try {
-            val r = Par.retrying { completeRaw(p, model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it } }
+            val r = if (p == Provider.FREE) free(model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it }
+            else Par.retrying { completeRaw(endpoint(p), model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file)
             // stopped while waiting for the answer: the answer stays in the journal, the task ends here
@@ -194,8 +207,56 @@ object Llm {
         return r
     }
 
+    /** Free AI: the best model with a key, then the next one on a limit, a key error or a failure ([FreeAi.MAX_TRIES] models). */
+    private fun free(
+        model: String, system: String, user: String, json: Boolean, fileUri: String?, maxTokens: Int, lowMedia: Boolean,
+        image: String?, imageMime: String, onRaw: (String) -> Unit
+    ): LlmReply {
+        FreeAiStore.refreshIfStale()
+        val cat = FreeAiStore.catalog()
+        val need = FreeAi.Need(smart = model != FreeAi.AUTO_FAST, vision = image != null, video = fileUri != null,
+            inTokens = estimateTokens(system + user), outTokens = maxTokens)
+        val tries = mutableListOf<Pair<String, String>>()
+        for (m in FreeAiStore.candidates(cat, need)) {
+            BgTasks.checkpoint()
+            val prov = cat.prov(m.p) ?: continue
+            val e = FreeAiStore.endpoint(prov)
+            try {
+                val r = try {
+                    completeRaw(e, m.id, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, onRaw)
+                } catch (x: LlmException) {
+                    // some free endpoints reject response_format: once more without it, the parsers still read JSON from text
+                    if (json && x.code == 400 && e.kind == ApiKind.OPENAI_COMPAT) {
+                        completeRaw(e.copy(jsonMode = false), m.id, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, onRaw)
+                    } else throw x
+                }
+                FreeAiStore.ok(m, r.inTokens + r.outTokens)
+                return r.copy(model = m.key)
+            } catch (x: Exception) {
+                if (x is java.util.concurrent.CancellationException) throw x
+                val code = (x as? LlmException)?.code?.takeIf { it > 0 }
+                val msg = x.message ?: x.javaClass.simpleName
+                val f = FreeAi.classify(code, msg + " " + (x as? LlmException)?.raw.orEmpty().take(600))
+                FreeAiStore.fail(m, f, msg)
+                L.w("llm", "free ${m.key} → $f: ${msg.take(200)}")
+                tries += m.key to msg
+            }
+        }
+        throw LlmException(t("Бесплатные ИИ не ответили: ", "Free AI did not answer: ") + FreeAi.summary(tries, cat, FreeAiStore::has))
+    }
+
+    /** Checks one free provider with its fastest model (no project data goes out). */
+    fun freeTest(provId: String): String {
+        val cat = FreeAiStore.catalog()
+        val prov = cat.prov(provId) ?: throw LlmException("?")
+        val m = cat.models.filter { it.p == provId }.minByOrNull { it.speed * 3 + it.intel } ?: throw LlmException(t("нет моделей", "no models"))
+        val r = completeRaw(FreeAiStore.endpoint(prov), m.id, "You are a test.", "Reply with the single word: OK", false, null, 16, false, null, "image/jpeg") {}
+        FreeAiStore.ok(m, r.inTokens + r.outTokens)
+        return m.name + ": " + r.text.trim().take(40)
+    }
+
     private fun completeRaw(
-        p: Provider,
+        p: LlmEndpoint,
         model: String,
         system: String,
         user: String,
@@ -217,18 +278,18 @@ object Llm {
                         .put(JSONObject().put("role", "user").put("content", if (image == null) user else JSONArray()
                             .put(JSONObject().put("type", "text").put("text", user))
                             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:$imageMime;base64,$image")))))
-                ).put(if (p == Provider.OPENAI) "max_completion_tokens" else "max_tokens", maxTokens)
-                if (json && p != Provider.OLLAMA && p != Provider.CUSTOM) {
+                ).put(if (p.openAiTokens) "max_completion_tokens" else "max_tokens", maxTokens)
+                if (json && p.jsonMode) {
                     body.put("response_format", JSONObject().put("type", "json_object"))
                 }
-                LlmParse.openAi(http("${p.baseUrl}/chat/completions", "POST", headers, body.toString()).also(onRaw), model, estimateTokens(system + user))
+                LlmParse.openAi(http("${p.base}/chat/completions", "POST", headers, body.toString()).also(onRaw), model, estimateTokens(system + user))
             }
             ApiKind.ANTHROPIC -> {
                 val body = JSONObject().put("model", model).put("max_tokens", maxTokens).put("system", system)
                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", if (image == null) user else JSONArray()
                         .put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", imageMime).put("data", image)))
                         .put(JSONObject().put("type", "text").put("text", user)))))
-                LlmParse.anthropic(http("${p.baseUrl}/messages", "POST", headers, body.toString()).also(onRaw), model)
+                LlmParse.anthropic(http("${p.base}/messages", "POST", headers, body.toString()).also(onRaw), model)
             }
             ApiKind.GEMINI -> {
                 val parts = JSONArray()
@@ -245,14 +306,14 @@ object Llm {
                     .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
                     .put("generationConfig", gen)
-                LlmParse.gemini(http("${p.baseUrl}/models/$model:generateContent", "POST", headers, body.toString()).also(onRaw), model)
+                LlmParse.gemini(http("${p.base}/models/$model:generateContent", "POST", headers, body.toString()).also(onRaw), model)
             }
         }
     }
 
     /** Lists models available for the provider, where its API supports it. */
     fun listModels(p: Provider): List<String> =
-        LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(p), null), p.kind == ApiKind.GEMINI)
+        LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(endpoint(p)), null), p.kind == ApiKind.GEMINI)
 
     fun ping(p: Provider): String {
         if (p == Provider.MANUAL) return t("OK — запросы будут копироваться в другой ИИ", "OK — requests will be copied to another AI")

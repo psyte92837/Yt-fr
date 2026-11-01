@@ -209,6 +209,7 @@ object StudioPrefs {
 class StudioActivity : LumenBase() {
     companion object {
         private const val REQ_AUDIO = 7401
+        private const val REQ_PODCAST = 7409
         private const val REQ_MIC = 7402
         private const val REQ_VIDEO = 7403
         private const val REQ_CAPTURE = 7404
@@ -567,7 +568,10 @@ class StudioActivity : LumenBase() {
     /** Long work of the screen: runs through [BgTasks] with a notification, so it survives minimising or closing. */
     private fun <T> job(key: String, work: () -> T, fail: (Throwable) -> Unit, done: (T) -> Unit) {
         BgTasks.run(this, "studio:$key", "Lumen Studio: " + jobTitle(key), BgTasks.reopen(this), { work() }, { e ->
-            if (e !is java.util.concurrent.CancellationException) autoAll = false
+            if (e !is java.util.concurrent.CancellationException) {
+                autoAll = false
+                podcastAuto = false
+            }
             runCatching { fail(e) }.onFailure { L.w("studio", "$key: ${it.message}") }
         }, { cancel = true }) { r ->
             runCatching { done(r) }.onFailure { L.w("studio", "$key: ${it.message}") }
@@ -690,6 +694,19 @@ class StudioActivity : LumenBase() {
             StudioTask.VOICE -> listOf("file", "mic")
             StudioTask.CUTS, StudioTask.CARTOON -> listOf("edge", "mic", "file")
             else -> listOf("edge", "mic", "file", "video")
+        }
+        if (task == StudioTask.VOICE) {
+            button(t("🎙 Подкаст → ролик сам", "🎙 Podcast → video, hands-free"), primary = true) {
+                if (busy.isNotEmpty() || StudioJob.running) {
+                    toast(t("Дождитесь окончания текущей задачи", "Wait for the current task to end"))
+                    return@button
+                }
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*")), REQ_PODCAST)
+            }
+            muted(t("Выберите запись диктофона или подкаст — дальше всё само: громкость, распознавание, AI-режиссёр (вырежет оговорки и паузы), инфосхемы, B-roll, стиль «Разбор» с главами по вопросам, звуки и сборка видео. Прежняя работа уйдёт в «Черновики».",
+                "Pick a voice memo or a podcast and the rest happens by itself: loudness, recognition, the AI director (cuts slips and pauses), info-schemes, B-roll, the «Explainer» style with chapters from the questions, sounds and the video build. The previous work goes to Drafts."))
         }
         val labels = if (task == StudioTask.VOICE) listOf(t("Аудиофайл", "Audio file"), t("Микрофон", "Mic"))
         else listOf("Microsoft", t("Микрофон", "Mic"), t("Аудио", "Audio"), t("Видео", "Video")).take(modes.size)
@@ -2167,6 +2184,7 @@ class StudioActivity : LumenBase() {
                 topicEdit.setText(idea.ifBlank { topic })
                 if (StudioPrefs.voiceMode != "edge") StudioPrefs.voiceMode = "edge"
                 autoAll = build
+                podcastAuto = false
                 runWrite(topic, StudioAuto.extra(scenes, draft)) {
                     analyse()
                     if (busy.isEmpty()) autoAll = false
@@ -2334,6 +2352,46 @@ class StudioActivity : LumenBase() {
         }
     }
 
+    /** «Podcast → video»: a fresh work from the recording, then the whole chain without stops up to the built video. */
+    private var podcastAuto = false
+
+    private fun podcast(uri: Uri) {
+        if (busy.isNotEmpty() || StudioJob.running || !canLeave()) return
+        saveInputs()
+        val moved = stashCurrent()
+        reload()
+        StudioPrefs.voiceMode = "file"
+        StudioPrefs.style = StudioStyle.EXPLAIN.name
+        StudioPrefs.broll = true
+        StudioPrefs.sfx = true
+        scriptEdit.setText("")
+        saveInputs()
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
+        }
+        if (moved) toast(t("Прежняя работа — в «Черновиках»", "The previous work is in Drafts"))
+        if (Provider.active() == null) toast(t("AI не подключён: монтаж будет по правилам, без инфосхем", "No AI connected: rule-based edit, no info-schemes"))
+        podcastAuto = true
+        busy = "import"
+        cancel = false
+        render()
+        job("import", {
+            report("import", t("Декодирование и громкость…", "Decoding and loudness…"))
+            val p = StudioAudio.decode(this, uri)
+            if (p.data.isEmpty()) error(t("В файле нет звука", "No sound in the file"))
+            writeTake(Studio.normalize(Studio.resample(p.data, p.rate, 44_100)), 44_100)
+        }, { e -> busy = ""; podcastAuto = false; render(); err(e) }) {
+            busy = ""
+            resetAnalysis()
+            autoAll = true
+            analyse()
+            if (busy.isEmpty()) {
+                autoAll = false
+                podcastAuto = false
+            }
+        }
+    }
+
     private fun togglePlay() {
         val p = player
         if (p != null && p.isPlaying) {
@@ -2371,6 +2429,7 @@ class StudioActivity : LumenBase() {
         if (uri == null) return
         when (requestCode) {
             REQ_AUDIO -> importAudio(uri)
+            REQ_PODCAST -> podcast(uri)
             REQ_VIDEO, REQ_CAPTURE -> importVideo(uri)
             REQ_MUSIC -> importMusic(uri)
             REQ_CHAR_IMG -> onCharImage?.invoke(uri).also { onCharImage = null }
@@ -2428,8 +2487,9 @@ class StudioActivity : LumenBase() {
                 toast(t("Речь не распознана — смонтировано по звуку шаблоном «$name»", "No speech recognised: edited by the sound with the \"$name\" template"))
                 if (own != null) animateEdit(own) else animate(StudioApproach.RHYTHM, remember = false)
             } else if (StudioPrefs.autoDirect || autoAll) {
-                val ap = StudioApproach.of(StudioPrefs.approach)
-                val own = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
+                // a podcast always gets the full AI director (it also cuts slips and long pauses)
+                val ap = if (podcastAuto) StudioApproach.FULL else StudioApproach.of(StudioPrefs.approach)
+                val own = if (podcastAuto) null else editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
                 if (own != null) animateEdit(own)
                 else animate(if (ap.usesAi && Provider.active() == null) StudioApproach.RULES else ap, remember = false)
             } else autoFinish()
@@ -2993,10 +3053,11 @@ class StudioActivity : LumenBase() {
     }
 
     /** The AI writes schemes for the scenes that need them; broken ones go back to it once with the list of problems. */
-    private fun composeSchemes(wish: String) {
-        val sc0 = script ?: return
-        val plan = currentPlan() ?: return
-        if (busy.isNotEmpty()) return
+    /** [then] runs when the schemes are done or could not be made (not on cancel). */
+    private fun composeSchemes(wish: String, then: (() -> Unit)? = null) {
+        val sc0 = script ?: return run { then?.invoke() }
+        val plan = currentPlan() ?: return run { then?.invoke() }
+        if (busy.isNotEmpty()) return run { then?.invoke() }
         val ranges = sc0.scenes.indices.map { i -> plan.times.firstOrNull { it.scene == i }?.words ?: IntRange.EMPTY }
         val vars = mapOf(
             "format" to formatText(), "lang" to aiLang(), "max" to StudioScheme.maxSchemes(sc0.scenes.size).toString(),
@@ -3035,7 +3096,9 @@ class StudioActivity : LumenBase() {
         }, { e ->
             busy = ""
             render()
-            if (e !is java.util.concurrent.CancellationException) err(e)
+            if (e !is java.util.concurrent.CancellationException) {
+                if (then != null) then() else err(e)
+            }
         }) { (found, failed) ->
             busy = ""
             val cur = script
@@ -3047,6 +3110,7 @@ class StudioActivity : LumenBase() {
             render()
             toast(if (found.isEmpty()) t("AI не нашёл сцен для схем", "AI found no scenes for schemes")
             else t("Инфосхем: ${found.size}", "Info-schemes: ${found.size}") + if (failed > 0) t(" · не удалось: $failed", " · failed: $failed") else "")
+            then?.invoke()
         }
     }
 
@@ -3159,7 +3223,10 @@ class StudioActivity : LumenBase() {
     private fun autoFinish() {
         if (!autoAll) return
         autoAll = false
-        renderVideo()
+        val schemes = podcastAuto && Provider.active() != null && script?.scenes?.none { it.scheme != null } == true
+        podcastAuto = false
+        // a podcast also gets AI info-schemes before the build
+        if (schemes) composeSchemes("") { renderVideo() } else renderVideo()
     }
 
     // ---------- step 4: video ----------

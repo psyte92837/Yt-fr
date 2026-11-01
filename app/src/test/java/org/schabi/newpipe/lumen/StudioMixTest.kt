@@ -155,4 +155,15 @@ class StudioMixTest {
         // checked against the mix of another length it does not match
         assertTrue(StudioMix.edited(m, clips, 1_000, 3))
     }
+
+    @Test
+    fun storyboardStrip() {
+        assertEquals(listOf(5, 15, 25, 35, 45, 55, 65, 75, 85, 95), StudioMix.stripFrames(100, 10))
+        assertEquals(listOf(0, 1, 2), StudioMix.stripFrames(3, 10))
+        assertTrue(StudioMix.stripFrames(0, 10).isEmpty())
+        // pages of 5×5 frames of 80×45: frame 26 is the second one on page 1, frame 31 starts its second row + 1
+        assertEquals(Triple(1, 80, 0), StudioMix.frameAt(26, 5, 5, 80, 45))
+        assertEquals(Triple(1, 80, 45), StudioMix.frameAt(31, 5, 5, 80, 45))
+        assertEquals(Triple(0, 0, 0), StudioMix.frameAt(0, 5, 5, 80, 45))
+    }
 }

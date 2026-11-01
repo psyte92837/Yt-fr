@@ -40,17 +40,48 @@ object StudioCutsLoad {
         return ok.filter { it.height in 1..maxHeight }.maxByOrNull { it.height } ?: ok.minByOrNull { it.height }
     }
 
+    /** A quick look at a found video: the stream to play ("" when there is none) and frames of its storyboard with their times. */
+    class Look(val stream: String, val frames: List<Pair<Long, android.graphics.Bitmap>>)
+
     /**
-     * Stream for a quick look at a found video: the lowest progressive stream with sound, else the lowest
-     * video-only one (network; worker thread).
+     * Quick look at a found video: the lowest quality stream and [want] frames of the YouTube storyboard spread over
+     * the video (a frameset with frames at least 100 px wide when there is one; only the pages that hold them are
+     * downloaded). Network; worker thread.
      */
-    fun previewUrl(url: String): String {
+    fun look(url: String, want: Int = 10): Look {
         val info = StreamInfo.getInfo(ServiceList.YouTube, url)
         fun low(list: List<VideoStream>) = list.filter { it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
             .minByOrNull { if (it.height > 0) it.height else Int.MAX_VALUE }
-        val pick = low(info.videoStreams.filter { !it.isVideoOnly }) ?: low(info.videoOnlyStreams)
-            ?: error(t("Нет потока для просмотра", "No stream to watch"))
-        return pick.content
+        val stream = (low(info.videoStreams.filter { !it.isVideoOnly }) ?: low(info.videoOnlyStreams))?.content.orEmpty()
+        val sets = runCatching { info.previewFrames }.getOrNull().orEmpty().filter { it.urls.isNotEmpty() && it.frameWidth > 0 && it.frameHeight > 0 }
+        val fs = sets.filter { it.frameWidth >= 100 }.minByOrNull { it.frameWidth * it.frameHeight } ?: sets.maxByOrNull { it.frameWidth * it.frameHeight }
+        val frames = mutableListOf<Pair<Long, android.graphics.Bitmap>>()
+        if (fs != null) {
+            val pages = HashMap<Int, android.graphics.Bitmap?>()
+            for (k in StudioMix.stripFrames(fs.totalCount, want)) {
+                val (page, left, top) = StudioMix.frameAt(k, fs.framesPerPageX, fs.framesPerPageY, fs.frameWidth, fs.frameHeight)
+                val src = pages.getOrPut(page) { fs.urls.getOrNull(page)?.let { u -> runCatching { image(u) }.getOrNull() } } ?: continue
+                val x = left.coerceIn(0, maxOf(0, src.width - fs.frameWidth))
+                val y = top.coerceIn(0, maxOf(0, src.height - fs.frameHeight))
+                val w = minOf(fs.frameWidth, src.width - x)
+                val h = minOf(fs.frameHeight, src.height - y)
+                if (w <= 0 || h <= 0) continue
+                frames += k.toLong() * fs.durationPerFrame to android.graphics.Bitmap.createBitmap(src, x, y, w, h)
+            }
+        }
+        if (stream.isEmpty() && frames.isEmpty()) error(t("Нет потока и кадров для просмотра", "No stream or frames to look at"))
+        return Look(stream, frames)
+    }
+
+    private fun image(url: String): android.graphics.Bitmap? {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.connectTimeout = 15_000
+        c.readTimeout = 15_000
+        try {
+            return c.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) }
+        } finally {
+            c.disconnect()
+        }
     }
 
     /** Downloads and cuts [c] into [dir]; returns it with the file, the lead and the length. */

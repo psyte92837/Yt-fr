@@ -38,7 +38,7 @@ data class SClip(
 data class ClipSlot(val startMs: Long, val endMs: Long, val id: String, val leadMs: Long, val lenMs: Long, val offsetMs: Long = 0)
 
 /** A video found by title in the Cuts search. */
-data class CutHit(val url: String, val title: String, val channel: String = "", val durationMs: Long = 0)
+data class CutHit(val url: String, val title: String, val channel: String = "", val durationMs: Long = 0, val thumb: String = "")
 
 /** A fragment of a DASH stream from its sidx box: where its bytes are and what time it covers. */
 data class DashSeg(val offset: Long, val size: Long, val startUs: Long, val durUs: Long)

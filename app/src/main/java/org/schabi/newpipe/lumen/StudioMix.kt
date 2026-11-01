@@ -91,6 +91,20 @@ object StudioMix {
         return out
     }
 
+    /** Frames of a storyboard for a strip: [want] of [total] frames, each from the middle of an equal part. */
+    fun stripFrames(total: Int, want: Int): List<Int> {
+        if (total <= 0 || want <= 0) return emptyList()
+        if (total <= want) return (0 until total).toList()
+        return (0 until want).map { k -> ((2L * k + 1) * total / (2L * want)).toInt() }.distinct()
+    }
+
+    /** Where frame [k] is in storyboard sprite pages of [perX]×[perY] frames of [fw]×[fh]: page, left, top. */
+    fun frameAt(k: Int, perX: Int, perY: Int, fw: Int, fh: Int): Triple<Int, Int, Int> {
+        val perPage = (perX * perY).coerceAtLeast(1)
+        val inPage = k % perPage
+        return Triple(k / perPage, inPage % perX.coerceAtLeast(1) * fw, inPage / perX.coerceAtLeast(1) * fh)
+    }
+
     /** How many neighbours are pieces of the same clip. */
     fun repeats(items: List<MixItem>): Int = items.zipWithNext().count { (a, b) -> a.clipId == b.clipId }
 

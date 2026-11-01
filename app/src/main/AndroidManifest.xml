@@ -241,6 +241,13 @@
             android:name=".lumen.HelpActivity"
             android:exported="false"
             android:theme="@style/LumenTheme" />
+        <!-- ===== Lumen: JS layer — the second renderer (lumen.canvas, WebView without network) ===== -->
+        <activity
+            android:name=".lumen.WebLayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- ===== Lumen: "Another AI by hand" — request out, answer back by clipboard or Share ===== -->
         <activity
             android:name=".lumen.RelayActivity"

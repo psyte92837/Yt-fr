@@ -1326,7 +1326,21 @@ class StudioActivity : LumenBase() {
             button(t("✏️ Открыть редактор: схемы, картинки, надписи", "✏️ Open the editor: schemes, pictures, captions"), primary = true) {
                 StudioEditorActivity.open(this@StudioActivity, f, plan.words)
             }
+            button(t("🧪 JS-слой поверх (второй рендер, WebView)", "🧪 JS layer on top (second renderer, WebView)"), style = BtnStyle.TEXT) { openLayer(f, plan) }
         }
+    }
+
+    /** The second renderer: the finished video with its speech and scenes goes to the JS layer screen (lumen.canvas). */
+    private fun openLayer(f: File, plan: StudioPlan) {
+        val sc = script
+        val rr = ranges
+        val ws = words
+        val scenes = if (sc != null && rr != null) sc.scenes.zip(rr).mapNotNull { (s, r) ->
+            ws.getOrNull(r.first)?.let { a -> Triple(s.title, a.startMs, ws.getOrNull(r.last)?.endMs ?: a.endMs) }
+        } else emptyList()
+        val json = WebLayer.dataJson(ws.map { Triple(it.text, it.startMs, it.endMs) }, scenes, sc?.title.orEmpty(), aiLang())
+        File(WebLayerActivity.dir(this), "data.json").writeText(json)
+        WebLayerActivity.open(this, f, true, plan.layers.subs)
     }
 
     /** Storyboard: a small frame of every scene; a tap shows that scene in the preview. */

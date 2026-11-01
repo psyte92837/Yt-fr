@@ -82,12 +82,12 @@ cluster exit=0
 graph_map: 174 communities named, 186 files mapped
 map exit=0
 total 9716
-drwxr-xr-x 3 runner runner    4096 Nov  1 15:13 .
-drwxr-xr-x 4 runner runner    4096 Nov  1 15:13 ..
--rw-r--r-- 1 runner runner  440887 Nov  1 15:13 .graphify_analysis.json
--rw-r--r-- 1 runner runner      27 Nov  1 15:13 .graphify_root
--rw-r--r-- 1 runner runner    6743 Nov  1 15:13 BUILD_LOG.txt
--rw-r--r-- 1 runner runner   56405 Nov  1 15:13 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner    4096 Nov  1 15:13 cache
--rw-r--r-- 1 runner runner 9375047 Nov  1 15:13 graph.json
--rw-r--r-- 1 runner runner   45092 Nov  1 15:13 manifest.json
+drwxr-xr-x 3 runner runner    4096 Nov  1 15:15 .
+drwxr-xr-x 4 runner runner    4096 Nov  1 15:14 ..
+-rw-r--r-- 1 runner runner  440887 Nov  1 15:15 .graphify_analysis.json
+-rw-r--r-- 1 runner runner      27 Nov  1 15:15 .graphify_root
+-rw-r--r-- 1 runner runner    6743 Nov  1 15:15 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner   56405 Nov  1 15:15 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner    4096 Nov  1 15:15 cache
+-rw-r--r-- 1 runner runner 9375047 Nov  1 15:15 graph.json
+-rw-r--r-- 1 runner runner   45084 Nov  1 15:15 manifest.json

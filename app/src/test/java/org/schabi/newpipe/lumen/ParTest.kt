@@ -54,4 +54,22 @@ class ParTest {
             assertEquals(1, calls)
         }
     }
+
+    @Test fun transientErrors() {
+        assertTrue(Par.transient(RuntimeException("HTTP 503: busy")))
+        assertTrue(!Par.transient(RuntimeException("HTTP 400: bad")))
+        assertTrue(!Par.transient(RuntimeException("HTTP 5000")))
+        assertTrue(Par.transient(java.io.IOException("unexpected end of stream on Address@1", java.io.EOFException("\\n not found"))))
+        assertTrue(Par.transient(java.net.SocketException("Connection reset")))
+        assertTrue(Par.transient(java.net.SocketTimeoutException("failed to connect to host")))
+        assertTrue(!Par.transient(java.net.SocketTimeoutException("timeout")))
+        assertTrue(!Par.transient(IllegalStateException("bad json")))
+    }
+
+    @Test fun retriesDroppedConnection() {
+        var calls = 0
+        val v = Par.retrying(3) { if (++calls < 2) throw java.io.IOException("unexpected end of stream") else "ok" }
+        assertEquals("ok", v)
+        assertEquals(2, calls)
+    }
 }

@@ -321,7 +321,28 @@ object Par {
         map<T, Unit>(items, threads, cancel) { i, x -> f(i, x) }
     }
 
-    /** Retries rate-limit style failures (HTTP 429/5xx) with growing pauses; other errors pass through. */
+    /**
+     * Worth another try: rate limits and server errors (HTTP 429/5xx) and dropped connections
+     * (a stale keep-alive closed by the server gives "unexpected end of stream", resets, refused).
+     * Read timeouts are not retried: they already waited minutes.
+     */
+    fun transient(e: Throwable): Boolean {
+        val m = e.message.orEmpty()
+        if (Regex("^HTTP (429|500|502|503|504|529)\\b").containsMatchIn(m)) return true
+        var c: Throwable? = e
+        var depth = 0
+        while (c != null && depth++ < 6) {
+            if (c is java.net.SocketTimeoutException) return c.message.orEmpty().contains("connect", true)
+            if (c is java.io.EOFException || c is java.net.ConnectException || c is java.net.SocketException ||
+                c is java.net.UnknownHostException || c is javax.net.ssl.SSLException) return true
+            val cm = c.message.orEmpty()
+            if (cm.contains("unexpected end of stream", true) || cm.contains("connection reset", true)) return true
+            c = c.cause
+        }
+        return false
+    }
+
+    /** Retries [transient] failures with growing pauses; other errors pass through. */
     fun <T> retrying(attempts: Int = 4, f: () -> T): T {
         var last: Exception? = null
         for (a in 0 until attempts) {
@@ -329,10 +350,7 @@ object Par {
                 return f()
             } catch (e: Exception) {
                 last = e
-                val m = e.message.orEmpty()
-                val transient = m.startsWith("HTTP 429") || m.startsWith("HTTP 500") || m.startsWith("HTTP 502") ||
-                    m.startsWith("HTTP 503") || m.startsWith("HTTP 504") || m.startsWith("HTTP 529")
-                if (!transient || a == attempts - 1) throw e
+                if (!transient(e) || a == attempts - 1) throw e
                 BgTasks.checkpoint()
                 Thread.sleep(1500L * (a + 1) * (a + 1))
             }

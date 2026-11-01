@@ -967,12 +967,15 @@ class ProjectActivity : LumenBase() {
         c.h2(t("Файлы данных", "Data files"))
         c.card {
             add(text(ctx, t("📦 Все артефакты одним файлом", "📦 All artifacts in one file"), Type.TITLE_M, bold = true), 0)
-            muted(t("Без ИИ: каналы, видео с цифрами, тегами и описаниями, расшифровки и комментарии — в Markdown (для людей и чатов с ИИ) или JSON. Отправьте друзьям или в любой ИИ сами.",
-                "No AI: channels, videos with numbers, tags and descriptions, transcripts and comments — as Markdown (for people and AI chats) or JSON. Send it to friends or any AI yourself."))
+            muted(t("Без ИИ: каналы, видео с цифрами, тегами и описаниями, расшифровки и комментарии — в PDF, картинки, HTML, Markdown, текст или JSON. Отправьте друзьям или в любой ИИ сами.",
+                "No AI: channels, videos with numbers, tags and descriptions, transcripts and comments — as PDF, images, HTML, Markdown, text or JSON. Send it to friends or any AI yourself."))
             button(t("Собрать и поделиться ↗", "Build and share ↗"), style = BtnStyle.FILLED) { artifactsDialog(project) }
         }
         listOf(
+            Triple("artifacts_pdf", t("PDF — все артефакты (без ИИ)", "PDF — all artifacts (no AI)"), "$base-artifacts.pdf"),
+            Triple("artifacts_html", t("HTML — все артефакты (без ИИ)", "HTML — all artifacts (no AI)"), "$base-artifacts.html"),
             Triple("artifacts_md", t("Markdown — все артефакты (без ИИ)", "Markdown — all artifacts (no AI)"), "$base-artifacts.md"),
+            Triple("artifacts_txt", t("Текст — все артефакты (без ИИ)", "Text — all artifacts (no AI)"), "$base-artifacts.txt"),
             Triple("artifacts_json", t("JSON — все артефакты (без ИИ)", "JSON — all artifacts (no AI)"), "$base-artifacts.json"),
             Triple("csv_videos", t("CSV — видео", "CSV — videos"), "$base-videos.csv"),
             Triple("csv_comments", t("CSV — комментарии", "CSV — comments"), "$base-comments.csv"),
@@ -991,7 +994,9 @@ class ProjectActivity : LumenBase() {
                 val mime = when (kind) {
                     "json", "artifacts_json" -> "application/json"
                     "md", "artifacts_md" -> "text/markdown"
-                    "pdf", "graph_pdf", "chgraph_pdf", "dossier_pdf" -> "application/pdf"
+                    "pdf", "graph_pdf", "chgraph_pdf", "dossier_pdf", "artifacts_pdf" -> "application/pdf"
+                    "artifacts_html" -> "text/html"
+                    "artifacts_txt" -> "text/plain"
                     "graph_png", "chgraph_png", "dossier_png" -> "image/png"
                     "insights_json", "clusters_json" -> "application/json"
                     "gexf" -> "application/xml"

@@ -72,4 +72,52 @@ class ArtifactsTest {
         assertEquals("Пётр", c.getJSONObject(0).getString("author"))
         assertFalse(o.getJSONArray("videos").getJSONObject(1).has("transcript"))
     }
+
+    @Test
+    fun plainTextHasNoMarkup() {
+        val sb = StringBuilder()
+        Artifacts.markdown(src, Artifacts.Opts(), sb, now = 0, plain = true)
+        val s = sb.toString()
+        assertTrue(s.startsWith("Ванная\n======"))
+        assertTrue(s.contains("ВИДЕО\n-----"))
+        assertTrue(s.contains("▌ 1. Плитка отвалилась"))
+        assertFalse(s.contains("**"))
+        assertFalse(s.contains("### "))
+    }
+
+    @Test
+    fun htmlIsEscapedWithContents() {
+        val v = Video("x", "", title = "<script>alert(1)</script> & co")
+        val sb = StringBuilder()
+        Artifacts.html(Artifacts.Source(JSONObject().put("name", "Т"), listOf(v1, v), emptyList(), { comments[it].orEmpty() }, { null }), Artifacts.Opts(), sb, now = 0)
+        val s = sb.toString()
+        assertTrue(s.startsWith("<!doctype html>"))
+        assertTrue(s.contains("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co"))
+        assertFalse(s.contains("<script>"))
+        assertTrue(s.contains("<a href=\"#v2\">"))
+        assertTrue(s.contains("<summary>Комментарии (2)</summary>"))
+        assertTrue(s.contains("prefers-color-scheme:dark"))
+        assertTrue(s.trimEnd().endsWith("</html>"))
+    }
+
+    @Test
+    fun chunksKeepPiecesUnderLimit() {
+        val text = "Первый абзац. Короткий.\n\n" + "Очень длинное предложение номер один. ".repeat(30) + "\n\nКонец"
+        val c = Artifacts.chunks(text, 200)
+        assertTrue(c.all { it.length <= 200 })
+        assertTrue(c.first().startsWith("Первый абзац. Короткий."))
+        assertEquals("Конец", c.last().substringAfterLast("\n\n").substringAfterLast(" "))
+        assertEquals(listOf("ab", "cd"), Artifacts.chunks("abcd", 2))
+        assertEquals(listOf("один\n\nдва"), Artifacts.chunks("один\n\nдва", 100))
+    }
+
+    @Test
+    fun numbersAndStats() {
+        assertEquals("1 234 567", Artifacts.num(1234567))
+        assertEquals("999", Artifacts.num(999))
+        assertEquals("1:02:03", Artifacts.duration(3723))
+        assertEquals("👁 1 000 · 👍 50 · ⏱ 2:05 · 💬 2", Artifacts.stats(v1, 2))
+        assertEquals("   ↳ ♥9  Пётр: Согласен", Artifacts.commentLine(comments.getValue("a1")[1], true))
+        assertEquals(Artifacts.Format.PDF, Artifacts.Format.of("artifacts_pdf"))
+    }
 }

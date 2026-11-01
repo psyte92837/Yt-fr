@@ -384,6 +384,87 @@ object ReportKit {
         doc.close()
     }
 
+    /** Blocks split into phone pages the same way as [pdf]: a block never splits, headings stay with what follows. */
+    fun paginate(blocks: List<Block>): List<List<Block>> {
+        val pages = ArrayList<MutableList<Block>>()
+        var cur = mutableListOf<Block>()
+        var y = 0f
+        val limit = PAGE_H - 28
+        blocks.forEachIndexed { i, b ->
+            var need = b.h
+            if (b.keepWithNext && i + 1 < blocks.size) need += blocks[i + 1].h
+            if (y + need > limit && y > 14f) {
+                pages += cur
+                cur = mutableListOf()
+                y = 12f
+            }
+            cur += b
+            y += b.h
+        }
+        if (cur.isNotEmpty()) pages += cur
+        return pages
+    }
+
+    /**
+     * Phone-screen pictures (1080×1920), one file per page, numbered in the corner; at most [maxPages].
+     * Returns the files and the total number of pages.
+     */
+    fun pngPages(blocks: List<Block>, dir: File, base: String, footer: String, maxPages: Int = 40): Pair<List<File>, Int> {
+        dir.mkdirs()
+        dir.listFiles()?.filter { it.name.startsWith("$base-") && it.name.endsWith(".png") }?.forEach { it.delete() }
+        val pages = paginate(blocks)
+        val s = 3f
+        val bmp = Bitmap.createBitmap((W * s).toInt(), (PAGE_H * s).toInt(), Bitmap.Config.ARGB_8888)
+        val fp = paint(9f, OUTLINE)
+        val fpr = paint(9f, OUTLINE).apply { textAlign = Paint.Align.RIGHT }
+        val out = ArrayList<File>()
+        try {
+            pages.take(maxPages).forEachIndexed { n, list ->
+                val c = Canvas(bmp)
+                c.drawColor(BG)
+                c.save()
+                c.scale(s, s)
+                var y = if (n == 0) 0f else 12f
+                for (b in list) {
+                    c.save()
+                    c.translate(0f, y)
+                    b.draw(c)
+                    c.restore()
+                    y += b.h
+                }
+                c.drawText(footer, PAD, PAGE_H - 12, fp)
+                c.drawText("${n + 1}/${pages.size}", W - PAD, PAGE_H - 12, fpr)
+                c.restore()
+                val f = File(dir, "$base-" + (n + 1).toString().padStart(3, '0') + ".png")
+                f.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                out += f
+            }
+        } finally {
+            bmp.recycle()
+        }
+        return out to pages.size
+    }
+
+    /** Several files in one share (an album of pictures in a messenger). */
+    fun shareMany(ctx: Context, files: List<File>, subject: String, mime: String) {
+        if (files.size == 1) return share(ctx, files[0], false, subject, mime)
+        val auth = ctx.packageName + ".provider"
+        val uris = ArrayList(files.map { f ->
+            try {
+                androidx.core.content.FileProvider.getUriForFile(ctx, auth, f)
+            } catch (e: IllegalArgumentException) {
+                val copy = File(ctx.cacheDir, f.name)
+                f.copyTo(copy, overwrite = true)
+                androidx.core.content.FileProvider.getUriForFile(ctx, auth, copy)
+            }
+        })
+        val i = Intent(Intent.ACTION_SEND_MULTIPLE).setType(mime)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).putExtra(Intent.EXTRA_SUBJECT, subject)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        i.clipData = ClipData.newRawUri(subject, uris[0]).also { cd -> uris.drop(1).forEach { cd.addItem(ClipData.Item(it)) } }
+        ctx.startActivity(Intent.createChooser(i, subject).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
+
     fun write(blocks: List<Block>, asPdf: Boolean, out: OutputStream, footer: String = "Lumen") =
         if (asPdf) pdf(blocks, out, footer) else png(blocks, out)
 

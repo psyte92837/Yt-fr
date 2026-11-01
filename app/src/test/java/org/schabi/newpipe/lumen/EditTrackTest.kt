@@ -180,4 +180,17 @@ class EditTrackTest {
         assertEquals(2_500L, EditSplit.srcAt(b, 3_500))
         assertTrue(EditSplit.overlays(listOf(b)).isEmpty())
     }
+
+    @Test
+    fun splitScreenSound() {
+        val b = EBlock("s", "split", 2_000, 5_000, file = "img/v.mp4")
+        // a second video is heard by default
+        assertTrue(EditSplit.mixes(listOf(b)))
+        assertFalse(EditSplit.mixes(listOf(b.copy(volume = 0f))))
+        assertTrue(EditSplit.mixes(listOf(b.copy(volume = 0f, mainVolume = 0.25f))))
+        assertFalse(EditSplit.mixes(listOf(b.copy(file = ""))))
+        val q = b.copy(mainVolume = 0.25f)
+        assertEquals(0.25f, EditSplit.mainVolume(listOf(q), 3_000, 1f), 0.001f)
+        assertEquals(0.5f, EditSplit.mainVolume(listOf(q), 8_000, 0.5f), 0.001f)
+    }
 }

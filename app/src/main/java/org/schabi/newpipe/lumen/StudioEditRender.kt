@@ -405,7 +405,10 @@ object StudioEditRender {
         val started = System.currentTimeMillis()
         val clips = EditTrack.of(p)
         // a cut track: the sound is put together once, for the GPU and (if needed) the CPU way
-        val sound = if (EditTrack.plain(clips, p.durMs)) null else EditAudio.build(File(dir, StudioEditStore.BASE), clips, cancelled, progress)
+        val splits = job.blocks.filter { it.kind == EditSplit.KIND }
+        // the sound is rebuilt when the track is cut or a split screen is heard (or makes the main video quieter)
+        val sound = if (EditTrack.plain(clips, p.durMs) && !EditSplit.mixes(splits)) null
+        else EditAudio.build(File(dir, StudioEditStore.BASE), clips, splits, dir, cancelled, progress)
         try {
             val n = StudioEditGl.render(job, dir, words, accent, styleDir, out, maxSide, sound, cancelled, progress)
             L.i("studio", "edit export on GPU: $n frames in ${(System.currentTimeMillis() - started) / 1000} s")

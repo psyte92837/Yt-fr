@@ -42,6 +42,7 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * Studio editor: the finished video plays with a timeline under it; at any moment the author pauses and
@@ -613,6 +614,7 @@ class StudioEditorActivity : LumenBase() {
                 act("✓", t("Готово", "Done")) { select(null) },
                 act("⊟", t("Раскладка", "Layout")) { splitSheet(b) },
                 act("⏮", t("Начало 2-го видео", "2nd video from")) { splitFrom(b) },
+                act(if (b.volume > 0f) "🔊" else "🔇", t("Звук", "Sound")) { splitSoundSheet(b) },
                 act("⏱", t("Время", "Timing")) { timingSheet(b) },
                 act("✂", t("Разделить", "Split")) { split(b) },
                 act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) },
@@ -853,16 +855,21 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private fun syncSide(sp: EBlock?) {
+        // the main video quieter during a split screen (above 100 % is heard in the export only)
+        player?.let { ex ->
+            val v = EditSplit.mainVolume(blocks, curMs, clips.getOrNull(curClip)?.volume ?: 1f).coerceIn(0f, 1f)
+            if (ex.volume != v) ex.volume = v
+        }
         if (sp == null) {
             player2?.takeIf { it.playWhenReady }?.pause()
             return
         }
         val ex2 = player2 ?: ExoPlayer.Builder(this).build().also { ex ->
             player2 = ex
-            // the sound stays the main video's (in the export too)
-            ex.volume = 0f
             ex.setVideoTextureView(texture2)
         }
+        val v2 = sp.volume.coerceIn(0f, 1f)
+        if (ex2.volume != v2) ex2.volume = v2
         if (side2File != sp.file) {
             side2File = sp.file
             ex2.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(dir, sp.file))))
@@ -1695,8 +1702,8 @@ class StudioEditorActivity : LumenBase() {
 
     private fun splitSheet(b: EBlock) {
         bottomSheet(t("⊟ Разделённый экран", "⊟ Split screen")) { dismiss ->
-            muted(t("Основное видео и второе делят кадр пополам, каждое обрезается по своей половине. Звук — основного видео.",
-                "The main and the second video share the frame, each cropped to its half. The sound is the main video's."))
+            muted(t("Основное видео и второе делят кадр пополам, каждое обрезается по своей половине. Звук обоих смешивается — громкость в «🔊 Звук».",
+                "The main and the second video share the frame, each cropped to its half. Both sounds are mixed — loudness in \"🔊 Sound\"."))
             add(choiceChips(ctx, EditSplit.LAYOUTS.map { it to splitName(it) }, b.look) { v ->
                 change(b.id) { it.copy(look = v) }
                 dismiss()
@@ -1709,6 +1716,22 @@ class StudioEditorActivity : LumenBase() {
                 dismiss()
                 pickSplit(b.id)
             }
+        }
+    }
+
+    private fun splitSoundSheet(b: EBlock) {
+        bottomSheet(t("🔊 Звук разделённого экрана", "🔊 Split screen sound")) { dismiss ->
+            label(this, t("Второе видео", "Second video"))
+            add(choiceChips(ctx, EditTrack.VOLUMES.map { it to "$it %" }, (b.volume * 100).roundToInt()) { v ->
+                change(b.id) { it.copy(volume = v / 100f) }
+            })
+            label(this, t("Основное видео в это время", "Main video meanwhile"))
+            add(choiceChips(ctx, listOf(0, 25, 50, 75, 100, 150).map { it to "$it %" }, (b.mainVolume * 100).roundToInt()) { v ->
+                change(b.id) { it.copy(mainVolume = v / 100f) }
+            })
+            muted(t("Реакция: второе 100 %, основное 0–25 %. Больше 100 % слышно только в готовом ролике.",
+                "Reaction: second 100 %, main 0–25 %. Above 100 % is heard in the exported video only."))
+            button(t("Готово", "Done"), primary = true) { dismiss() }
         }
     }
 
@@ -2023,7 +2046,7 @@ class StudioEditorActivity : LumenBase() {
     private fun exportSheet() {
         val p = project ?: return
         if (BgTasks.has(TASK_EXPORT)) return toast(t("Экспорт уже идёт", "The export is already running"))
-        val cut = !EditTrack.plain(EditTrack.of(p), p.durMs)
+        val cut = !EditTrack.plain(EditTrack.of(p), p.durMs) || EditSplit.mixes(p.blocks)
         if (!cut && p.blocks.none { it.kind != "scheme" || it.scheme != null }) return toast(t("Добавьте блок «＋» или измените ролик: ✂ Разделить, скорость…", "Add a block \"＋\" or edit the video: ✂ Split, speed…"))
         pause()
         val prefs = Lumen.prefs
@@ -2032,8 +2055,8 @@ class StudioEditorActivity : LumenBase() {
         bottomSheet(t("⬆ Экспорт ролика", "⬆ Export the video")) { dismiss ->
             val len = StudioEdit.clock(outLen(p)).substringBefore('.')
             val pieces = EditTrack.of(p).size
-            muted(if (cut) t("Блоков: ${p.blocks.size} · кусков: $pieces · длина $len · звук собирается заново по кускам.",
-                "Blocks: ${p.blocks.size} · pieces: $pieces · length $len · the sound is rebuilt piece by piece.")
+            muted(if (cut) t("Блоков: ${p.blocks.size} · кусков: $pieces · длина $len · звук собирается заново (куски, второе видео).",
+                "Blocks: ${p.blocks.size} · pieces: $pieces · length $len · the sound is rebuilt (pieces, second video).")
             else t("Блоков: ${p.blocks.size} · длина $len · звук оригинала копируется без потерь.",
                 "Blocks: ${p.blocks.size} · length $len · the original sound is copied without loss."))
             label(this, t("Качество", "Quality"))

@@ -41,7 +41,10 @@ data class EBlock(
     /** What was asked from the AI, to ask again. */
     val ask: String = "",
     /** Split screen: the moment of the second video ([file]) shown at [startMs]. */
-    val srcMs: Long = 0
+    val srcMs: Long = 0,
+    /** Split screen: loudness of the second video (0..2) and of the main one meanwhile. */
+    val volume: Float = 1f,
+    val mainVolume: Float = 1f
 ) {
     val endMs: Long get() = startMs + durMs
 }
@@ -593,6 +596,7 @@ object StudioEdit {
             b.scheme?.let { put("scheme", StudioScheme.toJson(it)) }
             if (b.ask.isNotEmpty()) put("ask", b.ask)
             if (b.srcMs > 0) put("src", b.srcMs)
+            if (b.kind == "split") put("vol", b.volume.toDouble()).put("mainVol", b.mainVolume.toDouble())
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -605,7 +609,8 @@ object StudioEdit {
             o.optString("id").ifEmpty { return null }, kind, max(0L, o.optLong("start")), max(MIN_MS, o.optLong("dur", DEFAULT_MS)),
             f("x", 0.5f), f("y", 0.5f), f("w", 0.6f).coerceIn(MIN_W, MAX_W), f("ratio", 0.6f).coerceIn(0.05f, 20f), f("rot", 0f), f("opacity", 1f).coerceIn(0f, 1f),
             o.optString("in", "pop").takeIf { it in ANIMS } ?: "pop", o.optString("out", "fade").takeIf { it in ANIMS } ?: "fade",
-            o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask"), max(0L, o.optLong("src"))
+            o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask"), max(0L, o.optLong("src")),
+            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f)
         )
     }
 

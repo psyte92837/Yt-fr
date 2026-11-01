@@ -56,15 +56,92 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
         private const val TIMEOUT = 10_000L
         private const val MIME_OUT = MediaFormat.MIMETYPE_AUDIO_AAC
 
-        /** Null when the video has no sound. Worker thread; throws CancellationException when [cancelled]. */
-        fun build(base: File, clips: List<VClip>, cancelled: () -> Boolean, progress: (String) -> Unit): EditAudio? {
+        /**
+         * The sound of [clips] with the second videos of split screens [splits] (folder [dir]) mixed in.
+         * Null when there is no sound at all. Worker thread; throws CancellationException when [cancelled].
+         */
+        fun build(
+            base: File, clips: List<VClip>, splits: List<EBlock>, dir: File, cancelled: () -> Boolean, progress: (String) -> Unit
+        ): EditAudio? {
             val ex = MediaExtractor()
             var dec: MediaCodec? = null
             var enc: MediaCodec? = null
+            val temps = ArrayList<File>()
+            val sides = ArrayList<SideMix>()
             try {
                 ex.setDataSource(base.absolutePath)
                 val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
-                    ?: return null
+                val heard = splits.filter { it.kind == EditSplit.KIND && it.file.isNotEmpty() && it.volume > 0f }
+                // a main video without sound: silence at 44.1 kHz, unless nothing is heard at all
+                if (idx == null && heard.isEmpty()) return null
+                var r: Remix? = null
+                var rate = 44_100
+                var outCh = 2
+                if (idx != null) {
+                    ex.selectTrack(idx)
+                    val inFmt = ex.getTrackFormat(idx)
+                    val d = MediaCodec.createDecoderByType(inFmt.getString(MediaFormat.KEY_MIME)!!)
+                    dec = d
+                    d.configure(inFmt, null, null, 0)
+                    d.start()
+                    val rm = Remix(ex, d, inFmt)
+                    rm.probe()
+                    r = rm
+                    rate = rm.rate
+                    outCh = rm.outCh
+                }
+                // the second videos first: each one's sound at this rate into a file, read back while the main sound is encoded
+                heard.forEachIndexed { i, b ->
+                    if (cancelled()) throw CancellationException()
+                    progress(t("Звук второго видео ${i + 1}/${heard.size}", "Sound of the second video ${i + 1}/${heard.size}"))
+                    val f = File(dir, "side_${b.id}.pcm")
+                    temps += f
+                    val need = b.durMs * rate / 1000
+                    if (side(File(dir, b.file), b, need, rate, outCh, f, cancelled)) {
+                        sides += SideMix(b.startMs * rate / 1000, b.startMs * rate / 1000 + need, b.volume, b.mainVolume, f, outCh)
+                    }
+                }
+                // a quieter main video without a heard second one
+                splits.filter { it.kind == EditSplit.KIND && it.file.isNotEmpty() && it.volume <= 0f && it.mainVolume != 1f }.forEach { b ->
+                    sides += SideMix(b.startMs * rate / 1000, (b.startMs + b.durMs) * rate / 1000, 0f, b.mainVolume, null, outCh)
+                }
+                val e = MediaCodec.createEncoderByType(MIME_OUT)
+                enc = e
+                e.configure(MediaFormat.createAudioFormat(MIME_OUT, rate, outCh).apply {
+                    setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                    setInteger(MediaFormat.KEY_BIT_RATE, 160_000)
+                    setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
+                }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                e.start()
+                val w = Writer(e, rate, outCh, sides)
+                clips.forEachIndexed { i, c ->
+                    if (cancelled()) throw CancellationException()
+                    progress(t("Звук: кусок ${i + 1}/${clips.size}", "Sound: piece ${i + 1}/${clips.size}"))
+                    val need = (c.outMs * rate / 1000.0).roundToLong()
+                    val rm = r
+                    if (rm == null || c.isHold || c.volume <= 0f) w.silence(need)
+                    else rm.piece(c, need, rate, { a, n -> w.feed(a, n) }, cancelled)
+                }
+                w.finish()
+                val fmt = w.format ?: error("no AAC format")
+                return EditAudio(fmt, w.packets.map { Packet(it.first, it.second, it.third) })
+            } finally {
+                sides.forEach { it.close() }
+                temps.forEach { it.delete() }
+                dec?.let { runCatching { it.stop() }; runCatching { it.release() } }
+                enc?.let { runCatching { it.stop() }; runCatching { it.release() } }
+                runCatching { ex.release() }
+            }
+        }
+
+        /** The sound of split screen [b] (second video [file]) as [need] frames of [rate] / [outCh] into [out]; false when it has none. */
+        private fun side(file: File, b: EBlock, need: Long, rate: Int, outCh: Int, out: File, cancelled: () -> Boolean): Boolean {
+            val ex = MediaExtractor()
+            var dec: MediaCodec? = null
+            try {
+                ex.setDataSource(file.absolutePath)
+                val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                    ?: return false
                 ex.selectTrack(idx)
                 val inFmt = ex.getTrackFormat(idx)
                 val d = MediaCodec.createDecoderByType(inFmt.getString(MediaFormat.KEY_MIME)!!)
@@ -73,29 +150,66 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                 d.start()
                 val r = Remix(ex, d, inFmt)
                 r.probe()
-                val e = MediaCodec.createEncoderByType(MIME_OUT)
-                enc = e
-                e.configure(MediaFormat.createAudioFormat(MIME_OUT, r.rate, r.outCh).apply {
-                    setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
-                    setInteger(MediaFormat.KEY_BIT_RATE, 160_000)
-                    setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
-                }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                e.start()
-                val w = Writer(e, r.rate, r.outCh)
-                clips.forEachIndexed { i, c ->
-                    if (cancelled()) throw CancellationException()
-                    progress(t("Звук: кусок ${i + 1}/${clips.size}", "Sound: piece ${i + 1}/${clips.size}"))
-                    val need = (c.outMs * r.rate / 1000.0).roundToLong()
-                    if (c.isHold || c.volume <= 0f) w.silence(need) else r.piece(c, need, w, cancelled)
+                val inCh = r.outCh
+                java.io.BufferedOutputStream(out.outputStream(), 1 shl 16).use { os ->
+                    val bytes = ByteBuffer.allocate(8192 * 2 * 2).order(ByteOrder.LITTLE_ENDIAN)
+                    r.piece(VClip("side", b.srcMs, b.srcMs + max(1L, b.durMs)), need, rate, { a, n ->
+                        // channels as in the main sound: mono doubled, stereo averaged
+                        var i = 0
+                        while (i < n) {
+                            bytes.clear()
+                            while (i < n && bytes.remaining() >= 4) {
+                                if (inCh == outCh) {
+                                    bytes.putShort(a[i])
+                                    i++
+                                } else if (inCh == 1) {
+                                    bytes.putShort(a[i]).putShort(a[i])
+                                    i++
+                                } else {
+                                    bytes.putShort(((a[i] + a[i + 1]) / 2).toShort())
+                                    i += 2
+                                }
+                            }
+                            os.write(bytes.array(), 0, bytes.position())
+                        }
+                    }, cancelled)
                 }
-                w.finish()
-                val fmt = w.format ?: error("no AAC format")
-                return EditAudio(fmt, w.packets.map { Packet(it.first, it.second, it.third) })
+                return true
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                L.w("studio", "split screen sound: ${e.message}")
+                return false
             } finally {
                 dec?.let { runCatching { it.stop() }; runCatching { it.release() } }
-                enc?.let { runCatching { it.stop() }; runCatching { it.release() } }
                 runCatching { ex.release() }
             }
+        }
+    }
+
+    /** A second video's sound (raw PCM file) heard over output frames [startF, endF); the main one at [mainVol] meanwhile. */
+    private class SideMix(val startF: Long, val endF: Long, val vol: Float, val mainVol: Float, file: File?, private val ch: Int) : java.io.Closeable {
+        private val input = file?.let { java.io.DataInputStream(java.io.BufferedInputStream(it.inputStream(), 1 shl 16)) }
+        private var bytes = ByteArray(0)
+
+        /** The next [frames] frames (silence past the end of the file). */
+        fun read(frames: Int): ShortArray {
+            val out = ShortArray(frames * ch)
+            val inp = input ?: return out
+            val need = frames * ch * 2
+            if (bytes.size < need) bytes = ByteArray(need)
+            var got = 0
+            while (got < need) {
+                val k = inp.read(bytes, got, need - got)
+                if (k < 0) break
+                got += k
+            }
+            ByteBuffer.wrap(bytes, 0, got - got % 2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(out, 0, got / 2)
+            return out
+        }
+
+        override fun close() {
+            runCatching { input?.close() }
         }
     }
 
@@ -139,11 +253,13 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
         }
 
         /** [need] output frames of piece [c] into [w]: linear resampling by speed, missing sound as silence. */
-        fun piece(c: VClip, need: Long, w: Writer, cancelled: () -> Boolean) {
+        fun piece(c: VClip, need: Long, outRate: Int, sink: (ShortArray, Int) -> Unit, cancelled: () -> Boolean) {
             val chOut = outCh
             dec.flush()
             ex.seekTo(c.fromMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             val srcStart = c.fromMs * rate / 1000.0
+            // source frames per output frame: the speed, and the other rate of a second video
+            val step = c.speed.toDouble() * rate / outRate
             val stopUs = c.toMs * 1000 + 300_000
             // decoded frames (interleaved, outCh channels) from frame index winStart
             var win = ShortArray(0)
@@ -155,7 +271,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
             val vol = c.volume
             fun produce(final: Boolean) {
                 while (j < need) {
-                    val pos = srcStart + j * c.speed.toDouble()
+                    val pos = srcStart + j * step
                     val i0 = floor(pos).toLong()
                     if (!final && (winStart < 0 || i0 + 1 >= winStart + winLen)) break
                     val f = (pos - i0).toFloat()
@@ -167,13 +283,13 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                     }
                     j++
                     if (outN == out.size) {
-                        w.feed(out, outN)
+                        sink(out, outN)
                         outN = 0
                     }
                 }
                 // forget what is behind
                 if (winStart >= 0) {
-                    val keepFrom = floor(srcStart + j * c.speed.toDouble()).toLong() - 1
+                    val keepFrom = floor(srcStart + j * step).toLong() - 1
                     val drop = (keepFrom - winStart).coerceIn(0, winLen.toLong()).toInt()
                     if (drop > 0) {
                         System.arraycopy(win, drop * chOut, win, 0, (winLen - drop) * chOut)
@@ -227,7 +343,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                 }
             }
             produce(true)
-            if (outN > 0) w.feed(out, outN)
+            if (outN > 0) sink(out, outN)
         }
 
         private fun sample(win: ShortArray, start: Long, len: Int, idx: Long, k: Int, chOut: Int): Float {
@@ -238,7 +354,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
     }
 
     /** Feeds PCM to the AAC encoder and keeps what comes out. */
-    private class Writer(private val enc: MediaCodec, private val rate: Int, private val ch: Int) {
+    private class Writer(private val enc: MediaCodec, private val rate: Int, private val ch: Int, private val sides: List<SideMix> = emptyList()) {
         val packets = ArrayList<Triple<ByteArray, Long, Int>>()
         var format: MediaFormat? = null
         private var frames = 0L
@@ -254,8 +370,24 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
             }
         }
 
-        /** [count] shorts of [pcm] (interleaved). */
-        fun feed(pcm: ShortArray, count: Int) {
+        /** [count] shorts of [pcm] (interleaved); the second videos' sound mixed in where it is heard. */
+        fun feed(pcm0: ShortArray, count: Int) {
+            var pcm = pcm0
+            val f0 = frames
+            val n = count / ch
+            for (sd in sides) {
+                val a = max(f0, sd.startF)
+                val b = min(f0 + n, sd.endF)
+                if (b <= a) continue
+                if (pcm === pcm0) pcm = pcm0.copyOf(count)
+                val len = (b - a).toInt()
+                val add = sd.read(len)
+                val base = ((a - f0) * ch).toInt()
+                for (i in 0 until len * ch) {
+                    val v = pcm[base + i] * sd.mainVol + add[i] * sd.vol
+                    pcm[base + i] = v.roundToInt().coerceIn(-32768, 32767).toShort()
+                }
+            }
             var off = 0
             while (off < count) {
                 val i = enc.dequeueInputBuffer(TIMEOUT)

@@ -343,6 +343,13 @@ object EditSplit {
     /** Moment of the second video at output time [tMs]. */
     fun srcAt(b: EBlock, tMs: Long): Long = b.srcMs + (tMs - b.startMs).coerceAtLeast(0)
 
+    /** Split screens whose sound changes the export: the second video heard, or the main one quieter. */
+    fun mixes(blocks: List<EBlock>): Boolean =
+        blocks.any { it.kind == KIND && it.file.isNotEmpty() && (it.volume > 0f || it.mainVolume != 1f) }
+
+    /** Loudness of the main video at [tMs]: its piece's, times the split screen's setting. */
+    fun mainVolume(blocks: List<EBlock>, tMs: Long, clipVolume: Float): Float = clipVolume * (active(blocks, tMs)?.mainVolume ?: 1f)
+
     /** Blocks drawn over the picture (a split screen is not one of them). */
     fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { it.kind != KIND }
 }

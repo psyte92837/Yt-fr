@@ -1323,6 +1323,9 @@ class StudioActivity : LumenBase() {
                 btn(ctx, t("▶ Открыть", "▶ Open"), style = BtnStyle.TONAL) { openFile(f) },
                 btn(ctx, t("Поделиться", "Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioActivity, f, false, f.name, "video/mp4") }
             )
+            button(t("✏️ Открыть редактор: схемы, картинки, надписи", "✏️ Open the editor: schemes, pictures, captions"), primary = true) {
+                StudioEditorActivity.open(this@StudioActivity, f, plan.words)
+            }
         }
     }
 

@@ -570,6 +570,9 @@ class StudioMixActivity : LumenBase() {
                 btn(ctx, t("▶ Открыть", "▶ Open"), style = BtnStyle.TONAL) { openVideo(video) },
                 btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TEXT) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") }
             )
+            button(t("✏️ Редактор: схемы, картинки, надписи", "✏️ Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
+                StudioEditorActivity.open(this@StudioMixActivity, video, words)
+            }
             if (Prefs.videoVoice) button(t("🤖 Отправить в ИИ", "🤖 Send to AI"), primary = true) { sendToAi(video) }
         }
     }

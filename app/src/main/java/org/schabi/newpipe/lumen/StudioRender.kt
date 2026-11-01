@@ -1251,14 +1251,16 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** An info-scheme in [box]: nodes come in on their words, arrows grow between them, the layout's guides behind. */
-    private fun scheme(c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a: Float, box: RectF = schemeBox(cx, cy)) {
+    private fun scheme(
+        c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a: Float, box: RectF = schemeBox(cx, cy),
+        start: Long = plan.times[index].startMs, nodeMs: List<Long>? = null
+    ) {
         val st = sstyle()
         val acc = st.accent ?: accent
         val bw = box.width()
         var bh = box.height()
         var top = box.top
         val left = box.left
-        val start = plan.times[index].startMs
         if (s.title.isNotBlank()) {
             val p = schText(st, min(4.4f * u, bh * 0.09f), st.ink, a * Studio.appear(tMs, start, 300), bold = true)
             c.drawText(cased(st, s.title), box.centerX(), top + p.textSize, p)
@@ -1266,7 +1268,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             bh -= p.textSize * 1.8f
         }
         val boxes = StudioScheme.layout(s, bw / bh)
-        val times = plan.schemeMs.getOrNull(index).orEmpty()
+        val times = nodeMs ?: plan.schemeMs.getOrNull(index).orEmpty()
         val ps = s.nodes.indices.map { Studio.appear(tMs, times.getOrElse(it) { 0L }, st.dur.toLong()) }
         val rects = boxes.map { b -> RectF(left + (b.x - b.w / 2) * bw, top + (b.y - b.h / 2) * bh, left + (b.x + b.w / 2) * bw, top + (b.y + b.h / 2) * bh) }
         val guide = Studio.appear(tMs, start, 400) * a
@@ -1312,6 +1314,16 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             c.drawText(cased(st, s.center), rects.map { it.centerX() }.average().toFloat(), rects.map { it.centerY() }.average().toFloat() + p.textSize * 0.35f, p)
         }
     }
+
+    /**
+     * Studio editor: info-scheme [s] in [box] at [tMs]; it shows up at [start], its nodes come in at [nodeMs]
+     * (the colours are those of the style this painter was made with).
+     */
+    fun schemeIn(c: Canvas, s: SScheme, box: RectF, tMs: Long, start: Long, nodeMs: List<Long>, a: Float = 1f) =
+        scheme(c, s, -1, box.centerX(), box.centerY(), tMs, a, box, start, nodeMs)
+
+    /** The colours schemes of this painter use (the chosen style, or "auto" from the palette). */
+    fun schemeLook(): SchemeStyle = sstyle()
 
     /** Point on the edge of a node towards ([tx], [ty]). */
     private fun edge(r: RectF, shape: String, tx: Float, ty: Float): Pair<Float, Float> {
@@ -2282,7 +2294,7 @@ object StudioVideo {
         }
     }
 
-    private fun writeImage(img: Image, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
+    internal fun writeImage(img: Image, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
         val planes = img.planes
         fun plane(i: Int, src: ByteArray, pw: Int, ph: Int) {
             val p = planes[i]
@@ -2306,7 +2318,7 @@ object StudioVideo {
     }
 
     /** Fallback when the encoder gives no Image: semi-planar NV12, the most common layout. */
-    private fun writeNv12(buf: ByteBuffer, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
+    internal fun writeNv12(buf: ByteBuffer, w: Int, h: Int, y: ByteArray, u: ByteArray, v: ByteArray) {
         buf.clear()
         buf.put(y)
         for (i in u.indices) {

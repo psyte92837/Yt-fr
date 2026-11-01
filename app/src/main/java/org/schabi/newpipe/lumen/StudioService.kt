@@ -78,6 +78,8 @@ object StudioJob {
     fun build(ctx: Context, r: Request, progress: (String) -> Unit) {
         val audio = finalAudio(r, progress)
         StudioVideo.render(r.plan, audio, r.out, r.w, r.h, 30, { cancel }, r.background) { progress(it) }
+        // the voice with times next to the video: the editor uses it to know what is said at every moment
+        if (r.plan.words.isNotEmpty()) runCatching { StudioEditorActivity.sidecar(r.out).writeText(StudioMix.wordsJson(r.plan.words)) }
         progress(t("Сохранение…", "Saving…"))
         savedAs = saveToMovies(ctx, r.out, r.name)
         result = r.out
@@ -260,6 +262,8 @@ class StudioService : Service() {
                 PendingIntent.getActivity(this, 2, view, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).build())
             b.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_share, t("Поделиться", "Share"),
                 PendingIntent.getActivity(this, 3, send, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)).build())
+            b.addAction(Notification.Action.Builder(android.R.drawable.ic_menu_edit, t("Редактор", "Editor"),
+                Nav.pending(this, 7301, StudioEditorActivity.intentFor(this, f))).build())
         }
         post(b.build())
     }

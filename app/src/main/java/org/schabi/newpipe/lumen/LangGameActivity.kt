@@ -222,6 +222,7 @@ class LangGameActivity : LumenBase() {
                 btn(ctx, t("Читать всё", "Read all"), style = BtnStyle.TEXT) { showText(t("Языковая игра", "Language game"), LangGameData.summary(g)) },
                 btn(ctx, t("📄 Файл ↗", "📄 File ↗"), style = BtnStyle.TEXT) { shareFile() }
             )
+            button(t("📦 Все артефакты файлом (без ИИ) ↗", "📦 All artifacts in a file (no AI) ↗"), style = BtnStyle.TEXT) { artifactsDialog(project) }
         }
         c.card {
             add(text(ctx, t("② Что написать", "② What to write"), Type.TITLE_M, bold = true), 0)

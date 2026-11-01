@@ -62,7 +62,7 @@ class RelayActivity : LumenBase() {
     @Suppress("DEPRECATION")
     private fun backToLumen() {
         try {
-            getSystemService(ActivityManager::class.java).appTasks.firstOrNull { it.taskInfo.persistentId != taskId }?.moveToFront()
+            getSystemService(ActivityManager::class.java).appTasks.firstOrNull { it.taskInfo?.persistentId != taskId }?.moveToFront()
         } catch (e: Exception) {
             L.w("relay", "front: ${e.message}")
         }

@@ -12,7 +12,7 @@ enum class StudioLayers(val id: String, val subs: Boolean, val graphics: Boolean
         fun of(id: String): StudioLayers = entries.firstOrNull { it.id == id } ?: ALL
 
         /** Size choices of a scheme over a background, % of its full-screen size. */
-        val SIZES = listOf(30, 40, 50, 60, 75, 100)
+        val SIZES = listOf(70, 80, 90, 100)
 
         fun scale(percent: Int): Float = percent.coerceIn(SIZES.first(), SIZES.last()) / 100f
 
@@ -34,6 +34,15 @@ enum class StudioLayers(val id: String, val subs: Boolean, val graphics: Boolean
 
         /** Scale of the scheme in an animation: on the board it leaves room for the characters, big takes most of the frame. */
         fun toonSchemeScale(mode: String): Float = if (toonMode(mode) == "big") 1f else 0.8f
+
+        /**
+         * Scale of a scheme over a background that keeps its text readable: a dense scheme (3+ items, a chain or chart)
+         * is not made smaller than 80% of its full size, a simple one not smaller than 70%.
+         */
+        fun readable(scale: Float, kind: String, items: Int): Float {
+            val dense = items >= 3 || kind in listOf("scheme", "flow", "cycle", "list", "chart", "compare")
+            return scale.coerceAtLeast(if (dense) 0.8f else 0.7f).coerceAtMost(1f)
+        }
 
         fun overY(scale: Float, subs: Boolean): Float = if (!subs) 0.5f else (0.42f - (1f - scale) * 0.12f).coerceIn(0.3f, 0.42f)
     }

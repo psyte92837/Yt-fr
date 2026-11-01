@@ -150,7 +150,7 @@ object StudioPrefs {
         set(v) = p.edit().putString("studio_scheme_place", v).apply()
     /** Size of a scheme over a background, % of its full-screen size. */
     var overSize: Int
-        get() = p.getInt("studio_over_size", 60)
+        get() = p.getInt("studio_over_size", 80)
         set(v) = p.edit().putInt("studio_over_size", v).apply()
     var musicName: String
         get() = p.getString("studio_music_name", "") ?: ""
@@ -1468,7 +1468,7 @@ class StudioActivity : LumenBase() {
     private fun bgSpec(plan: StudioPlan): StudioBg {
         if (task == StudioTask.CUTS) {
             val ready = readyCuts()
-            val slots = StudioCuts.slots(plan.times, plan.script.scenes.map { it.clip }, ready.associateBy { it.id })
+            val slots = StudioCuts.slots(plan.times, StudioCuts.effectiveClips(plan.script.scenes, ready.map { it.id }.toSet()), ready.associateBy { it.id })
             return StudioBg(null, null, emptyList(), slots, ready.associate { it.id to File(cutsDir, it.file) })
         }
         return if (videoReady()) StudioBg(sourceFile, cuts, emptyList()) else StudioBg(null, null, clips())
@@ -1970,7 +1970,7 @@ class StudioActivity : LumenBase() {
         val voice = pcm ?: return null
         if (words.isEmpty()) return null
         val style = currentStyle()
-        val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) readyIds().let { ids -> sc.scenes.indices.filter { sc.scenes[it].clip in ids }.toSet() }
+        val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) StudioCuts.effectiveClips(sc.scenes, readyIds()).let { ids -> sc.scenes.indices.filter { ids[it].isNotEmpty() }.toSet() }
         else null
         return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, StudioPrefs.overlay,
             StudioPrefs.zooms, StudioPrefs.transitions,

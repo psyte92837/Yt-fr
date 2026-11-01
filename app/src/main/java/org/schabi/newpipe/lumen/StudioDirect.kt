@@ -479,8 +479,10 @@ object StudioKeys {
     fun shapeOf(o: JSONObject): SShape? {
         val el = o.optString("el").ifBlank { o.optString("type") }.trim().lowercase()
         if (el !in SHAPES) return null
-        val text = o.optString("text").trim().take(40)
+        val raw = o.optString("text")
+        val text = StudioMotionTpl.vars(raw) { "" }.take(40)
         if ((el == "text" || el == "emoji") && text.isEmpty()) return null
+        if (el == "text" && '$' in raw && !StudioMotionTpl.readable(text)) return null
         val ka = o.optJSONArray("keys") ?: return null
         val keys = (0 until ka.length()).mapNotNull { i ->
             val k = ka.optJSONObject(i) ?: return@mapNotNull null

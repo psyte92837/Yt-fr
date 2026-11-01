@@ -248,4 +248,24 @@ class StudioCutsTest {
         val full = List(StudioCuts.MAX_CLIPS) { SClip("c${it + 1}", "x$it", 0, 5000) }
         assertEquals(StudioCuts.MAX_CLIPS, StudioCuts.addHits(full, hits).size)
     }
+
+    @Test
+    fun bareScenesKeepTheClip() {
+        val text = SScene("но", "text")
+        val icon = SScene("машины", "icons", items = listOf(SItem("🚗", "машины")))
+        val grid = SScene("три", "icons", items = listOf(SItem("1", "a"), SItem("2", "b"), SItem("3", "c")))
+        val stat = SScene("40%", "stat", "Статистика")
+        assertTrue(StudioCuts.bare(text))
+        assertTrue(StudioCuts.bare(icon))
+        assertTrue(!StudioCuts.bare(grid))
+        assertTrue(!StudioCuts.bare(stat))
+        assertTrue(!StudioCuts.bare(text.copy(media = "/x.jpg")))
+        val scenes = listOf(text, text.copy(clip = "c1"), text, grid, icon, stat, text.copy(clip = "c9"), text)
+        // c9 is not downloaded: its scene is bare and continues c1; graphic scenes stay inserts
+        assertEquals(listOf("c1", "c1", "c1", "", "c1", "", "c1", "c1"), StudioCuts.effectiveClips(scenes, setOf("c1")))
+        assertEquals(List(3) { "" }, StudioCuts.effectiveClips(listOf(text, grid, text), setOf("c1")))
+        // continued scenes play on in the clip instead of starting it again
+        val slots = StudioCuts.slots(times(0, 1000, 2000, 3000), listOf("c1", "c1", "c1"), mapOf("c1" to SClip("c1", "u", 0, 10_000, file = "f", lenMs = 10_000)))
+        assertEquals(listOf(0L, 1000L, 2000L), slots.map { it.offsetMs })
+    }
 }

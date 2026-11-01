@@ -221,11 +221,36 @@ object StudioMotionTpl {
         return TplResult(t, err)
     }
 
+    private val VARS = Regex("""\$(it\.icon|it\.label|it\.value|title|value|key|say|num)(?!\w)""", RegexOption.IGNORE_CASE)
+    private val LEFTOVER = Regex("""\$[A-Za-z_]\w*(?:\.\w+)*|\{\{[^}]*\}\}""")
+    private val SPACES = Regex("""\s{2,}""")
+
+    /**
+     * [text] with the variables put in by [get] (name in lower case: "key", "title", "it.label"…), in any letter case
+     * ($KEY, $Key); unknown or unfilled variables are removed so that "$KEY" never reaches the screen.
+     */
+    fun vars(text: String, get: (String) -> String): String {
+        if ('$' !in text && "{{" !in text) return text.trim()
+        return LEFTOVER.replace(VARS.replace(text) { get(it.groupValues[1].lowercase()) }, "").replace(SPACES, " ").trim()
+    }
+
+    /** Is there something to read in [s] (not only emoji, signs or spaces)? */
+    fun readable(s: String): Boolean = s.any { it.isLetterOrDigit() }
+
     /** Text of a layer with the scene put in: $title, $value, $key, $say, $num, $it.icon, $it.label, $it.value. */
-    fun fill(text: String, sc: SScene, item: SItem?, num: Int, key: String): String = text
-        .replace("\$it.icon", item?.icon ?: "").replace("\$it.label", item?.label ?: "").replace("\$it.value", item?.value ?: "")
-        .replace("\$title", sc.title).replace("\$value", sc.items.firstOrNull()?.value?.ifBlank { null } ?: sc.title)
-        .replace("\$key", key).replace("\$say", sc.say.take(60)).replace("\$num", num.toString()).trim()
+    fun fill(text: String, sc: SScene, item: SItem?, num: Int, key: String): String = vars(text) { v ->
+        when (v) {
+            "it.icon" -> item?.icon ?: ""
+            "it.label" -> item?.label ?: ""
+            "it.value" -> item?.value ?: ""
+            "title" -> sc.title
+            "value" -> sc.items.firstOrNull()?.value?.ifBlank { null } ?: sc.title
+            "key" -> key
+            "say" -> sc.say.take(60)
+            "num" -> num.toString()
+            else -> ""
+        }
+    }
 
     /**
      * Shapes of [t] for scene [sc] spoken by words [range] of [words] from [startMs] to [endMs], with absolute key times —
@@ -269,8 +294,15 @@ object StudioMotionTpl {
                 }
                 if (keys.isEmpty()) continue
                 val parts = if (ly.el == "group") ly.children else listOf(ly.copy(dx = null, dy = null))
-                for (ch in parts) {
+                val texts = parts.map { ch ->
                     val txt = fill(ch.text, sc, item, i + 1, keyText)
+                    // a text made only of variables that came out empty: nothing to show
+                    if (ch.el == "text" && '$' in ch.text && !readable(txt)) "" else txt
+                }
+                // a group whose text is gone loses its frame and icon too (no empty boxes on the screen)
+                if (ly.el == "group" && parts.indices.any { (parts[it].el == "text" || parts[it].el == "emoji") && texts[it].isEmpty() }) continue
+                for ((pi, ch) in parts.withIndex()) {
+                    val txt = texts[pi]
                     if ((ch.el == "text" || ch.el == "emoji") && txt.isEmpty()) continue
                     val dx = ev(ch.dx, vars, -1.0, 1.0) ?: 0f
                     val dy = ev(ch.dy, vars, -1.0, 1.0) ?: 0f
@@ -410,7 +442,17 @@ object StudioEditTpl {
                         list += when (type) {
                             "zoom" -> SCue("zoom", at)
                             "sfx" -> SCue("sfx", at, args[0])
-                            else -> SCue("pop", at, args[0].take(32), args.getOrElse(1) { "" }.take(8))
+                            else -> {
+                                val label = StudioMotionTpl.vars(args[0]) { v ->
+                                    when (v) {
+                                        "key" -> StudioWords.clean(words.getOrNull(key)?.text ?: "")
+                                        "num" -> (si + 1).toString()
+                                        else -> ""
+                                    }
+                                }
+                                if (!StudioMotionTpl.readable(label)) continue
+                                SCue("pop", at, label.take(32), args.getOrElse(1) { "" }.take(8))
+                            }
                         }
                     }
                 }

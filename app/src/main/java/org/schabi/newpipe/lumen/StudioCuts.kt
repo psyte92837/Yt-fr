@@ -207,6 +207,32 @@ object StudioCuts {
         return out
     }
 
+    /**
+     * Does scene [sc] have nothing to show on its own? Plain words, or a lone icon without a title: on a
+     * light insert such a scene is an empty screen with one word, so it keeps the clip playing instead.
+     */
+    fun bare(sc: SScene): Boolean {
+        if (sc.media.isNotBlank() || sc.shapes.isNotEmpty() || sc.scheme != null || Studio.isTpl(sc.kind)) return false
+        if (sc.kind == "text") return true
+        return sc.kind !in listOf("step", "stat", "big", "quote", "chart", "compare") && sc.items.size <= 1 && sc.title.isBlank()
+    }
+
+    /**
+     * Clip of every scene for the montage: a bare scene ([bare]) without a ready clip of its own continues the clip
+     * before it (the first ones take the next clip), so the video never drops to an empty screen.
+     */
+    fun effectiveClips(scenes: List<SScene>, ready: Set<String>): List<String> {
+        val own = scenes.map { it.clip.takeIf { c -> c in ready } ?: "" }
+        val out = own.toMutableList()
+        var last = ""
+        for (i in scenes.indices) {
+            if (out[i].isNotEmpty()) last = out[i] else if (bare(scenes[i])) out[i] = last
+        }
+        val first = own.indexOfFirst { it.isNotEmpty() }
+        if (first > 0) for (i in 0 until first) if (out[i].isEmpty() && bare(scenes[i])) out[i] = own[first]
+        return out
+    }
+
     /** Index of the slot playing at [tMs], or −1. */
     fun slotAt(slots: List<ClipSlot>, tMs: Long): Int {
         var lo = 0

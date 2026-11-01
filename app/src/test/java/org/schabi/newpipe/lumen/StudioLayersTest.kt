@@ -21,8 +21,8 @@ class StudioLayersTest {
 
     @Test
     fun scaleIsClamped() {
-        assertEquals(0.3f, StudioLayers.scale(5), 1e-4f)
-        assertEquals(0.6f, StudioLayers.scale(60), 1e-4f)
+        assertEquals(0.7f, StudioLayers.scale(5), 1e-4f)
+        assertEquals(0.8f, StudioLayers.scale(80), 1e-4f)
         assertEquals(1f, StudioLayers.scale(300), 1e-4f)
     }
 
@@ -35,6 +35,15 @@ class StudioLayersTest {
         assertEquals(0.5f, StudioLayers.overY(0.6f, false), 1e-4f)
         assertEquals(0.42f, StudioLayers.overY(1f, true), 1e-4f)
         assertTrue(StudioLayers.overY(0.3f, true) < StudioLayers.overY(0.75f, true))
+    }
+
+    @Test
+    fun readableScale() {
+        assertEquals(0.8f, StudioLayers.readable(0.3f, "icons", 4), 1e-4f)
+        assertEquals(0.8f, StudioLayers.readable(0.5f, "scheme", 0), 1e-4f)
+        assertEquals(0.7f, StudioLayers.readable(0.3f, "big", 1), 1e-4f)
+        assertEquals(0.9f, StudioLayers.readable(0.9f, "icons", 4), 1e-4f)
+        assertEquals(1f, StudioLayers.readable(1.4f, "big", 1), 1e-4f)
     }
 
     @Test

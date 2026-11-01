@@ -151,6 +151,58 @@ class StudioTemplatesTest {
     }
 
     @Test
+    fun variablesInAnyCaseAndLeftovers() {
+        val get = { v: String -> if (v == "key") "лизинг" else if (v == "num") "2" else "" }
+        assertEquals("📍 лизинг", StudioMotionTpl.vars("📍 \$KEY", get))
+        assertEquals("шаг 2: лизинг", StudioMotionTpl.vars("шаг \$Num: \$key", get))
+        // unknown or unfilled variables never reach the screen
+        assertEquals("📍", StudioMotionTpl.vars("📍 \$KEYWORD {{x}}", get))
+        assertEquals("цена \$5", StudioMotionTpl.vars("цена \$5", get))
+        assertEquals("Итого: лизинг.", StudioMotionTpl.vars("Итого: \$key.", get))
+        assertEquals("Итого: .", StudioMotionTpl.vars("Итого: \$foo.bar.", get))
+        assertTrue(StudioMotionTpl.readable("2 шага"))
+        assertTrue(!StudioMotionTpl.readable("📍 ✅ —"))
+    }
+
+    private val tagTpl = """{"lumen":"motion","id":"tag","layers":[
+        {"el":"group","keys":[{"t":0,"x":0.5,"y":0.3}],"children":[{"el":"rect","w":0.4,"h":0.1},{"el":"text","text":"📍 ${'$'}KEY"}]},
+        {"el":"text","text":"${'$'}title","keys":[{"t":0}]}]}"""
+
+    @Test
+    fun emptyTextDropsItsFrame() {
+        val t = StudioMotionTpl.parse(tagTpl).value!!
+        val w = words("Машины с торгов и лизинга")
+        val sc = SScene(w.joinToString(" ") { it.text }, "tpl:tag", "Скрытый рынок")
+        // key word known: frame + text with the word put in (variable written in capitals)
+        val full = StudioMotionTpl.compile(t, sc, w, w.indices, 0, 3000, 4)
+        assertEquals(listOf("rect", "text", "text"), full.map { it.first.el })
+        assertEquals("📍 лизинга", full[1].first.text)
+        // no key word: the tag would be an empty box with a pin, so the whole group goes
+        val none = StudioMotionTpl.compile(t, sc, w, w.indices, 0, 3000, null)
+        assertEquals(listOf("Скрытый рынок"), none.map { it.first.text })
+        assertTrue(none.none { '$' in it.first.text })
+    }
+
+    @Test
+    fun popsFillTheKeyWord() {
+        val tpl = StudioEditTpl.parse("""{"lumen":"edit","id":"p","pace":{"sceneWords":[3,8]},
+            "rules":[{"if":"first","do":{"cues":["pop:${'$'}KEY:📍@key","pop:${'$'}TITLE@start"]}},{"if":"else","do":{"kind":"text"}}]}""").value!!
+        val w = words("Почти никто не знает про закрытые аукционы машин.")
+        val pops = StudioEditTpl.direct(tpl, w).scenes[0].cues.filter { it.type == "pop" }
+        assertEquals(1, pops.size)
+        assertTrue(pops[0].text.isNotBlank() && '$' !in pops[0].text)
+        assertEquals("📍", pops[0].icon)
+    }
+
+    @Test
+    fun directorShapesLoseVariables() {
+        val o = JSONObject("""{"el":"text","text":"${'$'}KEY","keys":[{"at":0}]}""")
+        assertNull(StudioKeys.shapeOf(o))
+        val ok = StudioKeys.shapeOf(JSONObject("""{"el":"text","text":"40% ${'$'}num","keys":[{"at":0}]}"""))!!
+        assertEquals("40%", ok.text)
+    }
+
+    @Test
     fun jsonPatch() {
         val doc = JSONObject("""{"name":"A","layers":[{"el":"ring","keys":[{"t":0}]},{"el":"line"}]}""")
         val ops = JSONArray("""[{"op":"replace","path":"/name","value":"B"},{"op":"add","path":"/layers/1","value":{"el":"arrow"}},

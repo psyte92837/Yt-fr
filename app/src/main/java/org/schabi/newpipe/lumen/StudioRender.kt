@@ -79,7 +79,7 @@ class StudioPlan(
     /** What is drawn over the picture: subtitles and/or schemes. */
     val layers: StudioLayers = StudioLayers.ALL,
     /** Size of a scheme over a background (video, clip, photo), fraction of its full-screen size. */
-    val overScale: Float = 0.6f,
+    val overScale: Float = 0.8f,
     /** Look of the info-schemes (null = auto from the palette) and where they go in a montage. */
     val schemeStyle: SchemeStyle? = null,
     val schemePlace: String = "overlay",
@@ -135,7 +135,7 @@ class StudioPlan(
             script: SScript, words: List<SWord>, totalMs: Long, style: StudioStyle, accent: Int,
             ranges: List<IntRange>? = null, overlay: Boolean = false, zooms: Boolean = true, transitions: Boolean = true,
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
-            templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.6f,
+            templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.8f,
             schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto",
             toonSchemes: String = "board"
         ): StudioPlan {
@@ -722,8 +722,9 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         if (a <= 0f) return
         list.forEachIndexed { k, (ms, cue) ->
             if (tMs < ms) return@forEachIndexed
-            val label = (cue.icon + " " + cue.text.uppercase()).trim()
-            if (label.isEmpty()) return@forEachIndexed
+            val text = StudioMotionTpl.vars(cue.text) { "" }
+            if (!StudioMotionTpl.readable(text)) return@forEachIndexed
+            val label = (cue.icon + " " + text.uppercase()).trim()
             val p = StudioMotion.at(tMs, ms, 460) { StudioMotion.spring(it) }
             val cx = if (wide) w * 0.80f else w / 2f
             val cy = if (wide) h * (0.17f + 0.16f * k) else h * (0.31f + 0.075f * k)
@@ -964,7 +965,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
      */
     private fun overVisual(c: Canvas, sc: SScene, i: Int, local: Long, sceneMs: Long, a: Float) {
         if (!plan.graphics || a <= 0f || !StudioLayers.hasScheme(sc.kind, sc.items.size)) return
-        val k = plan.overScale
+        val k = StudioLayers.readable(plan.overScale, sc.kind, sc.items.size)
         val cy = h * StudioLayers.overY(k, plan.subs)
         c.save()
         c.scale(k, k, w / 2f, cy)

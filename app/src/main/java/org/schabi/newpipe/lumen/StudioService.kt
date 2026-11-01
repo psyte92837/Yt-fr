@@ -59,7 +59,8 @@ object StudioJob {
         val samples = (r.plan.totalMs * voice.rate / 1000).toInt()
         var base = Studio.fit(voice.data, samples)
         if (r.sfx) {
-            val events = StudioSfx.events(r.plan.script, r.plan.times, r.plan.words)
+            val own = StudioSfx.events(r.plan.script, r.plan.times, r.plan.words)
+            val events = if (r.plan.style == StudioStyle.EXPLAIN) StudioExplain.merge(own, StudioExplain.sfx(r.plan.times, r.plan.chapters)) else own
             if (events.isNotEmpty()) {
                 progress(t("Звуки эффектов", "Sound effects"))
                 base = StudioSfx.mix(base, voice.rate, events)

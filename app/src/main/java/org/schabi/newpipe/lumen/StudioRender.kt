@@ -49,7 +49,8 @@ import kotlin.math.sin
  * Look of the video. DARK: kinetic word groups on a dark screen; LIGHT: headline + one big word at a time
  * on a light screen; VIDEO: the speaker's own video with one word at a time, graphics as light inserts or cards on top.
  */
-enum class StudioStyle { DARK, LIGHT, VIDEO }
+/** DARK, LIGHT, VIDEO (own video or clips) and EXPLAIN — the explainer «Разбор» (see [StudioExplain]). */
+enum class StudioStyle { DARK, LIGHT, VIDEO, EXPLAIN }
 
 /** Everything needed to draw any frame of the video. */
 class StudioPlan(
@@ -127,6 +128,8 @@ class StudioPlan(
     }
 
     /** Stickers of every scene with their time. */
+    /** EXPLAIN style: scenes that open a numbered chapter. */
+    val chapters: List<Int> by lazy { if (style == StudioStyle.EXPLAIN) StudioExplain.chapters(script.scenes, times) else emptyList() }
     val pops: List<List<Pair<Long, SCue>>> = times.map { st -> script.scenes.getOrNull(st.scene)?.cues.orEmpty().filter { it.type == "pop" }.map { cueMs(st, it) to it } }
 
     companion object {
@@ -142,8 +145,11 @@ class StudioPlan(
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
-            val single = style != StudioStyle.DARK && cast == null
-            val caps = ranges.map { Studio.captions(words, it, maxWords = if (single) 1 else 4) }
+            val single = style != StudioStyle.DARK && style != StudioStyle.EXPLAIN && cast == null
+            val caps = ranges.map {
+                if (style == StudioStyle.EXPLAIN && cast == null) Studio.captions(words, it, StudioExplain.CAPTION_WORDS, StudioExplain.CAPTION_CHARS)
+                else Studio.captions(words, it, maxWords = if (single) 1 else 4)
+            }
             return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes))
         }
     }
@@ -161,6 +167,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     /** Dark or light colours; the VIDEO style switches between them per scene. */
     private fun palette(isDark: Boolean) {
         dark = isDark
+        if (dark && plan.style == StudioStyle.EXPLAIN) {
+            // graphite with cool cards (the explainer)
+            bg = 0xFF0B0D12.toInt(); card = 0xFF151922.toInt(); stroke = 0xFF2A303C.toInt(); ink = 0xFFF4F6FA.toInt(); muted = 0xFF8C96AA.toInt()
+            return
+        }
         bg = if (dark) 0xFF131417.toInt() else 0xFFF1F3F8.toInt()
         card = if (dark) 0xFF1D1F24.toInt() else 0xFFFFFFFF.toInt()
         stroke = if (dark) 0xFF2E3138.toInt() else 0xFFE2E5EC.toInt()
@@ -168,8 +179,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         muted = if (dark) 0xFF9AA0A9.toInt() else 0xFF6B7280.toInt()
     }
 
+    /** Styles drawn on a dark screen. */
+    private val darkStyle = plan.style == StudioStyle.DARK || plan.style == StudioStyle.EXPLAIN
+
     init {
-        palette(plan.style == StudioStyle.DARK)
+        palette(darkStyle)
     }
     private val green = 0xFF34C759.toInt()
     private val accent = plan.accent
@@ -547,6 +561,10 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             if (i >= 0) drawOnVideo(c, i, tMs)
             return
         }
+        if (plan.style == StudioStyle.EXPLAIN && plan.cast == null) {
+            explain(c, i, tMs)
+            return
+        }
         c.drawColor(bg)
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), if (dark) glowDark else glowLight)
         if (plan.cast != null) stage(c)
@@ -576,9 +594,196 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         if (full != null && plan.cast == null && plan.overlay) overVisual(c, plan.script.scenes[i], i, tMs - st.startMs, st.endMs - st.startMs, a)
         shapes(c, i, tMs, a)
         pops(c, i, tMs, a)
-        if (full != null) palette(plan.style == StudioStyle.DARK)
+        if (full != null) palette(darkStyle)
         c.restore()
         if (plan.cast != null) characters(c, i, tMs)
+    }
+
+    // ---------- explainer («Разбор», StudioStyle.EXPLAIN) ----------
+
+    private val exHeavy = Typeface.create("sans-serif-black", Typeface.NORMAL)
+    private val exText = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = exHeavy; textAlign = Paint.Align.CENTER }
+    private val exLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+        letterSpacing = 0.16f
+    }
+    private val exOutline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = exHeavy; textAlign = Paint.Align.CENTER; style = Paint.Style.STROKE; strokeJoin = Paint.Join.ROUND
+    }
+    private val exGlow = Paint().apply {
+        shader = RadialGradient(w / 2f, h * 0.3f, max(w, h) * 0.6f, (accent and 0x00FFFFFF) or 0x1E000000, 0, Shader.TileMode.CLAMP)
+    }
+    private val exShade = Paint().apply {
+        shader = android.graphics.LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(0xE60B0D12.toInt(), 0x990B0D12.toInt(), 0x990B0D12.toInt(), 0xF20B0D12.toInt()),
+            floatArrayOf(0f, 0.25f, 0.65f, 1f), Shader.TileMode.CLAMP)
+    }
+    private val exBlur = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    /** A frame of the explainer: background, chapter card or scheme of the scene, the chapter tag and short captions. */
+    private fun explain(c: Canvas, i: Int, tMs: Long) {
+        explainBg(c, i, tMs)
+        if (i < 0) return
+        val st = plan.times[i]
+        val sc = plan.script.scenes[i]
+        val local = tMs - st.startMs
+        val sceneMs = st.endMs - st.startMs
+        val a = alphaAt(i, tMs)
+        val chapter = plan.chapters.indexOf(i)
+        c.save()
+        val z = StudioMotion.punch(tMs, plan.zoomMs.getOrElse(i) { emptyList() }, 0.05f) * (1f + 0.02f * pulseAt(tMs))
+        if (z != 1f) c.scale(z, z, w / 2f, h / 2f)
+        // everything rises a little into place
+        c.translate(0f, (1 - Studio.appear(local, 0, 420)) * 3.5f * u)
+        if (chapter >= 0) chapterCard(c, chapter, sc, local, a)
+        else {
+            val graphic = plan.graphics && StudioLayers.hasScheme(sc.kind, sc.items.size)
+            if (plan.graphics && sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote", "big", "scheme"))
+                kicker(c, sc.title.uppercase(), h * (if (wide) 0.12f else 0.2f), muted, a * Studio.appear(local, 0, 300))
+            if (graphic) visual(c, sc, i, w / 2f, h * (if (wide) 0.5f else 0.47f), local, sceneMs, a)
+            else if (plan.graphics) bigWords(c, StudioExplain.headline(plan.words, st.words), local, a)
+            shapes(c, i, tMs, a)
+            pops(c, i, tMs, a)
+        }
+        c.restore()
+        chapterTag(c, tMs)
+        if (chapter < 0) shortCaption(c, i, tMs, a)
+    }
+
+    /** Graphite screen with an accent glow; a B-roll photo or clip of the scene shows through blurred and dark. */
+    private fun explainBg(c: Canvas, i: Int, tMs: Long) {
+        c.drawColor(bg)
+        val bmp = if (i >= 0) photo(i) else null
+        if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+            // cheap strong blur: shrink a lot, then stretch back with filtering
+            val small = Bitmap.createScaledBitmap(bmp, max(4, bmp.width / 28), max(4, bmp.height / 28), true)
+            val s = max(w.toFloat() / small.width, h.toFloat() / small.height)
+            val dw = small.width * s
+            val dh = small.height * s
+            exBlur.alpha = (255 * alphaAt(i, tMs)).toInt()
+            c.drawBitmap(small, null, RectF((w - dw) / 2, (h - dh) / 2, (w + dw) / 2, (h + dh) / 2), exBlur)
+            small.recycle()
+        }
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), exShade)
+        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), exGlow)
+    }
+
+    /** Small tracked capitals above a scheme. */
+    private fun kicker(c: Canvas, s: String, y: Float, color: Int, a: Float) {
+        if (a <= 0f || s.isBlank()) return
+        exLabel.textSize = 3.1f * u
+        var txt = s
+        while (exLabel.measureText(txt) > w * 0.86f && txt.length > 4) txt = txt.dropLast(2).trimEnd() + "…"
+        exLabel.color = color
+        exLabel.alpha = (255 * a).toInt()
+        c.drawText(txt, w / 2f, y, exLabel)
+    }
+
+    /** Chapter card: «ВОПРОС 02 / 04», a big outlined number, an accent bar and the question in capitals. */
+    private fun chapterCard(c: Canvas, k: Int, sc: SScene, local: Long, a: Float) {
+        if (!plan.graphics) return
+        val n = plan.chapters.size
+        val top = if (wide) 0.14f else 0.22f
+        kicker(c, t("ВОПРОС", "QUESTION") + " %02d / %02d".format(k + 1, n), h * top, muted, a * Studio.appear(local, 80, 300))
+        val p = Studio.appear(local, 0, 520)
+        exOutline.textSize = (if (wide) 22f else 30f) * u
+        exOutline.strokeWidth = 0.55f * u
+        exOutline.color = accent
+        exOutline.alpha = (255 * a * p).toInt()
+        val ny = h * (top + 0.17f)
+        c.save()
+        val sz = 1.15f - 0.15f * p
+        c.scale(sz, sz, w / 2f, ny)
+        c.drawText("%02d".format(k + 1), w / 2f, ny, exOutline)
+        c.restore()
+        val bw = 16f * u * Studio.appear(local, 200, 400)
+        fill.color = accent
+        fill.alpha = (255 * a).toInt()
+        val by = ny + 4.5f * u
+        if (bw > 0f) c.drawRoundRect(RectF(w / 2f - bw / 2, by, w / 2f + bw / 2, by + 1f * u), 0.5f * u, 0.5f * u, fill)
+        val lines = StudioExplain.title(sc.say)
+        exText.textSize = (if (wide) 6f else 7.6f) * u
+        while (lines.any { exText.measureText(it) > w * 0.88f } && exText.textSize > 4f * u) exText.textSize *= 0.92f
+        lines.forEachIndexed { li, line ->
+            val lp = Studio.appear(local, 250L + li * 100, 450)
+            exText.color = ink
+            exText.alpha = (255 * a * lp).toInt()
+            c.drawText(line, w / 2f, by + 11f * u + li * exText.textSize * 1.15f + (1 - lp) * 4f * u, exText)
+        }
+    }
+
+    /** A scene without a scheme: its key words big, the key word in the accent colour. */
+    private fun bigWords(c: Canvas, head: Pair<List<String>, Int>, local: Long, a: Float) {
+        val (lines, keyLine) = head
+        if (lines.isEmpty()) return
+        exText.textSize = (if (wide) 8f else 11f) * u
+        while (lines.any { exText.measureText(it) > w * 0.88f } && exText.textSize > 4f * u) exText.textSize *= 0.92f
+        val lh = exText.textSize * 1.12f
+        val y0 = h * 0.42f - lh * (lines.size - 1) / 2f
+        lines.forEachIndexed { li, line ->
+            val lp = Studio.appear(local, 60L + li * 120, 460)
+            exText.color = if (li == keyLine) accent else ink
+            exText.alpha = (255 * a * lp).toInt()
+            c.drawText(line, w / 2f, y0 + li * lh + (1 - lp) * 5f * u, exText)
+        }
+    }
+
+    /** Progress of the chapters on top: one dash per chapter, the passed ones in the accent, the number and name. */
+    private fun chapterTag(c: Canvas, tMs: Long) {
+        val n = plan.chapters.size
+        if (n == 0 || !plan.graphics) return
+        val k = StudioExplain.chapterAt(plan.chapters, plan.times, tMs)
+        if (k < 0) return
+        val start = plan.times.firstOrNull { it.scene == plan.chapters[k] }?.startMs ?: return
+        val a = Studio.appear(tMs, start, 400)
+        val x0 = 6f * u
+        val y0 = if (wide) 5f * u else h * 0.075f
+        for (j in 0 until n) {
+            fill.color = if (j <= k) accent else 0x33FFFFFF
+            fill.alpha = ((if (j <= k) 255 else 0x33) * a).toInt()
+            c.drawRoundRect(RectF(x0 + j * 5f * u, y0, x0 + j * 5f * u + 3.8f * u, y0 + 0.8f * u), 0.4f * u, 0.4f * u, fill)
+        }
+        exLabel.textAlign = Paint.Align.LEFT
+        exLabel.textSize = 2.5f * u
+        val num = "%02d".format(k + 1)
+        exLabel.color = accent
+        exLabel.alpha = (255 * a).toInt()
+        c.drawText(num, x0, y0 + 4.4f * u, exLabel)
+        exLabel.color = ink
+        exLabel.alpha = (255 * a).toInt()
+        c.drawText(StudioExplain.label(plan.script.scenes[plan.chapters[k]].say), x0 + exLabel.measureText(num) + 1.6f * u, y0 + 4.4f * u, exLabel)
+        exLabel.textAlign = Paint.Align.CENTER
+    }
+
+    /** 1–3 words at a time low on the screen; the word being said in the accent colour, a soft shadow under all. */
+    private fun shortCaption(c: Canvas, scene: Int, tMs: Long, a: Float) {
+        if (!plan.subs || a <= 0f) return
+        val groups = plan.captions.getOrNull(scene) ?: return
+        val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
+        if (tMs > plan.words[g.last].endMs + 900) return
+        val texts = g.map { plan.words[it].text.trim { ch -> ch == ',' || ch == '.' || ch == ';' || ch == ':' || ch == '—' } }
+        val active = g.lastOrNull { plan.words[it].startMs - 30 <= tMs } ?: g.first
+        exText.textSize = (if (wide) 5.6f else 7.2f) * u
+        val space = exText.measureText(" ")
+        fun total() = texts.sumOf { exText.measureText(it).toDouble() }.toFloat() + space * (texts.size - 1)
+        while (total() > w * 0.9f && exText.textSize > 3.5f * u) exText.textSize *= 0.92f
+        val p = Studio.appear(tMs, plan.words[g.first].startMs - 60, 140)
+        val y = h * (if (wide) 0.86f else 0.78f)
+        c.save()
+        val k = 0.92f + 0.08f * p
+        c.scale(k, k, w / 2f, y)
+        exText.textAlign = Paint.Align.LEFT
+        exText.setShadowLayer(1.8f * u, 0f, 0.5f * u, 0xD0000000.toInt())
+        var x = (w - total()) / 2
+        g.forEachIndexed { j, wi ->
+            exText.color = if (wi == active) accent else 0xFFFFFFFF.toInt()
+            exText.alpha = (255 * a * p).toInt()
+            c.drawText(texts[j], x, y + (1 - p) * 1.5f * u, exText)
+            x += exText.measureText(texts[j]) + space
+        }
+        exText.clearShadowLayer()
+        exText.textAlign = Paint.Align.CENTER
+        c.restore()
     }
 
     // ---------- cartoon ----------

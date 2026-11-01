@@ -1004,8 +1004,8 @@ class StudioActivity : LumenBase() {
 
     private fun videoCard(c: Col) = c.card {
         add(text(ctx, t("4. Ролик", "4. Video"), Type.TITLE_M, bold = true), 0)
-        val styles = listOfNotNull(StudioStyle.DARK, StudioStyle.LIGHT, if (montageReady()) StudioStyle.VIDEO else null)
-        val labels = listOf(t("Тёмный", "Dark"), t("Светлый", "Light"), t("Монтаж", "Montage")).take(styles.size)
+        val styles = listOfNotNull(StudioStyle.DARK, StudioStyle.LIGHT, StudioStyle.EXPLAIN, if (montageReady()) StudioStyle.VIDEO else null)
+        val labels = listOf(t("Тёмный", "Dark"), t("Светлый", "Light"), t("Разбор", "Explainer"), t("Монтаж", "Montage")).take(styles.size)
         if (cutMontage()) muted(t("Монтаж нарезки: клипы идут на своих сценах, между ними — графика, внизу слово под голос. Звук клипов выключен.",
             "Cut montage: clips play on their scenes, graphics in between, the spoken word below. Clip sound is off."))
         else add(segBar(ctx, labels, styles.indexOf(currentStyle()).coerceAtLeast(0)) {
@@ -1015,6 +1015,8 @@ class StudioActivity : LumenBase() {
         if (!cutMontage()) muted(when (currentStyle()) {
             StudioStyle.DARK -> t("Слова появляются группами с размытием, схемы из эмодзи на тёмном фоне.", "Word groups blur in, emoji schemes on a dark screen.")
             StudioStyle.LIGHT -> t("Заголовок капсом и одно крупное слово под голос на светлом фоне.", "A capital headline and one big word at a time on a light screen.")
+            StudioStyle.EXPLAIN -> t("Современный разбор: графитовый фон, схемы на карточках, вопросы голоса — главы с номерами и прогрессом сверху, субтитры по 1–3 слова, звуки на склейках. B-roll — размытым фоном.",
+                "Modern explainer: graphite screen, schemes on cards, the voice's questions become numbered chapters with progress on top, 1–3 word captions, sounds on cuts. B-roll as a blurred background.")
             StudioStyle.VIDEO -> if (videoReady()) t("Ваше видео, слово под голос внизу, графика вставками.", "Your video, the spoken word below, graphics cut in.")
             else t("Фоновые клипы по кругу под озвучку, слово внизу, графика вставками.", "Background clips loop under the voice-over, the word below, graphics cut in.")
         })
@@ -2681,6 +2683,7 @@ class StudioActivity : LumenBase() {
         when (e.style) {
             "dark" -> StudioPrefs.style = StudioStyle.DARK.name
             "light" -> StudioPrefs.style = StudioStyle.LIGHT.name
+            "explain" -> StudioPrefs.style = StudioStyle.EXPLAIN.name
         }
         directBy(StudioApproach.RULES, e)
     }

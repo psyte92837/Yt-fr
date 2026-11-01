@@ -1206,7 +1206,7 @@ val STUDIO_PROMPTS = linkedMapOf(
     "studio_tpl_edit" to (
         "Ты режиссёр монтажа. Придумай подход к монтажу роликов по запросу: \"{ask}\".\n" +
             "Протокол lumen.edit v1 — подход к монтажу всего ролика без AI. Поля: pace {sceneWords:[мин,макс] слов в сцене, cutOnPause: мс паузы для новой сцены}, " +
-            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light или пусто), " +
+            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light, explain — разбор с главами, или пусто), " +
             "rules — по порядку, срабатывают все подходящие (поздние перекрывают), else — если не подошло ни одно: " +
             "if — условия через & (с ! — отрицание): first, last, number, step, compare, list, quote, emoji, question, long (10+ слов), short (до 4), pause (пауза перед сценой), loud, keyword:слово|слово, every:N; " +
             "do — kind (text step icons list flow cycle big stat quote chart compare), tpl (id своего моушн-шаблона), transition (fade slide zoom whip none), " +
@@ -1229,7 +1229,7 @@ val STUDIO_PROMPTS = linkedMapOf(
             "x, y, s (масштаб), r (градусы), o (0..1), draw (доля прорисовки линии) — числа или формулы с i, n, num, + - * / ( ), min, max, abs, sin, cos, clamp, round, odd; " +
             "ease — linear, in, out, inOut, back, spring; пропущенные значения берутся из прошлого кадра. До 24 слоёв, до 12 ключей. " +
             "Протокол lumen.edit v1 — подход к монтажу всего ролика без AI. Поля: pace {sceneWords:[мин,макс] слов в сцене, cutOnPause: мс паузы для новой сцены}, " +
-            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light или пусто), " +
+            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light, explain — разбор с главами, или пусто), " +
             "rules — по порядку, срабатывают все подходящие (поздние перекрывают), else — если не подошло ни одно: " +
             "if — условия через & (с ! — отрицание): first, last, number, step, compare, list, quote, emoji, question, long (10+ слов), short (до 4), pause (пауза перед сценой), loud, keyword:слово|слово, every:N; " +
             "do — kind (text step icons list flow cycle big stat quote chart compare), tpl (id своего моушн-шаблона), transition (fade slide zoom whip none), " +
@@ -1244,7 +1244,7 @@ val STUDIO_PROMPTS = linkedMapOf(
             "Если в видео есть характерная графика (списки, цифры, подписи, стрелки, рамки), сделай для неё 1-2 моушн-шаблона и сошлись на них из правил (tpl). " +
             "Не копируй чужие тексты, логотипы и персонажей — только приёмы.\n" +
             "Протокол lumen.edit v1 — подход к монтажу всего ролика без AI. Поля: pace {sceneWords:[мин,макс] слов в сцене, cutOnPause: мс паузы для новой сцены}, " +
-            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light или пусто), " +
+            "camera {punchEvery: зум на главном слове каждой N-й сцены, 0 — только по правилам}, style (dark, light, explain — разбор с главами, или пусто), " +
             "rules — по порядку, срабатывают все подходящие (поздние перекрывают), else — если не подошло ни одно: " +
             "if — условия через & (с ! — отрицание): first, last, number, step, compare, list, quote, emoji, question, long (10+ слов), short (до 4), pause (пауза перед сценой), loud, keyword:слово|слово, every:N; " +
             "do — kind (text step icons list flow cycle big stat quote chart compare), tpl (id своего моушн-шаблона), transition (fade slide zoom whip none), " +

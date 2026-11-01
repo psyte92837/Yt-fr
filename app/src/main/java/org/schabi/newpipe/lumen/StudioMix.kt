@@ -30,10 +30,29 @@ data class MixItem(
 }
 
 object StudioMix {
-    val PIECES = listOf(1_000L, 2_000L, 3_000L, 5_000L)
+    val PIECES = listOf(500L, 1_000L, 1_500L, 2_000L, 3_000L, 5_000L)
     const val DEFAULT_PIECE_MS = 2_000L
     /** A piece shorter than this is not worth a cut. */
-    const val MIN_PIECE_MS = 500L
+    const val MIN_PIECE_MS = 300L
+
+    /** Own piece length typed in seconds ("1.5", "1,5", "2 с") → ms within [MIN_PIECE_MS]..[StudioCuts.MAX_CLIP_MS]; null if not a number. */
+    fun parsePiece(s: String): Long? {
+        val v = s.trim().lowercase().removeSuffix("с").removeSuffix("s").trim().replace(',', '.').toDoubleOrNull() ?: return null
+        if (v.isNaN() || v <= 0) return null
+        return (v * 1000).toLong().coerceIn(MIN_PIECE_MS, StudioCuts.MAX_CLIP_MS)
+    }
+
+    /** 500 → "0.5 с", 2000 → "2 с". */
+    fun pieceLabel(ms: Long): String =
+        (if (ms % 1000 == 0L) (ms / 1000).toString() else "%.1f".format(java.util.Locale.US, ms / 1000.0).trimEnd('0').trimEnd('.')) + " с"
+
+    /**
+     * Was the storyboard changed by hand since the mix was made with [pieceMs] and [seed]: order, deletions,
+     * ticks or schemes? Such work is lost when the pieces are cut again.
+     */
+    fun edited(items: List<MixItem>, clips: List<Pair<String, Long>>, pieceMs: Long, seed: Long): Boolean =
+        items.any { it.marked || it.scheme != null } ||
+            items.map { it.key to it.lenMs } != mix(clips, pieceMs, seed).map { it.key to it.lenMs }
 
     /** Pieces of a clip of usable length [clipMs]: equal parts close to [pieceMs]. */
     fun pieces(clipId: String, clipMs: Long, pieceMs: Long): List<MixItem> {

@@ -40,6 +40,19 @@ object StudioCutsLoad {
         return ok.filter { it.height in 1..maxHeight }.maxByOrNull { it.height } ?: ok.minByOrNull { it.height }
     }
 
+    /**
+     * Stream for a quick look at a found video: the lowest progressive stream with sound, else the lowest
+     * video-only one (network; worker thread).
+     */
+    fun previewUrl(url: String): String {
+        val info = StreamInfo.getInfo(ServiceList.YouTube, url)
+        fun low(list: List<VideoStream>) = list.filter { it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+            .minByOrNull { if (it.height > 0) it.height else Int.MAX_VALUE }
+        val pick = low(info.videoStreams.filter { !it.isVideoOnly }) ?: low(info.videoOnlyStreams)
+            ?: error(t("Нет потока для просмотра", "No stream to watch"))
+        return pick.content
+    }
+
     /** Downloads and cuts [c] into [dir]; returns it with the file, the lead and the length. */
     fun fetch(c: SClip, dir: File, maxHeight: Int, cancelled: () -> Boolean, progress: (String) -> Unit): SClip {
         progress(t("${c.id}: ссылка на поток…", "${c.id}: getting the stream…"))

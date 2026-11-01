@@ -130,4 +130,29 @@ class StudioMixTest {
         // marks and schemes do not change the picture order
         assertEquals(StudioMix.signature(a, "9:16"), StudioMix.signature(a.map { it.copy(marked = true) }, "9:16"))
     }
+
+    @Test
+    fun ownPieceLength() {
+        assertEquals(1_500L, StudioMix.parsePiece("1,5"))
+        assertEquals(800L, StudioMix.parsePiece("0.8 с"))
+        assertEquals(StudioMix.MIN_PIECE_MS, StudioMix.parsePiece("0.1"))
+        assertEquals(StudioCuts.MAX_CLIP_MS, StudioMix.parsePiece("90"))
+        assertEquals(null, StudioMix.parsePiece("abc"))
+        assertEquals(null, StudioMix.parsePiece("0"))
+        assertEquals("0.5 с", StudioMix.pieceLabel(500))
+        assertEquals("1.5 с", StudioMix.pieceLabel(1_500))
+        assertEquals("2 с", StudioMix.pieceLabel(2_000))
+    }
+
+    @Test
+    fun knowsHandEdits() {
+        val clips = listOf("c1" to 6_000L, "c2" to 4_000L)
+        val m = StudioMix.mix(clips, 2_000, 3)
+        assertTrue(!StudioMix.edited(m, clips, 2_000, 3))
+        assertTrue(StudioMix.edited(StudioMix.move(m, 0, 2), clips, 2_000, 3))
+        assertTrue(StudioMix.edited(m.drop(1), clips, 2_000, 3))
+        assertTrue(StudioMix.edited(m.mapIndexed { i, it -> if (i == 0) it.copy(marked = true) else it }, clips, 2_000, 3))
+        // checked against the mix of another length it does not match
+        assertTrue(StudioMix.edited(m, clips, 1_000, 3))
+    }
 }

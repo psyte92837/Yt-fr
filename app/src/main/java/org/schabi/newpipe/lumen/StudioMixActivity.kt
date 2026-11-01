@@ -292,10 +292,35 @@ class StudioMixActivity : LumenBase() {
         add(text(ctx, t("2. Микс", "2. Mix"), Type.TITLE_M, bold = true), 0)
         muted(t("Клипы режутся на куски и перемешиваются: два куска одного клипа не идут подряд.",
             "The clips are cut into pieces and shuffled: two pieces of one clip never go in a row."))
-        spinner(t("Длина куска", "Piece length"), StudioMix.PIECES.map { it to "${it / 1000} с" }, Prefs.pieceMs.takeIf { it in StudioMix.PIECES } ?: StudioMix.DEFAULT_PIECE_MS) {
-            Prefs.pieceMs = it
+        add(text(ctx, t("Длина куска — сразу для всех клипов", "Piece length — for all clips at once"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        val now = Prefs.pieceMs
+        val chips = (StudioMix.PIECES + now).distinct().sorted().map { ms ->
+            chip(ctx, StudioMix.pieceLabel(ms), ms == now) { if (busy.isEmpty() && ms != now) applyPiece(ms) }
+        } + chip(ctx, t("✎ Своя", "✎ Own")) {
+            if (busy.isEmpty()) prompt(t("Длина куска, секунд", "Piece length, seconds"), t("напр. 0.8 или 4", "e.g. 0.8 or 4"), (now / 1000.0).toString()) { v ->
+                val ms = StudioMix.parsePiece(v)
+                if (ms == null) toast(t("Нужно число секунд", "A number of seconds is needed")) else applyPiece(ms)
+            }
         }
+        chips(chips)
         if (busy.isEmpty() && items.isEmpty()) button(t("🔀 Смешать", "🔀 Mix"), primary = true) { shuffle() }
+    }
+
+    /** New piece length: every clip is cut again at once (same order of shuffle); hand edits are confirmed first. */
+    private fun applyPiece(ms: Long) {
+        val ready = readyClips().map { it.id to it.lenMs }
+        val old = Prefs.pieceMs
+        fun go() {
+            Prefs.pieceMs = ms
+            if (items.isNotEmpty() && ready.isNotEmpty()) saveItems(StudioMix.mix(ready, ms, Prefs.seed))
+            render()
+            if (items.isNotEmpty()) toast(t("Куски по ${StudioMix.pieceLabel(ms)}: кадров ${items.size}", "Pieces of ${StudioMix.pieceLabel(ms)}: ${items.size} frames"))
+        }
+        if (items.isNotEmpty() && StudioMix.edited(items, ready, old, Prefs.seed)) {
+            confirm(t("Перерезать все куски?", "Cut all pieces again?"),
+                t("Раскадровка соберётся заново по ${StudioMix.pieceLabel(ms)}: перестановки, удаления, отметки и схемы пропадут.",
+                    "The storyboard is rebuilt with ${StudioMix.pieceLabel(ms)} pieces: moves, deletions, ticks and schemes are lost."), t("Перерезать", "Cut")) { go() }
+        } else go()
     }
 
     private fun shuffle() {
@@ -863,6 +888,104 @@ class StudioMixActivity : LumenBase() {
 
     // ---------- clips ----------
 
+    /**
+     * Mini player for a quick look at a found video: the lowest quality stream (with sound when there is one),
+     * played through the NewPipe YouTube data source. Tap on the picture pauses; ⏪/⏩ jump 10 s.
+     */
+    private inner class MiniLook {
+        private val streams = HashMap<String, String>()
+        private var player: com.google.android.exoplayer2.ExoPlayer? = null
+        private var current = ""
+        private val surface = android.view.TextureView(this@StudioMixActivity)
+        private val frame = FrameLayout(this@StudioMixActivity).apply {
+            setBackgroundColor(0xFF000000.toInt())
+            addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER))
+            setOnClickListener { player?.let { p -> p.playWhenReady = !p.playWhenReady } }
+        }
+        private val state = text(this@StudioMixActivity, "", 12f, color = Palette.MUTED)
+        private val tick = object : Runnable {
+            override fun run() {
+                val p = player ?: return
+                if (current.isNotEmpty() && p.duration > 0) {
+                    state.text = StudioCuts.stamp(p.currentPosition) + " / " + StudioCuts.stamp(p.duration) + if (!p.playWhenReady) t(" · пауза", " · paused") else ""
+                }
+                frame.postDelayed(this, 500)
+            }
+        }
+        val view: LinearLayout = LinearLayout(this@StudioMixActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)))
+            addView(LinearLayout(this@StudioMixActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(btn(this@StudioMixActivity, "⏪ 10", style = BtnStyle.TEXT) { seek(-10_000) })
+                addView(state, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
+                addView(btn(this@StudioMixActivity, "10 ⏩", style = BtnStyle.TEXT) { seek(10_000) })
+            })
+        }
+
+        private fun seek(d: Long) {
+            val p = player ?: return
+            p.seekTo((p.currentPosition + d).coerceIn(0, if (p.duration > 0) maxOf(0, p.duration - 500) else Long.MAX_VALUE))
+        }
+
+        private fun exo(): com.google.android.exoplayer2.ExoPlayer = player ?: com.google.android.exoplayer2.ExoPlayer.Builder(this@StudioMixActivity).build().also { p ->
+            player = p
+            p.setVideoTextureView(surface)
+            p.addListener(object : com.google.android.exoplayer2.Player.Listener {
+                override fun onVideoSizeChanged(size: com.google.android.exoplayer2.video.VideoSize) {
+                    // keep the shape of the video inside the frame
+                    if (size.width <= 0 || size.height <= 0) return
+                    val fw = frame.width.takeIf { it > 0 } ?: return
+                    val fh = frame.height
+                    val k = minOf(fw.toFloat() / size.width, fh.toFloat() / (size.height / size.pixelWidthHeightRatio.coerceAtLeast(0.1f)))
+                    surface.layoutParams = FrameLayout.LayoutParams((size.width * k).toInt(), (size.height / size.pixelWidthHeightRatio.coerceAtLeast(0.1f) * k).toInt(), Gravity.CENTER)
+                }
+
+                override fun onPlayerError(error: com.google.android.exoplayer2.PlaybackException) {
+                    state.text = t("Не играет: ", "Cannot play: ") + (error.message ?: error.errorCodeName)
+                }
+            })
+            frame.post(tick)
+        }
+
+        fun play(url: String) {
+            current = url
+            state.text = t("Загрузка…", "Loading…")
+            player?.stop()
+            val ready = streams[url]
+            if (ready != null) return start(ready)
+            Lumen.async({ StudioCutsLoad.previewUrl(url) }, { e ->
+                if (current == url) state.text = (e.message ?: e.javaClass.simpleName).take(160)
+            }) { s ->
+                streams[url] = s
+                if (current == url && !isDestroyed) start(s)
+            }
+        }
+
+        private fun start(stream: String) {
+            val src = com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(
+                org.schabi.newpipe.player.datasource.YoutubeHttpDataSource.Factory().setRangeParameterEnabled(false).setRnParameterEnabled(true)
+            ).createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(stream))
+            val p = exo()
+            p.setMediaSource(src)
+            p.prepare()
+            p.playWhenReady = true
+        }
+
+        fun stop() {
+            current = ""
+            player?.stop()
+        }
+
+        fun release() {
+            current = ""
+            frame.removeCallbacks(tick)
+            player?.release()
+            player = null
+        }
+    }
+
     /** Search on YouTube by title: tick results in bulk and add them; the sheet stays open for more searches. */
     private fun findSheet() {
         var hits: List<CutHit> = emptyList()
@@ -879,19 +1002,46 @@ class StudioMixActivity : LumenBase() {
             allBtn.text = if (hits.isNotEmpty() && hits.all { it.url in marked }) t("☐ Снять все", "☐ Untick all") else t("☑ Отметить все", "☑ Tick all")
         }
 
+        // ---- quick look: one mini player, under the video being watched ----
+        val look = MiniLook()
+        var watching = ""
+        lateinit var fillRef: () -> Unit
+
+        fun watch(h: CutHit) {
+            if (watching == h.url) {
+                watching = ""
+                look.stop()
+            } else {
+                watching = h.url
+                look.play(h.url)
+            }
+            fillRef()
+        }
+
         fun fill() {
             box.removeAllViews()
+            (look.view.parent as? ViewGroup)?.removeView(look.view)
             val have = clips.map { it.url }.toSet()
             for (h in hits) {
                 val sub = listOf(h.channel, if (h.durationMs > 0) StudioCuts.stamp(h.durationMs) else "").filter { it.isNotBlank() }.joinToString(" · ")
                 val label = (if (h.url in have) "✅ " else "") + h.title + if (sub.isNotEmpty()) "\n$sub" else ""
-                box.addView(chk(this, label, h.url in marked) { on ->
-                    if (on) marked += h.url else marked -= h.url
-                    updateAdd()
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+                val line = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(chk(this@StudioMixActivity, label, h.url in marked) { on ->
+                        if (on) marked += h.url else marked -= h.url
+                        updateAdd()
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(btn(this@StudioMixActivity, if (watching == h.url) "■" else "▶", style = BtnStyle.TEXT) { watch(h) }.apply {
+                        contentDescription = t("Посмотреть", "Watch")
+                    })
+                }
+                box.addView(line, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+                if (watching == h.url) box.addView(look.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             }
             updateAdd()
         }
+        fillRef = { fill() }
 
         fun search(q: String) {
             if (q.isBlank()) return
@@ -903,15 +1053,17 @@ class StudioMixActivity : LumenBase() {
             }, { e -> info.text = (e.message ?: e.javaClass.simpleName).take(200) }) { found ->
                 hits = found
                 marked.clear()
+                watching = ""
+                look.stop()
                 info.text = if (found.isEmpty()) t("Ничего не нашлось. Попробуйте другие слова.", "Nothing found. Try other words.")
                 else t("Найдено: ${found.size}. Отметьте нужные.", "Found: ${found.size}. Tick the ones you need.")
                 fill()
             }
         }
 
-        bottomSheet(t("Найти видео для микса", "Find videos for the mix")) { _ ->
-            muted(t("Поиск по названию на YouTube. Отмеченные добавятся с 0:00 на 5 с; отрезок задайте кнопкой «⏱ Отрезок». Можно искать снова и добавлять ещё.",
-                "Search YouTube by title. Ticked ones are added from 0:00 for 5 s; set the piece with \"⏱ Piece\". You can search again and add more."))
+        bottomSheet(t("Найти видео для микса", "Find videos for the mix"), onDismiss = { look.release() }) { _ ->
+            muted(t("Поиск по названию на YouTube. ▶ — быстро посмотреть видео здесь же в низком качестве. Отмеченные добавятся с 0:00 на 5 с; отрезок задайте кнопкой «⏱ Отрезок». Можно искать снова и добавлять ещё.",
+                "Search YouTube by title. ▶ takes a quick look at a video right here in low quality. Ticked ones are added from 0:00 for 5 s; set the piece with \"⏱ Piece\". You can search again and add more."))
             val query = edit(t("Что искать", "What to search"))
             button(t("🔎 Искать", "🔎 Search"), style = BtnStyle.TONAL) { search(query.text.toString().trim()) }
             info = add(text(ctx, "", 13f, color = Palette.MUTED), 4)

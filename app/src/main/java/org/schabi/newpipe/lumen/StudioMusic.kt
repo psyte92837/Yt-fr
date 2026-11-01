@@ -23,6 +23,11 @@ object StudioMusic {
         OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
     }
 
+    /** Search answers are small: a catalog silent for 25 s is retried instead of waiting a minute. */
+    private val searchHttp by lazy {
+        http.newBuilder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS).build()
+    }
+
     private const val UA = "Lumen/1.0 (Android; open-source YouTube topic analyser)"
 
     fun search(source: String, query: String, commercial: Boolean): List<MusicHit> {
@@ -31,7 +36,9 @@ object StudioMusic {
                 ?: throw IllegalStateException(t("Нужен ключ Freesound", "A Freesound key is needed")))
             else -> StudioMusicCatalog.openverseUrl(query, commercial)
         }
-        val body = http.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute().use { r ->
+        val body = StudioMusicCatalog.retrying({ L.w("studio", "music search $source: ${it.javaClass.simpleName} ${it.message}, retry") }) {
+            searchHttp.newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute()
+        }.use { r ->
             if (r.code == 401 || r.code == 403) throw IllegalStateException(t("Каталог отклонил запрос (${r.code}). Проверьте ключ.", "The catalog rejected the request (${r.code}). Check the key."))
             if (r.code == 429) throw IllegalStateException(t("Слишком много запросов, попробуйте через минуту.", "Too many requests, try again in a minute."))
             if (!r.isSuccessful) throw IllegalStateException("HTTP ${r.code}")

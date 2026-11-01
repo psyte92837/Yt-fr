@@ -2733,6 +2733,7 @@ class StudioRecorder(private val onLevel: (Float, Long) -> Unit) {
  */
 object StudioRecognizer {
     const val RATE = 16_000
+    private const val PIPE_BLOCK = 32 * 1024
 
     fun available(ctx: Context): Boolean = Build.VERSION.SDK_INT >= 33 && SpeechRecognizer.isRecognitionAvailable(ctx)
 
@@ -2749,10 +2750,13 @@ object StudioRecognizer {
         val results = mutableListOf<Pair<Span, String>>()
         // the on-device recogniser often lacks the language pack: after its first failure the online one is used
         var onDevice = runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
-        var downloadTried = false
+        // the pack is downloaded at most once per [StudioSpeechPack.AGAIN_MS]: if the phone still says
+        // "language unavailable" after that, the online recogniser is used instead of downloading again
+        var downloadTried = !StudioSpeechPack.mayDownload(Lumen.prefs.getLong(StudioSpeechPack.key(lang), 0), System.currentTimeMillis())
+        var tag = lang
         fun langIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
         fun next(i: Int, retry: Boolean = false) {
             if (i >= pieces.size || cancelled()) {
                 done(results)
@@ -2779,6 +2783,7 @@ object StudioRecognizer {
                 if (text.isNullOrBlank() && !downloadTried && (error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE ||
                         (local && error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED))) {
                     downloadTried = true
+                    Lumen.prefs.edit().putLong(StudioSpeechPack.key(lang), System.currentTimeMillis()).apply()
                     status(t("Загрузка языкового пакета для распознавания ($lang)…", "Downloading the speech pack ($lang)…"))
                     main.post {
                         downloadPack(ctx, langIntent(), main, cancelled) { ok ->
@@ -2828,15 +2833,63 @@ object StudioRecognizer {
                     ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { os ->
                         val bytes = ByteBuffer.allocate(slice.size * 2).order(ByteOrder.LITTLE_ENDIAN)
                         bytes.asShortBuffer().put(slice)
-                        os.write(bytes.array())
+                        val all = bytes.array()
+                        // in small blocks: once the recogniser is done (result or error) the rest is not needed
+                        var off = 0
+                        while (off < all.size && !finished) {
+                            val n = minOf(PIPE_BLOCK, all.size - off)
+                            os.write(all, off, n)
+                            off += n
+                        }
                     }
                 } catch (e: Exception) {
-                    L.w("studio", "pipe: ${e.message}")
+                    // EPIPE: the recogniser closed its end (it finished or failed); only worth a note otherwise
+                    if (finished || e.message?.contains("EPIPE") == true) L.d("studio", "pipe closed: ${e.message}")
+                    else L.w("studio", "pipe: ${e.message}")
                 }
             }.start()
             main.postDelayed({ finish(null, -2) }, 15_000 + piece.ms * 2)
         }
-        next(0)
+        if (!onDevice) return next(0)
+        // ask the phone which packs it has: the exact installed tag (ru-RU vs ru) avoids a false "unavailable"
+        support(ctx, langIntent(), main) { installed, supported ->
+            val pick = StudioSpeechPack.pick(lang, installed, supported)
+            L.i("studio", "speech packs: installed=${installed.take(8)} pick=$pick")
+            if (pick != null) {
+                tag = pick.first
+                // installed: nothing to download, also not on a later "unavailable"
+                if (pick.second) downloadTried = true
+            }
+            next(0)
+        }
+    }
+
+    /** Installed and supported on-device languages (Android 13+); empty lists when the phone can't tell (3 s). */
+    @androidx.annotation.RequiresApi(33)
+    private fun support(ctx: Context, intent: Intent, main: Handler, done: (List<String>, List<String>) -> Unit) {
+        var over = false
+        val sr = runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) }.getOrNull()
+        fun end(a: List<String>, b: List<String>) {
+            if (over) return
+            over = true
+            runCatching { sr?.destroy() }
+            done(a, b)
+        }
+        if (sr == null) return end(emptyList(), emptyList())
+        try {
+            sr.checkRecognitionSupport(intent, ctx.mainExecutor, object : android.speech.RecognitionSupportCallback {
+                override fun onSupportResult(r: android.speech.RecognitionSupport) =
+                    end(r.installedOnDeviceLanguages, r.supportedOnDeviceLanguages + r.pendingOnDeviceLanguages)
+                override fun onError(error: Int) {
+                    L.w("studio", "speech support error $error")
+                    end(emptyList(), emptyList())
+                }
+            })
+        } catch (e: Exception) {
+            L.w("studio", "speech support: ${e.message}")
+            return end(emptyList(), emptyList())
+        }
+        main.postDelayed({ end(emptyList(), emptyList()) }, 3000)
     }
 
     /**

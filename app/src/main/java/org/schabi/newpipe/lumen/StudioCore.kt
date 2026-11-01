@@ -985,7 +985,58 @@ data class MusicHit(
 )
 
 /** Free background music catalogs (official APIs): parsing, licences and credits. Pure, unit-tested. */
+/** On-device speech packs: which tag to ask for and when a download is worth trying again (pure). */
+object StudioSpeechPack {
+    /** A pack download is tried again only after a week (the phone keeps it; a repeat means it's not usable). */
+    const val AGAIN_MS = 7 * 24 * 3600_000L
+
+    fun key(lang: String) = "speech_pack_try_" + lang.lowercase()
+
+    fun mayDownload(lastTry: Long, now: Long): Boolean = lastTry <= 0 || now - lastTry !in 0 until AGAIN_MS
+
+    /**
+     * The tag for [lang] ("ru-RU") among the phone's packs: exact match first, then the same language
+     * ("ru", "ru-KZ"); installed ones win. Returns (tag, installed) or null when the phone lists none.
+     */
+    fun pick(lang: String, installed: List<String>, supported: List<String>): Pair<String, Boolean>? {
+        fun norm(s: String) = s.trim().replace('_', '-').lowercase()
+        val want = norm(lang)
+        val base = want.substringBefore('-')
+        fun find(list: List<String>) = list.firstOrNull { norm(it) == want } ?: list.firstOrNull { norm(it).substringBefore('-') == base }
+        find(installed)?.let { return it to true }
+        find(supported)?.let { return it to false }
+        return null
+    }
+}
+
 object StudioMusicCatalog {
+    /**
+     * Runs [call] up to [tries] times on network errors (timeout, reset, no route), with a short pause.
+     * The last failure becomes a readable message; [onRetry] gets every failure that is retried.
+     */
+    fun <T> retrying(onRetry: (java.io.IOException) -> Unit, tries: Int = 2, pauseMs: Long = 1500, call: () -> T): T {
+        var last: java.io.IOException? = null
+        repeat(tries) { k ->
+            try {
+                return call()
+            } catch (e: java.io.IOException) {
+                last = e
+                if (k < tries - 1) {
+                    onRetry(e)
+                    if (pauseMs > 0) Thread.sleep(pauseMs)
+                }
+            }
+        }
+        throw IllegalStateException(networkMessage(last!!), last)
+    }
+
+    fun networkMessage(e: java.io.IOException): String = when (e) {
+        is java.net.SocketTimeoutException -> t("Каталог музыки не отвечает. Попробуйте ещё раз позже или другой источник.",
+            "The music catalog does not respond. Try again later or another source.")
+        is java.net.UnknownHostException -> t("Нет интернета: каталог музыки недоступен.", "No internet: the music catalog can't be reached.")
+        else -> t("Связь с каталогом музыки оборвалась. Попробуйте ещё раз.", "The connection to the music catalog dropped. Try again.")
+    }
+
     /** Search moods: label → English query (the catalogs are mostly English). */
     val MOODS = listOf(
         "спокойная" to "calm ambient", "энергичная" to "upbeat energetic", "вдохновляющая" to "inspiring",

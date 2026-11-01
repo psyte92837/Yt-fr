@@ -251,7 +251,7 @@
 - `GraphReport.kt` (14): .blocks():182, GraphReport.kt:1, GraphReport:24, Picture:69, Input:25, .input():57
 - `Harvest.kt` (42): HarvestSpec:21, .videos():378, HarvestRules:153, HarvestItem:67, HarvestState:105, Harvest.kt:1
 - `HarvestActivity.kt` (16): .render():235, harvestSetup():49, HarvestActivity.kt:1, HarvestActivity:203, startHarvest():21, .videoRow():321
-- `Help.kt` (11): .render():360, .open():345, Help.kt:1, HelpActivity:343, .topics():63, .onCreate():353
+- `Help.kt` (11): .render():368, .open():353, Help.kt:1, HelpActivity:351, .topics():65, .onCreate():361
 - `HomeActivities.kt` (34): .render():597, .render():149, HomeActivities.kt:1, .ideasCard():258, WizardActivity:387, SimpleWatcher:94
 - `Ideas.kt` (39): IdeasLogic:46, .apply():262, IdeasConfig:19, Ideas:184, .configs():192, .digest():331
 - `IdeasActivity.kt` (20): .dashboard():219, IdeasActivity:16, .render():77, .setup():127, .list():94, .start():173

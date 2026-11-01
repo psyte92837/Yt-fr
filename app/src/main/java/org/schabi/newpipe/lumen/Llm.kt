@@ -36,7 +36,11 @@ enum class Provider(
     OLLAMA("Ollama / LM Studio", ApiKind.OPENAI_COMPAT, "http://192.168.1.10:11434/v1",
         "https://ollama.com/download", "llama3.1", "llama3.1", needsKey = false),
     CUSTOM("Custom / Свой (OpenAI-compatible)", ApiKind.OPENAI_COMPAT, "https://",
-        "", "", "", needsKey = false);
+        "", "", "", needsKey = false),
+
+    /** No API: every request is copied to Gemini, ChatGPT, Claude… by hand and the answer is pasted back ([Relay]). */
+    MANUAL("Другой ИИ вручную / Any AI by hand (Gemini, ChatGPT…)", ApiKind.OPENAI_COMPAT, "manual://copy-paste",
+        "", "manual", "manual", needsKey = false);
 
     private fun pref(k: String) = "prov_${name}_$k"
 
@@ -145,6 +149,8 @@ object Llm {
         imageMime: String = "image/jpeg"
     ): LlmReply {
         val started = System.currentTimeMillis()
+        // another AI by hand: the request is copied out and the answer pasted back (no API, no key)
+        if (task != "ping" && (p == Provider.MANUAL || Relay.routes(task))) return relay(task, pid, system, user, json, fileUri, image, imageMime, started)
         var raw: String? = null
         // the user sees the data that goes out and picks what to keep (SendReviewActivity)
         BgTasks.checkpoint()
@@ -169,6 +175,23 @@ object Llm {
                 "error", e.message ?: e.javaClass.simpleName, System.currentTimeMillis() - started, file)
             throw e
         }
+    }
+
+    private fun relay(
+        task: String, pid: String, system: String, user: String, json: Boolean, fileUri: String?, image: String?, imageMime: String, started: Long
+    ): LlmReply {
+        BgTasks.checkpoint()
+        val text = try {
+            BgTasks.waitingUser { Relay.ask(Relay.Request(task.ifBlank { "ai" }, pid, system, user, json, fileUri, image, imageMime)) }
+        } catch (e: SendCancelled) {
+            AiJournal.record(pid, task, Provider.MANUAL.name, "manual", system, user, "", "", 0, 0, "blocked", e.message, 0)
+            throw e
+        }
+        val r = LlmReply(text, estimateTokens(system + user), estimateTokens(text), "manual")
+        AiJournal.record(pid, task, Provider.MANUAL.name, "manual", system, user, text, text, r.inTokens, r.outTokens, "ok", null,
+            System.currentTimeMillis() - started, fileUri)
+        BgTasks.checkpoint()
+        return r
     }
 
     private fun completeRaw(
@@ -232,6 +255,7 @@ object Llm {
         LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(p), null), p.kind == ApiKind.GEMINI)
 
     fun ping(p: Provider): String {
+        if (p == Provider.MANUAL) return t("OK — запросы будут копироваться в другой ИИ", "OK — requests will be copied to another AI")
         val r = complete(p, p.fastModel, "You are a test.", "Reply with the single word: OK", maxTokens = 16, task = "ping")
         return r.text.trim().take(60)
     }

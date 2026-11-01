@@ -139,6 +139,7 @@ object AiTasks {
     )
 
     fun requireProvider(): Provider = Provider.active()
+        ?: Provider.MANUAL.takeIf { Relay.mode != "off" }
         ?: throw LlmException(t("AI-провайдер не подключён. Откройте Настройки → AI.", "No AI provider connected. Open Settings → AI."))
 
     private fun cached(pid: String, key: String, force: Boolean): AiResult? = if (force) null else Store.ai(pid, key)

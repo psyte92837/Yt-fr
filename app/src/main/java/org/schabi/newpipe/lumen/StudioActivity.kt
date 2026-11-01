@@ -1085,6 +1085,11 @@ class StudioActivity : LumenBase() {
                 if (transcript.isNotBlank()) button(t("Текст расшифровки", "Transcript"), style = BtnStyle.TEXT) { showText(t("Расшифровка", "Transcript"), transcript) }
             }
             check(t("Запускать выбранный способ сразу после разбора", "Run the chosen way right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
+            // no API needed: every AI step of the Studio is copied to Gemini/ChatGPT and the answer pasted back (RelayActivity)
+            check(t("🌐 Через другой ИИ вручную: запрос копируется в Gemini/ChatGPT, ответ вставляется обратно",
+                "🌐 Through another AI by hand: the request is copied to Gemini/ChatGPT, the answer pasted back"), Relay.mode != "off") {
+                Relay.mode = if (!it) "off" else if (Relay.mode == "all") "all" else "studio"
+            }
             if (cur == StudioApproach.FULL) {
                 if (StudioPrefs.voiceMode != "edge") check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
                 check(t("🖼 Подбирать B-roll (свободные лицензии)", "🖼 Find B-roll (open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }

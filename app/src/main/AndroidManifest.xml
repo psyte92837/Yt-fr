@@ -235,6 +235,21 @@
             android:name=".lumen.HelpActivity"
             android:exported="false"
             android:theme="@style/LumenTheme" />
+        <!-- ===== Lumen: "Another AI by hand" — request out, answer back by clipboard or Share ===== -->
+        <activity
+            android:name=".lumen.RelayActivity"
+            android:exported="true"
+            android:label="Lumen: ответ ИИ"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".lumen.SendReviewActivity"
             android:exported="false"

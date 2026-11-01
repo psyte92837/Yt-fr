@@ -239,8 +239,9 @@ class SettingsActivity : LumenBase() {
                 muted(p.baseUrl)
                 if (configured) muted(p.fastModel + " / " + p.smartModel)
             }
-            card.setOnClickListener { editProvider(p) }
+            card.setOnClickListener { if (p == Provider.MANUAL) manualProvider() else editProvider(p) }
         }
+        relayRules(c)
         c.h2(t("Стоимость (необязательно)", "Pricing (optional)"))
         c.muted(t("Укажите цену вашей модели за 1 млн токенов — тогда перед запуском покажем примерную стоимость.",
             "Enter your model's price per 1M tokens to see an estimated cost before running."))
@@ -279,6 +280,31 @@ class SettingsActivity : LumenBase() {
                 toast(t("Сброшено", "Reset"))
             }
         }
+    }
+
+    /** Another AI by hand: no key, every request is copied out and the answer pasted back. */
+    private fun manualProvider() {
+        AlertDialog.Builder(this).setTitle(Provider.MANUAL.title)
+            .setMessage(t("Без ключа API. Когда Lumen нужен ИИ, откроется экран запроса: скопируйте его в Gemini, ChatGPT, Claude или любой другой чат, " +
+                "при желании допишите свою просьбу, а ответ скопируйте обратно — Lumen подхватит его из буфера. Можно и «Поделиться → Lumen: ответ ИИ» прямо в приложении ИИ. " +
+                "Ответ проходит те же проверки и исправления, что и ответ по API.",
+                "No API key. When Lumen needs AI, a request screen opens: copy it into Gemini, ChatGPT, Claude or any chat, add your own wish if you like, " +
+                    "and copy the answer back — Lumen picks it up from the clipboard. Or use \"Share → Lumen: AI answer\" right in the AI app. " +
+                    "The answer goes through the same checks and repairs as an API answer."))
+            .setPositiveButton(t("Сделать активным", "Make active")) { _, _ ->
+                Settings.activeProvider = Provider.MANUAL.name
+                render()
+            }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    /** Which calls go to another AI by hand while an API provider stays active. */
+    private fun relayRules(c: Col) {
+        c.spinner(t("Через другой ИИ вручную", "Through another AI by hand"),
+            listOf("off" to t("выкл", "off"), "studio" to t("Студия и Языковая игра", "Studio and Language game"), "all" to t("все задачи", "all tasks")),
+            Relay.mode) { Relay.mode = it }
+        c.muted(t("Запросы выбранных задач не уходят по API: открывается экран «Другой ИИ» — копируете запрос в Gemini/ChatGPT и возвращаете ответ.",
+            "Requests of the chosen tasks skip the API: the \"Another AI\" screen opens — copy the request into Gemini/ChatGPT and bring the answer back."))
     }
 
     private fun editProvider(p: Provider) {

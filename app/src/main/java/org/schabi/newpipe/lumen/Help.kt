@@ -48,6 +48,7 @@ object HelpMap {
         "BotNewActivity" to "bots",
         "BotActivity" to "bots",
         "SettingsActivity" to "settings",
+        "FreeAiActivity" to "settings",
         "TasksActivity" to "settings",
         "HelpActivity" to "about"
     )

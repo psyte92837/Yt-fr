@@ -249,7 +249,9 @@ class GraphActivity : LumenBase() {
     private lateinit var view: GraphView
     private var colorBy = "depth"
     private var onlyOnTopic = true
-    private val layoutCache = HashMap<Boolean, Pair<DoubleArray, DoubleArray>>()
+    private val layoutCache = HashMap<String, Pair<DoubleArray, DoubleArray>>()
+    private var maxDepth = 0 // 0 = all steps
+    private var collapse = false // video graph shown as channels
     private var current: GraphReport.Input? = null
     private var pendingPdf = false
 
@@ -284,6 +286,9 @@ class GraphActivity : LumenBase() {
                     add(text(ctx, t("Цвет узлов по", "Colour nodes by"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
                     add(choiceChips(ctx, chips, colorBy) { colorBy = it }, 8)
                     check(t("Только по теме", "On topic only"), onlyOnTopic) { onlyOnTopic = it }
+                    add(text(ctx, t("Шагов от старта", "Steps from the seeds"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+                    add(choiceChips(ctx, listOf(0 to t("Все", "All"), 1 to "1", 2 to "2", 3 to "3", 5 to "5"), maxDepth) { maxDepth = it }, 8)
+                    if (!channels) check(t("Свернуть видео в каналы", "Collapse videos into channels"), collapse) { collapse = it }
                     button(t("Готово", "Done"), primary = true) { dismiss() }
                 }
             },
@@ -304,8 +309,23 @@ class GraphActivity : LumenBase() {
                 view.fit()
             })
         )
-        val (list, e, ranks) = GraphReport.subgraph(graph, onlyOnTopic)
-        val key = onlyOnTopic
+        var (list, e, ranks) = GraphReport.subgraph(graph, onlyOnTopic)
+        if (maxDepth > 0) {
+            val keep = list.indices.filter { list[it].depth <= maxDepth }
+            val map = HashMap<Int, Int>()
+            keep.forEachIndexed { i, old -> map[old] = i }
+            val idx = e.indices.filter { map.containsKey(e[it].first) && map.containsKey(e[it].second) }
+            list = keep.map { list[it] }
+            ranks = IntArray(idx.size) { ranks[idx[it]] }
+            e = idx.map { map.getValue(e[it].first) to map.getValue(e[it].second) }
+        }
+        if (collapse && !channels) {
+            val c = collapseToChannels(list, e)
+            list = c.first
+            e = c.second
+            ranks = IntArray(e.size)
+        }
+        val key = "$onlyOnTopic|$maxDepth|$collapse"
         current = null
         Lumen.async({ layoutCache[key] ?: GraphAlgo.layout(list.size, e).also { layoutCache[key] = it } }, ::err) { (x, y) ->
             view.colorBy = colorBy
@@ -314,7 +334,7 @@ class GraphActivity : LumenBase() {
             layoutBar.visibility = View.GONE
             val p = Store.project(pid)
             current = GraphReport.Input(p?.name ?: "Lumen", p?.phrase ?: "", channels, list, e, ranks, x, y, colorBy, onlyOnTopic, graph.updatedAt, graph.requests)
-            legend.text = t("Узлов ${list.size} · связей ${e.size} · размер = как часто и как высоко рекомендуют. ",
+            legend.text = (if (collapse && !channels) t("Каналы из видео-графа · ", "Channels from the video graph · ") else "") + t("Узлов ${list.size} · связей ${e.size} · размер = как часто и как высоко рекомендуют. ",
                 "Nodes ${list.size} · edges ${e.size} · size = how often and how high recommended. ") +
                 view.legend.joinToString("   ") { "● " + it.second }
             val sb = android.text.SpannableStringBuilder(legend.text)
@@ -410,7 +430,36 @@ class GraphActivity : LumenBase() {
         }
     }
 
+    /** Video graph folded into channels: node = channel, edge = at least one recommendation between their videos. */
+    private fun collapseToChannels(list: List<RecNode>, e: List<Pair<Int, Int>>): Pair<List<RecNode>, List<Pair<Int, Int>>> {
+        val names = list.map { it.channel.ifBlank { "?" } }.distinct()
+        val ix = names.withIndex().associate { it.value to it.index }
+        val nodes = names.map { name ->
+            val vids = list.filter { it.channel.ifBlank { "?" } == name }
+            RecNode("ch:$name", url = vids.firstOrNull { it.channelUrl.isNotBlank() }?.channelUrl.orEmpty(), title = name, channel = name,
+                views = vids.sumOf { maxOf(0L, it.views) }, depth = vids.minOf { it.depth }, seed = vids.any { it.seed },
+                relevant = if (vids.any { it.relevant == 1 }) 1 else if (vids.all { it.relevant == 0 }) 0 else -1,
+                niche = vids.groupingBy { it.niche }.eachCount().maxByOrNull { it.value }?.key ?: -1,
+                pr = vids.sumOf { it.pr }, ppr = vids.sumOf { it.ppr })
+        }
+        val w = HashMap<Pair<Int, Int>, Int>()
+        for ((a, b) in e) {
+            val ca = ix.getValue(list[a].channel.ifBlank { "?" })
+            val cb = ix.getValue(list[b].channel.ifBlank { "?" })
+            if (ca != cb) w[ca to cb] = (w[ca to cb] ?: 0) + 1
+        }
+        w.forEach { (k, c) ->
+            nodes[k.second].hits++
+            nodes[k.second].weight += c.toDouble()
+        }
+        return nodes to w.keys.toList()
+    }
+
     private fun showNode(n: RecNode) {
+        if (n.id.startsWith("ch:")) {
+            if (n.url.isNotBlank()) ChannelActivity.open(this, pid, n.url) else toast(n.title)
+            return
+        }
         if (channels) {
             ChannelActivity.open(this, pid, n.url)
             return

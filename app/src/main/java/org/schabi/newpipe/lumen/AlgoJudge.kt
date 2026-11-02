@@ -23,6 +23,21 @@ object AlgoText {
 
     fun join(l: List<String>) = l.joinToString("; ").ifBlank { "-" }
 
+    @Volatile private var noted = false
+
+    /** Once per run of the app: edits of the replaced prompts (topic, relevance_channels, audit) are no longer used. */
+    fun noteReplacedPrompts() {
+        if (noted) return
+        noted = true
+        try {
+            val old = listOf("topic", "relevance_channels", "audit").filter { Lumen.prefs.contains("prompt_$it") }
+            if (old.isNotEmpty()) L.w("prompts", "edited prompts ${old.joinToString()} are replaced by algo_topic / algo_judge_channels / algo_audit; " +
+                "move your changes there (Settings → Prompts → 🧭 Algorithm)")
+        } catch (e: Exception) {
+            // prefs unavailable
+        }
+    }
+
     /** {phrase} {core} {include} {exclude} {adjacent} {lang} from the project and its topic profile. */
     fun topicVars(p: Project, tp: TopicProfile? = TopicFilter.load(p.id)): Map<String, String> = mapOf(
         "phrase" to p.phrase.ifBlank { tp?.phrase.orEmpty() }.ifBlank { "-" },
@@ -99,6 +114,7 @@ object AlgoJudge {
     fun videos(p: Project, list: List<RecNode>, mode: String, keywords: Set<String>, progress: (String) -> Unit = {}) {
         val todo = list.filter { it.relevant == -1 }
         if (todo.isEmpty()) return
+        AlgoText.noteReplacedPrompts()
         if (mode == "off") {
             todo.forEach { it.relevant = 1 }
             return

@@ -68,6 +68,9 @@ object Notify {
             .setContentTitle(title).setContentText(body)
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(openProject(ctx, projectId)).setAutoCancel(true)
+            .addAction(Notification.Action.Builder(null, if (ok) t("Открыть", "Open") else t("Посмотреть", "View"), openProject(ctx, projectId)).build())
+            .addAction(Notification.Action.Builder(null, t("Задачи", "Tasks"),
+                Nav.pending(ctx, 7301, Intent(ctx, TasksActivity::class.java))).build())
         if (Build.VERSION.SDK_INT < 26) {
             b.setPriority(Notification.PRIORITY_HIGH)
             if (Settings.vibrateDone) b.setVibrate(VIBRATION)
@@ -312,6 +315,8 @@ class CollectService : Service() {
             .setOngoing(true)
             .setContentIntent(Notify.openProject(this, CollectState.projectId))
             .addAction(Notification.Action.Builder(null, t("Стоп", "Stop"), stop).build())
+            .addAction(Notification.Action.Builder(null, t("Задачи", "Tasks"),
+                Nav.pending(this, 7302, Intent(this, TasksActivity::class.java))).build())
             .build()
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)

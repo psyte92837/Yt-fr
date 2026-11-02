@@ -277,7 +277,7 @@ class StudioEditorActivity : LumenBase() {
         val under = text(this, sub, 13f, color = Palette.MUTED)
         texts.addView(under)
         row.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(12) })
-        if (onDelete != null) row.addView(iconBtn(this, "🗑") { onDelete() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        if (onDelete != null) row.addView(iconBtn(this, "🗑") { onDelete() }, LinearLayout.LayoutParams(dp(48), dp(48)))
         c.add(row, 8)
         loadThumb(iv, f, under, sub)
     }
@@ -637,6 +637,7 @@ class StudioEditorActivity : LumenBase() {
                 add(act("⬆", t("Выше", "Forward")) { commit(StudioEdit.reorder(blocks, b.id, 1)) })
                 add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
                 add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
+                add(act("📐", t("Положение", "Position")) { positionSheet(b.id) })
                 if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
                 add(act("🗑", t("Удалить", "Delete")) { delete(b.id) })
             }
@@ -2014,6 +2015,37 @@ class StudioEditorActivity : LumenBase() {
                 val cur = StudioEdit.find(blocks, b.id) ?: return@button
                 commit(blocks.map { it.copy(animIn = cur.animIn, animOut = cur.animOut) })
             }
+        }
+    }
+
+    /** Exact position, size and angle by buttons: the same as dragging, without gestures (TalkBack, precision). */
+    private fun positionSheet(id: String) {
+        bottomSheet(t("📐 Положение", "📐 Position")) { _ ->
+            muted(t("Каждое нажатие — шаг; ↶ отменяет.", "Each tap is one step; ↶ undoes."))
+            fun row(label: String, value: (EBlock) -> String, step: (EBlock, Int) -> EBlock) {
+                val v = text(ctx, "", 15f, bold = true).apply {
+                    gravity = android.view.Gravity.CENTER
+                    accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+                }
+                fun show() { StudioEdit.find(blocks, id)?.let { v.text = value(it) } }
+                show()
+                fun tap(dir: Int) {
+                    StudioEdit.find(blocks, id)?.let { b -> change(id) { step(b, dir) } }
+                    show()
+                }
+                add(text(ctx, label, Type.LABEL, bold = true, color = Palette.MUTED), 12)
+                add(rowOf(ctx,
+                    btn(ctx, "−", style = BtnStyle.TONAL) { tap(-1) }.apply { contentDescription = t("Меньше: ", "Less: ") + label },
+                    v,
+                    btn(ctx, "＋", style = BtnStyle.TONAL) { tap(1) }.apply { contentDescription = t("Больше: ", "More: ") + label }
+                ), 4)
+            }
+            row(t("По горизонтали", "Horizontal"), { "${(it.x * 100).roundToInt()}%" }) { b, d -> b.copy(x = (b.x + d * 0.01f).coerceIn(0f, 1f)) }
+            row(t("По вертикали", "Vertical"), { "${(it.y * 100).roundToInt()}%" }) { b, d -> b.copy(y = (b.y + d * 0.01f).coerceIn(0f, 1f)) }
+            row(t("Ширина", "Width"), { "${(it.w * 100).roundToInt()}%" }) { b, d -> b.copy(w = (b.w + d * 0.02f).coerceIn(0.05f, 1.5f)) }
+            row(t("Угол", "Angle"), { "${it.rot.roundToInt()}°" }) { b, d -> b.copy(rot = ((b.rot + d * 5f + 540f) % 360f) - 180f) }
+            row(t("Начало", "Start"), { StudioEdit.clock(it.startMs) }) { b, d -> b.copy(startMs = (b.startMs + d * 100L).coerceAtLeast(0)) }
+            row(t("Длительность", "Duration"), { StudioEdit.clock(it.durMs) }) { b, d -> b.copy(durMs = (b.durMs + d * 100L).coerceAtLeast(300)) }
         }
     }
 

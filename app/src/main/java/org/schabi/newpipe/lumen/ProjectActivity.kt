@@ -491,6 +491,7 @@ class ProjectActivity : LumenBase() {
             addView(selText, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             addView(btn(this@ProjectActivity, t("Все", "All"), style = BtnStyle.TEXT) { setMarked(filteredVideos().map { it.id }, true) })
             addView(btn(this@ProjectActivity, t("Снять", "Clear"), style = BtnStyle.TEXT) { setMarked(videos.keys, false) })
+            addView(iconBtn(this@ProjectActivity, "⋮", Palette.ON_SOFT) { selectionMenu() }, LinearLayout.LayoutParams(dp(48), dp(48)))
         }
         var markedChip: TextView? = null
         fun refreshSel() {
@@ -573,7 +574,41 @@ class ProjectActivity : LumenBase() {
             shown = 50
             fill()
         })
+        search.onEnter { }
         fill()
+    }
+
+    /** Actions on the marked videos: invert within the filter, delete from the project (with Undo). */
+    private fun selectionMenu() {
+        val marked = videos.values.filter { it.marked }
+        val items = arrayOf(
+            t("Инвертировать выбор (в фильтре)", "Invert selection (in the filter)"),
+            t("Удалить из проекта (${marked.size})", "Remove from project (${marked.size})")
+        )
+        android.app.AlertDialog.Builder(this).setTitle(t("Выбрано: ", "Selected: ") + marked.size).setItems(items) { _, i ->
+            when (i) {
+                0 -> {
+                    val visible = filteredVideos().map { it.id }
+                    val now = SelectionLogic.invert(visible, videos.values.filter { it.marked }.map { it.id }.toSet())
+                    videos.values.forEach { it.marked = it.id in now }
+                    Store.saveVideos(project.id, videos.values)
+                    render()
+                }
+                1 -> {
+                    val before = LinkedHashMap(videos)
+                    undoable(t("Удалено видео: ${marked.size}", "Videos removed: ${marked.size}"), apply = {
+                        marked.forEach { videos.remove(it.id) }
+                        Store.saveVideos(project.id, videos.values)
+                        render()
+                    }, revert = {
+                        videos.clear()
+                        videos.putAll(before)
+                        Store.saveVideos(project.id, videos.values)
+                        render()
+                    })
+                }
+            }
+        }.show()
     }
 
     private fun videoRow(v: Video): View {

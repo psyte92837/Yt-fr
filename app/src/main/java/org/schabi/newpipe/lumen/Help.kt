@@ -414,6 +414,18 @@ class HelpActivity : LumenBase() {
     }
 
     private val expanded = mutableSetOf<String>()
+    private var query = ""
+    private val header by lazy {
+        val box = Col(this, 0)
+        box.root.setPadding(dp(16), dp(4), dp(16), dp(4))
+        val e = box.add(edt(this, t("Найти в справке…", "Search the help…"), query), 0)
+        e.onEnter { }
+        e.addTextChangedListener(SimpleWatcher {
+            query = it
+            render(intent.getStringExtra("topic") ?: "about")
+        })
+        box.root
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -425,10 +437,14 @@ class HelpActivity : LumenBase() {
     private fun render(first: String) {
         val c = Col(this)
         val all = Help.topics()
-        val ordered = listOfNotNull(all.firstOrNull { it.id == first }) + all.filter { it.id != first }
+        val found = if (query.isBlank()) null else all.filter {
+            SearchIndex.score(query, SearchIndex.Item("help", it.title, it.what, it.id, (it.steps + it.tips).joinToString(" "))) > 0
+        }
+        val ordered = found ?: (listOfNotNull(all.firstOrNull { it.id == first }) + all.filter { it.id != first })
+        if (found != null && found.isEmpty()) c.empty(t("Ничего не найдено", "Nothing found"), t("Попробуйте другое слово.", "Try another word."))
         for (tp in ordered) {
             c.card {
-                section(tp.title, tp.what.take(80) + if (tp.what.length > 80) "…" else "", tp.id in expanded, { on ->
+                section(tp.title, tp.what.take(80) + if (tp.what.length > 80) "…" else "", tp.id in expanded || found != null, { on ->
                     if (on) expanded += tp.id else expanded -= tp.id
                     render(first)
                 }) {
@@ -445,6 +461,6 @@ class HelpActivity : LumenBase() {
             }
         }
         c.muted(t("Lumen — свободное ПО (GPL-3.0), основан на NewPipe.", "Lumen is free software (GPL-3.0) based on NewPipe."))
-        page(t("Справка", "Help"), c.root, keepScroll = true)
+        page(t("Справка", "Help"), c.root, keepScroll = query.isBlank(), header = header)
     }
 }

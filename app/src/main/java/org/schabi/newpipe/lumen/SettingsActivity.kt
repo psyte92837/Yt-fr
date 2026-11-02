@@ -25,6 +25,7 @@ class SettingsActivity : LumenBase() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (intent.getBooleanExtra("general", false)) section = 0
+        if (intent.getBooleanExtra("studio", false)) section = 4
         if (intent.getBooleanExtra("ai", false)) section = 1
         if (intent.getBooleanExtra("logs", false)) section = 2
         if (intent.getBooleanExtra("quick", false)) section = 3
@@ -49,7 +50,8 @@ class SettingsActivity : LumenBase() {
         Triple(t("Общие", "General"), t("язык, режим, мониторинг, сбор", "language, mode, monitoring, collection"), 0),
         Triple(t("AI и промпты", "AI and prompts"), t("провайдер, ключи, шаблоны запросов", "provider, keys, prompt templates"), 1),
         Triple(t("Данные", "Data"), t("резервная копия, журнал, статистика AI", "backup, logs, AI usage"), 2),
-        Triple(t("О приложении", "About"), t("версия, обновления, проверка YouTube, быстрый анализ", "version, updates, YouTube check, instant analysis"), 3)
+        Triple(t("О приложении", "About"), t("версия, обновления, проверка YouTube, быстрый анализ", "version, updates, YouTube check, instant analysis"), 3),
+        Triple("Lumen Studio", t("эффекты, B-roll, качество экспорта, другой ИИ, подсказки", "effects, B-roll, export quality, another AI, hints"), 4)
     )
 
     private fun render() {
@@ -83,11 +85,12 @@ class SettingsActivity : LumenBase() {
                 c.h2(t("Журнал", "Logs"))
                 logs(c)
             }
-            else -> {
+            3 -> {
                 about(c)
                 c.h2(t("Быстрый анализ", "Instant analysis"))
                 quick(c)
             }
+            else -> studio(c)
         }
         page(sections[section].first, c.root)
     }
@@ -305,6 +308,29 @@ class SettingsActivity : LumenBase() {
                 render()
             }
             .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    /** Studio options that otherwise live on its steps: one place to look, the same values. */
+    private fun studio(c: Col) {
+        c.muted(t("Те же настройки есть на шагах Студии; здесь — все вместе.", "The same options are on the Studio steps; here they are all together."))
+        c.h2(t("Ролик", "Video"))
+        c.check(t("Звуковые эффекты (whoosh, boom)", "Sound effects (whoosh, boom)"), StudioPrefs.sfx) { StudioPrefs.sfx = it }
+        c.check(t("Вырезать слова-паразиты", "Cut filler words"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
+        c.check(t("AI-режиссёр сам после разбора", "AI director right after the analysis"), StudioPrefs.autoDirect) { StudioPrefs.autoDirect = it }
+        c.check(t("Пульсация на ударениях", "Pulse on stresses"), StudioPrefs.pulse) { StudioPrefs.pulse = it }
+        c.check(t("Живые эмодзи", "Live emoji"), StudioPrefs.liveEmoji) { StudioPrefs.liveEmoji = it }
+        c.h2("B-roll")
+        c.check(t("Подбирать B-roll", "Pick B-roll"), StudioPrefs.broll) { StudioPrefs.broll = it }
+        c.check(t("Видеоклипы вместо фото", "Video clips instead of photos"), StudioPrefs.brollVideo) { StudioPrefs.brollVideo = it }
+        c.h2(t("Редактор", "Editor"))
+        c.spinner(t("Качество экспорта", "Export quality"), listOf(1920 to t("как оригинал", "as the original"), 1280 to t("720p — быстрее", "720p — faster")),
+            Lumen.prefs.getInt("studio_edit_side", 1920)) { Lumen.prefs.edit().putInt("studio_edit_side", it).apply() }
+        c.button(t("Показать подсказки заново", "Show the hints again"), style = BtnStyle.TEXT) {
+            Lumen.prefs.edit().remove("studio_edit_hint").apply()
+            toast(t("Подсказка покажется при следующем входе в редактор", "The hint shows next time you open the editor"))
+        }
+        c.h2(t("Другой ИИ", "Another AI"))
+        relayRules(c)
     }
 
     /** Which calls go to another AI by hand while an API provider stays active. */

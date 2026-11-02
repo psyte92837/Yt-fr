@@ -128,6 +128,20 @@ class AiJournalActivity : LumenBase() {
     private var pid: String? = null
     private var status = "all"
     private var task = ""
+    private var query = ""
+    private val header by lazy {
+        val box = Col(this, 0)
+        box.root.setPadding(dp(16), dp(4), dp(16), dp(4))
+        val e = box.add(edt(this, t("Найти в ответах…", "Search the answers…"), query), 0)
+        e.onEnter { }
+        e.addTextChangedListener(SimpleWatcher {
+            query = it
+            e.removeCallbacks(again)
+            e.postDelayed(again, 250)
+        })
+        box.root
+    }
+    private val again = Runnable { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,8 +170,12 @@ class AiJournalActivity : LumenBase() {
                 render()
             }
         })
+        val q = SearchIndex.tokens(query)
         val list = all.filter { (status == "all" || it.status == status) && (task.isEmpty() || it.task == task) }
-        if (list.isEmpty()) c.muted("—")
+            .filter { e -> q.isEmpty() || SearchIndex.norm(e.task + " " + e.model + " " + e.text + " " + e.error).let { s -> q.all { s.contains(it) } } }
+        if (list.isEmpty()) c.empty(t("Нет ответов", "No answers"),
+            if (q.isNotEmpty()) t("Под запрос ничего нет — измените слова или фильтры.", "Nothing matches — change the words or filters.")
+            else t("Ответы появятся после первого вызова AI.", "Answers appear after the first AI call."))
         list.take(150).forEach { e ->
             val card = c.card {
                 add(text(ctx, "${e.task} · ${AiJournal.statusLabel(e.status)}", 14f, bold = true,
@@ -182,7 +200,7 @@ class AiJournalActivity : LumenBase() {
                 }
             }
         )
-        page(t("Ответы AI", "AI answers"), c.root, actions = actions)
+        page(t("Ответы AI", "AI answers"), c.root, actions = actions, header = header, keepScroll = true)
     }
 
     companion object {

@@ -553,14 +553,14 @@ class StudioActivity : LumenBase() {
         c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
-        // the Mix, the Montage (hand editor + JS layers by the protocol) and the Editor are their own screens: a second row of tabs
-        c.add(segBar(this, listOf(t("🔀 Микс", "🔀 Mix"), t("🎛 Монтаж", "🎛 Montage"), t("✏️ Редактор", "✏️ Editor")), -1) {
-            when (it) {
-                0 -> StudioMixActivity.open(this)
-                1 -> openMontage()
-                else -> StudioEditorActivity.open(this)
-            }
-        }, 6)
+        // the Mix, the Montage (hand editor + JS layers by the protocol) and the Editor are their own screens:
+        // entry buttons with "↗", not tabs, so it is clear they open another screen (Back returns here)
+        c.add(text(this, t("Другие инструменты", "Other tools"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        c.add(chipScroller(this, listOf(
+            chip(this, t("🔀 Микс ↗", "🔀 Mix ↗")) { StudioMixActivity.open(this) }.apply { contentDescription = t("Открыть Микс", "Open Mix") },
+            chip(this, t("🎛 Монтаж ↗", "🎛 Montage ↗")) { openMontage() }.apply { contentDescription = t("Открыть Монтаж", "Open Montage") },
+            chip(this, t("✏️ Редактор ↗", "✏️ Editor ↗")) { StudioEditorActivity.open(this) }.apply { contentDescription = t("Открыть редактор", "Open the editor") }
+        )), 4)
         if (!foreign) {
             val n = StudioDrafts.count(draftsDir, task.id)
             c.row(

@@ -119,6 +119,16 @@ class GraphView(ctx: Context) : View(ctx) {
         legend = leg
     }
 
+    /** Selects node [i] and brings it to the centre, zoomed in. */
+    fun focusOn(i: Int) {
+        if (i !in nodes.indices || width == 0) return
+        scale = 2.5f
+        tx = (width / 2f - (margin + px[i] * (width - 2 * margin)) * scale).toFloat()
+        ty = (height / 2f - (margin + py[i] * (height - 2 * margin)) * scale).toFloat()
+        selected = i
+        announceForAccessibility(nodes[i].title)
+    }
+
     /** Fits the whole graph into the view. */
     fun fit() {
         scale = 1f
@@ -269,7 +279,7 @@ class GraphActivity : LumenBase() {
         val pr = Store.project(pid)
         page(
             (if (channels) t("Каналы · ", "Channels · ") else "") + (pr?.name ?: t("Граф", "Graph")), view, header = header, scroll = false,
-            actions = listOf("⇪" to { exportMenu() }, "⤢" to {
+            actions = listOf("🔍" to { findNode() }, "⇪" to { exportMenu() }, "⤢" to {
                 view.selected = -1
                 view.fit()
             })
@@ -343,6 +353,40 @@ class GraphActivity : LumenBase() {
         toast(t("Сохраняю…", "Saving…"))
         Lumen.async({ contentResolver.openOutputStream(uri)?.use { GraphReport.write(inp, pdf, it) } }, ::err) {
             toast(t("Отчёт сохранён", "Report saved"))
+        }
+    }
+
+    /** Find a node by title or channel; with an empty query — all nodes by importance (a list instead of the canvas). */
+    private fun findNode() {
+        val nodes = view.nodes
+        if (nodes.isEmpty()) return toast(t("Граф ещё строится", "The graph is still being built"))
+        bottomSheet(t("🔍 Найти в графе", "🔍 Find in the graph")) { dismiss ->
+            val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            fun fill(q: String) {
+                box.removeAllViews()
+                val idx = if (q.isBlank()) nodes.indices.sortedByDescending { nodes[it].pr }
+                else SearchIndex.rank(q, nodes.mapIndexed { i, n -> SearchIndex.Item("node", n.title.ifBlank { n.id }, n.channel, i.toString()) })
+                    .map { it.item.key.toInt() }
+                if (idx.isEmpty()) box.addView(text(ctx, t("Ничего не найдено", "Nothing found"), 14f, color = Palette.MUTED))
+                idx.take(40).forEach { i ->
+                    val n = nodes[i]
+                    box.addView(text(ctx, n.title.ifBlank { n.id } + if (n.channel.isNotBlank()) "\n" + n.channel else "", 14f).apply {
+                        minHeight = dp(48)
+                        setPadding(0, dp(8), 0, dp(8))
+                        background = ripple(ctx, roundBg(0x00000000, 8f, ctx), Palette.ON_SURFACE)
+                        setOnClickListener {
+                            dismiss()
+                            view.focusOn(i)
+                            showNode(n)
+                        }
+                    })
+                }
+            }
+            val e = add(edt(ctx, t("Название или канал", "Title or channel")), 8)
+            e.addTextChangedListener(SimpleWatcher { fill(it) })
+            e.onEnter { fill(it) }
+            add(box, 8)
+            fill("")
         }
     }
 

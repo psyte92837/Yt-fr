@@ -44,10 +44,15 @@ data class EBlock(
     val srcMs: Long = 0,
     /** Split screen: loudness of the second video (0..2) and of the main one meanwhile. */
     val volume: Float = 1f,
-    val mainVolume: Float = 1f
+    val mainVolume: Float = 1f,
+    /** Keyframes of place, size, turn and opacity (see [EditKeys]); empty = the block stands still. */
+    val keys: List<EKey> = emptyList()
 ) {
     val endMs: Long get() = startMs + durMs
 }
+
+/** A keyframe of a block: [atMs] from its start, its place, width, turn and opacity then. */
+data class EKey(val atMs: Long, val x: Float, val y: Float, val w: Float, val rot: Float, val opacity: Float)
 
 /** An editor project: the base video (copied into the project folder) and the blocks over it. */
 data class EProject(
@@ -62,7 +67,14 @@ data class EProject(
     /** Last exported file (path), empty before the first export. */
     val exported: String = "",
     /** Pieces of the main track (see [EditTrack]); empty = the whole video as it is. */
-    val clips: List<VClip> = emptyList()
+    val clips: List<VClip> = emptyList(),
+    /** Shape of the exported frame ([EditCanvas.RATIOS], "" = that of the video). */
+    val ratio: String = "",
+    /** The video covers the frame (edges cut off) instead of fitting into it on [bg]. */
+    val fill: Boolean = false,
+    val bg: Int = 0xFF000000.toInt(),
+    /** The background of a fitted video is the video itself, enlarged and blurred (instead of [bg]). */
+    val blur: Boolean = false
 )
 
 /** Look of a block at a moment of its in / out animation: opacity, scale and shift (fractions of the frame). */
@@ -81,7 +93,7 @@ object StudioEdit {
     const val MIN_W = 0.06f
     const val MAX_W = 2f
 
-    val KINDS = listOf("scheme", "image", "text", "emoji", "split")
+    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio")
     val ANIMS = listOf("none", "fade", "pop", "slide", "zoom")
     val TEXT_LOOKS = listOf("plate", "shadow", "accent", "light")
     val IMAGE_LOOKS = listOf("plain", "round", "card", "circle")
@@ -511,7 +523,7 @@ object StudioEdit {
      */
     fun overlayKey(shown: List<EBlock>, tMs: Long, settle: (EBlock) -> Long): String = shown.joinToString("|") { b ->
         val d = animMs(b)
-        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b))
+        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b)) || b.keys.size > 1
         b.id + "@" + b.hashCode() + if (moving) ":$tMs" else ""
     }
 
@@ -596,7 +608,8 @@ object StudioEdit {
             b.scheme?.let { put("scheme", StudioScheme.toJson(it)) }
             if (b.ask.isNotEmpty()) put("ask", b.ask)
             if (b.srcMs > 0) put("src", b.srcMs)
-            if (b.kind == "split") put("vol", b.volume.toDouble()).put("mainVol", b.mainVolume.toDouble())
+            if (b.kind == "split" || b.kind == "audio") put("vol", b.volume.toDouble()).put("mainVol", b.mainVolume.toDouble())
+            if (b.keys.isNotEmpty()) put("keys", EditKeys.json(b.keys))
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -610,7 +623,7 @@ object StudioEdit {
             f("x", 0.5f), f("y", 0.5f), f("w", 0.6f).coerceIn(MIN_W, MAX_W), f("ratio", 0.6f).coerceIn(0.05f, 20f), f("rot", 0f), f("opacity", 1f).coerceIn(0f, 1f),
             o.optString("in", "pop").takeIf { it in ANIMS } ?: "pop", o.optString("out", "fade").takeIf { it in ANIMS } ?: "fade",
             o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask"), max(0L, o.optLong("src")),
-            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f)
+            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f), EditKeys.from(o.optJSONArray("keys"))
         )
     }
 
@@ -623,7 +636,10 @@ object StudioEdit {
         .put("id", p.id).put("source", p.source).put("w", p.w).put("h", p.h).put("dur", p.durMs)
         .put("created", p.created).put("exported", p.exported)
         .put("blocks", blocksJson(p.blocks))
-        .apply { if (p.clips.isNotEmpty()) put("clips", EditTrack.json(p.clips)) }
+        .apply {
+            if (p.clips.isNotEmpty()) put("clips", EditTrack.json(p.clips))
+            if (p.ratio.isNotEmpty()) put("ratio", p.ratio).put("fill", p.fill).put("bg", p.bg).put("blur", p.blur)
+        }
 
     fun fromJson(s: String): EProject? = runCatching {
         val o = JSONObject(s)
@@ -632,7 +648,8 @@ object StudioEdit {
         val h = o.optInt("h")
         if (w <= 0 || h <= 0) return null
         EProject(o.getString("id"), o.optString("source"), w, h, o.optLong("dur"), blocksFrom(o.optJSONArray("blocks")), o.optLong("created"), o.optString("exported"),
-            EditTrack.from(o.optJSONArray("clips")))
+            EditTrack.from(o.optJSONArray("clips")), o.optString("ratio").takeIf { it in EditCanvas.RATIOS } ?: "", o.optBoolean("fill"),
+            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt(), o.optBoolean("blur"))
     }.getOrNull()
 }
 

@@ -99,12 +99,15 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
         invalidate()
     }
 
-    private fun sel(): EBlock? = StudioEdit.find(blocks, selected)?.takeIf { timeMs >= it.startMs && timeMs < it.endMs }
+    /** The blocks as they are at [timeMs] (keyframes applied). */
+    private fun shown(): List<EBlock> = if (blocks.none { it.keys.isNotEmpty() }) blocks else blocks.map { EditKeys.at(it, timeMs) }
+
+    private fun sel(): EBlock? = StudioEdit.find(shown(), selected)?.takeIf { timeMs >= it.startMs && timeMs < it.endMs }
 
     override fun onDraw(c: Canvas) {
         val fw = width.toFloat()
         val fh = height.toFloat()
-        painter?.draw(c, StudioEdit.active(blocks, timeMs), timeMs)
+        painter?.draw(c, StudioEdit.active(shown(), timeMs), timeMs)
         if (portrait && moved && (mode == MOVE || mode == SCALE || mode == PINCH || mode == WIDTH)) {
             // YouTube Shorts / Reels: the title and buttons cover the bottom fifth and the right column
             c.drawRect(0f, fh * 0.8f, fw, fh, safeP)
@@ -210,7 +213,7 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
                     mode = CORNER
                     start = cur
                 } else {
-                    val hit = StudioEdit.top(StudioEdit.active(blocks, timeMs), fw, fh, e.x, e.y, 6 * dp)
+                    val hit = StudioEdit.top(StudioEdit.active(shown(), timeMs), fw, fh, e.x, e.y, 6 * dp)
                     if (hit != null) {
                         if (hit.id != selected) onSelect(hit.id)
                         mode = MOVE
@@ -343,6 +346,9 @@ class EditTimeline(ctx: Context) : View(ctx) {
         private set
     var thumbs: List<Pair<Long, Bitmap>> = emptyList()
         set(v) { field = v; invalidate() }
+    /** Frames of the other videos of the track, by their file. */
+    var srcThumbs: Map<String, List<Pair<Long, Bitmap>>> = emptyMap()
+        set(v) { field = v; invalidate() }
     /** Width / height of a video frame. */
     var aspect = 9f / 16f
     /** The voice with times: a row of words under the frames; edges stick to word starts. */
@@ -365,6 +371,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
     var clipSel = -1
         set(v) { field = v; invalidate() }
     var onClip: (Int) -> Unit = {}
+    /** A tap on the square at the seam before piece k (its transition). */
+    var onSeam: (Int) -> Unit = {}
     /** A piece dragged by the finger to another place: (from, its new index). */
     var onClipDrop: (Int, Int) -> Unit = { _, _ -> }
 
@@ -405,6 +413,28 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val clipSelP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * dp; color = 0xFFFFD60A.toInt() }
     private val seamP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt(); strokeWidth = 3 * dp; strokeCap = Paint.Cap.ROUND }
     private val liftP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
+    private val keyP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt() }
+    private val seamBox = 18 * dp
+    private val seamBoxP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF2FFFFFF.toInt() }
+    private val seamOnP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt() }
+    private val seamTextP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14161B.toInt(); textSize = 11 * dp; textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
+    private val seamOnTextP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14161B.toInt(); textSize = 12 * dp; textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
+
+    /** Colours for a light panel (the light theme of the app); dark is the default. */
+    fun light(on: Boolean) {
+        val ink = if (on) 0xFF1D1B20.toInt() else 0xFFFFFFFF.toInt()
+        tickP.color = (ink and 0x00FFFFFF) or 0x99000000.toInt()
+        labelP.color = (ink and 0x00FFFFFF) or 0xCC000000.toInt()
+        wordP.color = (ink and 0x00FFFFFF) or 0xD9000000.toInt()
+        wordTick.color = (ink and 0x00FFFFFF) or 0x66000000
+        headP.color = ink
+        stripBg.color = if (on) 0xFFD5D7DD.toInt() else 0xFF2A2D33.toInt()
+        sepP.color = if (on) 0xFFE9EAEE.toInt() else 0xFF15171B.toInt()
+        dimP.color = if (on) 0x99FFFFFF.toInt() else 0x99000000.toInt()
+        seamBoxP.color = if (on) 0xFF1D1B20.toInt() else 0xF2FFFFFF.toInt()
+        seamTextP.color = if (on) 0xFFFFFFFF.toInt() else 0xFF14161B.toInt()
+        invalidate()
+    }
 
     private fun relayout() {
         lanes = StudioEdit.lanes(blocks)
@@ -450,6 +480,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         "scheme" -> 0xFF6750A4.toInt()
         "image" -> 0xFF00796B.toInt()
         EditSplit.KIND -> 0xFF1565C0.toInt()
+        EditMusic.KIND -> 0xFF2E7D32.toInt()
         "text" -> 0xFFB45309.toInt()
         else -> 0xFFC2185B.toInt()
     }
@@ -459,6 +490,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.firstOrNull()?.label.orEmpty())
         "image" -> "🖼 " + t("Картинка", "Picture")
         EditSplit.KIND -> "⊟ " + t("Экран надвое", "Split screen")
+        EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") } + if (b.volume <= 0f) " 🔇" else ""
         "text" -> "T " + b.text.replace('\n', ' ')
         else -> b.text
     }
@@ -505,13 +537,13 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 if (r < 0 || l > w) continue
                 c.save()
                 c.clipRect(l, stripTop, r, stripTop + stripH)
-                if (thumbs.isNotEmpty()) {
+                if (thumbs.isNotEmpty() || srcThumbs.isNotEmpty()) {
                     // frames of this piece from its own left edge: a cut is seen as a seam
                     var x = l + ((max(l, 0f) - l) / cw).toInt() * cw
                     while (x < min(r, w)) {
                         val off = msAt(x + cw / 2) - st[i]
                         val at = if (ck.isHold) ck.fromMs else (ck.fromMs + (off * ck.speed).toLong()).coerceIn(ck.fromMs, ck.toMs)
-                        val bmp = nearest(at)
+                        val bmp = nearest(at, ck.src)
                         if (bmp != null) {
                             val ratio = cw / stripH
                             val bw = bmp.width.toFloat()
@@ -541,6 +573,16 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 if (i > 0) c.drawRect(l - 1.5f * dp, stripTop, l + 1.5f * dp, stripTop + stripH, sepP)
             }
             c.restore()
+            // a square at every seam, like CapCut: a tap opens its transition; filled when there is one
+            if (cl.size > 1 && mode != REORDER) for (i in 1 until cl.size) {
+                val x = xOf(st[i])
+                if (x < -seamBox || x > w + seamBox) continue
+                val cy = stripTop + stripH / 2
+                val r = RectF(x - seamBox / 2, cy - seamBox / 2, x + seamBox / 2, cy + seamBox / 2)
+                val on = cl[i].trans.isNotEmpty()
+                c.drawRoundRect(r, 4 * dp, 4 * dp, if (on) seamOnP else seamBoxP)
+                c.drawText(if (on) "⇆" else "|", r.centerX(), r.centerY() + seamTextP.textSize * 0.36f, if (on) seamOnTextP else seamTextP)
+            }
             if (clipSel in cl.indices && mode != REORDER) {
                 val l = xOf(st[clipSel])
                 val r = xOf(st[clipSel] + cl[clipSel].outMs)
@@ -556,7 +598,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 }
                 val bw = max(stripH, min(xOf(d.outMs) - xOf(0), 110 * dp))
                 val box = RectF(lastX - bw / 2, stripTop - 6 * dp, lastX + bw / 2, stripTop + stripH - 6 * dp)
-                val bmp = nearest(if (d.isHold) d.fromMs else (d.fromMs + d.toMs) / 2)
+                val bmp = nearest(if (d.isHold) d.fromMs else (d.fromMs + d.toMs) / 2, d.src)
                 c.save()
                 c.clipPath(Path().apply { addRoundRect(box, 6 * dp, 6 * dp, Path.Direction.CW) })
                 c.drawRect(box, stripBg)
@@ -610,6 +652,15 @@ class EditTimeline(ctx: Context) : View(ctx) {
             val tx = max(r.left, 0f) + (if (isSel) handleW + 4 * dp else 8 * dp)
             c.drawText(label(b), tx, r.centerY() + nameP.textSize * 0.36f, nameP)
             c.restore()
+            // keyframes: small diamonds on the bar
+            for (k in b.keys) {
+                val kx = xOf(b.startMs + k.atMs)
+                if (kx < r.left - 1 || kx > r.right + 1) continue
+                val ky = r.bottom - 5 * dp
+                c.drawPath(Path().apply {
+                    moveTo(kx, ky - 4 * dp); lineTo(kx + 4 * dp, ky); lineTo(kx, ky + 4 * dp); lineTo(kx - 4 * dp, ky); close()
+                }, keyP)
+            }
             if (isSel) {
                 c.drawRoundRect(r, rad, rad, selP)
                 for (left in listOf(true, false)) {
@@ -635,8 +686,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
         c.drawCircle(px, 4 * dp, 4 * dp, headP)
     }
 
-    private fun nearest(ms: Long): Bitmap? {
-        val list = thumbs
+    private fun nearest(ms: Long, src: String = ""): Bitmap? {
+        val list = if (src.isEmpty()) thumbs else srcThumbs[src].orEmpty()
         if (list.isEmpty()) return null
         var lo = 0
         var hi = list.lastIndex
@@ -891,7 +942,9 @@ class EditTimeline(ctx: Context) : View(ctx) {
                             val at = msAt(e.x)
                             words.minByOrNull { kotlin.math.abs(it.startMs - at) }?.takeIf { kotlin.math.abs(xOf(it.startMs) - e.x) < 40 * dp }
                         } else null
-                        if (inStrip && at in 0 until totalMs) {
+                        val seam = if (inStrip && clips.size > 1) (1 until clips.size).firstOrNull { abs(xOf(clipStarts[it]) - e.x) < seamBox * 0.8f } else null
+                        if (seam != null) onSeam(seam)
+                        else if (inStrip && at in 0 until totalMs) {
                             // a tap on the frames selects that piece of the main track
                             onClip(if (clips.isEmpty()) 0 else EditTrack.locate(clips, at).index)
                         } else if (hitWord != null) {

@@ -29,7 +29,9 @@ data class SClip(
     /** Where [fromMs] is inside the file (the file starts at the key frame before it). */
     val leadMs: Long = 0,
     /** Usable length of the file from [leadMs]. */
-    val lenMs: Long = 0
+    val lenMs: Long = 0,
+    /** Length of the whole YouTube video (0 = not known yet): new random moments are picked inside it. */
+    val durMs: Long = 0
 ) {
     val ms: Long get() = toMs - fromMs
 }
@@ -104,7 +106,7 @@ object StudioCuts {
     fun toJson(clips: List<SClip>): String = JSONArray().apply {
         clips.forEach {
             put(JSONObject().put("id", it.id).put("url", it.url).put("from", it.fromMs).put("to", it.toMs).put("note", it.note)
-                .put("title", it.title).put("file", it.file).put("lead", it.leadMs).put("len", it.lenMs))
+                .put("title", it.title).put("file", it.file).put("lead", it.leadMs).put("len", it.lenMs).put("dur", it.durMs))
         }
     }.toString()
 
@@ -116,7 +118,7 @@ object StudioCuts {
             val url = o.optString("url").trim()
             if (id.isEmpty() || url.isEmpty()) return@mapNotNull null
             SClip(id, url, o.optLong("from"), o.optLong("to"), o.optString("note"), o.optString("title"), o.optString("file"),
-                o.optLong("lead"), o.optLong("len"))
+                o.optLong("lead"), o.optLong("len"), o.optLong("dur"))
         }
     }.getOrDefault(emptyList())
 
@@ -334,7 +336,7 @@ object StudioCuts {
             if (h.url in have) continue
             have += h.url
             val (a, b) = span(fromMs, null)
-            out += SClip(newId(out), h.url, a, b, notes[h.url].orEmpty().ifBlank { h.title.take(200) }, h.title)
+            out += SClip(newId(out), h.url, a, b, notes[h.url].orEmpty().ifBlank { h.title.take(200) }, h.title, durMs = h.durationMs)
         }
         return out
     }

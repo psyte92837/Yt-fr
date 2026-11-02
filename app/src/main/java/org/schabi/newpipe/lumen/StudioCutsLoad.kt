@@ -84,6 +84,9 @@ object StudioCutsLoad {
         }
     }
 
+    /** Length of a YouTube video in ms (0 when not known). Network; worker thread. */
+    fun durationMs(url: String): Long = StreamInfo.getInfo(ServiceList.YouTube, url).duration.coerceAtLeast(0) * 1000
+
     /** Downloads and cuts [c] into [dir]; returns it with the file, the lead and the length. */
     fun fetch(c: SClip, dir: File, maxHeight: Int, cancelled: () -> Boolean, progress: (String) -> Unit): SClip {
         progress(t("${c.id}: ссылка на поток…", "${c.id}: getting the stream…"))
@@ -126,7 +129,8 @@ object StudioCutsLoad {
         try {
             val (leadUs, lenUs) = cut(part, out, fromUs, toUs, segStartUs)
             if (lenUs <= 0) error(t("${c.id}: в отрезке нет кадров", "${c.id}: no frames in the piece"))
-            return c.copy(file = out.name, leadMs = leadUs / 1000, lenMs = lenUs / 1000, title = c.title.ifBlank { info.name.orEmpty() })
+            return c.copy(file = out.name, leadMs = leadUs / 1000, lenMs = lenUs / 1000, title = c.title.ifBlank { info.name.orEmpty() },
+                durMs = if (info.duration > 0) info.duration * 1000 else c.durMs)
         } finally {
             part.delete()
         }

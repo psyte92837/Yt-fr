@@ -81,6 +81,14 @@ class StudioMixActivity : LumenBase() {
         var seed: Long
             get() = p.getLong("studio_mix_seed", 1)
             set(v) = p.edit().putLong("studio_mix_seed", v).apply()
+        /** Where the clips are cut: [MixCut.EVEN] or [MixCut.RANDOM] (own moments are set per clip). */
+        var mode: MixCut
+            get() = MixCut.of(p.getString("studio_mix_mode", "")) ?: MixCut.EVEN
+            set(v) = p.edit().putString("studio_mix_mode", v.id).apply()
+        /** Seed of the random moments: a new one cuts the clips at other places. */
+        var cutSeed: Long
+            get() = p.getLong("studio_mix_cut_seed", 1)
+            set(v) = p.edit().putLong("studio_mix_cut_seed", v).apply()
         /** The last built video, what it showed ([StudioMix.signature]) and whether it had the voice-over. */
         var video: String
             get() = p.getString("studio_mix_video", "") ?: ""
@@ -104,12 +112,23 @@ class StudioMixActivity : LumenBase() {
     private val clipsFile get() = File(dir, "clips.json")
     private val clipsDir get() = File(dir, "clips").apply { mkdirs() }
     private val mixFile get() = File(dir, "mix.json")
+    private val cutsFile get() = File(dir, "cuts.json")
     private val voiceFile get() = File(dir, "voice.wav")
     private val wordsFile get() = File(dir, "words.json")
 
     private var clips: List<SClip> = emptyList()
     private var items: List<MixItem> = emptyList()
     private var words: List<SWord> = emptyList()
+    /** Own cutting of clips, by id (see [ClipCut]). */
+    private var cuts: Map<String, ClipCut> = emptyMap()
+    /** Storyboard states for ↶ and ↷ (this visit only). */
+    private val undoStack = ArrayDeque<List<MixItem>>()
+    private val redoStack = ArrayDeque<List<MixItem>>()
+    /** Storyboard grid and its scroll, kept over a re-render. */
+    private var boardRv: RecyclerView? = null
+    private var boardState: android.os.Parcelable? = null
+    /** Actions for the ticked elements under the storyboard (refilled on every tick). */
+    private var selBox: LinearLayout? = null
     /** Clips ticked in the list (for the range and removal). */
     private val clipMarks = LinkedHashSet<String>()
 
@@ -167,6 +186,7 @@ class StudioMixActivity : LumenBase() {
         val ready = readyIds()
         items = if (mixFile.exists()) StudioMix.keepClips(StudioMix.fromJson(mixFile.readText()), ready) else emptyList()
         words = if (wordsFile.exists() && voiceFile.exists()) StudioMix.wordsFromJson(wordsFile.readText()) else emptyList()
+        cuts = if (cutsFile.exists()) StudioMix.cutsFromJson(cutsFile.readText()) else emptyMap()
         clipMarks.retainAll(clips.map { it.id }.toSet())
     }
 
@@ -181,6 +201,66 @@ class StudioMixActivity : LumenBase() {
         items = list
         runCatching { mixFile.writeText(StudioMix.toJson(list)) }.onFailure { L.w("studio", "mix: ${it.message}") }
     }
+
+    private fun saveCuts(map: Map<String, ClipCut>) {
+        cuts = map.filterValues { !it.isDefault || it.marks.isNotEmpty() }
+        runCatching { cutsFile.writeText(StudioMix.cutsJson(cuts)) }.onFailure { L.w("studio", "mix cuts: ${it.message}") }
+    }
+
+    /** A hand change of the storyboard: kept for ↶, saved and shown; [msg] shows a snackbar with "Undo". */
+    private fun change(list: List<MixItem>, msg: String? = null) {
+        val next = StudioMix.unique(list)
+        if (next == items) return
+        pushUndo(items)
+        saveItems(next)
+        render()
+        if (msg != null) snack(msg, t("Отменить", "Undo")) { undo() }
+    }
+
+    private fun pushUndo(state: List<MixItem>) {
+        undoStack.addLast(state)
+        while (undoStack.size > 40) undoStack.removeFirst()
+        redoStack.clear()
+    }
+
+    private fun undo() {
+        val prev = undoStack.removeLastOrNull() ?: return
+        redoStack.addLast(items)
+        saveItems(prev)
+        render()
+    }
+
+    private fun redo() {
+        val next = redoStack.removeLastOrNull() ?: return
+        undoStack.addLast(items)
+        saveItems(next)
+        render()
+    }
+
+    /** A ready clip as the mix cuts it. */
+    private fun specs(): List<MixSpec> = readyClips().map { MixSpec(it.id, it.lenMs, cuts[it.id] ?: ClipCut()) }
+
+    /** The whole storyboard cut again by the current settings (hand edits are gone; ↶ brings them back). */
+    private fun recut(msg: String?) {
+        if (readyClips().isEmpty()) return
+        change(StudioMix.build(specs(), Prefs.pieceMs, Prefs.mode, Prefs.cutSeed, Prefs.seed), msg)
+    }
+
+    /** Pieces of clip [id] cut again by its settings and put back at random places. */
+    private fun recutClip(id: String): List<MixItem> {
+        val spec = specs().firstOrNull { it.id == id } ?: return items
+        return StudioMix.replaceClip(items, id, StudioMix.cut(spec, Prefs.pieceMs, Prefs.mode, Prefs.cutSeed), System.nanoTime())
+    }
+
+    private fun cutLabel(c: ClipCut): String = listOfNotNull(
+        when (c.cut) {
+            MixCut.EVEN -> t("▦ ровно", "▦ even")
+            MixCut.RANDOM -> t("🎲 случайно", "🎲 random")
+            MixCut.MARKS -> t("✂ свои моменты: ${c.marks.size}", "✂ own moments: ${c.marks.size}")
+            null -> null
+        },
+        c.pieceMs.takeIf { it > 0 }?.let { StudioMix.pieceLabel(it) }
+    ).joinToString(" · ")
 
     private fun readyClips(): List<SClip> = clips.filter { it.file.isNotEmpty() && it.lenMs > 0 && File(clipsDir, it.file).exists() }
 
@@ -209,6 +289,8 @@ class StudioMixActivity : LumenBase() {
             Prefs.videoSig = ""
             Prefs.savedAs = ""
             clipMarks.clear()
+            undoStack.clear()
+            redoStack.clear()
             load()
             render()
         }
@@ -220,6 +302,9 @@ class StudioMixActivity : LumenBase() {
         status = null
         renderBar = null
         boardInfo = null
+        boardState = boardRv?.layoutManager?.onSaveInstanceState() ?: boardState
+        boardRv = null
+        selBox = null
         val c = Col(this)
         if (Prefs.format.isEmpty()) {
             formatCard(c)
@@ -227,7 +312,9 @@ class StudioMixActivity : LumenBase() {
             return
         }
         c.row(
-            chip(this, (if (aspect() == StudioAspect.PORTRAIT) "📱 Shorts / Stories 9:16" else t("🖥 Горизонтальное 16:9", "🖥 Horizontal 16:9")), true),
+            chip(this, (if (aspect() == StudioAspect.PORTRAIT) "📱 9:16 ⇄" else "🖥 16:9 ⇄"), true) { switchFormat() }.apply {
+                contentDescription = t("Формат кадра, нажмите, чтобы сменить", "Frame format, tap to switch")
+            },
             btn(this, t("＋ Новый микс", "＋ New mix"), style = BtnStyle.TONAL) { newMix() }
         )
         clipsCard(c)
@@ -237,6 +324,16 @@ class StudioMixActivity : LumenBase() {
             finalCard(c)
         }
         page(t("🔀 Микс", "🔀 Mix"), c.root, keepScroll = true)
+    }
+
+    /** 9:16 ⇄ 16:9: the clips stay, only the frame of the storyboard and of the next build changes. */
+    private fun switchFormat() {
+        if (busy.isNotEmpty() || rendering()) return toast(t("Дождитесь конца задачи", "Wait for the task to end"))
+        Prefs.format = if (aspect() == StudioAspect.PORTRAIT) StudioAspect.LANDSCAPE.id else StudioAspect.PORTRAIT.id
+        boardState = null
+        render()
+        toast(if (aspect() == StudioAspect.PORTRAIT) t("Формат 9:16 (Shorts / Stories)", "Format 9:16 (Shorts / Stories)")
+        else t("Формат 16:9 (обычное видео)", "Format 16:9 (regular video)"))
     }
 
     private fun formatCard(c: Col) = c.card {
@@ -265,15 +362,28 @@ class StudioMixActivity : LumenBase() {
 
     private fun clipsCard(c: Col) = c.card {
         add(text(ctx, t("1. Видео", "1. Videos"), Type.TITLE_M, bold = true), 0)
-        muted(t("Найдите видео, отметьте нужные и задайте им отрезок: начало и длину (до 30 с). Скачиваются только эти секунды, без звука.",
-            "Find videos, tick the ones you need and set their piece: start and length (up to 30 s). Only those seconds are downloaded, without sound."))
+        muted(t("Найдите видео, отметьте нужные и задайте им отрезок: начало и длину (до 30 с). Скачиваются только эти секунды, без звука. ⋮ у клипа — выбрать момент по кадрам видео, взять ещё отрезок, своя нарезка.",
+            "Find videos, tick the ones you need and set their piece: start and length (up to 30 s). Only those seconds are downloaded, without sound. ⋮ at a clip — pick the moment by the video frames, take one more piece, own cutting."))
         clips.forEach { cl ->
             val ready = cl.file.isNotEmpty() && File(clipsDir, cl.file).exists()
-            val label = (if (ready) "✅ " else "⬇ ") + "${cl.id} · ${StudioCuts.stamp(cl.fromMs)} +${(cl.ms + 500) / 1000} с\n" +
-                cl.title.ifBlank { cl.note }.ifBlank { cl.url }.take(80)
-            add(chk(ctx, label, cl.id in clipMarks) { on ->
-                if (on) clipMarks += cl.id else clipMarks -= cl.id
-                if (busy.isEmpty()) render()
+            val onBoard = items.count { it.clipId == cl.id }
+            val extra = listOfNotNull(
+                if (ready && items.isNotEmpty()) t("кусков в раскадровке: $onBoard", "pieces on the storyboard: $onBoard") else null,
+                cuts[cl.id]?.let { cutLabel(it) }?.takeIf { it.isNotEmpty() }
+            ).joinToString(" · ")
+            val label = (if (ready) "✅ " else "⬇ ") + "${cl.id} · ${StudioCuts.stamp(cl.fromMs)} +${(cl.ms + 500) / 1000} с" +
+                (if (cl.durMs > 0) t(" из ", " of ") + StudioCuts.stamp(cl.durMs) else "") + "\n" +
+                cl.title.ifBlank { cl.note }.ifBlank { cl.url }.take(80) + if (extra.isNotEmpty()) "\n$extra" else ""
+            add(LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(chk(ctx, label, cl.id in clipMarks) { on ->
+                    if (on) clipMarks += cl.id else clipMarks -= cl.id
+                    if (busy.isEmpty()) render()
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                addView(iconBtn(ctx, "⋮") { if (busy.isEmpty()) clipSheet(cl.id) }.apply {
+                    contentDescription = t("Настроить клип ${cl.id}", "Set up clip ${cl.id}")
+                })
             }, 4)
         }
         progress("dl", t("Загрузка клипов…", "Downloading clips…"))
@@ -299,9 +409,9 @@ class StudioMixActivity : LumenBase() {
     }
 
     private fun mixCard(c: Col) = c.card {
-        add(text(ctx, t("2. Микс", "2. Mix"), Type.TITLE_M, bold = true), 0)
-        muted(t("Клипы режутся на куски и перемешиваются: два куска одного клипа не идут подряд.",
-            "The clips are cut into pieces and shuffled: two pieces of one clip never go in a row."))
+        add(text(ctx, t("2. Нарезка", "2. Cutting"), Type.TITLE_M, bold = true), 0)
+        muted(t("Клипы режутся на куски и перемешиваются: два куска одного клипа не идут подряд. Своя нарезка для клипа — ⋮ у него в списке.",
+            "The clips are cut into pieces and shuffled: two pieces of one clip never go in a row. Own cutting of a clip — ⋮ at it in the list."))
         add(text(ctx, t("Длина куска — сразу для всех клипов", "Piece length — for all clips at once"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         val now = Prefs.pieceMs
         val chips = (StudioMix.PIECES + now).distinct().sorted().map { ms ->
@@ -313,81 +423,207 @@ class StudioMixActivity : LumenBase() {
             }
         }
         chips(chips)
-        if (busy.isEmpty() && items.isEmpty()) button(t("🔀 Смешать", "🔀 Mix"), primary = true) { shuffle() }
-    }
-
-    /** New piece length: every clip is cut again at once (same order of shuffle); hand edits are confirmed first. */
-    private fun applyPiece(ms: Long) {
-        val ready = readyClips().map { it.id to it.lenMs }
-        val old = Prefs.pieceMs
-        fun go() {
-            Prefs.pieceMs = ms
-            if (items.isNotEmpty() && ready.isNotEmpty()) saveItems(StudioMix.mix(ready, ms, Prefs.seed))
-            render()
-            if (items.isNotEmpty()) toast(t("Куски по ${StudioMix.pieceLabel(ms)}: кадров ${items.size}", "Pieces of ${StudioMix.pieceLabel(ms)}: ${items.size} frames"))
+        add(text(ctx, t("Где резать", "Where to cut"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(MixCut.EVEN to t("▦ Ровно, подряд", "▦ Even, in a row"), MixCut.RANDOM to t("🎲 Случайные моменты", "🎲 Random moments")),
+            Prefs.mode) { m -> if (busy.isEmpty()) setMode(m) }, 4)
+        muted(if (Prefs.mode == MixCut.EVEN) t("Каждый клип делится на равные куски от начала до конца.", "Every clip is split into equal pieces from start to end.")
+        else t("Куски берутся из случайных мест клипа, длина гуляет ±40 %. «🎲 Нарезать в новых местах» в «⋯ Варианты» — другие места.",
+            "Pieces come from random places of a clip, the length varies ±40 %. \"🎲 Cut at new places\" in \"⋯ Options\" gives other places."))
+        val own = readyClips().filter { cuts[it.id]?.isDefault == false }.map { it.id }
+        if (own.isNotEmpty()) muted(t("Своя нарезка у клипов: ", "Own cutting of clips: ") + own.joinToString(", "))
+        if (busy.isNotEmpty()) return@card
+        if (items.isEmpty()) button(t("🔀 Смешать", "🔀 Mix"), primary = true) { shuffle() }
+        else {
+            val missing = StudioMix.missing(items, readyClips().map { it.id })
+            if (missing.isNotEmpty()) button(t("＋ Куски клипов, которых нет в раскадровке: ", "＋ Pieces of clips missing on the storyboard: ") + missing.joinToString(", "),
+                style = BtnStyle.TONAL) {
+                var list = items
+                val specs = specs().associateBy { it.id }
+                for (id in missing) specs[id]?.let { list = StudioMix.addPieces(list, StudioMix.cut(it, Prefs.pieceMs, Prefs.mode, Prefs.cutSeed), System.nanoTime()) }
+                change(list, t("Добавлено кусков: ${list.size - items.size}", "Pieces added: ${list.size - items.size}"))
+            }
         }
-        if (items.isNotEmpty() && StudioMix.edited(items, ready, old, Prefs.seed)) {
-            confirm(t("Перерезать все куски?", "Cut all pieces again?"),
-                t("Раскадровка соберётся заново по ${StudioMix.pieceLabel(ms)}: перестановки, удаления, отметки и схемы пропадут.",
-                    "The storyboard is rebuilt with ${StudioMix.pieceLabel(ms)} pieces: moves, deletions, ticks and schemes are lost."), t("Перерезать", "Cut")) { go() }
-        } else go()
     }
 
+    /** New piece length: every clip is cut again at once; ↶ or "Undo" brings the old storyboard back. */
+    private fun applyPiece(ms: Long) {
+        Prefs.pieceMs = ms
+        if (items.isEmpty()) return render()
+        recut(t("Куски по ${StudioMix.pieceLabel(ms)}", "Pieces of ${StudioMix.pieceLabel(ms)}"))
+    }
+
+    private fun setMode(m: MixCut) {
+        Prefs.mode = m
+        if (m == MixCut.RANDOM) Prefs.cutSeed = System.nanoTime()
+        if (items.isEmpty()) return render()
+        recut(if (m == MixCut.RANDOM) t("Нарезано в случайных местах", "Cut at random places") else t("Нарезано ровно, подряд", "Cut evenly, in a row"))
+    }
+
+    /** The first mix of the downloaded clips. */
     private fun shuffle() {
-        val ready = readyClips()
-        if (ready.isEmpty()) return
-        val before = items
-        val oldSeed = Prefs.seed
-        undoable(t("Раскадровка перемешана", "Storyboard shuffled"), apply = {
+        if (readyClips().isEmpty()) return
+        Prefs.seed = System.nanoTime()
+        recut(null)
+    }
+
+    /** The same pieces in a new row; pinned ones keep their places. */
+    private fun reorder(order: MixOrder) {
+        Prefs.seed = System.nanoTime()
+        val msg = when (order) {
+            MixOrder.SHUFFLE -> t("Перемешано", "Shuffled")
+            MixOrder.ORDER -> t("По порядку клипов", "In clip order")
+            MixOrder.ROUND -> t("Клипы по кругу", "Clips in turn")
+        }
+        val next = StudioMix.rearrange(items, order, Prefs.seed)
+        if (next == items) toast(t("Порядок не изменился: всё закреплено или кусок один", "The order is the same: everything is pinned or there is one piece"))
+        else change(next, msg)
+    }
+
+    /** All the ways to shuffle and to cut again, explained; the quick "🔀 Shuffle" is on the card. */
+    private fun shuffleSheet() = bottomSheet(t("🔀 Перемешать и нарезать", "🔀 Shuffle and cut")) { dismiss ->
+        val pinned = items.count { it.locked }
+        val ticked = items.count { it.marked }
+        if (pinned > 0) muted(t("📌 Закреплённые куски ($pinned) остаются на своих местах.", "📌 Pinned pieces ($pinned) stay in their places."))
+        add(text(ctx, t("Те же куски — новый порядок", "Same pieces — new order"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        button(t("🔀 Случайно, без повторов подряд", "🔀 Random, no repeats in a row"), style = BtnStyle.TONAL) { dismiss(); reorder(MixOrder.SHUFFLE) }
+        button(t("▤ По порядку: клип за клипом", "▤ In order: clip after clip"), style = BtnStyle.TEXT) { dismiss(); reorder(MixOrder.ORDER) }
+        button(t("🔁 По кругу: c1, c2, c3, c1…", "🔁 In turn: c1, c2, c3, c1…"), style = BtnStyle.TEXT) { dismiss(); reorder(MixOrder.ROUND) }
+        if (ticked >= 2) button(t("🔀 Только отмеченные ($ticked) между собой", "🔀 Only the ticked ($ticked) among themselves"), style = BtnStyle.TEXT) {
+            dismiss()
+            change(StudioMix.shuffleMarked(items, System.nanoTime()), t("Отмеченные перемешаны", "Ticked ones shuffled"))
+        }
+        add(text(ctx, t("Новые куски из скачанных отрезков", "New pieces from the downloaded parts"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+        muted(t("Клипы режутся заново. Отметки, закрепления и схемы сбрасываются — ↶ вернёт.", "The clips are cut again. Ticks, pins and schemes are reset — ↶ brings them back."))
+        button(t("🎲 Нарезать в новых случайных местах", "🎲 Cut at new random places"), style = BtnStyle.TONAL) {
+            dismiss()
+            Prefs.mode = MixCut.RANDOM
+            Prefs.cutSeed = System.nanoTime()
             Prefs.seed = System.nanoTime()
-            saveItems(StudioMix.mix(ready.map { it.id to it.lenMs }, Prefs.pieceMs, Prefs.seed))
-            render()
-        }, revert = {
-            Prefs.seed = oldSeed
-            saveItems(before)
-            render()
-        })
+            recut(t("Новые случайные куски", "New random pieces"))
+        }
+        if (Prefs.mode == MixCut.RANDOM) button(t("▦ Нарезать ровно, подряд", "▦ Cut evenly, in a row"), style = BtnStyle.TEXT) { dismiss(); setMode(MixCut.EVEN) }
+        add(text(ctx, t("Новые моменты из видео", "New moments of the videos"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+        muted(t("Для каждого видео берётся новый случайный отрезок той же длины и скачивается заново (нужен интернет). Куски этих клипов нарежутся заново.",
+            "Every video gets a new random part of the same length, downloaded again (needs internet). The pieces of those clips are cut again."))
+        val ready = readyClips()
+        button(t("🌐 Новые моменты у всех клипов (${ready.size})", "🌐 New moments for all clips (${ready.size})"), style = BtnStyle.TONAL) {
+            dismiss()
+            randomMoments(ready)
+        }
+        val tickedClips = ready.filter { it.id in clipMarks }
+        if (tickedClips.isNotEmpty() && tickedClips.size < ready.size) button(t("🌐 Только у отмеченных клипов: ", "🌐 Only for the ticked clips: ") + tickedClips.joinToString(", ") { it.id },
+            style = BtnStyle.TEXT) { dismiss(); randomMoments(tickedClips) }
+        add(text(ctx, t("Длина ролика", "Video length"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+        val total = StudioMix.totalMs(items)
+        val opts = listOf(10, 15, 20, 30, 45, 60, 90, 120).map { it * 1000L }.filter { it < total }
+        if (opts.isEmpty()) muted(t("Ролик уже короче 10 с (${StudioCuts.stamp(total)}).", "The video is already shorter than 10 s (${StudioCuts.stamp(total)})."))
+        else {
+            muted(t("Сейчас ${StudioCuts.stamp(total)}. Куски с конца убираются, последний укорачивается.", "Now ${StudioCuts.stamp(total)}. Pieces at the end are dropped, the last one is shortened."))
+            chips(opts.map { ms ->
+                chip(ctx, "≤ " + StudioCuts.stamp(ms)) {
+                    dismiss()
+                    change(StudioMix.trimTo(items, ms), t("Ролик обрезан до ${StudioCuts.stamp(ms)}", "Video cut to ${StudioCuts.stamp(ms)}"))
+                }
+            })
+        }
+    }
+
+    /** New random parts of the videos of [list], downloaded again (the download task re-cuts their pieces). */
+    private fun randomMoments(list: List<SClip>) {
+        if (list.isEmpty()) return
+        confirm(t("Новые случайные моменты?", "New random moments?"),
+            t("Клипов: ${list.size}. Их отрезки заменятся случайными из тех же видео и скачаются заново.",
+                "Clips: ${list.size}. Their parts are replaced by random ones of the same videos and downloaded again."), t("Скачать", "Download")) {
+            download(list.map { it.id }.toSet())
+        }
     }
 
     // ---------- storyboard ----------
 
     private fun boardCard(c: Col) = c.card {
-        add(text(ctx, t("3. Раскадровка", "3. Storyboard"), Type.TITLE_M, bold = true), 0)
-        muted(t("Нажмите на кадр — отметить, удерживайте и тащите — переставить, ✕ — удалить.",
-            "Tap a frame to tick it, hold and drag to move it, ✕ to delete it."))
+        add(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(text(ctx, t("3. Раскадровка", "3. Storyboard"), Type.TITLE_M, bold = true).apply { heading() },
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (busy.isEmpty()) {
+                addView(iconBtn(ctx, "↶") { undo() }.apply {
+                    contentDescription = t("Отменить", "Undo")
+                    isEnabled = undoStack.isNotEmpty()
+                    alpha = if (undoStack.isNotEmpty()) 1f else 0.35f
+                })
+                addView(iconBtn(ctx, "↷") { redo() }.apply {
+                    contentDescription = t("Повторить", "Redo")
+                    isEnabled = redoStack.isNotEmpty()
+                    alpha = if (redoStack.isNotEmpty()) 1f else 0.35f
+                })
+            }
+        }, 0)
+        muted(t("Тап по кадру — настроить кусок (начало, длина, место). ○ — отметить несколько. Удерживайте и тащите — переставить. 📌 — закреплён: не двигается при перемешивании.",
+            "Tap a frame to set up the piece (start, length, place). ○ ticks several. Hold and drag to move. 📌 — pinned: stays in place when shuffled."))
         boardInfo = add(text(ctx, "", 14f, bold = true), 8)
         updateInfo()
         val (rv, height) = board()
         add(rv, 8).layoutParams.height = height
         if (busy.isNotEmpty()) return@card
-        val all = items.all { it.marked }
+        selBox = add(LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }, 4)
+        fillSelection()
         row(
-            btn(ctx, if (all) t("☐ Снять все", "☐ Untick all") else t("☑ Отметить все", "☑ Tick all"), style = BtnStyle.TEXT) {
-                saveItems(items.map { it.copy(marked = !all) })
-                render()
-            },
-            btn(ctx, t("✕ Удалить отмеченные", "✕ Delete ticked"), style = BtnStyle.TEXT) {
-                if (items.none { it.marked }) toast(t("Ничего не отмечено", "Nothing is ticked"))
-                else {
-                    val before = items
-                    undoable(t("Удалено кадров: ${items.count { it.marked }}", "Frames deleted: ${items.count { it.marked }}"), apply = {
-                        saveItems(StudioMix.removeMarked(items))
-                        render()
-                    }, revert = {
-                        saveItems(before)
-                        render()
-                    })
-                }
-            }
+            btn(ctx, t("🔀 Перемешать", "🔀 Shuffle"), style = BtnStyle.TONAL) { reorder(MixOrder.SHUFFLE) },
+            btn(ctx, t("⋯ Варианты", "⋯ Options"), style = BtnStyle.TEXT) { shuffleSheet() }
         )
-        button(t("🔀 Перемешать заново", "🔀 Shuffle again"), style = BtnStyle.TONAL) { shuffle() }
+        button(t("▶ Просмотр без сборки", "▶ Preview without building"), style = BtnStyle.TONAL) { previewSheet(0) }
+    }
+
+    /** Under the storyboard: "Tick all", or the actions for the ticked elements. */
+    private fun fillSelection() {
+        val box = selBox ?: return
+        box.removeAllViews()
+        val n = items.count { it.marked }
+        if (n == 0) {
+            box.addView(btn(this, t("☑ Отметить все", "☑ Tick all"), style = BtnStyle.TEXT) { change(items.map { it.copy(marked = true) }) })
+            return
+        }
+        box.addView(text(this, t("Отмечено: $n из ${items.size}", "Ticked: $n of ${items.size}"), Type.LABEL, bold = true, color = Palette.MUTED))
+        val pinAll = items.filter { it.marked }.all { it.locked }
+        val actions = listOfNotNull(
+            chip(this, t("☐ Снять", "☐ Untick")) { change(items.map { it.copy(marked = false) }) },
+            if (n < items.size) chip(this, t("☑ Все", "☑ All")) { change(items.map { it.copy(marked = true) }) } else null,
+            chip(this, if (pinAll) t("Открепить", "Unpin") else t("📌 Закрепить", "📌 Pin")) {
+                change(items.map { if (it.marked) it.copy(locked = !pinAll) else it },
+                    if (pinAll) t("Откреплено: $n", "Unpinned: $n") else t("Закреплено: $n — не двигаются при перемешивании", "Pinned: $n — they stay when shuffled"))
+            },
+            if (n >= 2) chip(this, t("🔀 Перемешать их", "🔀 Shuffle them")) {
+                change(StudioMix.shuffleMarked(items, System.nanoTime()), t("Отмеченные перемешаны", "Ticked ones shuffled"))
+            } else null,
+            chip(this, t("⏮ В начало", "⏮ To start")) { change(StudioMix.markedTo(items, true)) },
+            chip(this, t("⏭ В конец", "⏭ To end")) { change(StudioMix.markedTo(items, false)) },
+            chip(this, t("⧉ Дубль", "⧉ Duplicate")) { change(StudioMix.duplicateMarked(items), t("Дубли добавлены: $n", "Duplicates added: $n")) },
+            chip(this, t("✕ Удалить", "✕ Delete")) { change(StudioMix.removeMarked(items), t("Удалено кадров: $n", "Frames deleted: $n")) }
+        )
+        box.addView(chipRow(this, actions, collapseAfter = 99), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(6)
+        })
     }
 
     private fun updateInfo() {
         val on = items.count { it.marked }
+        val pins = items.count { it.locked }
+        val voice = if (voiceFile.exists()) (voiceFile.length() - 44).coerceAtLeast(0) / 2 * 1000 / 44_100 else 0L
         boardInfo?.text = t("Кадров: ${items.size} · ${StudioCuts.stamp(StudioMix.totalMs(items))}", "Frames: ${items.size} · ${StudioCuts.stamp(StudioMix.totalMs(items))}") +
             (if (on > 0) t(" · отмечено: $on", " · ticked: $on") else "") +
+            (if (pins > 0) " · 📌 $pins" else "") +
+            (if (voice > 0) t(" · озвучка ", " · voice-over ") + StudioCuts.stamp(voice) else "") +
             StudioMix.repeats(items).let { if (it > 0) t(" · повторов подряд: $it", " · repeats in a row: $it") else "" }
+    }
+
+    /** Tick of element [p] switched without rebuilding the page. */
+    private fun toggleMark(p: Int, adapter: RecyclerView.Adapter<*>) {
+        if (p !in items.indices || busy.isNotEmpty()) return
+        saveItems(items.mapIndexed { i, it -> if (i == p) it.copy(marked = !it.marked) else it })
+        adapter.notifyItemChanged(p)
+        updateInfo()
+        fillSelection()
     }
 
     /** The storyboard: a grid of frames with a fixed height, so dragging scrolls it inside the page. */
@@ -404,10 +640,18 @@ class StudioMixActivity : LumenBase() {
         val adapter = BoardAdapter(tileW, tileH)
         rv.adapter = adapter
         rv.isNestedScrollingEnabled = true
+        boardState?.let { rv.layoutManager?.onRestoreInstanceState(it) }
+        boardRv = rv
+        var dragFrom: List<MixItem>? = null
         ItemTouchHelper(object : ItemTouchHelper.SimpleCallback(
             ItemTouchHelper.UP or ItemTouchHelper.DOWN or ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT, 0
         ) {
             override fun isLongPressDragEnabled() = busy.isEmpty()
+
+            override fun onSelectedChanged(vh: RecyclerView.ViewHolder?, actionState: Int) {
+                super.onSelectedChanged(vh, actionState)
+                if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) dragFrom = items
+            }
 
             override fun onMove(rv: RecyclerView, from: RecyclerView.ViewHolder, to: RecyclerView.ViewHolder): Boolean {
                 val a = from.bindingAdapterPosition
@@ -422,10 +666,16 @@ class StudioMixActivity : LumenBase() {
 
             override fun clearView(rv: RecyclerView, vh: RecyclerView.ViewHolder) {
                 super.clearView(rv, vh)
-                saveItems(items)
+                val before = dragFrom
+                dragFrom = null
+                if (before != null && before != items) {
+                    // a drag is one step of ↶
+                    pushUndo(before)
+                    saveItems(items)
+                    render()
+                    return
+                }
                 updateInfo()
-                // numbers follow the new order
-                rv.post { adapter.notifyItemRangeChanged(0, items.size) }
             }
         }).attachToRecyclerView(rv)
         return rv to minOf(rows * rowH + dp(4), (resources.displayMetrics.heightPixels * 0.55f).toInt())
@@ -459,11 +709,12 @@ class StudioMixActivity : LumenBase() {
                 maxLines = 2
             }
             root.addView(label, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
-            val mark = text(ctx, "✓", 14f, bold = true, color = 0xFFFFFFFF.toInt()).apply {
+            // the tick circle: always there, so several frames can be ticked without a long press
+            val mark = text(ctx, "", 14f, bold = true, color = 0xFFFFFFFF.toInt()).apply {
                 gravity = Gravity.CENTER
-                background = roundBg(Palette.ACCENT, 12f, ctx)
+                setPadding(dp(4), dp(4), dp(4), dp(4))
             }
-            root.addView(mark, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.END).apply { setMargins(0, dp(4), dp(4), 0) })
+            root.addView(mark, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.TOP or Gravity.END))
             val del = text(ctx, "✕", 13f, bold = true, color = 0xFFFFFFFF.toInt()).apply {
                 gravity = Gravity.CENTER
                 background = roundBg(0x99000000.toInt(), 12f, ctx)
@@ -474,32 +725,31 @@ class StudioMixActivity : LumenBase() {
             root.setOnClickListener {
                 val p = h.bindingAdapterPosition
                 if (p < 0 || busy.isNotEmpty()) return@setOnClickListener
-                saveItems(items.mapIndexed { i, it -> if (i == p) it.copy(marked = !it.marked) else it })
-                notifyItemChanged(p)
-                updateInfo()
+                // while something is ticked a tap ticks; otherwise it opens the piece
+                if (items.any { it.marked }) toggleMark(p, this) else pieceSheet(items[p].key)
             }
+            mark.setOnClickListener { toggleMark(h.bindingAdapterPosition, this) }
             del.setOnClickListener {
                 val p = h.bindingAdapterPosition
                 if (p < 0 || busy.isNotEmpty()) return@setOnClickListener
-                val before = items
-                saveItems(items.filterIndexed { i, _ -> i != p })
-                notifyItemRemoved(p)
-                notifyItemRangeChanged(p, items.size - p)
-                updateInfo()
-                if (items.isEmpty()) render()
-                this@StudioMixActivity.snack(t("Кадр удалён", "Frame deleted"), t("Отменить", "Undo")) {
-                    saveItems(before)
-                    render()
-                }
+                change(items.filterIndexed { i, _ -> i != p }, t("Кадр удалён", "Frame deleted"))
             }
             return h
         }
 
         override fun onBindViewHolder(h: Tile, position: Int) {
             val it = items[position]
-            h.label.text = "${position + 1} · ${it.clipId} · ${"%.1f".format(Locale.US, it.lenMs / 1000f)} с" + if (it.scheme != null) " 🧩" else ""
-            h.mark.visibility = if (it.marked) View.VISIBLE else View.GONE
+            h.label.text = "${position + 1} · ${it.clipId} · ${"%.1f".format(Locale.US, it.lenMs / 1000f)} с" +
+                (if (it.scheme != null) " 🧩" else "") + if (it.locked) " 📌" else ""
+            h.mark.text = if (it.marked) "✓" else ""
+            h.mark.background = android.graphics.drawable.InsetDrawable(
+                if (it.marked) roundBg(Palette.ACCENT, 14f, this@StudioMixActivity) else roundBg(0x55000000, 14f, this@StudioMixActivity, 0xFFFFFFFF.toInt()),
+                dp(4)
+            )
+            h.mark.contentDescription = if (it.marked) t("Снять отметку", "Untick") else t("Отметить", "Tick")
             h.root.background = if (it.marked) roundBg(0x00000000, 6f, this@StudioMixActivity, Palette.ACCENT) else null
+            h.root.contentDescription = t("Кадр ${position + 1}, клип ${it.clipId}", "Frame ${position + 1}, clip ${it.clipId}") +
+                (if (it.locked) t(", закреплён", ", pinned") else "")
             thumb(h.image, it)
         }
     }
@@ -534,6 +784,335 @@ class StudioMixActivity : LumenBase() {
             }.getOrNull() ?: return@execute
             thumbs.put(key, bmp)
             Lumen.ui { if (iv.tag == key) iv.setImageBitmap(bmp) }
+        }
+    }
+
+    // ---------- one piece, preview ----------
+
+    /**
+     * Player of storyboard pieces straight from the downloaded clips, cropped to the frame of the mix like the built
+     * video: one piece in a loop or the whole storyboard in a row. No build is needed.
+     */
+    private inner class MixPlayer {
+        private val surface = android.view.TextureView(this@StudioMixActivity)
+        private val box = FrameLayout(this@StudioMixActivity).apply {
+            setBackgroundColor(0xFF000000.toInt())
+            addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            setOnClickListener { toggle() }
+            contentDescription = t("Пауза или воспроизведение", "Pause or play")
+        }
+        private var player: com.google.android.exoplayer2.ExoPlayer? = null
+        private var vw = 0
+        private var vh = 0
+        /** What plays now, so a refreshed sheet does not restart the same piece. */
+        var playing = ""
+        var onIndex: (Int) -> Unit = {}
+        var onPlaying: (Boolean) -> Unit = {}
+
+        /** The player in a frame of the mix shape, centred. */
+        fun view(): View {
+            val w = resources.displayMetrics.widthPixels - dp(40)
+            val (bw, bh) = if (aspect() == StudioAspect.PORTRAIT) {
+                val h = (resources.displayMetrics.heightPixels * 0.36f).toInt()
+                h * 9 / 16 to h
+            } else w to w * 9 / 16
+            box.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
+            (box.parent as? ViewGroup)?.removeView(box)
+            return FrameLayout(this@StudioMixActivity).apply {
+                addView(box, FrameLayout.LayoutParams(bw, bh, Gravity.CENTER))
+                layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, bh)
+            }
+        }
+
+        /** Centre crop of the video into the frame, as in the built mix. */
+        private fun fit() {
+            val fw = box.width.toFloat()
+            val fh = box.height.toFloat()
+            if (vw <= 0 || vh <= 0 || fw <= 0 || fh <= 0) return
+            val k = maxOf(fw / vw, fh / vh)
+            surface.setTransform(android.graphics.Matrix().apply { setScale(vw * k / fw, vh * k / fh, fw / 2, fh / 2) })
+        }
+
+        private fun exo(): com.google.android.exoplayer2.ExoPlayer = player ?: com.google.android.exoplayer2.ExoPlayer.Builder(this@StudioMixActivity).build().also { p ->
+            player = p
+            p.setVideoTextureView(surface)
+            p.addListener(object : com.google.android.exoplayer2.Player.Listener {
+                override fun onVideoSizeChanged(size: com.google.android.exoplayer2.video.VideoSize) {
+                    if (size.width <= 0 || size.height <= 0) return
+                    vw = (size.width * size.pixelWidthHeightRatio).toInt()
+                    vh = size.height
+                    fit()
+                }
+
+                override fun onMediaItemTransition(mediaItem: com.google.android.exoplayer2.MediaItem?, reason: Int) = onIndex(p.currentMediaItemIndex)
+
+                override fun onIsPlayingChanged(isPlaying: Boolean) = onPlaying(isPlaying)
+            })
+        }
+
+        /** Plays [parts] from element [start]: in a loop, cropped like the mix. */
+        fun play(parts: List<MixItem>, start: Int = 0) {
+            val ready = readyClips().associateBy { it.id }
+            val list = parts.mapNotNull { item ->
+                val c = ready[item.clipId] ?: return@mapNotNull null
+                val a = c.leadMs + item.fromMs
+                com.google.android.exoplayer2.MediaItem.Builder()
+                    .setUri(android.net.Uri.fromFile(File(clipsDir, c.file)))
+                    .setClippingConfiguration(com.google.android.exoplayer2.MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(a).setEndPositionMs(a + item.lenMs).build())
+                    .build()
+            }
+            if (list.isEmpty()) return
+            playing = parts.joinToString(";") { "${it.key}+${it.lenMs}" }
+            val p = exo()
+            p.setMediaItems(list, start.coerceIn(0, list.size - 1), 0L)
+            p.repeatMode = com.google.android.exoplayer2.Player.REPEAT_MODE_ALL
+            p.prepare()
+            p.playWhenReady = true
+            onIndex(p.currentMediaItemIndex)
+        }
+
+        fun toggle() {
+            val p = player ?: return
+            p.playWhenReady = !p.playWhenReady
+        }
+
+        fun next() = player?.let { if (it.hasNextMediaItem()) it.seekToNextMediaItem() else it.seekTo(0, 0L) }
+
+        fun prev() = player?.let { if (it.hasPreviousMediaItem()) it.seekToPreviousMediaItem() else it.seekTo(0L) }
+
+        fun index(): Int = player?.currentMediaItemIndex ?: 0
+
+        fun release() {
+            player?.release()
+            player = null
+        }
+    }
+
+    /** Start of element [i] in the video. */
+    private fun timeAt(i: Int): Long = items.take(i).sumOf { it.lenMs }
+
+    /** The whole storyboard in a row, as in the built video (without schemes, subtitles and voice-over). */
+    private fun previewSheet(from: Int) {
+        if (items.isEmpty()) return
+        val player = MixPlayer()
+        bottomSheet(t("▶ Просмотр раскадровки", "▶ Storyboard preview"), onDismiss = { player.release() }) { dismiss ->
+            muted(t("Куски идут подряд, как в готовом видео. Схем, субтитров и озвучки здесь нет — их добавит сборка.",
+                "The pieces go one after another as in the built video. Schemes, subtitles and the voice-over come with the build."))
+            add(player.view(), 8)
+            val info = add(text(ctx, "", 14f, bold = true), 8)
+            lateinit var playB: Button
+            row(
+                btn(ctx, "⏮", style = BtnStyle.TEXT) { player.prev() }.apply { contentDescription = t("Предыдущий кусок", "Previous piece") },
+                btn(ctx, "⏸", style = BtnStyle.TONAL) { player.toggle() }.also { playB = it },
+                btn(ctx, "⏭", style = BtnStyle.TEXT) { player.next() }.apply { contentDescription = t("Следующий кусок", "Next piece") }
+            )
+            button(t("✎ Настроить этот кусок", "✎ Set up this piece"), style = BtnStyle.TEXT) {
+                val k = items.getOrNull(player.index())?.key
+                dismiss()
+                k?.let { pieceSheet(it) }
+            }
+            player.onIndex = { i ->
+                items.getOrNull(i)?.let { info.text = "${i + 1} / ${items.size} · ${it.clipId} · ${StudioCuts.stamp(timeAt(i))} / ${StudioCuts.stamp(StudioMix.totalMs(items))}" }
+            }
+            player.onPlaying = { on ->
+                playB.text = if (on) "⏸" else "▶"
+                playB.contentDescription = if (on) t("Пауза", "Pause") else t("Играть", "Play")
+            }
+            player.play(items, from)
+        }
+    }
+
+    /**
+     * One piece: plays in a loop; its start and length inside the clip, another random moment, its place on the
+     * storyboard, pin, duplicate, halves, delete. Every change is one step of ↶.
+     */
+    private fun pieceSheet(key0: String) {
+        var key = key0
+        val player = MixPlayer()
+        bottomSheet(t("Кусок раскадровки", "Storyboard piece"), onDismiss = { player.release() }) { dismiss ->
+            add(player.view(), 8)
+            val body = Col(ctx, 0)
+            add(body.root, 4)
+            lateinit var refill: () -> Unit
+
+            /** The storyboard changed by the sheet; the piece is followed to its place [at]. */
+            fun applyEdit(list: List<MixItem>, at: Int) {
+                change(list)
+                val k = items.getOrNull(at)?.key
+                if (k == null) dismiss() else {
+                    key = k
+                    refill()
+                }
+            }
+
+            fun label(s: String) = body.add(text(ctx, s, Type.LABEL, bold = true, color = Palette.MUTED), 12)
+
+            refill = fill@{
+                body.clear()
+                val i = items.indexOfFirst { it.key == key }
+                val it = items.getOrNull(i)
+                val clip = it?.let { x -> readyClips().firstOrNull { c -> c.id == x.clipId } }
+                if (it == null || clip == null) {
+                    dismiss()
+                    return@fill
+                }
+                if (player.playing != "${it.key}+${it.lenMs}") player.play(listOf(it))
+                val clipMs = clip.lenMs
+                fun put(x: MixItem) = applyEdit(items.mapIndexed { k, y -> if (k == i) x else y }, i)
+                body.add(text(ctx, "${i + 1} / ${items.size} · ${clip.id} · ${StudioMix.pieceLabel(it.lenMs)}" + (if (it.locked) " · 📌" else ""), Type.TITLE_M, bold = true), 0)
+                body.muted(clip.title.ifBlank { clip.note }.ifBlank { clip.url }.take(90) + "\n" +
+                    t("В видео: ", "In the video: ") + StudioCuts.stamp(clip.fromMs + it.fromMs) + "–" + StudioCuts.stamp(clip.fromMs + it.fromMs + it.lenMs) +
+                    t(" · отрезок клипа ", " · clip part ") + StudioCuts.stamp(clip.fromMs) + "–" + StudioCuts.stamp(clip.fromMs + clipMs))
+                label(t("Начало куска", "Piece start"))
+                body.chips(listOf(-1_000L to "−1 с", -200L to "−0.2", 200L to "+0.2", 1_000L to "+1 с").map { (d, s) ->
+                    chip(ctx, s) { put(StudioMix.shift(it, d, clipMs)) }.apply {
+                        contentDescription = t("Сдвинуть начало на $s", "Move the start by $s")
+                    }
+                } + chip(ctx, t("🎲 Другой момент", "🎲 Another moment")) { put(StudioMix.moment(it, clipMs, System.nanoTime())) })
+                label(t("Длина куска", "Piece length"))
+                body.chips((StudioMix.PIECES.filter { ms -> ms <= clipMs } + it.lenMs).distinct().sorted().map { ms ->
+                    chip(ctx, StudioMix.pieceLabel(ms), ms == it.lenMs) { if (ms != it.lenMs) put(StudioMix.withLen(it, ms, clipMs)) }
+                } + chip(ctx, t("✎ Своя", "✎ Own")) {
+                    prompt(t("Длина куска, секунд", "Piece length, seconds"), t("до ", "up to ") + StudioMix.pieceLabel(clipMs), (it.lenMs / 1000.0).toString()) { v ->
+                        StudioMix.parsePiece(v)?.let { ms -> put(StudioMix.withLen(it, ms, clipMs)) } ?: toast(t("Нужно число секунд", "A number of seconds is needed"))
+                    }
+                })
+                label(t("Место в раскадровке", "Place on the storyboard"))
+                body.chips(listOfNotNull(
+                    if (i > 0) chip(ctx, t("⏮ В начало", "⏮ To start")) { applyEdit(StudioMix.move(items, i, 0), 0) } else null,
+                    if (i > 0) chip(ctx, t("◀ Раньше", "◀ Earlier")) { applyEdit(StudioMix.move(items, i, i - 1), i - 1) } else null,
+                    if (i < items.lastIndex) chip(ctx, t("Позже ▶", "Later ▶")) { applyEdit(StudioMix.move(items, i, i + 1), i + 1) } else null,
+                    if (i < items.lastIndex) chip(ctx, t("⏭ В конец", "⏭ To end")) { applyEdit(StudioMix.move(items, i, items.lastIndex), items.lastIndex) } else null
+                ))
+                label(t("Ещё", "More"))
+                body.chips(listOfNotNull(
+                    chip(ctx, if (it.locked) t("Открепить", "Unpin") else t("📌 Закрепить", "📌 Pin"), it.locked) { put(it.copy(locked = !it.locked)) },
+                    chip(ctx, t("⧉ Дубль", "⧉ Duplicate")) { applyEdit(StudioMix.duplicate(items, i), i) },
+                    StudioMix.halves(items, i)?.let { h -> chip(ctx, t("✂ Пополам", "✂ In halves")) { applyEdit(h, i) } },
+                    if (it.scheme != null) chip(ctx, t("🧩 Убрать схему", "🧩 Remove scheme")) { put(it.copy(scheme = null)) } else null,
+                    chip(ctx, t("✕ Удалить", "✕ Delete")) {
+                        dismiss()
+                        change(items.filterIndexed { k, _ -> k != i }, t("Кадр удалён", "Frame deleted"))
+                    }
+                ))
+                val back = undoStack.isNotEmpty()
+                body.row(
+                    btn(ctx, t("↶ Отменить", "↶ Undo"), style = BtnStyle.TEXT) {
+                        undo()
+                        if (items.none { x -> x.key == key }) items.getOrNull(i)?.let { x -> key = x.key }
+                        refill()
+                    }.apply { isEnabled = back },
+                    btn(ctx, t("Готово", "Done"), style = BtnStyle.TONAL) { dismiss() }
+                )
+            }
+            refill()
+        }
+    }
+
+    /**
+     * One clip: frames across its video and a mini player to pick the moment, its part (start and length),
+     * a random part, one more part of the same video, and its own cutting into pieces.
+     */
+    private fun clipSheet(id: String) {
+        val cl = clips.firstOrNull { it.id == id } ?: return
+        val look = MiniLook()
+        bottomSheet(t("Клип ${cl.id}", "Clip ${cl.id}"), onDismiss = { look.release() }) { dismiss ->
+            p(cl.title.ifBlank { cl.note }.ifBlank { cl.url }.take(120))
+            muted(t("Отрезок ", "Part ") + StudioCuts.stamp(cl.fromMs) + "–" + StudioCuts.stamp(cl.toMs) +
+                (if (cl.durMs > 0) t(" из ", " of ") + StudioCuts.stamp(cl.durMs) else "") +
+                if (cl.file.isEmpty()) t(" · не скачан", " · not downloaded") else "")
+            add(text(ctx, t("Найти момент в видео", "Find the moment in the video"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            muted(t("Кадры по всему видео; тап по кадру — видео с этого места. На нужном месте нажмите «⏱ Начало = сейчас».",
+                "Frames across the video; tap a frame to watch from there. At the right place tap \"⏱ Start = now\"."))
+            add(look.view, 4)
+            look.open(cl.url)
+
+            add(text(ctx, t("Отрезок для скачивания", "Part to download"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+            val fromE = edit(t("Начало: 1:23 или 83", "Start: 1:23 or 83"), StudioCuts.stamp(cl.fromMs))
+            var lenS = ((cl.ms + 500) / 1000).coerceIn(1, StudioCuts.MAX_CLIP_MS / 1000)
+            add(choiceChips(ctx, (listOf(3L, 5L, 8L, 10L, 15L, 20L, 30L) + lenS).distinct().sorted().map { it to "$it с" }, lenS) { lenS = it }, 4)
+            row(
+                btn(ctx, t("⏱ Начало = сейчас", "⏱ Start = now"), style = BtnStyle.TONAL) {
+                    val at = look.posMs()
+                    if (at < 0) toast(t("Включите видео выше: тап по кадру", "Play the video above: tap a frame"))
+                    else fromE.setText(StudioCuts.stamp(at / 100 * 100))
+                },
+                btn(ctx, t("🎲 Случайно", "🎲 Random"), style = BtnStyle.TEXT) {
+                    val dur = cl.durMs.takeIf { it > 0 } ?: look.durMs()
+                    if (dur <= 0) toast(t("Длина видео ещё не известна: включите его выше", "The video length is not known yet: play it above"))
+                    else fromE.setText(StudioCuts.stamp(StudioMix.randomStart(dur, lenS * 1000, StudioCuts.parseTime(fromE.text.toString()) ?: 0, System.nanoTime())))
+                }
+            )
+            button(t("⬇ Применить и скачать", "⬇ Apply and download"), primary = true) {
+                val from = StudioCuts.parseTime(fromE.text.toString())
+                    ?: return@button toast(t("Начало: время вида 1:23 или 83", "Start: a time like 1:23 or 83"))
+                val (a, b) = StudioCuts.span(from, from + lenS * 1000)
+                val now = clips.firstOrNull { it.id == id } ?: return@button dismiss()
+                dismiss()
+                if (now.fromMs == a && now.toMs == b && now.file.isNotEmpty()) return@button toast(t("Отрезок тот же", "The part is the same"))
+                if (now.file.isNotEmpty()) File(clipsDir, now.file).delete()
+                saveClips(clips.map { if (it.id == id) it.copy(fromMs = a, toMs = b, file = "", leadMs = 0, lenMs = 0) else it })
+                render()
+                download()
+            }
+            button(t("⧉ Ещё отрезок из этого видео", "⧉ One more part of this video"), style = BtnStyle.TEXT) {
+                if (clips.size >= StudioCuts.MAX_CLIPS) return@button toast(t("Не больше ${StudioCuts.MAX_CLIPS} клипов", "At most ${StudioCuts.MAX_CLIPS} clips"))
+                val (a, b) = StudioCuts.span(cl.toMs, cl.toMs + cl.ms)
+                val add = SClip(StudioCuts.newId(clips), cl.url, a, b, cl.note, cl.title, durMs = cl.durMs)
+                saveClips(clips + add)
+                dismiss()
+                render()
+                toast(t("Добавлен ${add.id}: отрезок сразу после ${cl.id}. Задайте его и скачайте", "Added ${add.id}: the part right after ${cl.id}. Set it and download"))
+                clipSheet(add.id)
+            }
+
+            add(text(ctx, t("Нарезка этого клипа", "Cutting of this clip"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+            var cut = cuts[id] ?: ClipCut()
+            val marksBox = Col(ctx, 0)
+            add(choiceChips(ctx, listOf(null to t("Как у всех", "As for all"), MixCut.EVEN to t("▦ Ровно", "▦ Even"),
+                MixCut.RANDOM to t("🎲 Случайно", "🎲 Random"), MixCut.MARKS to t("✂ Свои моменты", "✂ Own moments")), cut.cut) { m ->
+                cut = cut.copy(cut = m)
+                marksBox.root.visibility = if (m == MixCut.MARKS) View.VISIBLE else View.GONE
+            }, 4)
+            muted(t("Длина куска", "Piece length"))
+            add(choiceChips(ctx, listOf(0L to t("Как у всех (${StudioMix.pieceLabel(Prefs.pieceMs)})", "As for all (${StudioMix.pieceLabel(Prefs.pieceMs)})")) +
+                (StudioMix.PIECES + cut.pieceMs).filter { it > 0 }.distinct().sorted().map { it to StudioMix.pieceLabel(it) }, cut.pieceMs) { ms ->
+                cut = cut.copy(pieceMs = ms)
+            }, 4)
+            add(marksBox.root, 4)
+            marksBox.root.visibility = if (cut.cut == MixCut.MARKS) View.VISIBLE else View.GONE
+            marksBox.muted(t("С каких секунд отрезка брать куски: 0 — его начало. Напр. 0:01, 3.5, 7. Кусок длится до следующего момента, но не дольше длины куска.",
+                "From which seconds of the part to take pieces: 0 is its start. E.g. 0:01, 3.5, 7. A piece lasts until the next moment, at most the piece length."))
+            val marksE = marksBox.edit(t("Моменты", "Moments"), StudioMix.marksText(cut.marks))
+            marksBox.button(t("＋ Момент = сейчас (из видео выше)", "＋ Moment = now (from the video above)"), style = BtnStyle.TEXT) {
+                val at = look.posMs()
+                val rel = at - cl.fromMs
+                when {
+                    at < 0 -> toast(t("Включите видео выше: тап по кадру", "Play the video above: tap a frame"))
+                    rel < 0 || rel > cl.ms -> toast(t("Момент вне отрезка ", "The moment is outside the part ") + StudioCuts.stamp(cl.fromMs) + "–" + StudioCuts.stamp(cl.toMs))
+                    else -> {
+                        val list = (StudioMix.parseMarks(marksE.text.toString()).orEmpty() + rel / 100 * 100).distinct().sorted()
+                        marksE.setText(StudioMix.marksText(list))
+                    }
+                }
+            }
+            button(t("✓ Применить нарезку", "✓ Apply cutting"), style = BtnStyle.TONAL) {
+                val marks = if (cut.cut == MixCut.MARKS) StudioMix.parseMarks(marksE.text.toString())
+                    ?: return@button toast(t("Моменты: времена через запятую, напр. 0:01, 3.5", "Moments: times separated by commas, e.g. 0:01, 3.5"))
+                else cut.marks
+                if (cut.cut == MixCut.MARKS && marks.isEmpty()) return@button toast(t("Добавьте хотя бы один момент", "Add at least one moment"))
+                saveCuts(cuts + (id to cut.copy(marks = marks)))
+                dismiss()
+                if (items.isNotEmpty() && readyClips().any { it.id == id }) {
+                    val list = recutClip(id)
+                    change(list, t("${cl.id}: кусков ${list.count { it.clipId == id }}", "${cl.id}: ${list.count { it.clipId == id }} pieces"))
+                } else render()
+            }
+            button(t("✕ Убрать клип", "✕ Remove clip"), style = BtnStyle.TEXT) {
+                dismiss()
+                removeClips(listOf(cl))
+            }
         }
     }
 
@@ -1061,6 +1640,12 @@ class StudioMixActivity : LumenBase() {
             playBtn.text = "⏸"
         }
 
+        /** Position of the playing video, ms; −1 when nothing plays. */
+        fun posMs(): Long = player?.takeIf { started && current.isNotEmpty() }?.currentPosition ?: -1
+
+        /** Length of the playing video, ms; 0 when not known. */
+        fun durMs(): Long = player?.takeIf { started }?.duration?.takeIf { it > 0 } ?: 0
+
         fun stop() {
             current = ""
             started = false
@@ -1224,13 +1809,18 @@ class StudioMixActivity : LumenBase() {
             marked.forEach { if (it.file.isNotEmpty()) File(clipsDir, it.file).delete() }
             val ids = marked.map { it.id }.toSet()
             clipMarks -= ids
+            saveCuts(cuts - ids)
             saveClips(clips.filter { it.id !in ids })
             render()
         }
 
-    /** Downloads the clips that are not ready, two at a time; a failed one is reported and skipped. */
-    private fun download() {
-        val todo = clips.filter { it !in readyClips() }
+    /**
+     * Downloads the clips that are not ready, two at a time; a failed one is reported and skipped. Clips in
+     * [randomize] first get a new random part of their video (same length). Pieces of new and re-downloaded clips
+     * go into an existing storyboard at random places.
+     */
+    private fun download(randomize: Set<String> = emptySet()) {
+        val todo = clips.filter { it !in readyClips() || it.id in randomize }
         if (todo.isEmpty()) return
         busy = "dl"
         cancel = false
@@ -1241,16 +1831,23 @@ class StudioMixActivity : LumenBase() {
         BgTasks.run(this, key, t("Микс: загрузка клипов", "Mix: downloading clips"), BgTasks.reopen(this), {
             val done = java.util.concurrent.ConcurrentHashMap<String, SClip>()
             val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
-            Par.mapAll(todo, 2) { i, cl ->
+            Par.mapAll(todo, 2) { i, cl0 ->
                 if (cancel) throw java.util.concurrent.CancellationException()
                 BgTasks.progress(key, t("Клип ${i + 1}/${todo.size}", "Clip ${i + 1}/${todo.size}"))
                 try {
+                    var cl = cl0
+                    if (cl.id in randomize) {
+                        val dur = cl.durMs.takeIf { it > 0 } ?: StudioCutsLoad.durationMs(cl.url)
+                        val at = StudioMix.randomStart(dur, cl.ms, cl.fromMs, System.nanoTime() + i)
+                        val (a, b) = StudioCuts.span(at, at + cl.ms)
+                        cl = cl.copy(fromMs = a, toMs = b, durMs = dur)
+                    }
                     done[cl.id] = StudioCutsLoad.fetch(cl, dirNow, maxH, { cancel }) { BgTasks.progress(key, it) }
                 } catch (e: java.util.concurrent.CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    L.w("studio", "mix clip ${cl.id}: ${e.message}")
-                    errors += "${cl.id}: ${e.message ?: e.javaClass.simpleName}"
+                    L.w("studio", "mix clip ${cl0.id}: ${e.message}")
+                    errors += "${cl0.id}: ${e.message ?: e.javaClass.simpleName}"
                 }
                 i
             }
@@ -1263,12 +1860,30 @@ class StudioMixActivity : LumenBase() {
         }, { cancel = true }) { (done, errors) ->
             // the list on disk may have changed while downloading
             val now = if (clipsFile.exists()) StudioCuts.fromJson(clipsFile.readText()) else clips
-            saveClips(now.map { cl -> done[cl.id]?.takeIf { it.url == cl.url && it.fromMs == cl.fromMs && it.toMs == cl.toMs } ?: cl })
+            saveClips(now.map { cl ->
+                done[cl.id]?.takeIf { it.url == cl.url && (cl.id in randomize || it.fromMs == cl.fromMs && it.toMs == cl.toMs) } ?: cl
+            })
             busy = ""
-            if (isDestroyed) return@run
-            render()
+            // the new pieces join the storyboard (one step of ↶)
+            var list = items
+            if (list.isNotEmpty()) {
+                val specs = specs().associateBy { it.id }
+                for (id in done.keys) {
+                    val spec = specs[id] ?: continue
+                    if (id in randomize || list.none { it.clipId == id }) {
+                        list = StudioMix.replaceClip(list, id, StudioMix.cut(spec, Prefs.pieceMs, Prefs.mode, Prefs.cutSeed), System.nanoTime())
+                    }
+                }
+            }
+            if (isDestroyed) {
+                if (list != items) saveItems(StudioMix.unique(list))
+                return@run
+            }
+            val joined = list != items
+            if (joined) change(list) else render()
             if (errors.isNotEmpty()) showText(t("Не все клипы скачались", "Some clips failed"), errors.joinToString("\n"))
-            else toast(t("Клипов скачано: ${done.size}", "Clips downloaded: ${done.size}"))
+            else toast(t("Клипов скачано: ${done.size}", "Clips downloaded: ${done.size}") +
+                if (joined) t(" · их куски добавлены в раскадровку", " · their pieces are on the storyboard") else "")
         }
     }
 }

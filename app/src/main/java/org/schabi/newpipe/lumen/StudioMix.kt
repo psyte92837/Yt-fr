@@ -16,18 +16,44 @@ import kotlin.random.Random
 
 /**
  * One element of the mix: [lenMs] of clip [clipId] from [fromMs] (time inside the downloaded piece, from its lead).
- * [marked] — ticked on the storyboard; [scheme] — info-scheme drawn over this element.
+ * [marked] — ticked on the storyboard; [scheme] — info-scheme drawn over this element; [locked] — pinned: it keeps
+ * its place when the storyboard is shuffled or arranged; [dup] — copy number of a duplicated piece (0 = original).
  */
 data class MixItem(
     val clipId: String,
     val fromMs: Long,
     val lenMs: Long,
     val marked: Boolean = false,
-    val scheme: SScheme? = null
+    val scheme: SScheme? = null,
+    val locked: Boolean = false,
+    val dup: Int = 0
 ) {
-    /** Stable key for the storyboard: a clip piece is unique by clip and start. */
-    val key: String get() = "$clipId@$fromMs"
+    /** Stable key for the storyboard: a clip piece is unique by clip, start and copy number. */
+    val key: String get() = "$clipId@$fromMs" + if (dup > 0) "#$dup" else ""
 }
+
+/** How a clip is cut: equal parts, random moments of random length around the piece length, or own moments. */
+enum class MixCut(val id: String) {
+    EVEN("even"), RANDOM("random"), MARKS("marks");
+
+    companion object {
+        fun of(id: String?): MixCut? = values().firstOrNull { it.id == id }
+    }
+}
+
+/** How the pieces are put in a row: shuffled (no two of one clip in a row), clip after clip, or clips in turn. */
+enum class MixOrder { SHUFFLE, ORDER, ROUND }
+
+/**
+ * Own cutting of one clip: [cut] null = as for all clips, [pieceMs] 0 = the common piece length, [marks] — own
+ * moments (ms inside the downloaded piece) for [MixCut.MARKS].
+ */
+data class ClipCut(val cut: MixCut? = null, val pieceMs: Long = 0, val marks: List<Long> = emptyList()) {
+    val isDefault: Boolean get() = cut == null && pieceMs <= 0
+}
+
+/** A downloaded clip as the mix sees it: id, usable length and its own cutting. */
+data class MixSpec(val id: String, val ms: Long, val cut: ClipCut = ClipCut())
 
 object StudioMix {
     val PIECES = listOf(500L, 1_000L, 1_500L, 2_000L, 3_000L, 5_000L)
@@ -47,12 +73,15 @@ object StudioMix {
         (if (ms % 1000 == 0L) (ms / 1000).toString() else "%.1f".format(java.util.Locale.US, ms / 1000.0).trimEnd('0').trimEnd('.')) + " с"
 
     /**
-     * Was the storyboard changed by hand since the mix was made with [pieceMs] and [seed]: order, deletions,
-     * ticks or schemes? Such work is lost when the pieces are cut again.
+     * Was the storyboard changed by hand since it was made from [specs] with these settings: order, deletions,
+     * ticks, pins or schemes? Such work is lost when the pieces are cut again.
      */
+    fun edited(items: List<MixItem>, specs: List<MixSpec>, pieceMs: Long, mode: MixCut, cutSeed: Long, seed: Long): Boolean =
+        items.any { it.marked || it.locked || it.scheme != null } ||
+            items.map { it.key to it.lenMs } != build(specs, pieceMs, mode, cutSeed, seed).map { it.key to it.lenMs }
+
     fun edited(items: List<MixItem>, clips: List<Pair<String, Long>>, pieceMs: Long, seed: Long): Boolean =
-        items.any { it.marked || it.scheme != null } ||
-            items.map { it.key to it.lenMs } != mix(clips, pieceMs, seed).map { it.key to it.lenMs }
+        edited(items, clips.map { MixSpec(it.first, it.second) }, pieceMs, MixCut.EVEN, 0, seed)
 
     /** Pieces of a clip of usable length [clipMs]: equal parts close to [pieceMs]. */
     fun pieces(clipId: String, clipMs: Long, pieceMs: Long): List<MixItem> {
@@ -63,33 +92,262 @@ object StudioMix {
     }
 
     /**
+     * Pieces at random moments: about 3/4 of the clip is used, pieces of 60–140 % of [pieceMs] with random gaps
+     * between them, in time order, never overlapping. The same [seed] gives the same pieces.
+     */
+    fun randomPieces(clipId: String, clipMs: Long, pieceMs: Long, seed: Long): List<MixItem> {
+        if (clipMs < MIN_PIECE_MS || pieceMs <= 0) return emptyList()
+        val rnd = Random(seed)
+        val p = pieceMs.coerceIn(MIN_PIECE_MS, clipMs)
+        val n = ((clipMs * 3 / 4 + p / 2) / p).toInt().coerceIn(1, (clipMs / MIN_PIECE_MS).toInt().coerceAtLeast(1))
+        val lo = maxOf(MIN_PIECE_MS, p * 6 / 10)
+        val hi = maxOf(lo, p * 14 / 10)
+        var lens = List(n) { lo + (rnd.nextDouble() * (hi - lo)).toLong() }
+        val sum = lens.sum()
+        if (sum > clipMs) lens = lens.map { maxOf(MIN_PIECE_MS, it * clipMs / sum) }
+        while (lens.size > 1 && lens.sum() > clipMs) lens = lens.dropLast(1)
+        lens = lens.map { minOf(it, clipMs) }
+        val free = (clipMs - lens.sum()).coerceAtLeast(0)
+        val w = List(lens.size + 1) { 0.05 + rnd.nextDouble() }
+        val wSum = w.sum()
+        var at = (free * w[0] / wSum).toLong()
+        return lens.mapIndexed { k, len ->
+            val from = at.coerceAtMost(clipMs - len)
+            at = from + len + (free * w[k + 1] / wSum).toLong()
+            MixItem(clipId, from, len)
+        }
+    }
+
+    /** Pieces from own moments [marks]: each one [pieceMs] long, but not past the next moment or the clip end. */
+    fun markPieces(clipId: String, clipMs: Long, pieceMs: Long, marks: List<Long>): List<MixItem> {
+        val ms = marks.filter { it >= 0 && it <= clipMs - MIN_PIECE_MS }.distinct().sorted()
+        return ms.mapIndexedNotNull { i, at ->
+            val end = minOf(at + pieceMs, clipMs, ms.getOrNull(i + 1) ?: Long.MAX_VALUE)
+            (end - at).takeIf { it >= MIN_PIECE_MS }?.let { MixItem(clipId, at, it) }
+        }
+    }
+
+    /** Pieces of one clip by its own cutting, or by the common [pieceMs] and [mode]. */
+    fun cut(spec: MixSpec, pieceMs: Long, mode: MixCut, cutSeed: Long): List<MixItem> {
+        val p = spec.cut.pieceMs.takeIf { it > 0 } ?: pieceMs
+        return when (spec.cut.cut ?: mode) {
+            MixCut.EVEN -> pieces(spec.id, spec.ms, p)
+            MixCut.RANDOM -> randomPieces(spec.id, spec.ms, p, cutSeed * 31 + spec.id.hashCode())
+            MixCut.MARKS -> markPieces(spec.id, spec.ms, p, spec.cut.marks).ifEmpty { pieces(spec.id, spec.ms, p) }
+        }
+    }
+
+    /** The whole storyboard: every clip cut, then put in a row by [order]. */
+    fun build(specs: List<MixSpec>, pieceMs: Long, mode: MixCut, cutSeed: Long, seed: Long, order: MixOrder = MixOrder.SHUFFLE): List<MixItem> =
+        arrange(specs.flatMap { cut(it, pieceMs, mode, cutSeed) }, order, seed)
+
+    /**
      * All pieces of [clips] (id to usable length) in a random order where two pieces of one clip are never
      * neighbours, while that is possible: a clip with more than half of what is left goes first.
      */
-    fun mix(clips: List<Pair<String, Long>>, pieceMs: Long, seed: Long): List<MixItem> {
+    fun mix(clips: List<Pair<String, Long>>, pieceMs: Long, seed: Long): List<MixItem> =
+        build(clips.map { MixSpec(it.first, it.second) }, pieceMs, MixCut.EVEN, 0, seed)
+
+    /** Clip order for "clip after clip": c1, c2, …, c10 (by number), then the rest by name. */
+    private fun clipOrder(ids: Collection<String>): List<String> =
+        ids.distinct().sortedWith(compareBy<String>({ it.removePrefix("c").toIntOrNull() ?: Int.MAX_VALUE }, { it }))
+
+    /** [pool] in a row by [order], nothing pinned. */
+    fun arrange(pool: List<MixItem>, order: MixOrder, seed: Long): List<MixItem> =
+        fillFree(pool.map { it.copy(locked = false) }, pool.indices.toSet(), order, seed)
+
+    /** The storyboard put in a new row by [order]: pinned elements keep their places. */
+    fun rearrange(items: List<MixItem>, order: MixOrder, seed: Long): List<MixItem> =
+        fillFree(items, items.indices.filter { !items[it].locked }.toSet(), order, seed)
+
+    /** Only the ticked (not pinned) elements are shuffled among their own places. */
+    fun shuffleMarked(items: List<MixItem>, seed: Long): List<MixItem> =
+        fillFree(items, items.indices.filter { items[it].marked && !items[it].locked }.toSet(), MixOrder.SHUFFLE, seed)
+
+    /** Elements at [free] places are put in a new row by [order]; the others stay where they are. */
+    private fun fillFree(items: List<MixItem>, free: Set<Int>, order: MixOrder, seed: Long): List<MixItem> {
+        if (free.isEmpty()) return items
+        val slots = arrayOfNulls<MixItem>(items.size)
+        items.forEachIndexed { i, it -> if (i !in free) slots[i] = it }
+        val pool = items.filterIndexed { i, _ -> i in free }
+        if (order != MixOrder.SHUFFLE) {
+            val byClip = pool.groupBy { it.clipId }.mapValues { (_, l) -> l.sortedBy { it.fromMs }.toMutableList() }
+            val ids = clipOrder(byClip.keys)
+            val seq = if (order == MixOrder.ORDER) ids.flatMap { byClip.getValue(it) }
+            else buildList {
+                while (size < pool.size) for (id in ids) {
+                    val l = byClip.getValue(id)
+                    if (l.isNotEmpty()) add(l.removeAt(0))
+                }
+            }
+            var k = 0
+            for (i in slots.indices) if (slots[i] == null) slots[i] = seq[k++]
+            return slots.map { it!! }
+        }
         val rnd = Random(seed)
-        val left = clips.associate { (id, ms) -> id to pieces(id, ms, pieceMs).shuffled(rnd).toMutableList() }
-            .filterValues { it.isNotEmpty() }.toMutableMap()
-        val out = mutableListOf<MixItem>()
-        var last = ""
-        while (left.isNotEmpty()) {
-            val total = left.values.sumOf { it.size }
-            val must = left.entries.firstOrNull { it.key != last && it.value.size * 2 > total }
-            val pick = must?.key ?: left.keys.filter { it != last }.let { ok ->
-                if (ok.isEmpty()) last
-                else {
+        val left = LinkedHashMap<String, MutableList<MixItem>>()
+        pool.groupBy { it.clipId }.forEach { (id, l) -> left[id] = l.shuffled(rnd).toMutableList() }
+        var remaining = pool.size
+        for (i in slots.indices) {
+            if (slots[i] != null) continue
+            val prev = slots.getOrNull(i - 1)?.clipId
+            val next = slots.getOrNull(i + 1)?.clipId
+            val must = left.entries.firstOrNull { it.key != prev && it.value.size * 2 > remaining }?.key
+            val pick = must ?: left.keys.filter { it != prev && it != next }
+                .ifEmpty { left.keys.filter { it != prev } }.ifEmpty { left.keys.toList() }.let { ok ->
                     // weighted by what is left, so big clips do not pile up at the end
                     var r = rnd.nextInt(ok.sumOf { left.getValue(it).size })
                     ok.first { id -> r -= left.getValue(id).size; r < 0 }
                 }
-            }
             val list = left.getValue(pick)
-            out += list.removeAt(list.lastIndex)
+            slots[i] = list.removeAt(list.lastIndex)
             if (list.isEmpty()) left.remove(pick)
-            last = pick
+            remaining--
+        }
+        return slots.map { it!! }
+    }
+
+    /**
+     * [new] pieces put into the storyboard at random places, between pieces of other clips where possible;
+     * the rest of the storyboard keeps its order.
+     */
+    fun addPieces(items: List<MixItem>, new: List<MixItem>, seed: Long): List<MixItem> {
+        val rnd = Random(seed)
+        val out = items.toMutableList()
+        for (p in new.shuffled(rnd)) {
+            val good = (0..out.size).filter { at ->
+                out.getOrNull(at - 1)?.clipId != p.clipId && out.getOrNull(at)?.clipId != p.clipId
+            }
+            val at = if (good.isNotEmpty()) good[rnd.nextInt(good.size)] else rnd.nextInt(out.size + 1)
+            out.add(at, p)
+        }
+        return unique(out)
+    }
+
+    /** The pieces of clip [clipId] replaced by [new] ones at random places; the other elements keep their order. */
+    fun replaceClip(items: List<MixItem>, clipId: String, new: List<MixItem>, seed: Long): List<MixItem> =
+        addPieces(items.filter { it.clipId != clipId }, new, seed)
+
+    /** Ready clips that have no element on the storyboard (new or re-cut clips). */
+    fun missing(items: List<MixItem>, ready: List<String>): List<String> {
+        val have = items.map { it.clipId }.toSet()
+        return ready.filter { it !in have }
+    }
+
+    /** Elements with equal keys get their own copy numbers, so the storyboard never has two equal keys. */
+    fun unique(items: List<MixItem>): List<MixItem> {
+        val seen = HashSet<String>()
+        return items.map { item ->
+            var it = item
+            while (!seen.add(it.key)) it = it.copy(dup = it.dup + 1)
+            it
+        }
+    }
+
+    // ---------- one element ----------
+
+    /** Start moved by [deltaMs] inside the clip of usable length [clipMs]. */
+    fun shift(item: MixItem, deltaMs: Long, clipMs: Long): MixItem =
+        item.copy(fromMs = (item.fromMs + deltaMs).coerceIn(0, (clipMs - item.lenMs).coerceAtLeast(0)))
+
+    /** New length, kept inside the clip: the start moves back when the end would pass the clip end. */
+    fun withLen(item: MixItem, lenMs: Long, clipMs: Long): MixItem {
+        val len = lenMs.coerceIn(MIN_PIECE_MS, clipMs.coerceAtLeast(MIN_PIECE_MS))
+        return item.copy(lenMs = len, fromMs = item.fromMs.coerceAtMost((clipMs - len).coerceAtLeast(0)))
+    }
+
+    /** The same length at another random moment of the clip, at least a piece away from the old one when it fits. */
+    fun moment(item: MixItem, clipMs: Long, seed: Long): MixItem {
+        val room = clipMs - item.lenMs
+        if (room <= 0) return item.copy(fromMs = 0)
+        val rnd = Random(seed)
+        var from = rnd.nextLong(room + 1)
+        repeat(8) { if (kotlin.math.abs(from - item.fromMs) < item.lenMs && room > item.lenMs * 2) from = rnd.nextLong(room + 1) }
+        return item.copy(fromMs = from / 100 * 100)
+    }
+
+    /** Element [i] cut in two halves; null when a half would be shorter than [MIN_PIECE_MS]. */
+    fun halves(items: List<MixItem>, i: Int): List<MixItem>? {
+        val it = items.getOrNull(i) ?: return null
+        val a = it.lenMs / 2
+        if (a < MIN_PIECE_MS || it.lenMs - a < MIN_PIECE_MS) return null
+        val out = items.toMutableList()
+        out[i] = it.copy(lenMs = a)
+        out.add(i + 1, it.copy(fromMs = it.fromMs + a, lenMs = it.lenMs - a, scheme = null, dup = 0))
+        return unique(out)
+    }
+
+    /** A copy of element [i] right after it (not ticked, not pinned, without a scheme). */
+    fun duplicate(items: List<MixItem>, i: Int): List<MixItem> {
+        val it = items.getOrNull(i) ?: return items
+        val out = items.toMutableList()
+        out.add(i + 1, it.copy(marked = false, locked = false, scheme = null))
+        return unique(out)
+    }
+
+    /** Copies of the ticked elements, each right after its original. */
+    fun duplicateMarked(items: List<MixItem>): List<MixItem> =
+        unique(items.flatMap { if (it.marked) listOf(it, it.copy(marked = false, locked = false, scheme = null)) else listOf(it) })
+
+    /** Ticked elements moved to the start (or the end), keeping their order. */
+    fun markedTo(items: List<MixItem>, start: Boolean): List<MixItem> {
+        val (on, off) = items.partition { it.marked }
+        return if (start) on + off else off + on
+    }
+
+    /** The storyboard cut to [targetMs]: the elements from the start, the last one shortened (not below the minimum). */
+    fun trimTo(items: List<MixItem>, targetMs: Long): List<MixItem> {
+        val out = mutableListOf<MixItem>()
+        var at = 0L
+        for (it in items) {
+            if (at >= targetMs) break
+            val len = minOf(it.lenMs, targetMs - at)
+            if (len < MIN_PIECE_MS && out.isNotEmpty()) break
+            out += it.copy(lenMs = maxOf(len, minOf(it.lenMs, MIN_PIECE_MS)))
+            at += out.last().lenMs
         }
         return out
     }
+
+    /**
+     * Start of a random new piece of [lenMs] in a video of [durMs] (whole 100 ms), away from [oldMs] when the video
+     * is long enough; 0 when the video is not longer than the piece.
+     */
+    fun randomStart(durMs: Long, lenMs: Long, oldMs: Long, seed: Long): Long {
+        val room = durMs - lenMs
+        if (room <= 0) return 0
+        val rnd = Random(seed)
+        var at = rnd.nextLong(room + 1)
+        repeat(8) { if (kotlin.math.abs(at - oldMs) < lenMs && room > lenMs * 3) at = rnd.nextLong(room + 1) }
+        return at / 100 * 100
+    }
+
+    /** Own moments typed as "0:03, 7.5; 0:12" → sorted ms; null when a part is not a time. */
+    fun parseMarks(s: String): List<Long>? {
+        val parts = s.split(Regex("""[,;\s]+""")).filter { it.isNotBlank() }
+        val out = parts.map { StudioCuts.parseTime(it) ?: return null }
+        return out.distinct().sorted()
+    }
+
+    fun marksText(marks: List<Long>): String = marks.joinToString(", ") { StudioCuts.stamp(it) }
+
+    // ---------- clip cutting saved per clip ----------
+
+    fun cutsJson(cuts: Map<String, ClipCut>): String = JSONObject().apply {
+        cuts.filterValues { !it.isDefault || it.marks.isNotEmpty() }.forEach { (id, c) ->
+            put(id, JSONObject().put("cut", c.cut?.id ?: "").put("piece", c.pieceMs).put("marks", JSONArray(c.marks)))
+        }
+    }.toString()
+
+    fun cutsFromJson(s: String): Map<String, ClipCut> = runCatching {
+        val o = JSONObject(s)
+        o.keys().asSequence().associateWith { id ->
+            val c = o.getJSONObject(id)
+            val m = c.optJSONArray("marks")
+            ClipCut(MixCut.of(c.optString("cut")), c.optLong("piece").coerceAtLeast(0),
+                if (m == null) emptyList() else (0 until m.length()).map { m.optLong(it) }.filter { it >= 0 })
+        }
+    }.getOrDefault(emptyMap())
 
     /** Frames of a storyboard for a strip: [want] of [total] frames, each from the middle of an equal part. */
     fun stripFrames(total: Int, want: Int): List<Int> {
@@ -209,6 +467,8 @@ object StudioMix {
         items.forEach {
             put(JSONObject().put("clip", it.clipId).put("from", it.fromMs).put("len", it.lenMs).put("on", it.marked).apply {
                 it.scheme?.let { s -> put("scheme", StudioScheme.toJson(s)) }
+                if (it.locked) put("lock", true)
+                if (it.dup > 0) put("dup", it.dup)
             })
         }
     }.toString()
@@ -220,8 +480,9 @@ object StudioMix {
             val id = o.optString("clip").trim()
             val len = o.optLong("len")
             if (id.isEmpty() || len <= 0) return@mapNotNull null
-            MixItem(id, o.optLong("from").coerceAtLeast(0), len, o.optBoolean("on"), o.optJSONObject("scheme")?.let { StudioScheme.fromJson(it) })
-        }
+            MixItem(id, o.optLong("from").coerceAtLeast(0), len, o.optBoolean("on"), o.optJSONObject("scheme")?.let { StudioScheme.fromJson(it) },
+                o.optBoolean("lock"), o.optInt("dup").coerceAtLeast(0))
+        }.let { unique(it) }
     }.getOrDefault(emptyList())
 
     fun wordsJson(words: List<SWord>): String = JSONArray().apply {

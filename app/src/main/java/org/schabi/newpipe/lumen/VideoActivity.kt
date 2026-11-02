@@ -37,6 +37,43 @@ class VideoActivity : LumenBase() {
         render()
     }
 
+    /** Copy the link, put the video into another project or the Mix, remove it from this project. */
+    private fun videoMenu() {
+        val v = video
+        val acts = mutableListOf<Pair<String, () -> Unit>>()
+        acts += t("⧉ Копировать ссылку", "⧉ Copy the link") to {
+            getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("url", v.url))
+            toast(t("Ссылка скопирована", "Link copied"))
+        }
+        acts += t("В другой проект…", "To another project…") to { toProject() }
+        if (!isLocalSource(v.id)) acts += t("🔀 В Микс Студии", "🔀 To the Studio Mix") to {
+            if (StudioMixActivity.addVideo(this, v.url, v.title)) snack(t("Добавлено в Микс", "Added to the Mix"), t("Открыть", "Open")) { StudioMixActivity.open(this) }
+            else toast(t("Уже в Миксе или Микс заполнен", "Already in the Mix or the Mix is full"))
+        }
+        acts += t("Удалить из проекта", "Remove from project") to {
+            confirm(t("Удалить видео из проекта?", "Remove the video from the project?"), v.title.take(80), t("Удалить", "Delete")) {
+                val all = Store.videos(pid)
+                all.remove(v.id)
+                Store.saveVideos(pid, all.values)
+                toast(t("Видео удалено из проекта", "Video removed from the project"))
+                finish()
+            }
+        }
+        android.app.AlertDialog.Builder(this).setTitle(v.title.take(60)).setItems(acts.map { it.first }.toTypedArray()) { _, i -> acts[i].second() }.show()
+    }
+
+    private fun toProject() {
+        val others = Store.projects().filter { it.id != pid }
+        if (others.isEmpty()) return toast(t("Других проектов нет", "No other projects"))
+        android.app.AlertDialog.Builder(this).setTitle(t("В какой проект", "To which project"))
+            .setItems(others.map { it.name.ifBlank { it.phrase } }.toTypedArray()) { _, i ->
+                val p = others[i]
+                val added = Store.mergeVideos(p.id, listOf(Video.from(video.toJson())))
+                snack(if (added > 0) t("Добавлено в «${p.name.take(30)}»", "Added to \"${p.name.take(30)}\"") else t("Там это видео уже есть", "It is there already"),
+                    t("Открыть", "Open")) { openProjectScreen(p) }
+            }.setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
     private fun reloadAndRender() {
         if (isFinishing || isDestroyed) return
         Store.videos(pid)[video.id]?.let { video = it }
@@ -171,7 +208,7 @@ class VideoActivity : LumenBase() {
                 render()
             }
         }
-        page(t("Видео", "Video"), c.root, actions = listOf("⤴" to { shareText(v.title, v.url) }))
+        page(t("Видео", "Video"), c.root, actions = listOf("⤴" to { shareText(v.title, v.url) }, "⋮" to { videoMenu() }))
     }
 
     private fun collectNow() {

@@ -91,6 +91,12 @@ class BotsActivity : LumenBase() {
             }
             card.setOnClickListener { BotActivity.open(this, b.id) }
         }
+        val idle = bots.filter { !it.enabled && Bots.token(it.id) != null }
+        if (idle.size > 1) c.button(t("▶ Запустить все (${idle.size})", "▶ Start all (${idle.size})"), style = BtnStyle.TONAL) {
+            idle.forEach { BotManager.setEnabled(this, it.id, true) }
+            if (!BotManager.batteryOk(this)) BotManager.askBattery(this)
+            render()
+        }
         if (bots.any { it.enabled }) {
             c.button(t("Остановить все", "Stop all"), style = BtnStyle.TEXT) {
                 confirm(t("Остановить всех ботов?", "Stop all bots?"), t("Они перестанут отвечать в Telegram.", "They will stop answering in Telegram."), t("Остановить", "Stop")) {

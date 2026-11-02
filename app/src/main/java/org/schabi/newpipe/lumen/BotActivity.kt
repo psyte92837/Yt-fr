@@ -33,6 +33,7 @@ class BotActivity : LumenBase() {
     private var busy: String? = null
     private var busyView: TextView? = null
     private var logFilter = 0
+    private var logQuery = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -834,8 +835,18 @@ class BotActivity : LumenBase() {
             }
             return c
         }
-        val list = all.filter { logFilter == 0 || it.kind == BotLogEntry.ERR }.takeLast(300).reversed()
-        if (list.isEmpty()) c.muted(t("Журнал пуст. Запустите бота и напишите ему в Telegram.", "The journal is empty. Start the bot and write to it in Telegram."))
+        val q0 = c.edit(t("Найти в журнале", "Search the journal"), logQuery)
+        q0.onEnter { }
+        val box = Col(this, 0)
+        c.add(box.root, 0)
+        fun fill() {
+        box.clear()
+        val q = SearchIndex.tokens(logQuery)
+        val list = all.filter { logFilter == 0 || it.kind == BotLogEntry.ERR }
+            .filter { e -> q.isEmpty() || SearchIndex.norm(e.who + " " + e.text).let { s -> q.all { s.contains(it) } } }.takeLast(300).reversed()
+        val c = box
+        if (list.isEmpty() && q.isNotEmpty()) c.muted(t("Ничего не найдено.", "Nothing found."))
+        else if (list.isEmpty()) c.muted(t("Журнал пуст. Запустите бота и напишите ему в Telegram.", "The journal is empty. Start the bot and write to it in Telegram."))
         for (e in list) {
             val arrow = when (e.kind) {
                 BotLogEntry.IN -> "→"
@@ -856,6 +867,12 @@ class BotActivity : LumenBase() {
                 ab.show()
             }
         }
+        }
+        q0.addTextChangedListener(SimpleWatcher {
+            logQuery = it
+            fill()
+        })
+        fill()
         if (all.isNotEmpty()) {
             c.button(t("Очистить журнал", "Clear the journal"), style = BtnStyle.TEXT) {
                 confirm(t("Очистить журнал?", "Clear the journal?"), "", t("Очистить", "Clear")) {

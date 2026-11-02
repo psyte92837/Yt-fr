@@ -2214,16 +2214,64 @@ class StudioEditorActivity : LumenBase() {
             if (list.isEmpty()) muted(if (kind == EditMusic.KIND) t("Пока нет музыки: «🎵 Музыка» добавит трек с телефона с места курсора.",
                 "No music yet: \"🎵 Music\" adds a track from the phone at the playhead.")
             else t("Пока пусто: остановите видео в нужном месте и нажмите «＋ Вставить».", "Empty so far: stop the video at a moment and tap \"＋ Insert\"."))
-            for (b in list.sortedBy { it.startMs }) add(text(ctx, blockName(b) + "\n" + StudioEdit.clock(b.startMs) + " – " + StudioEdit.clock(b.endMs), 15f).apply {
-                setPadding(dp(8), dp(10), dp(8), dp(10))
-                if (b.id == selected) setTextColor(Palette.ACCENT)
-                background = ripple(ctx, roundBg(0x00000000, 12f, ctx), Palette.ON_SURFACE)
-                setOnClickListener {
-                    dismiss()
-                    select(b.id, seek = true)
+            // several blocks at once: tick them, then delete or shift together (one ↶ step each)
+            val picked = linkedSetOf<String>()
+            var picking = false
+            val bar = Col(ctx, 0)
+            val rows = Col(ctx, 0)
+            fun fill() {
+                bar.clear()
+                rows.clear()
+                if (list.size > 1) bar.add(chipScroller(ctx, if (!picking) listOf(chip(ctx, t("☑ Выбрать несколько", "☑ Select several")) { picking = true; fill() })
+                else listOf(
+                    chip(ctx, t("Выбрано: ", "Picked: ") + picked.size, true),
+                    chip(ctx, t("Все", "All")) { picked.addAll(list.map { it.id }); fill() },
+                    chip(ctx, t("◀ 0,5 с", "◀ 0.5 s")) { shiftPicked(picked, -500); fill() },
+                    chip(ctx, t("0,5 с ▶", "0.5 s ▶")) { shiftPicked(picked, 500); fill() },
+                    chip(ctx, t("🗑 Удалить", "🗑 Delete")) {
+                        if (picked.isEmpty()) return@chip
+                        val n = picked.size
+                        commit(blocks.filter { it.id !in picked }, null)
+                        toast(t("Удалено блоков: $n (↶ — вернуть)", "Blocks deleted: $n (↶ brings them back)"))
+                        dismiss()
+                    },
+                    chip(ctx, t("Готово", "Done")) { picking = false; picked.clear(); fill() }
+                )), 0)
+                for (b0 in list.sortedBy { it.startMs }) {
+                    val b = StudioEdit.find(blocks, b0.id) ?: continue
+                    val mark = if (picking) (if (b.id in picked) "☑ " else "☐ ") else ""
+                    rows.add(text(ctx, mark + blockName(b) + "\n" + StudioEdit.clock(b.startMs) + " – " + StudioEdit.clock(b.endMs), 15f).apply {
+                        setPadding(dp(8), dp(10), dp(8), dp(10))
+                        if (b.id == selected || b.id in picked) setTextColor(Palette.ACCENT)
+                        background = ripple(ctx, roundBg(0x00000000, 12f, ctx), Palette.ON_SURFACE)
+                        setOnClickListener {
+                            if (picking) {
+                                if (!picked.add(b.id)) picked.remove(b.id)
+                                fill()
+                            } else {
+                                dismiss()
+                                select(b.id, seek = true)
+                            }
+                        }
+                        setOnLongClickListener {
+                            picking = true
+                            picked.add(b.id)
+                            fill()
+                            true
+                        }
+                    }, 2)
                 }
-            }, 2)
+            }
+            add(bar.root, 4)
+            add(rows.root, 4)
+            fill()
         }
+    }
+
+    /** Moves the picked blocks together by [ms] (one undo step). */
+    private fun shiftPicked(ids: Set<String>, ms: Long) {
+        if (ids.isEmpty()) return
+        commit(blocks.map { b -> if (b.id in ids) StudioEdit.clampTime(b.copy(startMs = (b.startMs + ms).coerceAtLeast(0)), total) else b })
     }
 
     private fun textSchemeSheet(old: EBlock?) {

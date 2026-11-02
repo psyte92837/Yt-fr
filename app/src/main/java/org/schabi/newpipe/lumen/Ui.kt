@@ -1491,3 +1491,50 @@ fun ProgressBar.showProgress(message: String) {
         progress = (f * max).toInt()
     }
 }
+
+/**
+ * Sideways swipe on a row inside a vertical list: the row follows the finger; past a third of its width
+ * it slides out and [onSwiped] runs (direction -1 left, 1 right), otherwise it springs back. Taps and long presses still work.
+ */
+fun View.onSwipe(onSwiped: (Int) -> Unit) {
+    val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+    var x0 = 0f
+    var y0 = 0f
+    var dragging = false
+    setOnTouchListener { v, e ->
+        when (e.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                x0 = e.rawX; y0 = e.rawY; dragging = false
+                false
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val dx = e.rawX - x0
+                val dy = e.rawY - y0
+                if (!dragging && kotlin.math.abs(dx) > slop * 2 && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.5f) {
+                    dragging = true
+                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                    v.cancelLongPress()
+                    v.isPressed = false
+                }
+                if (dragging) {
+                    v.translationX = dx
+                    v.alpha = 1f - minOf(0.6f, kotlin.math.abs(dx) / v.width.coerceAtLeast(1))
+                }
+                dragging
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                if (!dragging) return@setOnTouchListener false
+                dragging = false
+                val dx = v.translationX
+                if (e.actionMasked == android.view.MotionEvent.ACTION_UP && kotlin.math.abs(dx) > v.width / 3f) {
+                    val dir = if (dx < 0) -1 else 1
+                    v.animate().translationX(dir * v.width.toFloat()).alpha(0f).setDuration(160).withEndAction {
+                        onSwiped(dir)
+                    }.start()
+                } else v.animate().translationX(0f).alpha(1f).setDuration(160).start()
+                true
+            }
+            else -> dragging
+        }
+    }
+}

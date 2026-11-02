@@ -50,6 +50,16 @@ class StudioMixActivity : LumenBase() {
         private val thumbPool = Executors.newSingleThreadExecutor()
 
         fun open(ctx: Context) = ctx.startActivity(Intent(ctx, StudioMixActivity::class.java))
+
+        /** Adds a YouTube video to the mix clips from elsewhere (e.g. a project video); false if it is there already or the mix is full. */
+        fun addVideo(ctx: Context, url: String, title: String): Boolean {
+            val f = File(ctx.filesDir, "lumen/studio/mix/clips.json").apply { parentFile?.mkdirs() }
+            val clips = if (f.exists()) StudioCuts.fromJson(f.readText()) else emptyList()
+            val list = StudioCuts.addHits(clips, listOf(CutHit(url, title)))
+            if (list.size == clips.size) return false
+            f.writeText(StudioCuts.toJson(list))
+            return true
+        }
     }
 
     /** Settings of the mix kept between visits. */

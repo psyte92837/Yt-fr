@@ -89,7 +89,9 @@ object Help {
                 "The list of topic projects and the main sections in the bottom bar: Projects, Browser, Read aloud, Studio, Settings."),
             listOf(
                 t("«＋ Новый проект» — создать тему.", "\"＋ New project\" creates a topic."),
-                t("Нажмите на проект, чтобы открыть его; долгое нажатие или ⋮ — дублировать, архив, удалить.", "Tap a project to open it; long press or ⋮ to duplicate, archive or delete."),
+                t("Нажмите на проект, чтобы открыть его; ⋮ на карточке — переименовать, дублировать, архив, закрепить, удалить.", "Tap a project to open it; ⋮ on the card renames, duplicates, archives, pins or deletes."),
+                t("Долгое нажатие на проект включает выбор нескольких: архив, закрепить, в корзину сразу для всех. «Назад» — выйти из выбора.",
+                    "A long press starts selecting several: archive, pin or trash them at once. Back leaves the selection."),
                 t("⋮ в шапке: домен для наблюдения, архив, восстановление из копии, журнал ошибок.", "⋮ in the top bar: a domain to watch, archive, restore from a backup, error log.")
             ),
             listOf(t("Копия данных сама сохраняется в «Загрузки/Lumen».", "A backup is saved to Downloads/Lumen automatically."),
@@ -99,7 +101,9 @@ object Help {
                     "A deleted project stays in the trash for 7 days (⋮ → Trash) and can be restored."),
                 t("📌 Закрепить сверху и сортировка — в меню проекта и ⋮ в шапке.", "📌 Pin to top and sorting are in the project menu and ⋮ in the top bar."),
                 t("После удаления или сброса внизу появляется «Отменить» на несколько секунд.", "After a delete or reset, \"Undo\" shows at the bottom for a few seconds."),
-                t("Долгое нажатие на значок Lumen: новый проект, поиск, Студия, озвучка.", "Long press on the Lumen icon: new project, search, Studio, read aloud."))),
+                t("Долгое нажатие на значок Lumen: новый проект, поиск, Студия, озвучка.", "Long press on the Lumen icon: new project, search, Studio, read aloud."),
+                t("Смахните карточку проекта в сторону — в архив; строку видео в проекте — удалить из проекта. Есть «Отменить».",
+                    "Swipe a project card sideways to archive it; a video row in a project to remove it. \"Undo\" is offered."))),
         HelpTopic("wizard", t("Первый запуск", "First run"),
             t("Мастер начальной настройки: язык, градиентная тема, режим, AI. Любой шаг можно пропустить и поменять позже в Настройках.",
                 "First-run wizard: language, gradient theme, mode, AI. Every step can be skipped and changed later in Settings."),

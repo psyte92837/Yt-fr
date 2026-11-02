@@ -36,6 +36,15 @@ class FreeAiActivity : LumenBase() {
                     "Keys are free (sign up at the provider, no card) and stay on the phone in Android Keystore."))
             muted(t("Подключено: ", "Connected: ") + usable.size + t(" из ", " of ") + cat.providers.size +
                 t(" · запросов сегодня: ", " · requests today: ") + use.slots.values.sumOf { it.n })
+            val resting = use.slots.values.filter { it.coolUntil > now }
+            if (resting.isNotEmpty()) {
+                val next = resting.minOf { it.coolUntil }
+                muted("⏸ " + t("Отдыхают: ${resting.size} · первая вернётся через ", "Resting: ${resting.size} · the first returns in ") + TaskText.elapsed(next - now))
+                button(t("Снять все паузы", "Clear all cooldowns"), style = BtnStyle.TEXT) {
+                    FreeAiStore.clearCooldowns()
+                    render()
+                }
+            }
             if (!active) button(t("Сделать активным", "Make active"), primary = true) {
                 if (usable.isEmpty()) toast(t("Сначала добавьте хотя бы один ключ ниже", "Add at least one key below first"))
                 Settings.activeProvider = Provider.FREE.name
@@ -65,6 +74,13 @@ class FreeAiActivity : LumenBase() {
                 muted(t("моделей ", "models ") + models.size + (best?.let { t(" · лучшая: ", " · best: ") + it.name } ?: "") +
                     if (n > 0) t(" · сегодня ", " · today ") + n else "")
                 keyErr?.let { muted(it.err.take(160)) }
+                val rest = models.mapNotNull { m -> use.slots[m.key]?.takeIf { it.coolUntil > now }?.let { m to it } }
+                if (rest.isNotEmpty()) {
+                    val until = rest.maxOf { it.second.coolUntil }
+                    muted("⏸ " + t("отдыхают ${rest.size} из ${models.size} · до ", "resting ${rest.size} of ${models.size} · until ") +
+                        java.text.SimpleDateFormat(if (until - now > 20 * 3600_000L) "dd.MM HH:mm" else "HH:mm", java.util.Locale.getDefault()).format(java.util.Date(until)) +
+                        rest.first().second.err.takeIf { it.isNotBlank() }?.let { " — " + it.take(80) }.orEmpty())
+                }
             }
             card.setOnClickListener { editProvider(p) }
         }

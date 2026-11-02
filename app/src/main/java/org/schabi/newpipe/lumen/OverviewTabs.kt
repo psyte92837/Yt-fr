@@ -227,10 +227,14 @@ fun ProjectActivity.channelsTab(c: Col) {
                 startActivity(Intent(this, GraphActivity::class.java).putExtra("pid", project.id).putExtra("file", RecGraph.CHANNELS_FILE))
             },
             btn(this, t("Сбросить", "Reset"), style = BtnStyle.TEXT) {
-                confirm(t("Удалить граф каналов?", "Delete channel graph?"), "") {
+                val old = RecGraph.load(project.id, RecGraph.CHANNELS_FILE)
+                undoable(t("Граф каналов сброшен", "Channel graph reset"), apply = {
                     RecGraph.clear(project.id, RecGraph.CHANNELS_FILE)
                     render()
-                }
+                }, revert = {
+                    RecGraph.save(project.id, old, RecGraph.CHANNELS_FILE)
+                    render()
+                })
             }
         )
         channelRows(c, g, 100, sort)

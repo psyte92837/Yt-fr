@@ -78,9 +78,41 @@ class DiagramActivity : LumenBase() {
     private fun render() {
         page(
             d.title, view, scroll = false,
-            actions = listOf("⤴" to { shareMenu() }, "⋮" to { moreMenu() }),
+            actions = listOf("☰" to { blocksList() }, "⤴" to { shareMenu() }, "⋮" to { moreMenu() }),
             fab = t("＋  Блок", "＋  Block") to { addBlock() }
         )
+        view.contentDescription = t("Схема «${d.title}»: блоков ${d.nodes.size}, связей ${d.edges.size}. Список блоков — кнопка ☰.",
+            "Diagram \"${d.title}\": ${d.nodes.size} blocks, ${d.edges.size} links. The list of blocks is the ☰ button.")
+    }
+
+    /** All blocks as a list with their links: find one and edit it without the canvas (TalkBack, big diagrams). */
+    private fun blocksList() {
+        bottomSheet(t("☰ Блоки схемы", "☰ Diagram blocks")) { dismiss ->
+            val box = Col(ctx, 0)
+            fun fill(q: String) {
+                box.clear()
+                val toks = SearchIndex.tokens(q)
+                val list = d.nodes.filter { n -> toks.isEmpty() || SearchIndex.norm(n.text).let { s -> toks.all { s.contains(it) } } }
+                if (list.isEmpty()) box.muted(t("Нет блоков.", "No blocks."))
+                list.forEach { n ->
+                    val outs = d.edges.filter { it.from == n.id }.mapNotNull { e -> d.node(e.to)?.text?.let { cut(it) } }
+                    val ins = d.edges.filter { it.to == n.id }.mapNotNull { e -> d.node(e.from)?.text?.let { cut(it) } }
+                    box.card {
+                        add(text(ctx, n.text.ifBlank { "—" }, 15f, bold = true), 0)
+                        if (ins.isNotEmpty()) muted(t("из: ", "from: ") + ins.joinToString(", "))
+                        if (outs.isNotEmpty()) muted(t("в: ", "to: ") + outs.joinToString(", "))
+                    }.setOnClickListener {
+                        dismiss()
+                        editNode(n.id)
+                    }
+                }
+            }
+            val e = add(edt(ctx, t("Найти блок", "Find a block")), 0)
+            e.addTextChangedListener(SimpleWatcher { fill(it) })
+            e.onEnter { fill(it) }
+            add(box.root, 8)
+            fill("")
+        }
     }
 
     private fun persist(refit: Boolean = false) {

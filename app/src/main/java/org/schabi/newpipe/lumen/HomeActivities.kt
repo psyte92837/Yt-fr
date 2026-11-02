@@ -100,6 +100,21 @@ class SimpleWatcher(val on: (String) -> Unit) : android.text.TextWatcher {
 /** Launcher screen: list of projects (topics). */
 class LumenActivity : LumenBase() {
     private var showArchived = false
+    /** Selection mode: tap toggles a project, the bar on top acts on all picked ones. */
+    private var selecting = false
+    private val picked = linkedSetOf<String>()
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (selecting) {
+            selecting = false
+            picked.clear()
+            render()
+        } else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -150,11 +165,15 @@ class LumenActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        Updates.available?.let { u ->
+        Updates.available?.takeIf { it.build.toString() != Lumen.prefs.getString("upd_hidden", "") }?.let { u ->
             val broken = System.currentTimeMillis() - Updates.brokenAt < 3 * 86_400_000L
             val card = c.card {
                 add(text(ctx, if (broken) t("Готово исправление для YouTube", "A YouTube fix is ready") else t("Доступно обновление", "Update available"), Type.TITLE_M, bold = true), 0)
                 muted(t("Сборка ${u.build}. Нажмите, чтобы установить", "Build ${u.build}. Tap to install"))
+                if (!broken) add(btn(ctx, t("Скрыть до следующей сборки", "Hide until the next build"), style = BtnStyle.TEXT) {
+                    Lumen.prefs.edit().putString("upd_hidden", u.build.toString()).apply()
+                    render()
+                }, 4)
             }
             card.setOnClickListener { startActivity(Intent(this, SettingsActivity::class.java).putExtra("update", true)) }
         }
@@ -191,6 +210,7 @@ class LumenActivity : LumenBase() {
             .map { ProjectOrder.Row(it.id, it.name.ifBlank { it.phrase }, it.createdAt, it.lastRunAt, it.videoCount) },
             Lumen.prefs.getString("home_sort", "recent") ?: "recent", pins).mapNotNull { byId[it.id] }
         c.h2(if (showArchived) t("Архив", "Archive") + " (${list.size})" else t("Проекты", "Projects") + " (${list.size})")
+        if (selecting) selectionBar(c, list)
         if (list.isEmpty()) {
             if (showArchived) c.muted(t("В архиве пусто.", "The archive is empty."))
             else c.empty(t("Пока нет проектов", "No projects yet"),
@@ -208,7 +228,8 @@ class LumenActivity : LumenBase() {
         }
         for (p in list) {
             val card = c.card {
-                val title = text(ctx, (if (p.id in pins) "📌 " else "") + p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true).apply {
+                val mark = if (selecting) (if (p.id in picked) "☑ " else "☐ ") else ""
+                val title = text(ctx, mark + (if (p.id in pins) "📌 " else "") + p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
@@ -233,9 +254,17 @@ class LumenActivity : LumenBase() {
                 add(kmapButton(ctx, p.id), 8).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = ctx.dp(8) }
             }
             card.contentDescription = p.name
-            card.setOnClickListener { openProjectScreen(p) }
+            if (selecting && p.id in picked) card.background = roundBg(Palette.ACCENT_SOFT, 12f, this, Palette.ACCENT)
+            card.setOnClickListener { if (selecting) toggle(p.id) else openProjectScreen(p) }
+            // swipe sideways: archive (or back from the archive) with Undo
+            if (!selecting) card.onSwipe { bulkArchive(listOf(p)) }
             card.setOnLongClickListener {
-                projectMenu(p)
+                // long press starts selecting (like Android lists); the ⋮ on the card keeps the menu
+                if (!selecting) {
+                    selecting = true
+                    picked.clear()
+                }
+                toggle(p.id)
                 true
             }
         }
@@ -335,6 +364,11 @@ class LumenActivity : LumenBase() {
                 render()
             })
         }
+        items.add(t("☑ Выбрать несколько", "☑ Select several") to {
+            selecting = true
+            picked.clear()
+            render()
+        })
         items.add(t("Сортировка: ", "Sort: ") + sortName(Lumen.prefs.getString("home_sort", "recent") ?: "recent") to { sortDialog() })
         val trashed = runCatching { Store.trashed().size }.getOrDefault(0)
         if (trashed > 0) items.add(t("🗑 Корзина ($trashed)", "🗑 Trash ($trashed)") to { trashSheet() })
@@ -349,6 +383,58 @@ class LumenActivity : LumenBase() {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))
         })
         AlertDialog.Builder(this).setTitle("Lumen").setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()
+    }
+
+    private fun toggle(id: String) {
+        if (!picked.add(id)) picked.remove(id)
+        if (picked.isEmpty()) selecting = false
+        render()
+    }
+
+    /** "Picked: n" with All / None and actions on the picked projects (archive and trash with Undo, pin). */
+    private fun selectionBar(c: Col, list: List<Project>) {
+        val chosen = list.filter { it.id in picked }
+        c.card {
+            add(text(ctx, t("Выбрано: ", "Picked: ") + chosen.size, Type.TITLE_M, bold = true).apply { heading() }, 0)
+            add(chipScroller(ctx, listOf(
+                chip(ctx, t("Все", "All")) { picked.addAll(list.map { it.id }); render() },
+                chip(ctx, t("Снять", "None")) { picked.clear(); selecting = false; render() },
+                chip(ctx, if (showArchived) t("Из архива", "Unarchive") else t("В архив", "Archive")) { bulkArchive(chosen) },
+                chip(ctx, t("📌 Закрепить", "📌 Pin")) {
+                    val pins = ProjectOrder.parsePins(Lumen.prefs.getString("home_pins", null))
+                    Lumen.prefs.edit().putString("home_pins", ProjectOrder.pins(pins + chosen.map { it.id })).apply()
+                    render()
+                },
+                chip(ctx, t("🗑 В корзину", "🗑 To trash")) { bulkTrash(chosen) }
+            )), 8)
+        }
+    }
+
+    private fun bulkArchive(chosen: List<Project>) {
+        if (chosen.isEmpty()) return
+        val to = !showArchived
+        undoable(t("Проектов: ${chosen.size} → ", "Projects: ${chosen.size} → ") + if (to) t("архив", "archive") else t("список", "list"), apply = {
+            chosen.forEach { it.archived = to; Store.save(it); Monitoring.apply(this, it) }
+            selecting = false
+            picked.clear()
+            render()
+        }, revert = {
+            chosen.forEach { it.archived = !to; Store.save(it); Monitoring.apply(this, it) }
+            render()
+        })
+    }
+
+    private fun bulkTrash(chosen: List<Project>) {
+        if (chosen.isEmpty()) return
+        undoable(t("В корзине проектов: ${chosen.size}", "Projects moved to trash: ${chosen.size}"), apply = {
+            chosen.forEach { Monitoring.cancel(this, it.id); Store.trash(it.id) }
+            selecting = false
+            picked.clear()
+            render()
+        }, revert = {
+            chosen.forEach { if (Store.restore(it.id)) Store.project(it.id)?.let { p -> Monitoring.apply(this, p) } }
+            render()
+        })
     }
 
     private fun sortName(mode: String) = when (mode) {

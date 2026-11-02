@@ -52,10 +52,14 @@ fun ProjectActivity.recsTab(c: Col) {
                     startActivity(Intent(ctx, GraphActivity::class.java).putExtra("pid", project.id))
                 },
                 btn(ctx, t("Сбросить", "Reset"), style = BtnStyle.OUTLINED) {
-                    confirm(t("Удалить граф?", "Delete the graph?"), t("Видео проекта не затрагиваются.", "Project videos are not affected.")) {
+                    val old = RecGraph.load(project.id)
+                    undoable(t("Граф рекомендаций сброшен (видео проекта не тронуты)", "Recommendation graph reset (project videos untouched)"), apply = {
                         RecGraph.clear(project.id)
                         render()
-                    }
+                    }, revert = {
+                        RecGraph.save(project.id, old)
+                        render()
+                    })
                 }
             ), 8)
         }
@@ -241,17 +245,11 @@ fun ProjectActivity.recsTab(c: Col) {
     c.row(
         btn(this, t("В проект: отмеченные (${picked.size})", "Add marked (${picked.size})"), style = BtnStyle.TONAL) {
             val add = picked.mapNotNull { g.nodes[it]?.toVideo("rec") }
-            val n = Store.mergeVideos(project.id, add)
             picked.clear()
-            reload()
-            render()
-            toast(t("Добавлено: $n", "Added: $n"))
+            addVideosUndoable(add)
         },
         btn(this, t("В проект: топ-10", "Add top 10"), style = BtnStyle.OUTLINED) {
-            val n = Store.mergeVideos(project.id, list.take(10).map { it.toVideo("rec") })
-            reload()
-            render()
-            toast(t("Добавлено: $n", "Added: $n"))
+            addVideosUndoable(list.take(10).map { it.toVideo("rec") })
         }
     )
     if (list.isEmpty()) c.muted("—")
@@ -314,4 +312,22 @@ private fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
     }
     row.setOnClickListener { openVideo(n.url) }
     return row
+}
+
+/** Adds videos to the project with "Undo" (removes exactly the ones that were new). */
+fun ProjectActivity.addVideosUndoable(add: List<Video>) {
+    val before = Store.videos(project.id).keys.toSet()
+    val fresh = add.map { it.id }.distinct().filter { it !in before }
+    if (fresh.isEmpty()) return toast(t("Эти видео уже в проекте", "These videos are already in the project"))
+    undoable(t("Добавлено видео: ${fresh.size}", "Videos added: ${fresh.size}"), apply = {
+        Store.mergeVideos(project.id, add)
+        reload()
+        render()
+    }, revert = {
+        val all = Store.videos(project.id)
+        fresh.forEach { all.remove(it) }
+        Store.saveVideos(project.id, all.values)
+        reload()
+        render()
+    })
 }

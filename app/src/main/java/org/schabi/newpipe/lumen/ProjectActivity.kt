@@ -701,6 +701,22 @@ class ProjectActivity : LumenBase() {
             cb.isChecked = !cb.isChecked
             true
         }
+        // swipe sideways: remove from the project with Undo
+        row.onSwipe {
+            val before = LinkedHashMap(videos)
+            undoable(t("Видео удалено из проекта", "Video removed from the project"), apply = {
+                videos.remove(v.id)
+                Store.saveVideos(project.id, videos.values)
+                keepScrollOnce = true
+                render()
+            }, revert = {
+                videos.clear()
+                videos.putAll(before)
+                Store.saveVideos(project.id, videos.values)
+                keepScrollOnce = true
+                render()
+            })
+        }
         return row
     }
 
@@ -786,6 +802,31 @@ class ProjectActivity : LumenBase() {
     }
 
     // ------------------------------------------------------------------ Analytics
+    /** The analytics tab as plain text: totals, trend, top channels, words and phrases, top videos. */
+    private fun shareAnalytics(all: List<Video>, s: Stats) {
+        Lumen.async({
+            val sb = StringBuilder()
+            sb.append(project.name).append(" — ").append(t("аналитика", "analytics")).append("\n\n")
+            sb.append(t("Видео: ", "Videos: ")).append(s.total).append(" · ").append(t("просмотров: ", "views: ")).append(Fmt.num(s.totalViews.toLong()))
+                .append(" · ").append(t("в среднем: ", "average: ")).append(Fmt.num(s.avgViews)).append("\n")
+                .append(Fmt.date(s.firstMs)).append(" — ").append(Fmt.date(s.lastMs)).append("\n\n")
+            sb.append(t("Тренд", "Trend")).append(":\n")
+            Analytics.trend(all).forEach { sb.append("  ").append(it.label).append(": ").append(it.count).append(t(" видео, ", " videos, ")).append(Fmt.num(it.views)).append("\n") }
+            sb.append("\n").append(t("Топ каналов", "Top channels")).append(":\n")
+            Analytics.topChannels(all, channelsBy, 10).forEachIndexed { i, ch ->
+                sb.append("  ${i + 1}. ").append(ch.name).append(" — ").append(ch.videos).append(t(" видео, ", " videos, ")).append(Fmt.num(ch.views)).append("\n")
+            }
+            val texts = Analytics.textsOf(project.id, all, wordsSource).toList()
+            val words = Words.top(texts.asSequence(), 30)
+            if (words.isNotEmpty()) sb.append("\n").append(t("Частые слова", "Frequent words")).append(": ").append(words.joinToString(", ") { "${it.first} (${it.second})" }).append("\n")
+            val bi = Words.topBigrams(texts.asSequence(), 12)
+            if (bi.isNotEmpty()) sb.append(t("Словосочетания", "Phrases")).append(": ").append(bi.joinToString(", ") { "${it.first} (${it.second})" }).append("\n")
+            sb.append("\n").append(t("Топ видео", "Top videos")).append(":\n")
+            Analytics.topVideos(all, videosBy, 10).forEachIndexed { i, v -> sb.append("  ${i + 1}. ").append(v.title).append(" — ").append(Fmt.num(v.views)).append("\n    ").append(v.url).append("\n") }
+            sb.toString()
+        }, ::err) { shareText(project.name, it) }
+    }
+
     private fun analyticsTab(c: Col) {
         val all = videos.values.toList()
         if (all.isEmpty()) {
@@ -798,6 +839,7 @@ class ProjectActivity : LumenBase() {
             muted(t("Видео: ${s.total} · собрано: ${s.collected} · с расшифровкой: ${s.withTranscript} · комментариев: ${s.comments}",
                 "Videos: ${s.total} · collected: ${s.collected} · transcripts: ${s.withTranscript} · comments: ${s.comments}"))
             muted(t("Средние просмотры: ", "Average views: ") + Fmt.num(s.avgViews) + " · " + Fmt.date(s.firstMs) + " — " + Fmt.date(s.lastMs))
+            button(t("⤴ Поделиться аналитикой", "⤴ Share the analytics"), style = BtnStyle.TEXT) { shareAnalytics(all, s) }
         }
 
         c.h2(t("Тренд по времени", "Trend over time"))

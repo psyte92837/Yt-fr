@@ -77,6 +77,8 @@ class StudioEditPainter(
             "image" -> picture(c, b, box)
             "scheme" -> scheme(c, b, box, tMs)
             "text" -> caption(c, b, box)
+            // frames of an animation block are drawn from its rendered frames (stage 2 of the insert wizard)
+            EditInsert.KIND -> Unit
             else -> emoji(c, b.text, box)
         }
         if (layered) c.restore()
@@ -401,7 +403,7 @@ object StudioEditRender {
         cancelled: () -> Boolean, progress: (String) -> Unit
     ) {
         // a scheme still being drawn by the AI is not exported
-        val job = p.copy(blocks = p.blocks.filter { it.kind != "scheme" || it.scheme != null })
+        val job = p.copy(blocks = p.blocks.filter { !EditInsert.isPending(it) })
         val started = System.currentTimeMillis()
         val clips = EditTrack.of(p)
         // a cut track: the sound is put together once, for the GPU and (if needed) the CPU way

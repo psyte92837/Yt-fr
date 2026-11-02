@@ -2196,10 +2196,12 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private fun blockName(b: EBlock): String = when (b.kind) {
-        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + t("ИИ рисует…", "AI drawing…")
+        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + (if (b.req.isNotEmpty()) t("ждёт ответ ИИ #", "awaits AI answer #") + b.req else t("ИИ рисует…", "AI drawing…"))
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.joinToString(" → ") { it.label }.take(40))
         "image" -> "🖼 " + (b.ask.ifBlank { t("Картинка", "Picture") })
         "text" -> "T " + b.text.replace('\n', ' ').take(40)
+        EditInsert.KIND -> "🎞 " + (if (b.file.isEmpty()) "⏳ " + t("ждёт ответ ИИ", "awaits AI answer") + (if (b.req.isNotEmpty()) " #" + b.req else "")
+        else b.text.ifBlank { t("Анимация", "Animation") })
         EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") }
         else -> b.text + " " + t("эмодзи", "emoji")
@@ -3372,7 +3374,7 @@ class StudioEditorActivity : LumenBase() {
         val track = EditTrack.of(p)
         val cut = !EditTrack.plain(track, p.durMs) || EditCanvas.reshaped(p) || p.fill
         val rebuilt = !EditTrack.soundPlain(track, p.durMs) || EditSplit.mixes(p.blocks) || EditMusic.mixes(p.blocks)
-        if (!cut && !rebuilt && p.blocks.none { it.kind != "scheme" || it.scheme != null })
+        if (!cut && !rebuilt && p.blocks.none { !EditInsert.isPending(it) })
             return toast(t("Пока нечего сохранять: добавьте надпись, музыку, фильтр или разрежьте ролик (✂).", "Nothing to save yet: add a caption, music, a filter or split the video (✂)."))
         pause()
         val prefs = Lumen.prefs

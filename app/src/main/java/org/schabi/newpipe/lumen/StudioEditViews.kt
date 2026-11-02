@@ -486,9 +486,11 @@ class EditTimeline(ctx: Context) : View(ctx) {
     }
 
     private fun label(b: EBlock): String = when (b.kind) {
-        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + t("ИИ рисует…", "AI drawing…")
+        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + (if (b.req.isNotEmpty()) t("ждёт ответ ИИ #", "awaits AI answer #") + b.req else t("ИИ рисует…", "AI drawing…"))
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.firstOrNull()?.label.orEmpty())
         "image" -> "🖼 " + t("Картинка", "Picture")
+        EditInsert.KIND -> "🎞 " + (if (b.file.isEmpty()) "⏳ " + (if (b.req.isNotEmpty()) t("ждёт ответ ИИ #", "awaits AI answer #") + b.req else t("ИИ рисует…", "AI drawing…"))
+        else b.text.ifBlank { t("Анимация", "Animation") })
         EditSplit.KIND -> "⊟ " + t("Экран надвое", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") } + if (b.volume <= 0f) " 🔇" else ""
         "text" -> "T " + b.text.replace('\n', ' ')

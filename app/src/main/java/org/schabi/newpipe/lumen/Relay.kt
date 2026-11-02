@@ -20,7 +20,7 @@ import java.util.concurrent.locks.ReentrantLock
  */
 object RelayText {
     const val PROTOCOL = "lumen.relay v1"
-    private const val HEAD = "⟦Lumen → AI"
+    const val HEAD = "⟦Lumen → AI"
 
     /** The text the user pastes into another AI: what to answer, the role, the task, the video/picture, the wish. */
     fun request(task: String, system: String, user: String, json: Boolean, fileUri: String?, image: Boolean, wish: String): String = buildString {

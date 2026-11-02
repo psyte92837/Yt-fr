@@ -1381,6 +1381,9 @@ val STUDIO_PROMPTS = linkedMapOf(
             "{protocol}\n" +
             "Верни строго JSON одной схемы: {\"layout\":\"...\",\"title\":\"\",\"nodes\":[...]}"
         ),
+    // the insert wizard: the whole request is built by EditInsert.request (one text for the built-in AI and for another AI)
+    "studio_edit_anim" to "{request}",
+    "studio_edit_anim_fix" to "{request}",
     "studio_edit_query" to (
         "Подбери поисковый запрос для бесплатного стокового фото (Openverse: Wikimedia, Flickr) к моменту ролика. " +
             "Что звучит: «{moment}». {wish}\n" +

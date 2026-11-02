@@ -108,7 +108,11 @@ data class EditBrief(
     val avoidUi: Boolean? = null,
     val face: FRect? = null,
     /** top | under. */
-    val layer: String = ""
+    val layer: String = "",
+    /** Theme id ("" = the theme of the video). */
+    val theme: String = "",
+    /** Values of the animation's `// param` (lumen.anim v1.1). */
+    val params: Map<String, String> = emptyMap()
 )
 
 /** A type of the wizard's first step: what the author wants to show; [draw] scheme | anim | both (first = default). */
@@ -135,7 +139,13 @@ data class InsertCtx(
     val req: String = "",
     val zones: List<InsertZone> = emptyList(),
     val accent: String = "#FFD60A", val ink: String = "#FFFFFF", val card: String = "#101318", val font: String = "sans-serif",
-    val fps: Int = 30
+    val fps: Int = 30,
+    /** shorts | reels | tiktok | youtube — whose interface and end screen to keep free. */
+    val platform: String = "",
+    /** Length of the whole video (end screens), 0 = unknown. */
+    val totalMs: Long = 0,
+    val theme: EditTheme? = null,
+    val cues: List<AnimCue> = emptyList()
 ) {
     val vertical: Boolean get() = fh > fw
     val endMs: Long get() = startMs + durMs
@@ -237,7 +247,7 @@ object EditInsert {
     // ---------- request marks ----------
 
     private const val B32 = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    private val MARK = Regex("#([A-Z2-9]{4})\\b")
+    private val MARK = Regex("#([A-Z2-9]{4})(?:-\\d)?\\b")
 
     /** A 4-letter mark of a request: time and a counter, without look-alike letters (I, O, 0, 1). */
     fun reqId(nowMs: Long, counter: Int): String {
@@ -383,11 +393,32 @@ object EditInsert {
     /** Height / width in pixels by the shape. */
     fun ratioOf(shape: String): Float = when (shape) { "square" -> 1f; "tall" -> 1.4f; else -> 0.56f }
 
-    /** Safe zones of the format: the interface of Shorts / Reels / TikTok in a vertical frame (bottom 18 %, right 12 %). */
-    fun uiZones(fw: Int, fh: Int): List<InsertZone> = if (fh <= fw) emptyList() else listOf(
-        InsertZone(FRect(0f, 0.82f, 1f, 1f), t("интерфейс Shorts", "Shorts interface")),
-        InsertZone(FRect(0.88f, 0.45f, 1f, 0.82f), t("кнопки Shorts", "Shorts buttons"))
-    )
+    val PLATFORMS = listOf("shorts", "reels", "tiktok", "youtube")
+
+    fun platformName(p: String) = when (p) { "reels" -> "Reels"; "tiktok" -> "TikTok"; "youtube" -> "YouTube"; else -> "Shorts" }
+
+    /** The platform by default: a vertical video is a Short, a horizontal one is for YouTube. */
+    fun defaultPlatform(fw: Int, fh: Int): String = if (fh > fw) "shorts" else "youtube"
+
+    /** Safe zones of the format: the interface of Shorts / Reels / TikTok in a vertical frame; nothing on a horizontal one. */
+    fun uiZones(fw: Int, fh: Int, platform: String = ""): List<InsertZone> {
+        if (fh <= fw) return emptyList()
+        val p = platform.ifEmpty { "shorts" }.takeIf { it != "youtube" } ?: "shorts"
+        val name = platformName(p)
+        val (bottom, right, top) = when (p) {
+            "reels" -> Triple(0.8f, 0.86f, 0.07f)
+            "tiktok" -> Triple(0.78f, 0.85f, 0.09f)
+            else -> Triple(0.82f, 0.88f, 0f)
+        }
+        return listOfNotNull(
+            InsertZone(FRect(0f, bottom, 1f, 1f), t("интерфейс $name", "$name interface")),
+            InsertZone(FRect(right, 0.42f, 1f, bottom), t("кнопки $name", "$name buttons")),
+            if (top > 0f) InsertZone(FRect(0f, 0f, 1f, top), t("верх $name", "$name top")) else null
+        )
+    }
+
+    /** YouTube shows its end screen over the last 20 s of a horizontal video. */
+    const val END_SCREEN_MS = 20_000L
 
     /** Where subtitles usually stand. */
     fun subsZone(fw: Int, fh: Int): InsertZone =
@@ -402,9 +433,9 @@ object EditInsert {
     }
 
     /** Zones the block must not cover for this brief (fractions of the frame). */
-    fun zones(b: EditBrief, fw: Int, fh: Int, subsInVideo: Boolean): List<InsertZone> {
+    fun zones(b: EditBrief, fw: Int, fh: Int, subsInVideo: Boolean, platform: String = ""): List<InsertZone> {
         val out = mutableListOf<InsertZone>()
-        if (b.avoidUi ?: (fh > fw)) out += uiZones(fw, fh)
+        if (b.avoidUi ?: (fh > fw)) out += uiZones(fw, fh, platform)
         if (b.avoidSubs ?: subsInVideo) out += subsZone(fw, fh)
         if (b.avoidFace != false) b.face?.let { out += InsertZone(it, t("лицо", "face")) }
         return out
@@ -456,9 +487,9 @@ object EditInsert {
     }
 
     /** The block in pixels of the exported frame: [EditInsert.MAX_SIDE] at most by its short side, even numbers. */
-    fun pixels(block: FRect, fw: Int, fh: Int): Pair<Int, Int> {
-        var w = block.w * fw
-        var h = block.h * fh
+    fun pixels(block: FRect, fw: Int, fh: Int, scale: Float = 1f): Pair<Int, Int> {
+        var w = block.w * fw * scale
+        var h = block.h * fh * scale
         val k = min(1f, MAX_SIDE / min(w, h).coerceAtLeast(1f))
         w *= k
         h *= k
@@ -517,9 +548,11 @@ object EditInsert {
             else t("Мало контраста с видео под блоком", "Low contrast with the video under the block"),
             listOfNotNull(if (faint) "opaque" to t("Непрозрачный блок", "Opaque block") else null,
                 "plate" to t("Плотнее подложка", "Denser plate"), if (b.dim < 0.4f) "dim" to t("Затемнить видео на 40 %", "Dim the video 40 %") else null))
-        val zones = zones(b, ctx.fw, ctx.fh, false) + ctx.zones
+        val zones = zones(b, ctx.fw, ctx.fh, false, ctx.platform) + ctx.zones
         val hit = zones.firstOrNull { cross(ctx.block, it.r) != null && ctx.block.w < 0.99f }
         if (hit != null) out += InsertWarn("zone", t("Блок заходит на зону «${hit.why}»", "The block covers «${hit.why}»"), listOf("move" to t("Сдвинуть", "Move")))
+        if (ctx.platform == "youtube" && !ctx.vertical && ctx.totalMs > END_SCREEN_MS * 2 && ctx.endMs > ctx.totalMs - END_SCREEN_MS)
+            out += InsertWarn("endscreen", t("Последние 20 с YouTube закрывает конечной заставкой", "YouTube covers the last 20 s with the end screen"), emptyList())
         if (b.size == "s" && (narrow || ctx.block.w < 0.45f))
             out += InsertWarn("font", t("Текст будет мельче, чем читается на телефоне", "Text will be smaller than readable on a phone"), listOf("bigger" to t("Крупнее", "Bigger")))
         return out
@@ -536,7 +569,7 @@ object EditInsert {
         "dim" -> b.copy(dim = 0.4f)
         "bigger" -> b.copy(size = "m")
         "move" -> {
-            val zones = zones(b, ctx.fw, ctx.fh, false) + ctx.zones
+            val zones = zones(b, ctx.fw, ctx.fh, false, ctx.platform) + ctx.zones
             listOf("top", "bottom", "center", "corner").map { b.copy(place = it) }
                 .firstOrNull { c -> zones.none { z -> cross(place(c, ctx.fw, ctx.fh), z.r) != null } } ?: b.copy(place = "top", scale = "s")
         }
@@ -716,14 +749,20 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
 • Нельзя: сеть, внешние скрипты, картинки и шрифты по URL, DOM кроме ctx, таймеры. Шрифты системные ('sans-serif', 'serif', 'monospace'), эмодзи можно.
 • Скорость: до 15 мс на кадр, до 60 000 символов; без getImageData и больших shadowBlur.
 • Лучше всего получается: счётчик числа, растущие столбцы или линия, кольцо прогресса, сравнение двух величин, список с галочками, стрелка или выделение, пиктограммы, лента времени, маршрут, кинетический текст.
+v1.1 (необязательно, но лучше):
+• data.theme = {bg, surface, ink, muted, accent, accent2, good, bad, font, weight, upper, radius, stroke, plate, plateAlpha, shadow, pace, ease, stagger, glow} — бери цвета и шрифт отсюда: T('accent'), T('font'). Так автор сменит стиль без ИИ.
+• Параметры для правки без ИИ — строки в начале кода: // param title text "Заголовок" — Заголовок; // param speed range 0.5..2 =1 — Скорость; // param accent color =theme.accent; // param icons bool =true; // param style choice bars|line =bars. Значения — в data.params, в коде param('speed').
+• Сегменты: // segments: intro=0.8 loop=2 outro=0.6 — тогда t идёт 0…intro+loop+outro, Lumen сам повторяет середину под любую длину блока (финал всегда в конце). Цикл должен стыковаться: кадр конца loop = кадр его начала.
+• data.cues = [{id, t, kind: word|item|main|pause|cut}] — события блока; cue('main') → секунды главного слова, cue('item2') — второго пункта.
+• Помощники v1.1: spring(x,k,d), stagger(t,i,n,start,step,dur), seq(t,[[a,b],…]) → {i, p}, typewriter(text,p), countTo(v,p,{decimals,locale}), wrap(ctx,text,maxW) → строки, textBox(ctx,text,x,y,w,h,{size,weight,align,color}), arrow(ctx,x1,y1,x2,y2,p,width), ring(ctx,cx,cy,r,p,width,color), bar(ctx,x,y,w,h,p,color,r), glow(ctx,color,blur), emoji(ctx,e,x,y,size), T(name), cue(id), param(name).
 """.trim()
 
     /** JSON the animation gets as data (see [ANIM_PROTOCOL]). */
-    fun animData(ctx: InsertCtx, b: EditBrief): JSONObject {
-        val (bw, bh) = pixels(ctx.block, ctx.fw, ctx.fh)
+    fun animData(ctx: InsertCtx, b: EditBrief, header: AnimHeader? = null, scale: Float = 1f): JSONObject {
+        val (bw, bh) = pixels(ctx.block, ctx.fw, ctx.fh, scale)
         val ws = ctx.words.filter { it.startMs >= ctx.startMs && it.startMs < ctx.endMs }
         fun s(ms: Long) = Math.round(max(0L, ms - ctx.startMs) / 10.0) / 100.0
-        val zones = inBlock(ctx.block, zones(b, ctx.fw, ctx.fh, false) + ctx.zones)
+        val zones = inBlock(ctx.block, zones(b, ctx.fw, ctx.fh, false, ctx.platform) + ctx.zones)
         val brief = JSONObject().put("type", b.type)
             .put("items", JSONArray().apply {
                 b.rows.forEach { put(JSONObject().put("label", it.label).put("value", it.value).put("unit", it.unit).put("icon", it.icon).put("main", it.main)) }
@@ -740,15 +779,28 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
             .put("words", JSONArray().apply { ws.forEach { put(JSONObject().put("w", it.text).put("s", s(it.startMs)).put("e", s(it.endMs))) } })
             .put("place", JSONObject().put("fw", ctx.fw).put("fh", ctx.fh).put("x", ctx.block.l.toDouble()).put("y", ctx.block.t.toDouble()))
             .put("brief", brief)
+            .apply {
+                val th = ctx.theme?.let { EditThemes.tokens(it) }
+                if (th != null) {
+                    put("theme", th)
+                    if (b.accent == null) put("accent", th.optString("accent")).put("ink", th.optString("ink")).put("card", th.optString("surface")).put("font", th.optString("font"))
+                }
+                if (header != null && header.params.isNotEmpty()) put("params", AnimV11.params(header, b.params, th))
+                if (ctx.cues.isNotEmpty()) put("cues", AnimV11.cuesJson(ctx.cues))
+                if (header != null && header.hasSegments) {
+                    put("seg", JSONObject().put("intro", header.intro / 1000.0).put("loop", header.loop / 1000.0).put("outro", header.outro / 1000.0).put("total", ctx.durMs / 1000.0))
+                    put("dur", header.segLen / 1000.0)
+                }
+            }
     }
 
     /**
      * The request of the wizard (lumen.insert v1): one self-contained text for the built-in AI and for another AI. Starts
      * with the Relay head, so our own request in the clipboard is never taken for an answer.
      */
-    fun request(ctx: InsertCtx, b: EditBrief, kind: String = kindOf(b)): String = buildString {
+    fun request(ctx: InsertCtx, b: EditBrief, kind: String = kindOf(b), variants: Int = 1): String = buildString {
         val anim = kind == KIND
-        val zonesIn = inBlock(ctx.block, zones(b, ctx.fw, ctx.fh, false) + ctx.zones)
+        val zonesIn = inBlock(ctx.block, zones(b, ctx.fw, ctx.fh, false, ctx.platform) + ctx.zones)
         val (bw, _) = pixels(ctx.block, ctx.fw, ctx.fh)
         val minFont = if (anim) (minFontPx(ctx.fw, ctx.fh, b.size) * bw / (ctx.block.w * ctx.fw).coerceAtLeast(1f)).roundToInt() else 0
         append(RelayText.HEAD).append(" · ").append(PROTOCOL).append(" · #").append(ctx.req).append("⟧\n")
@@ -763,12 +815,15 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
         append(t("ПОЖЕЛАНИЕ АВТОРА: ", "AUTHOR'S WISH: ")).append(ctx.wish.trim().ifEmpty { t("(нет)", "(none)") }).append('\n')
         append(t("БРИФ (только то, что задал автор; остальное выбери сам):\n", "BRIEF (only what the author set; choose the rest yourself):\n"))
         briefLines(b, kind, zonesIn, minFont).forEach { append(it).append('\n') }
+        ctx.theme?.let { append(t("ТЕМА: ", "THEME: ")).append(EditThemes.describe(it)).append(if (anim) t(" — цвета, шрифт и скругления бери из data.theme (T('accent') …), не вписывай их в код.\n", " — take colours, font and roundings from data.theme (T('accent') …), do not write them into the code.\n") else "\n") }
+        if (ctx.cues.any { it.kind != "word" }) append(t("СОБЫТИЯ (секунды от начала блока, cue(id)): ", "EVENTS (seconds from the block start, cue(id)): ")).append(AnimV11.cuesText(ctx.cues)).append('\n')
+        if (variants > 1) append(AnimV11.variantsText(variants, ctx.req)).append('\n')
         append('\n')
         if (anim) {
             append(ANIM_PROTOCOL).append("\n\n")
             append(t("DATA (то, что получит frame в data):\n", "DATA (what frame gets as data):\n")).append(animData(ctx, b).toString()).append("\n\n")
             append(t("ОБРАЗЕЦ КОДА (как читать data.brief и data.words; сделай своё под бриф, не копируй):\n", "CODE SAMPLE (how to read data.brief and data.words; make your own for the brief, do not copy):\n"))
-            append("```javascript\n").append(AnimExamples.SAMPLE).append("\n```\n\n")
+            append("```javascript\n").append(AnimExamples.forType(b.type)?.code ?: AnimExamples.SAMPLE).append("\n```\n\n")
             append(t("ОТВЕТ: один блок ```javascript; первые строки — // $ANIM #${ctx.req} и // name: короткое название (2–4 слова); при повторе — // loop: N; дальше function frame(t, ctx, W, H, data) { … }. Без HTML и пояснений.",
                 "ANSWER: one ```javascript block; first lines — // $ANIM #${ctx.req} and // name: a short name (2–4 words); for a loop — // loop: N; then function frame(t, ctx, W, H, data) { … }. No HTML, no explanations."))
         } else {
@@ -798,7 +853,7 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
 
     // ---------- the answer ----------
 
-    private val ANIM_HEAD = Regex("""//\s*lumen\.anim\s*v1\s*#([A-Z2-9]{4})""")
+    private val ANIM_HEAD = Regex("""//\s*lumen\.anim\s*v1(?:\.1)?\s*#([A-Z2-9]{4})(?:-\d)?""")
     private val LOOP = Regex("""^\s*//\s*loop\s*[:：]\s*(\d+(?:[.,]\d+)?)""", setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE))
     private val FRAME = Regex("""function\s+frame\s*\(|(?:const|let|var)\s+frame\s*=|window\.frame\s*=""")
     private val JSON_FENCE = Regex("```(?:json)?\\s*\\n?(\\{[\\s\\S]*?\\})\\s*```")
@@ -817,7 +872,7 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
             if (o != null && o.has("nodes")) {
                 val s = StudioScheme.fromJson(o)
                 if (s != null && s.nodes.isNotEmpty()) {
-                    val req = o.optString("req").trim().removePrefix("#").uppercase().takeIf { it.length == 4 } ?: MARK.find(raw)?.groupValues?.get(1).orEmpty()
+                    val req = o.optString("req").trim().removePrefix("#").uppercase().substringBefore('-').takeIf { it.length == 4 } ?: MARK.find(raw)?.groupValues?.get(1).orEmpty()
                     return InsertAnswer.Scheme(s, req, s.title.ifEmpty { s.nodes.first().label })
                 }
             }
@@ -837,6 +892,13 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
         if (Regex("""new\s+Image\s*\(|drawImage\s*\(\s*['"]""").containsMatchIn(code))
             p += t("картинки по URL не загрузятся — рисуй фигурами или эмодзи", "pictures by URL do not load — draw shapes or emoji")
         return p
+    }
+
+    /** Problems worth an AI round only when the block has a theme: colours written into the code. */
+    fun themeProblems(code: String): List<String> {
+        val n = AnimV11.hardColors(code)
+        return if (n > 0) listOf(t("$n цветов вписаны в код — бери их из data.theme (T('accent'), T('ink')…), чтобы тема менялась без ИИ",
+            "$n colours are written into the code — take them from data.theme (T('accent'), T('ink')…) so the theme changes without AI")) else emptyList()
     }
 
     /** Problems of a trial run: [msPerFrame] of the slowest frame, [errors] of JS, [empty] / [opaque] — all frames empty / the whole block filled. */
@@ -875,6 +937,27 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
         val t = if (meta.durMs > 0 && durMs > 0 && abs(meta.durMs - durMs) > 1) tMs * meta.durMs.toDouble() / durMs else tMs.toDouble()
         return floor(t * meta.fps / 1000.0).toInt().coerceIn(0, meta.count - 1)
     }
+
+    /** Frame of [b] at [tMs] from its start: with segments the animation time first, else as [frameIndex]. */
+    fun frameAt(tMs: Long, b: EBlock, meta: AnimMeta?): Int? {
+        val sg = AnimV11.seg(b.seg) ?: return frameIndex(tMs, b.durMs, meta)
+        if (meta == null || meta.count <= 0 || tMs < 0) return null
+        val at = AnimV11.segTime(tMs, b.durMs, sg.first, sg.second, sg.third)
+        return floor(at * meta.fps / 1000.0).toInt().coerceIn(0, meta.count - 1)
+    }
+
+    /** Length of the animation the frames are made for: the segments, the loop or the block. */
+    fun animLen(b: EBlock): Long = AnimV11.seg(b.seg)?.let { it.first + it.second + it.third } ?: if (b.loopMs > 0) b.loopMs else b.durMs
+
+    /** A soft exit (200 ms) when the last frame still shows something: the code did not draw its own exit. */
+    fun tailFade(tMs: Long, durMs: Long, lastDrawn: Boolean): Float {
+        if (!lastDrawn) return 1f
+        val left = durMs - tMs
+        return if (left >= 200) 1f else (left / 200f).coerceIn(0f, 1f)
+    }
+
+    /** Frames are drawn this many times larger when keyframes zoom the block in (at most 2). */
+    fun renderScale(b: EBlock): Float = (b.keys.maxOfOrNull { it.w / b.w.coerceAtLeast(1e-3f) } ?: 1f).coerceIn(1f, 2f)
 
     // ---------- JSON ----------
 
@@ -918,6 +1001,8 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
         if (b.loopS > 0) o.put("loop", b.loopS)
         rect(b.rect)?.let { o.put("rect", it) }
         rect(b.face)?.let { o.put("face", it) }
+        if (b.theme.isNotEmpty()) o.put("theme", b.theme)
+        if (b.params.isNotEmpty()) o.put("params", JSONObject(b.params as Map<*, *>))
         return o
     }
 
@@ -939,7 +1024,8 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
             lenMs = o.optLong("len").coerceIn(0L, 120_000L), animIn = s("in"), animOut = s("out"), reveal = s("reveal"), pace = s("pace"),
             accentMain = o.optBoolean("accentMain", true), holdMs = o.optLong("hold", -1L).coerceIn(-1L, 10_000L), loopS = o.optInt("loop").coerceIn(0, 30), sound = s("sound"),
             place = s("place"), rect = rectOf(o.optJSONArray("rect")), scale = s("scale"), shape = s("shape"),
-            avoidFace = o.bool3("avoidFace"), avoidSubs = o.bool3("avoidSubs"), avoidUi = o.bool3("avoidUi"), face = rectOf(o.optJSONArray("face")), layer = s("layer")
+            avoidFace = o.bool3("avoidFace"), avoidSubs = o.bool3("avoidSubs"), avoidUi = o.bool3("avoidUi"), face = rectOf(o.optJSONArray("face")), layer = s("layer"),
+            theme = s("theme"), params = o.optJSONObject("params")?.let { f -> f.keys().asSequence().associateWith { f.optString(it) } }.orEmpty()
         )
     }
 

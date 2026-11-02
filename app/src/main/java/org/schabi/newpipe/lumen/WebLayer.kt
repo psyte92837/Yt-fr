@@ -108,6 +108,24 @@ W.rand=function(i){var s=Math.sin(i*12.9898+78.233)*43758.5453;return s-Math.flo
 W.roundRect=function(c,x,y,w,h,r){r=Math.max(0,Math.min(r,w/2,h/2));c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath()};
 W.fitFont=function(c,text,maxW,size,weight){weight=weight||800;var s=size;for(var k=0;k<30&&s>6;k++){c.font=weight+' '+s+'px sans-serif';if(c.measureText(text).width<=maxW)break;s*=0.92}return s};
 W.wordAt=function(t){var w=(W.data&&W.data.words)||[];for(var i=0;i<w.length;i++){if(t>=w[i].s&&t<w[i].e)return i}return -1};
+W.T=function(n){var D=W.data||{},t=D.theme||{},d={accent:D.accent||'#FFD60A',ink:D.ink||'#FFFFFF',surface:D.card||'#101318',bg:'#000000',muted:'#B8C0CC',accent2:'#64D2FF',good:'#34C759',bad:'#FF453A',font:D.font||'sans-serif',weight:800,radius:0.06,stroke:1,plateAlpha:72,glow:0};return t[n]!=null?t[n]:d[n]};
+W.cue=function(id,def){var cs=(W.data&&W.data.cues)||[];for(var i=0;i<cs.length;i++){if(cs[i].id===id||cs[i].kind===id)return cs[i].t}return def==null?0:def};
+W.param=function(n,def){var p=(W.data&&W.data.params)||{};return p[n]!=null?p[n]:def};
+W.spring=function(x,k,d){x=clamp(x,0,1);k=k||12;d=d==null?0.6:d;return 1-Math.exp(-d*10*x)*Math.cos(k*x)};
+W.stagger=function(t,i,n,start,step,dur){return prog(t,(start||0)+i*(step||0.12),(start||0)+i*(step||0.12)+(dur||0.4))};
+W.seq=function(t,parts){for(var i=0;i<parts.length;i++){if(t<parts[i][1])return{i:i,p:prog(t,parts[i][0],parts[i][1])}}return{i:parts.length-1,p:1}};
+W.typewriter=function(text,p){text=String(text);return text.slice(0,Math.round(text.length*clamp(p,0,1)))};
+W.countTo=function(v,p,o){o=o||{};var d=o.decimals||0,x=v*clamp(p,0,1);try{return new Intl.NumberFormat(o.locale||'ru',{minimumFractionDigits:d,maximumFractionDigits:d}).format(x)}catch(e){return x.toFixed(d)}};
+W.wrap=function(c,text,maxW){var ws=String(text).split(/\s+/),out=[],cur='';for(var i=0;i<ws.length;i++){var n=cur?cur+' '+ws[i]:ws[i];if(c.measureText(n).width>maxW&&cur){out.push(cur);cur=ws[i]}else cur=n}if(cur)out.push(cur);return out};
+W.textBox=function(c,text,x,y,w,h,o){o=o||{};var s=o.size||h,wt=o.weight||T('weight'),f=o.font||T('font'),lines=[];for(var k=0;k<24&&s>6;k++){c.font=wt+' '+s+'px '+f;lines=wrap(c,text,w);if(lines.length*s*1.15<=h)break;s*=0.9}c.fillStyle=o.color||T('ink');c.textBaseline='middle';c.textAlign=o.align||'center';var ax=o.align==='left'?x:(o.align==='right'?x+w:x+w/2),y0=y+h/2-(lines.length-1)*s*1.15/2;for(var j=0;j<lines.length;j++)c.fillText(lines[j],ax,y0+j*s*1.15);return s};
+W.arrow=function(c,x1,y1,x2,y2,p,wd){p=clamp(p==null?1:p,0,1);wd=wd||6;var x=lerp(x1,x2,p),y=lerp(y1,y2,p);c.lineWidth=wd;c.lineCap='round';c.beginPath();c.moveTo(x1,y1);c.lineTo(x,y);c.stroke();if(p>0.9){var a=Math.atan2(y2-y1,x2-x1),hl=wd*3.2;c.beginPath();c.moveTo(x,y);c.lineTo(x-hl*Math.cos(a-0.5),y-hl*Math.sin(a-0.5));c.moveTo(x,y);c.lineTo(x-hl*Math.cos(a+0.5),y-hl*Math.sin(a+0.5));c.stroke()}};
+W.ring=function(c,cx,cy,r,p,wd,col){c.lineWidth=wd||r*0.2;c.lineCap='round';c.strokeStyle=col||T('accent');c.beginPath();c.arc(cx,cy,r,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.max(0.001,clamp(p,0,1)));c.stroke()};
+W.bar=function(c,x,y,w,h,p,col,r){c.fillStyle=col||T('accent');var hh=h*clamp(p,0,1.2);roundRect(c,x,y+h-hh,w,hh,r==null?Math.min(w,hh)*0.15:r);c.fill()};
+W.glow=function(c,col,blur){c.shadowColor=col||T('accent');c.shadowBlur=blur==null?20:blur};
+W.emoji=function(c,e,x,y,size){c.font=size+'px sans-serif';c.textAlign='center';c.textBaseline='middle';c.fillText(e,x,y)};
+W.__probe={on:false,min:0,out:0,calls:0};
+(function(){var P=W.CanvasRenderingContext2D&&CanvasRenderingContext2D.prototype;if(!P)return;['fillText','strokeText'].forEach(function(m){var f=P[m];P[m]=function(t,x,y){var pr=W.__probe;if(pr.on){pr.calls++;var r=/(\d+(?:\.\d+)?)px/.exec(this.font||''),s=r?parseFloat(r[1]):0;if(s>0&&(pr.min===0||s<pr.min))pr.min=s;var g=this.getTransform?this.getTransform():null;if(!g||(g.a===1&&g.b===0&&g.c===0&&g.d===1&&g.e===0&&g.f===0)){var tw=this.measureText(String(t)).width,al=this.textAlign,l=al==='center'?x-tw/2:((al==='right'||al==='end')?x-tw:x),cv=this.canvas;if(l<-2||l+tw>cv.width+2||y<-2||y>cv.height+2)pr.out++}}return f.apply(this,arguments)}})})();
+W.__lumenReport=function(){var p=W.__probe;return JSON.stringify({minFont:p.min,outside:p.out,calls:p.calls})};
 })();
 """.trim()
 

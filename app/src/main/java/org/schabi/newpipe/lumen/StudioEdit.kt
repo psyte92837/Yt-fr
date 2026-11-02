@@ -60,7 +60,13 @@ data class EBlock(
     val dim: Float = 0f,
     val dimAll: Boolean = false,
     /** Up to 3 previous answers (scheme JSON or code), newest first, for «← Прошлая версия». */
-    val history: List<String> = emptyList()
+    val history: List<String> = emptyList(),
+    /** The theme of the block (lumen.theme v1 JSON, see [EditThemes]); "" = none. */
+    val theme: String = "",
+    /** An accent effect over the whole block: pulse, shake, wiggle, bounce ("" = none). */
+    val emph: String = "",
+    /** Segments of an animation "intro,loop,outro" in ms (lumen.anim v1.1): any length without a new render. */
+    val seg: String = ""
 ) {
     val endMs: Long get() = startMs + durMs
 }
@@ -90,11 +96,21 @@ data class EProject(
     /** The background of a fitted video is the video itself, enlarged and blurred (instead of [bg]). */
     val blur: Boolean = false,
     /** Style of the video for new schemes and animations (JSON of an [EditBrief] without content), "" = none. */
-    val brand: String = ""
+    val brand: String = "",
+    /** The theme of the video (lumen.theme v1 JSON): new inserts start from it, «🎨» recolours all with it. */
+    val theme: String = ""
 )
 
 /** Look of a block at a moment of its in / out animation: opacity, scale and shift (fractions of the frame). */
-data class EPose(val alpha: Float, val scale: Float, val dx: Float, val dy: Float)
+data class EPose(
+    val alpha: Float, val scale: Float, val dx: Float, val dy: Float,
+    /** Shown part from the left (wipe), 0..1. */
+    val clip: Float = 1f,
+    /** Extra turn, degrees. */
+    val rot: Float = 0f,
+    /** Shown part of a caption's letters (typewriter), 0..1. */
+    val reveal: Float = 1f
+)
 
 /**
  * Logic of the Studio editor (protocol lumen.studioedit v1): placing blocks in time (move, trim, split,
@@ -109,8 +125,9 @@ object StudioEdit {
     const val MIN_W = 0.06f
     const val MAX_W = 2f
 
-    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio", EditInsert.KIND)
-    val ANIMS = listOf("none", "fade", "pop", "slide", "zoom")
+    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)
+    val ANIMS = listOf("none", "fade", "pop", "slide", "zoom", "wipe", "drop", "spin", "type")
+    val EMPHS = listOf("", "pulse", "shake", "wiggle", "bounce")
     val TEXT_LOOKS = listOf("plate", "shadow", "accent", "light")
     val IMAGE_LOOKS = listOf("plain", "round", "card", "circle")
 
@@ -318,6 +335,9 @@ object StudioEdit {
     /** Length of the in and out animation: 350 ms, at most a third of the block. */
     fun animMs(b: EBlock): Long = min(350L, b.durMs / 3)
 
+    /** A caption types its letters in over this time (in animation "type"). */
+    fun typeMs(b: EBlock): Long = min(b.durMs / 2, max(400L, b.text.length * 45L))
+
     private fun easeOut(p: Float): Float {
         val r = 1 - p
         return 1 - r * r * r
@@ -336,10 +356,24 @@ object StudioEdit {
         var alpha = 1f
         var scale = 1f
         var dy = 0f
+        var clip = 1f
+        var rot = 0f
+        var reveal = 1f
         fun apply(kind: String, p: Float, out: Boolean) {
             if (p >= 1f) return
             val e = easeOut(p)
             when (kind) {
+                "wipe" -> clip *= e
+                "drop" -> {
+                    alpha *= min(1f, p * 3f)
+                    dy -= (1 - backOut(p)) * 0.08f
+                }
+                "spin" -> {
+                    alpha *= e
+                    scale *= 0.5f + 0.5f * backOut(p)
+                    rot += (1 - e) * (if (out) 90f else -90f)
+                }
+                "type" -> if (b.kind == "text") reveal *= p else alpha *= e
                 "fade" -> alpha *= e
                 "pop" -> {
                     alpha *= min(1f, p * 2.5f)
@@ -356,10 +390,20 @@ object StudioEdit {
             }
         }
         if (d > 0) {
-            if (b.animIn != "none") apply(b.animIn, ((tMs - b.startMs).toFloat() / d).coerceIn(0f, 1f), false)
+            val dIn = if (b.animIn == "type") typeMs(b) else d
+            if (b.animIn != "none") apply(b.animIn, ((tMs - b.startMs).toFloat() / dIn).coerceIn(0f, 1f), false)
             if (b.animOut != "none") apply(b.animOut, ((b.endMs - tMs).toFloat() / d).coerceIn(0f, 1f), true)
         }
-        return EPose(alpha.coerceIn(0f, 1f), scale, 0f, dy)
+        // an accent effect lives over the whole block
+        var dx = 0f
+        val local = (tMs - b.startMs) / 1000.0
+        when (b.emph) {
+            "pulse" -> scale *= 1f + 0.05f * kotlin.math.sin(local * 2 * Math.PI / 0.9).toFloat().let { (it + 1) / 2 }
+            "shake" -> dx += 0.006f * kotlin.math.sin(local * 2 * Math.PI * 7).toFloat() * (if ((local % 2.0) < 0.5) 1f else 0f)
+            "wiggle" -> rot += 3f * kotlin.math.sin(local * 2 * Math.PI / 0.7).toFloat()
+            "bounce" -> dy -= 0.015f * kotlin.math.abs(kotlin.math.sin(local * Math.PI / 0.6)).toFloat()
+        }
+        return EPose(alpha.coerceIn(0f, 1f), scale, dx, dy, clip.coerceIn(0f, 1f), rot, reveal.coerceIn(0f, 1f))
     }
 
     // ---------- words of the moment ----------
@@ -538,8 +582,10 @@ object StudioEdit {
      * for schemes, until [settle] (when the last node has come in).
      */
     fun overlayKey(shown: List<EBlock>, tMs: Long, settle: (EBlock) -> Long): String = shown.joinToString("|") { b ->
-        val d = max(animMs(b), if (b.dim > 0f) DIM_MS else 0L)
-        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b)) || b.keys.size > 1
+        val d = max(max(animMs(b), if (b.dim > 0f) DIM_MS else 0L), if (b.animIn == "type") typeMs(b) else 0L)
+        // motion blocks move all the time, accent effects too
+        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b)) || b.keys.size > 1 ||
+            b.emph.isNotEmpty() || b.kind == EditMotion.KIND || b.kind == EditLottie.KIND
         // an animation is redrawn only when its frame changes, not on every frame of the video
         val frame = if (b.kind == EditInsert.KIND && b.file.contains("/r_")) {
             val local = tMs - b.startMs
@@ -649,6 +695,9 @@ object StudioEdit {
             if (b.dim > 0f) put("dim", b.dim.toDouble())
             if (b.dimAll) put("dimAll", true)
             if (b.history.isNotEmpty()) put("history", JSONArray(b.history.take(3)))
+            if (b.theme.isNotEmpty()) put("theme", b.theme)
+            if (b.emph.isNotEmpty()) put("emph", b.emph)
+            if (b.seg.isNotEmpty()) put("seg", b.seg)
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -659,6 +708,7 @@ object StudioEdit {
         // a scheme or an animation without content is kept only while it waits for an answer
         if (kind == "scheme" && scheme == null && req.isEmpty()) return null
         if (kind == EditInsert.KIND && o.optString("file").isEmpty() && req.isEmpty()) return null
+        if (kind == EditLottie.KIND && o.optString("file").isEmpty()) return null
         fun f(k: String, d: Float) = o.optDouble(k, d.toDouble()).toFloat().takeIf { !it.isNaN() } ?: d
         return EBlock(
             o.optString("id").ifEmpty { return null }, kind, max(0L, o.optLong("start")), max(MIN_MS, o.optLong("dur", DEFAULT_MS)),
@@ -668,7 +718,8 @@ object StudioEdit {
             f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f), EditKeys.from(o.optJSONArray("keys")),
             o.optInt("fps", EditInsert.DEFAULT_FPS).coerceIn(1, 60), o.optLong("loop").coerceIn(0L, EditInsert.MAX_ANIM_MS), req,
             o.optString("brief"), EditInsert.lookFrom(o.optJSONObject("over")), f("dim", 0f).coerceIn(0f, 0.6f), o.optBoolean("dimAll"),
-            o.optJSONArray("history")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }.take(3) }.orEmpty()
+            o.optJSONArray("history")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }.take(3) }.orEmpty(),
+            o.optString("theme"), o.optString("emph").takeIf { it in EMPHS } ?: "", o.optString("seg")
         )
     }
 
@@ -685,6 +736,7 @@ object StudioEdit {
             if (p.clips.isNotEmpty()) put("clips", EditTrack.json(p.clips))
             if (p.ratio.isNotEmpty()) put("ratio", p.ratio).put("fill", p.fill).put("bg", p.bg).put("blur", p.blur)
             if (p.brand.isNotEmpty()) put("brand", p.brand)
+            if (p.theme.isNotEmpty()) put("theme", p.theme)
         }
 
     fun fromJson(s: String): EProject? = runCatching {
@@ -695,7 +747,7 @@ object StudioEdit {
         if (w <= 0 || h <= 0) return null
         EProject(o.getString("id"), o.optString("source"), w, h, o.optLong("dur"), blocksFrom(o.optJSONArray("blocks")), o.optLong("created"), o.optString("exported"),
             EditTrack.from(o.optJSONArray("clips")), o.optString("ratio").takeIf { it in EditCanvas.RATIOS } ?: "", o.optBoolean("fill"),
-            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt(), o.optBoolean("blur"), o.optString("brand"))
+            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt(), o.optBoolean("blur"), o.optString("brand"), o.optString("theme"))
     }.getOrNull()
 }
 

@@ -108,9 +108,15 @@ object AnimRender {
     }
 
     /** A trial run: frames at [times] seconds, the slowest frame, JS errors, all empty, the whole block opaque. */
-    class Trial(val frames: List<Bitmap>, val msPerFrame: Double, val errors: List<String>, val allEmpty: Boolean, val opaque: Boolean)
+    class Trial(
+        val frames: List<Bitmap>, val msPerFrame: Double, val errors: List<String>, val allEmpty: Boolean, val opaque: Boolean,
+        /** The probe of the page: the smallest text, texts past the edges (JSON, see AnimV11.reportProblems). */
+        val probe: String? = null,
+        /** The largest share of each zone (in fractions of the block) the frames cover with opaque pixels. */
+        val covered: List<Float> = emptyList()
+    )
 
-    fun trial(host: CanvasHost, code: String, data: JSONObject, times: List<Double>): Trial {
+    fun trial(host: CanvasHost, code: String, data: JSONObject, times: List<Double>, zones: List<FRect> = emptyList()): Trial {
         val errors = mutableListOf<String>()
         try {
             host.load(code, data)
@@ -121,6 +127,8 @@ object AnimRender {
         var slow = 0.0
         var empty = 0
         var opaque = 0
+        host.jsAsync("window.__probe&&(__probe.on=true)")()
+        val covered = FloatArray(zones.size)
         for (s in times) {
             BgTasks.checkpoint()
             val t0 = System.nanoTime()
@@ -135,10 +143,16 @@ object AnimRender {
             if (b == null) empty++ else {
                 val pts = listOf(2 to 2, b.width - 3 to 2, 2 to b.height - 3, b.width - 3 to b.height - 3, b.width / 2 to b.height / 2)
                 if (pts.all { (x, y) -> x in 0 until b.width && y in 0 until b.height && (b.getPixel(x, y) ushr 24) >= 250 }) opaque++
+                if (zones.isNotEmpty()) {
+                    val px = IntArray(b.width * b.height)
+                    b.getPixels(px, 0, b.width, 0, 0, b.width, b.height)
+                    zones.forEachIndexed { i, z -> covered[i] = maxOf(covered[i], AnimV11.coverage(px, b.width, b.height, z, 3)) }
+                }
                 frames += b
             }
         }
-        return Trial(frames, slow, errors, empty == times.size, opaque == times.size && times.isNotEmpty())
+        val probe = host.jsAsync("window.__lumenReport?__lumenReport():''")()?.let { r -> runCatching { JSONArray("[$r]").getString(0) }.getOrNull() }
+        return Trial(frames, slow, errors, empty == times.size, opaque == times.size && times.isNotEmpty(), probe, covered.toList())
     }
 
     /** Removes render folders no block of [blocks] shows (the code stays: undo may bring it back). */

@@ -275,7 +275,7 @@ class StudioEditTest {
         assertNull(StudioEdit.fromJson("{\"protocol\":\"other\"}"))
         assertNull(StudioEdit.fromJson("not json"))
         // unknown kinds and schemes without nodes are dropped, bad values fall back
-        val a = org.json.JSONArray("[{\"id\":\"x\",\"kind\":\"video\"},{\"id\":\"y\",\"kind\":\"scheme\"},{\"id\":\"z\",\"kind\":\"emoji\",\"text\":\"🔥\",\"in\":\"spin\",\"w\":50}]")
+        val a = org.json.JSONArray("[{\"id\":\"x\",\"kind\":\"video\"},{\"id\":\"y\",\"kind\":\"scheme\"},{\"id\":\"z\",\"kind\":\"emoji\",\"text\":\"🔥\",\"in\":\"twirl\",\"w\":50}]")
         val blocks = StudioEdit.blocksFrom(a)
         assertEquals(listOf("z"), blocks.map { it.id })
         assertEquals("pop", blocks[0].animIn)

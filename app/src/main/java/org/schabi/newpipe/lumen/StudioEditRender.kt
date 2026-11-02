@@ -83,10 +83,168 @@ class StudioEditPainter(
         val meta = AnimRender.meta(dir, b) ?: return pending(c, box, "🎞",
             if (b.file.isEmpty()) waitText(b) else t("Анимация рисуется…", "Rendering the animation…"))
         val rd = File(dir, b.file)
-        val i = EditInsert.frameIndex(tMs - b.startMs, b.durMs, meta) ?: return
+        val i = EditInsert.frameAt(tMs - b.startMs, b, meta) ?: return
         val bmp = AnimFrames.frame(rd, i, meta)
         AnimFrames.prefetch(rd, i, meta)
-        if (bmp != null) c.drawBitmap(bmp, null, box, img)
+        if (bmp == null) return
+        // the code did not draw its own exit (the last frame is not empty): a soft fade at the very end
+        val fade = EditInsert.tailFade(tMs - b.startMs, b.durMs, b.animOut == "none" && b.seg.isEmpty() && (meta.count - 1) !in meta.empty)
+        img.alpha = (255 * fade).toInt()
+        c.drawBitmap(bmp, null, box, img)
+        img.alpha = 255
+    }
+
+    // ---------- native motion blocks and Lottie ----------
+
+    private val briefs = HashMap<String, EditBrief>()
+    private val themes = HashMap<String, EditTheme?>()
+    private val faces2 = HashMap<String, Typeface>()
+    private val primFill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val primLine = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val primText = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    private fun briefOf(b: EBlock): EditBrief = briefs.also { if (it.size > 200) it.clear() }.getOrPut(b.brief) { EditInsert.briefFrom(b.brief) ?: EditBrief() }
+
+    /** The theme of a block: its own, else one in the accent of the block or of the video. */
+    private fun themeOf(b: EBlock): EditTheme {
+        val own = if (b.theme.isEmpty()) null else themes.also { if (it.size > 100) it.clear() }.getOrPut(b.theme) { EditThemes.parse(b.theme) }
+        if (own != null) return own
+        val base = EditThemes.preset("science")!!
+        return base.copy(accent = b.over?.accent ?: accent)
+    }
+
+    /** A typeface of a theme font ("file:<name>" — a font file of the project in fonts/). */
+    private fun face(font: String, weight: Int): Typeface = faces2.getOrPut("$font|$weight") {
+        val style = if (weight >= 700) Typeface.BOLD else Typeface.NORMAL
+        when {
+            font.startsWith("file:") -> runCatching { Typeface.createFromFile(File(dir, "fonts/" + font.removePrefix("file:"))) }.getOrNull()?.let { Typeface.create(it, style) }
+                ?: Typeface.create(Typeface.SANS_SERIF, style)
+            font == "serif" -> Typeface.create(Typeface.SERIF, style)
+            font == "mono" -> Typeface.create(Typeface.MONOSPACE, style)
+            font == "condensed" -> Typeface.create("sans-serif-condensed", style)
+            font == "rounded" -> Typeface.create("sans-serif-rounded", style)
+            weight >= 900 -> Typeface.create("sans-serif-black", Typeface.NORMAL)
+            else -> Typeface.create(Typeface.SANS_SERIF, style)
+        }
+    }
+
+    private fun motion(c: Canvas, b: EBlock, box: RectF, tMs: Long) {
+        val br = briefOf(b)
+        val th = themeOf(b)
+        val ws = words.filter { it.startMs >= b.startMs && it.startMs < b.endMs }.map { it.text to (it.startMs - b.startMs) / 1000.0 }
+        val prims = EditMotion.frame(b.look, EditMotion.content(br, ws), th, (tMs - b.startMs) / 1000.0, b.durMs / 1000.0, box.width(), box.height(),
+            EditInsert.minFontPx(w, h, br.size).toFloat())
+        c.save()
+        c.translate(box.left, box.top)
+        for (p in prims) prim(c, p, th)
+        c.restore()
+    }
+
+    private fun alphaOf(color: Int, a: Float) = ((color ushr 24) * a).toInt().coerceIn(0, 255)
+
+    private fun prim(c: Canvas, p: MPrim, th: EditTheme) {
+        val m = min(w, h) / 1080f
+        when (p) {
+            is MPrim.Box -> {
+                primFill.color = p.color
+                primFill.alpha = alphaOf(p.color, p.a)
+                if (p.glow > 0f) primFill.setShadowLayer(24f * m * p.glow + 1f, 0f, 0f, p.color) else primFill.clearShadowLayer()
+                c.drawRoundRect(RectF(p.l, p.t, p.r, p.b), p.radius, p.radius, primFill)
+                primFill.clearShadowLayer()
+            }
+            is MPrim.Arc -> {
+                primLine.color = p.color
+                primLine.alpha = alphaOf(p.color, p.a)
+                primLine.strokeWidth = p.width
+                if (p.glow > 0f) primLine.setShadowLayer(24f * m * p.glow + 1f, 0f, 0f, p.color) else primLine.clearShadowLayer()
+                c.drawArc(RectF(p.cx - p.r, p.cy - p.r, p.cx + p.r, p.cy + p.r), p.start, p.sweep, false, primLine)
+                primLine.clearShadowLayer()
+            }
+            is MPrim.Line -> {
+                primLine.color = p.color
+                primLine.alpha = alphaOf(p.color, p.a)
+                primLine.strokeWidth = p.width
+                c.drawLine(p.x1, p.y1, p.x2, p.y2, primLine)
+            }
+            is MPrim.Icon -> {
+                emojiP.textSize = p.size
+                emojiP.alpha = (255 * p.a).toInt().coerceIn(0, 255)
+                val fm = emojiP.fontMetrics
+                c.drawText(p.text, p.cx, p.cy - (fm.ascent + fm.descent) / 2, emojiP)
+                emojiP.alpha = 255
+            }
+            is MPrim.Label -> {
+                if (p.text.isBlank()) return
+                primText.typeface = face(th.font, p.weight)
+                primText.textSize = p.size
+                primText.textAlign = when (p.align) { -1 -> Paint.Align.LEFT; 1 -> Paint.Align.RIGHT; else -> Paint.Align.CENTER }
+                if (th.tracking != 0f) primText.letterSpacing = th.tracking
+                if (p.maxW > 0f) {
+                    val tw = primText.measureText(p.text)
+                    if (tw > p.maxW) primText.textSize = p.size * p.maxW / tw
+                }
+                val fm = primText.fontMetrics
+                val y = p.y - (fm.ascent + fm.descent) / 2
+                if (p.outline || (th.plate == "none" && th.shadow)) {
+                    primText.style = Paint.Style.STROKE
+                    primText.strokeWidth = primText.textSize * 0.12f
+                    primText.strokeJoin = Paint.Join.ROUND
+                    primText.color = 0xE6000000.toInt()
+                    primText.alpha = (230 * p.a).toInt().coerceIn(0, 255)
+                    c.drawText(p.text, p.x, y, primText)
+                    primText.style = Paint.Style.FILL
+                }
+                primText.color = p.color
+                primText.alpha = alphaOf(p.color, p.a)
+                if (p.glow > 0f) primText.setShadowLayer(18f * m * p.glow + 1f, 0f, 0f, p.color) else primText.clearShadowLayer()
+                c.drawText(p.text, p.x, y, primText)
+                primText.clearShadowLayer()
+                primText.letterSpacing = 0f
+            }
+        }
+    }
+
+    private val lotties = HashMap<String, Pair<com.airbnb.lottie.LottieDrawable, EditLottie.Info>?>()
+
+    private fun lottie(c: Canvas, b: EBlock, box: RectF, tMs: Long) {
+        val br = briefOf(b)
+        val key = b.file + "|" + br.fields.hashCode() + "|" + b.theme.hashCode()
+        val got = lotties.getOrPut(key) {
+            runCatching {
+                val f = File(dir, b.file)
+                val json = f.readText()
+                val info = EditLottie.info(json) ?: return@runCatching null
+                val comp = com.airbnb.lottie.LottieCompositionFactory.fromJsonStringSync(json, key).value ?: return@runCatching null
+                val d = com.airbnb.lottie.LottieDrawable()
+                d.composition = comp
+                val texts = br.fields.filterKeys { it.startsWith("lottie:") }
+                if (texts.isNotEmpty()) {
+                    val td = com.airbnb.lottie.TextDelegate(d)
+                    texts.forEach { (k, v) -> td.setText(k.removePrefix("lottie:"), v) }
+                    d.setTextDelegate(td)
+                }
+                if (br.fields["lottie_tint"] == "theme") {
+                    val col = themeOf(b).accent
+                    d.addValueCallback(com.airbnb.lottie.model.KeyPath("**"), com.airbnb.lottie.LottieProperty.COLOR_FILTER,
+                        com.airbnb.lottie.value.LottieValueCallback<android.graphics.ColorFilter>(com.airbnb.lottie.SimpleColorFilter(col)))
+                }
+                d to info
+            }.onFailure { L.w("studio", "lottie: ${it.message}") }.getOrNull()
+        } ?: return pending(c, box, "✨", t("Lottie не открылся", "Lottie did not open"))
+        val (d, info) = got
+        d.progress = EditLottie.progress(tMs - b.startMs, b.durMs, info, b.look)
+        val cw = max(1, info.w).toFloat()
+        val ch = max(1, info.h).toFloat()
+        val k = min(box.width() / cw, box.height() / ch)
+        c.save()
+        c.translate(box.centerX() - cw * k / 2, box.centerY() - ch * k / 2)
+        c.scale(k, k)
+        d.setBounds(0, 0, cw.toInt(), ch.toInt())
+        d.draw(c)
+        c.restore()
     }
 
     private fun waitText(b: EBlock): String =
@@ -101,17 +259,21 @@ class StudioEditPainter(
         val (hw, hh) = StudioEdit.halfSize(b, w.toFloat(), h.toFloat())
         if (hw < 1f || hh < 1f) return
         c.save()
-        c.translate(b.x * w, (b.y + pose.dy) * h)
-        if (b.rot != 0f) c.rotate(b.rot)
+        c.translate((b.x + pose.dx) * w, (b.y + pose.dy) * h)
+        if (b.rot + pose.rot != 0f) c.rotate(b.rot + pose.rot)
         if (pose.scale != 1f) c.scale(pose.scale, pose.scale)
         val box = RectF(-hw, -hh, hw, hh)
+        // a wipe shows the block from the left
+        if (pose.clip < 0.999f) c.clipRect(box.left - hw, box.top - hh, box.left + box.width() * pose.clip, box.bottom + hh)
         val layered = alpha < 0.995f
         if (layered) c.saveLayerAlpha(RectF(box).apply { inset(-hw * 0.25f - 8f, -hh * 0.25f - 8f) }, (alpha * 255).toInt().coerceIn(0, 255))
         when (b.kind) {
             "image" -> picture(c, b, box)
             "scheme" -> scheme(c, b, box, tMs)
-            "text" -> caption(c, b, box)
+            "text" -> caption(c, b, box, pose.reveal)
             EditInsert.KIND -> anim(c, b, box, tMs)
+            EditMotion.KIND -> motion(c, b, box, tMs)
+            EditLottie.KIND -> lottie(c, b, box, tMs)
             else -> emoji(c, b.text, box)
         }
         if (layered) c.restore()
@@ -286,11 +448,25 @@ class StudioEditPainter(
         return out.ifEmpty { listOf("") }
     }
 
-    private fun caption(c: Canvas, b: EBlock, box: RectF) {
+    private fun caption(c: Canvas, b: EBlock, box: RectF, reveal: Float = 1f) {
         if (b.text.isBlank()) return
+        val o = b.over
+        val accent = o?.accent ?: this.accent
+        val oldFace = textP.typeface
+        if (o != null && o.font.isNotEmpty()) textP.typeface = face(o.font, 900)
+        try {
+            captionText(c, b, box, reveal, accent, if (o?.upper == true) b.text.uppercase() else b.text)
+        } finally {
+            textP.typeface = oldFace
+        }
+    }
+
+    private fun captionText(c: Canvas, b: EBlock, box: RectF, reveal: Float, accent: Int, text: String) {
         val m = min(box.width(), box.height())
         val pad = min(m * 0.22f, box.width() * 0.06f)
-        val (size, lines) = fit(b.text.trim(), box.width() - pad * 2, box.height() - pad * 2)
+        val (size, lines) = fit(text.trim(), box.width() - pad * 2, box.height() - pad * 2)
+        // the typewriter shows the letters one by one over the laid-out lines
+        var left = if (reveal >= 0.999f) Int.MAX_VALUE else kotlin.math.ceil(lines.sumOf { it.length } * reveal).toInt()
         val ink: Int
         when (b.look) {
             "shadow" -> ink = Color.WHITE
@@ -309,17 +485,25 @@ class StudioEditPainter(
         val step = size * 1.18f
         val fm = textP.fontMetrics
         var y = box.centerY() - step * lines.size / 2 + step / 2 - (fm.ascent + fm.descent) / 2
-        for (l in lines) {
+        for (l0 in lines) {
+            if (left <= 0) break
+            val l = if (l0.length <= left) l0 else l0.take(left)
+            left -= l0.length
+            // a line being typed stays where the whole line will stand
+            val partial = l.length < l0.length
+            val x = if (partial) box.centerX() - textP.measureText(l0) / 2 else box.centerX()
+            if (partial) textP.textAlign = Paint.Align.LEFT
             if (b.look == "shadow") {
                 textP.style = Paint.Style.STROKE
                 textP.strokeWidth = size * 0.14f
                 textP.strokeJoin = Paint.Join.ROUND
                 textP.color = 0xE6000000.toInt()
-                c.drawText(l, box.centerX(), y, textP)
+                c.drawText(l, x, y, textP)
                 textP.style = Paint.Style.FILL
             }
             textP.color = ink
-            c.drawText(l, box.centerX(), y, textP)
+            c.drawText(l, x, y, textP)
+            textP.textAlign = Paint.Align.CENTER
             y += step
         }
     }

@@ -167,6 +167,12 @@ object Store {
         writeAtomic(File(dir(projectId), name), text)
     }
 
+    /** Every file of the project as a path relative to its folder ("ai/x.json"). */
+    fun listFiles(projectId: String): List<String> = synchronized(lock) {
+        val d = dir(projectId)
+        d.walkTopDown().filter { it.isFile }.map { it.relativeTo(d).path.replace('\\', '/') }.toList()
+    }
+
     // ---- comments / transcripts ----
     fun saveComments(projectId: String, videoId: String, list: List<Comment>) {
         val a = JSONArray()

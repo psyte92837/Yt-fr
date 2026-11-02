@@ -1082,9 +1082,10 @@ class ProjectActivity : LumenBase() {
         c.h2(t("Файлы данных", "Data files"))
         c.card {
             add(text(ctx, t("📦 Все артефакты одним файлом", "📦 All artifacts in one file"), Type.TITLE_M, bold = true), 0)
-            muted(t("Без ИИ: каналы, видео с цифрами, тегами и описаниями, расшифровки и комментарии — в PDF, картинки, HTML, Markdown, текст или JSON. Отправьте друзьям или в любой ИИ сами.",
-                "No AI: channels, videos with numbers, tags and descriptions, transcripts and comments — as PDF, images, HTML, Markdown, text or JSON. Send it to friends or any AI yourself."))
-            button(t("Собрать и поделиться ↗", "Build and share ↗"), style = BtnStyle.FILLED) { artifactsDialog(project) }
+            muted(t("Каналы, видео с цифрами, тегами и описаниями, расшифровки и комментарии, а по желанию — выводы ИИ и данные анализа (граф рекомендаций, ниши, профиль темы, языковая игра…) — в PDF, картинки, HTML, Markdown, текст или JSON. Отправьте друзьям или в любой ИИ.",
+                "Channels, videos with numbers, tags and descriptions, transcripts and comments, and optionally AI results and analysis data (recommendation graph, niches, topic profile, language game…) — as PDF, images, HTML, Markdown, text or JSON. Send it to friends or any AI."))
+            button(t("🤖 Всё собранное одним файлом для ИИ ↗", "🤖 Everything in one file for an AI ↗"), style = BtnStyle.FILLED) { artifactsAllForAi(project) }
+            button(t("Выбрать формат и состав ↗", "Pick format and contents ↗"), style = BtnStyle.TEXT) { artifactsDialog(project) }
         }
         listOf(
             Triple("artifacts_pdf", t("PDF — все артефакты (без ИИ)", "PDF — all artifacts (no AI)"), "$base-artifacts.pdf"),

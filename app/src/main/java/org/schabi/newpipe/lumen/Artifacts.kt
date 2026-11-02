@@ -26,16 +26,95 @@ object Artifacts {
         /** Comment authors' names; off by default — the file is meant to be passed on. */
         val authors: Boolean = false,
         /** Comments per video, 0 = all. */
-        val maxComments: Int = 0
+        val maxComments: Int = 0,
+        /** Everything else the project holds: AI results and analysis data (graphs, niches, topic, language game…). */
+        val extras: Boolean = false,
+        /** Characters per extra file; a bigger one is cut with a note. */
+        val extraMax: Int = 400_000
     )
+
+    /** One more collected thing: [section] "ai" (an AI result) or "data" (a project file). */
+    class Extra(val section: String, val title: String, val file: String, val text: String)
 
     class Source(
         val meta: JSONObject,
         val videos: List<Video>,
         val channels: List<ChannelData>,
         val comments: (String) -> List<Comment>,
-        val transcript: (String) -> String?
+        val transcript: (String) -> String?,
+        val extras: () -> List<Extra> = { emptyList() }
     )
+
+    // ------------------------------------------------------------------ extras
+    /** Human names of known project files, in the order they go into the file. */
+    val LABELS = linkedMapOf(
+        "project.json" to "Настройки проекта",
+        "topic.json" to "Профиль темы",
+        "recs.json" to "Граф рекомендаций (видео → видео)",
+        "chgraph.json" to "Граф каналов",
+        "recs_snaps.json" to "Снимки графа по дням",
+        "algo_niches.json" to "Ниши: названия",
+        "algo_labels.json" to "Разметка: по теме / не по теме",
+        "algo_me.json" to "Мой канал в рекомендациях",
+        "algo_opps.json" to "Возможности",
+        "algo_radar.json" to "Радар",
+        "predict.json" to "Предсказания",
+        "audit.json" to "Аудит рекомендаций",
+        "audit_graph.json" to "Граф аудита",
+        "audit_cfg.json" to "Настройки аудита",
+        "langgame.json" to "Языковая игра аудитории",
+        "langgame_last.json" to "Языковая игра: последний текст",
+        "harvest.json" to "Сбор",
+        "ideas.json" to "Идеи",
+        "quick.json" to "Быстрый разбор",
+        "digests.json" to "Дайджесты",
+        "rejected.json" to "Отклонённые видео",
+        "watch_langs.json" to "Языки наблюдения",
+        "chgraph_seeds.txt" to "Стартовые каналы графа"
+    )
+    private val PREFIX = listOf("style_" to "Стиль видео", "voc_ai/" to "Словарь аудитории (ИИ)", "diagrams/" to "Схема")
+
+    /** Already in the main part or not text: not repeated as extras. */
+    fun extraFile(path: String): Boolean {
+        val p = path.replace('\\', '/')
+        val name = p.substringAfterLast('/')
+        if (name.startsWith(".") || name.endsWith(".tmp")) return false
+        if (p == "videos.json" || p == "channels.json") return false
+        if (p.startsWith("comments/") || p.startsWith("transcripts/") || p.startsWith("ai/")) return false
+        return name.substringAfterLast('.', "").lowercase() in setOf("json", "txt", "md", "csv", "tsv")
+    }
+
+    fun label(path: String): String = LABELS[path] ?: PREFIX.firstOrNull { path.startsWith(it.first) }?.let { (pre, l) ->
+        l + " · " + path.removePrefix(pre).substringBeforeLast('.')
+    } ?: path
+
+    /** Files in reading order: known ones first (as in [LABELS]), then the rest by name. */
+    fun orderFiles(paths: Collection<String>): List<String> {
+        val known = LABELS.keys.toList()
+        return paths.filter(::extraFile).sortedWith(compareBy<String>({ known.indexOf(it).let { i -> if (i < 0) Int.MAX_VALUE else i } }, { it }))
+    }
+
+    /** JSON without spaces (fewer tokens), anything else trimmed; cut to [max] with a note. */
+    fun compact(text: String, max: Int): String {
+        val t = text.trim()
+        val c = when {
+            t.startsWith("{") -> runCatching { JSONObject(t).toString() }.getOrDefault(t)
+            t.startsWith("[") -> runCatching { JSONArray(t).toString() }.getOrDefault(t)
+            else -> t
+        }
+        return if (max <= 0 || c.length <= max) c else c.take(max) + "\n… [обрезано: показано $max из ${c.length} символов]"
+    }
+
+    private fun extrasOf(src: Source, o: Opts): List<Extra> = if (o.extras) src.extras().filter { it.text.isNotBlank() } else emptyList()
+
+    private fun aiTitle(src: Source, kind: String, target: String, model: String, at: Long): String {
+        val what = if (target.isBlank() || target == "project") "проект" else src.videos.firstOrNull { it.id == target }?.title?.let(::one) ?: target
+        return listOf(kind, what, model, if (at > 0) Fmt.dateTime(at) else "").filter { it.isNotBlank() }.joinToString(" · ")
+    }
+
+    /** An AI result as an extra; the title names the video, not its id. */
+    fun aiExtra(src: Source, key: String, kind: String, target: String, model: String, at: Long, text: String) =
+        Extra("ai", aiTitle(src, kind, target, model, at), "ai/$key.json", text)
 
     private fun cleanTranscript(s: String) = s.replace("\r", "").replace(Regex("""\n{3,}"""), "\n\n").trim()
 
@@ -61,13 +140,19 @@ object Artifacts {
         fun b(text: String) = if (plain) text else "**$text**"
         h(1, m.optString("name").ifBlank { m.optString("phrase") }.ifBlank { "Lumen" })
         out.append('\n')
-        out.append(if (plain) "" else "> ").append("$PROTOCOL v$VERSION · ").append(Fmt.dateTime(now)).append(" · собрано Lumen без анализа ИИ: только исходные тексты и цифры с YouTube.\n\n")
+        out.append(if (plain) "" else "> ").append("$PROTOCOL v$VERSION · ").append(Fmt.dateTime(now)).append(if (o.extras) " · исходные тексты и цифры с YouTube, выводы ИИ и данные анализа Lumen.\n\n" else " · собрано Lumen без анализа ИИ: только исходные тексты и цифры с YouTube.\n\n")
         if (m.optString("phrase").isNotBlank()) out.append(b("Тема:") + " ").append(m.optString("phrase")).append('\n')
         if (m.optString("domain").isNotBlank()) out.append(b("Область:") + " ").append(m.optString("domain")).append('\n')
         val nc = src.videos.sumOf { pickComments(src, it, o).size }
         val nt = if (o.transcripts) src.videos.count { !src.transcript(it.id).isNullOrBlank() } else 0
         out.append(b("Состав:") + " каналов ").append(src.channels.size.toString()).append(", видео ").append(src.videos.size.toString())
             .append(", расшифровок ").append(nt.toString()).append(", комментариев ").append(nc.toString()).append("\n\n")
+        val extras = extrasOf(src, o)
+        if (o.extras) {
+            out.append(b("Как читать:") + " файл собран для анализа в другом ИИ. Разделы: «Каналы»; «Видео» — ссылка, цифры, теги, описание, расшифровка, комментарии; " +
+                "«Выводы ИИ» — что уже написал ИИ в Lumen (это мнение, не факт); «Данные анализа» — файлы проекта в JSON (граф рекомендаций, ниши, профиль темы и др.). " +
+                "Цифры — на момент сбора.\n\n")
+        }
 
         if (src.channels.isNotEmpty()) {
             h(2, "Каналы")
@@ -125,6 +210,24 @@ object Artifacts {
             }
             out.append("\n---\n\n")
         }
+        val ai = extras.filter { it.section == "ai" }
+        if (ai.isNotEmpty()) {
+            h(2, "Выводы ИИ (${ai.size})")
+            out.append('\n')
+            ai.forEach { e -> h(3, e.title); out.append('\n').append(e.text.trim()).append("\n\n") }
+        }
+        val data = extras.filter { it.section != "ai" }
+        if (data.isNotEmpty()) {
+            h(2, "Данные анализа (${data.size})")
+            out.append('\n')
+            data.forEach { e ->
+                h(3, e.title)
+                out.append(if (plain) "файл: ${e.file}\n" else "`${e.file}`\n\n")
+                val text = compact(e.text, o.extraMax)
+                if (plain) out.append(text).append("\n\n")
+                else out.append(if (text.startsWith("{") || text.startsWith("[")) "```json\n" else "```\n").append(text).append("\n```\n\n")
+            }
+        }
     }
 
     // ------------------------------------------------------------------ JSON
@@ -153,15 +256,29 @@ object Artifacts {
     /** One JSON object written piece by piece: header, channels, then one video at a time. */
     fun json(src: Source, o: Opts, out: Appendable, now: Long = System.currentTimeMillis()) {
         out.append("{\"protocol\":").append(JSONObject.quote(PROTOCOL)).append(",\"version\":").append(VERSION.toString())
-            .append(",\"at\":").append(now.toString()).append(",\"ai\":false")
+            .append(",\"at\":").append(now.toString()).append(",\"ai\":").append(o.extras.toString())
             .append(",\"project\":").append(src.meta.toString())
             .append(",\"options\":").append(JSONObject().put("comments", o.comments).put("transcripts", o.transcripts)
-                .put("descriptions", o.descriptions).put("authors", o.authors).put("maxComments", o.maxComments).toString())
+                .put("descriptions", o.descriptions).put("authors", o.authors).put("maxComments", o.maxComments).put("extras", o.extras).toString())
             .append(",\n\"channels\":[")
         src.channels.forEachIndexed { i, c -> out.append(if (i == 0) "\n" else ",\n").append(channelJson(c, o).toString()) }
         out.append("],\n\"videos\":[")
         src.videos.forEachIndexed { i, v -> out.append(if (i == 0) "\n" else ",\n").append(videoJson(src, v, o).toString()) }
-        out.append("]}\n")
+        out.append("]")
+        if (o.extras) {
+            out.append(",\n\"extras\":[")
+            extrasOf(src, o).forEachIndexed { i, e ->
+                val j = JSONObject().put("section", e.section).put("title", e.title).put("file", e.file)
+                val text = if (e.section == "ai") e.text.trim() else compact(e.text, o.extraMax)
+                val parsed = if (e.section != "ai" && text.length == compact(e.text, 0).length) runCatching {
+                    if (text.startsWith("{")) JSONObject(text) else if (text.startsWith("[")) JSONArray(text) else null
+                }.getOrNull() else null
+                if (parsed != null) j.put("data", parsed) else j.put("text", text)
+                out.append(if (i == 0) "\n" else ",\n").append(j.toString())
+            }
+            out.append("]")
+        }
+        out.append("}\n")
     }
 
     // ------------------------------------------------------------------ formats
@@ -315,7 +432,22 @@ object Artifacts {
             }
             out.append("</div>")
         }
-        out.append("<footer>Собрано Lumen без анализа ИИ: только исходные тексты и цифры с YouTube.</footer></main></body></html>\n")
+        val extras = extrasOf(src, o)
+        val ai = extras.filter { it.section == "ai" }
+        if (ai.isNotEmpty()) {
+            out.append("<h2>Выводы ИИ (").append(ai.size.toString()).append(")</h2>")
+            ai.forEach { e -> out.append("<div class=\"card\"><h3>").append(esc(e.title)).append("</h3><div class=\"pre\">").append(esc(e.text.trim())).append("</div></div>") }
+        }
+        val data = extras.filter { it.section != "ai" }
+        if (data.isNotEmpty()) {
+            out.append("<h2>Данные анализа (").append(data.size.toString()).append(")</h2>")
+            data.forEach { e ->
+                out.append("<div class=\"card\"><h3>").append(esc(e.title)).append("</h3><div class=\"meta\">").append(esc(e.file))
+                    .append("</div><details><summary>Показать</summary><div class=\"pre\">").append(esc(compact(e.text, o.extraMax))).append("</div></details></div>")
+            }
+        }
+        out.append("<footer>").append(if (o.extras) "Исходные тексты и цифры с YouTube, выводы ИИ и данные анализа Lumen." else "Собрано Lumen без анализа ИИ: только исходные тексты и цифры с YouTube.")
+            .append("</footer></main></body></html>\n")
     }
 
     // ------------------------------------------------------------------ Android side
@@ -324,16 +456,22 @@ object Artifacts {
         val meta = JSONObject().put("name", p?.name.orEmpty()).put("phrase", p?.phrase.orEmpty()).put("domain", p?.domain.orEmpty())
         val videos = Store.videos(pid).values.sortedByDescending { it.views }
         val channels = runCatching { ChannelStore.all(pid).values.toList() }.getOrDefault(emptyList())
-        return Source(meta, videos, channels, { runCatching { Store.comments(pid, it) }.getOrDefault(emptyList()) }, { Store.transcript(pid, it) })
+        lateinit var src: Source
+        src = Source(meta, videos, channels, { runCatching { Store.comments(pid, it) }.getOrDefault(emptyList()) }, { Store.transcript(pid, it) }) {
+            Store.aiAll(pid).map { aiExtra(src, it.key, it.kind, it.target, it.model, it.at, it.text) } +
+                orderFiles(Store.listFiles(pid)).mapNotNull { f -> Store.readFile(pid, f)?.let { Extra("data", label(f), f, it) } }
+        }
+        return src
     }
 
     var opts: Opts
         get() = Lumen.prefs.let {
             Opts(it.getBoolean("art_comments", true), it.getBoolean("art_transcripts", true), it.getBoolean("art_desc", true),
-                it.getBoolean("art_authors", false), it.getInt("art_max_comments", 0))
+                it.getBoolean("art_authors", false), it.getInt("art_max_comments", 0), it.getBoolean("art_extras", true))
         }
         set(v) = Lumen.prefs.edit().putBoolean("art_comments", v.comments).putBoolean("art_transcripts", v.transcripts)
-            .putBoolean("art_desc", v.descriptions).putBoolean("art_authors", v.authors).putInt("art_max_comments", v.maxComments).apply()
+            .putBoolean("art_desc", v.descriptions).putBoolean("art_authors", v.authors).putInt("art_max_comments", v.maxComments)
+            .putBoolean("art_extras", v.extras).apply()
 
     var format: Format
         get() = Format.of(Lumen.prefs.getString("art_format", "pdf").orEmpty())
@@ -394,12 +532,17 @@ object Artifacts {
             }
             if (cm.isNotEmpty()) para("**" + t("Комментарии", "Comments") + " (${cm.size})**\n" + cm.joinToString("\n") { commentLine(it, o.authors) }, 12f)
         }
+        val ai = extrasOf(src, o).filter { it.section == "ai" }
+        if (ai.isNotEmpty()) {
+            out += ReportKit.Section(t("Выводы ИИ", "AI results"), t("данные анализа (графы, ниши) — в MD, TXT или JSON", "analysis data (graphs, niches) is in MD, TXT or JSON"))
+            ai.forEach { para("**" + it.title + "**\n" + it.text.trim(), 12f) }
+        }
         out += ReportKit.Footer(t("Собрано Lumen без анализа ИИ: только исходные тексты и цифры с YouTube.", "Gathered by Lumen without AI: only source texts and numbers from YouTube."))
         return out
     }
 
     /** One file of [f] (for PNG — the first page; use [pages] for all of them). */
-    fun write(pid: String, f: Format, out: OutputStream) {
+    fun write(pid: String, f: Format, out: OutputStream, opts: Opts = this.opts) {
         val src = source(pid)
         when (f) {
             Format.PDF -> ReportKit.pdf(blocks(src, opts), out, "Lumen · " + (src.meta.optString("name").ifBlank { "artifacts" }))
@@ -418,7 +561,7 @@ object Artifacts {
     }
 
     /** Page pictures into [dir]; returns the files and the total number of pages. */
-    fun pages(pid: String, dir: java.io.File, base: String): Pair<List<java.io.File>, Int> {
+    fun pages(pid: String, dir: java.io.File, base: String, opts: Opts = this.opts): Pair<List<java.io.File>, Int> {
         val src = source(pid)
         return ReportKit.pngPages(blocks(src, opts), dir, base, "Lumen · " + LangGame.clip(src.meta.optString("name"), 40))
     }
@@ -437,37 +580,42 @@ fun LumenBase.artifactsDialog(project: Project) {
             Artifacts.format = formats[pick]
             artifactsOptions(project, formats[pick])
         }
+        .setNeutralButton(t("🤖 Всё для ИИ", "🤖 All for AI")) { _, _ -> artifactsAllForAi(project) }
         .setNegativeButton(t("Отмена", "Cancel"), null)
         .show()
 }
 
+/** One Markdown file with everything the project holds (what chat AIs read best): all comments, transcripts, AI results, analysis data. */
+fun LumenBase.artifactsAllForAi(project: Project) = artifactsShare(project, Artifacts.Format.MD, Artifacts.Opts(extras = true))
+
 private fun LumenBase.artifactsOptions(project: Project, f: Artifacts.Format) {
     val o = Artifacts.opts
-    val checked = booleanArrayOf(o.comments, o.transcripts, o.descriptions, o.authors, o.maxComments in 1..100)
+    val checked = booleanArrayOf(o.comments, o.transcripts, o.descriptions, o.authors, o.maxComments in 1..100, o.extras)
     val items = arrayOf(
         t("Комментарии", "Comments"), t("Расшифровки", "Transcripts"), t("Описания видео и каналов", "Video and channel descriptions"),
-        t("Имена авторов комментариев", "Comment authors' names"), t("Только 50 лучших комментариев к видео", "Only the top 50 comments per video")
+        t("Имена авторов комментариев", "Comment authors' names"), t("Только 50 лучших комментариев к видео", "Only the top 50 comments per video"),
+        t("Выводы ИИ и данные анализа (граф, ниши, тема, языковая игра…)", "AI results and analysis data (graph, niches, topic, language game…)")
     )
     AlertDialog.Builder(this).setTitle(t(f.ru, f.en) + t(": что включить", ": what to include"))
         .setMultiChoiceItems(items, checked) { _, w, v -> checked[w] = v }
         .setPositiveButton(t("Поделиться ↗", "Share ↗")) { _, _ ->
-            Artifacts.opts = Artifacts.Opts(checked[0], checked[1], checked[2], checked[3], if (checked[4]) 50 else 0)
-            artifactsShare(project, f)
+            Artifacts.opts = Artifacts.Opts(checked[0], checked[1], checked[2], checked[3], if (checked[4]) 50 else 0, checked[5])
+            artifactsShare(project, f, Artifacts.opts)
         }
         .setNegativeButton(t("Отмена", "Cancel"), null)
         .show()
 }
 
-private fun LumenBase.artifactsShare(project: Project, f: Artifacts.Format) {
-    val base = ReportKit.safeName(project.name) + "-artifacts"
+private fun LumenBase.artifactsShare(project: Project, f: Artifacts.Format, o: Artifacts.Opts) {
+    val base = ReportKit.safeName(project.name) + if (o.extras && f != Artifacts.Format.PDF && f != Artifacts.Format.PNG) "-all" else "-artifacts"
     val subject = project.name + t(" — артефакты", " — artifacts")
     bgTask(t("Файл артефактов", "Artifacts file"), {
         if (f == Artifacts.Format.PNG) {
             val dir = java.io.File(ReportKit.shareFile(this, "x").parentFile, "pages")
-            Artifacts.pages(project.id, dir, base)
+            Artifacts.pages(project.id, dir, base, o)
         } else {
             val file = ReportKit.shareFile(this, "$base.${f.ext}")
-            file.outputStream().use { Artifacts.write(project.id, f, it) }
+            file.outputStream().use { Artifacts.write(project.id, f, it, o) }
             listOf(file) to 1
         }
     }, { err(it) }) { (files, total) ->

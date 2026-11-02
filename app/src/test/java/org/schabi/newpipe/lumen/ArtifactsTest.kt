@@ -120,4 +120,46 @@ class ArtifactsTest {
         assertEquals("   ↳ ♥9  Пётр: Согласен", Artifacts.commentLine(comments.getValue("a1")[1], true))
         assertEquals(Artifacts.Format.PDF, Artifacts.Format.of("artifacts_pdf"))
     }
+
+    private fun withExtras() = Artifacts.Source(src.meta, src.videos, src.channels, src.comments, src.transcript) {
+        listOf(
+            Artifacts.Extra("ai", "video_summary · Плитка отвалилась", "ai/k.json", "Итог: плохой клей"),
+            Artifacts.Extra("data", Artifacts.label("topic.json"), "topic.json", "{\n  \"phrase\": \"ремонт\"\n}"),
+            Artifacts.Extra("data", "big", "x.txt", "a".repeat(50))
+        )
+    }
+
+    @Test
+    fun extrasGoInOnlyWhenAsked() {
+        val off = StringBuilder().also { Artifacts.markdown(withExtras(), Artifacts.Opts(), it, now = 0) }.toString()
+        assertFalse(off.contains("Выводы ИИ"))
+        val sb = StringBuilder()
+        Artifacts.markdown(withExtras(), Artifacts.Opts(extras = true, extraMax = 30), sb, now = 0)
+        val s = sb.toString()
+        assertTrue(s.contains("Как читать:"))
+        assertTrue(s.contains("## Выводы ИИ (1)"))
+        assertTrue(s.contains("Итог: плохой клей"))
+        assertTrue(s.contains("### Профиль темы"))
+        assertTrue(s.contains("```json\n{\"phrase\":\"ремонт\"}\n```"))
+        assertTrue(s.contains("[обрезано: показано 30 из 50 символов]"))
+        val j = JSONObject(StringBuilder().also { Artifacts.json(withExtras(), Artifacts.Opts(extras = true), it, now = 0) }.toString())
+        val ex = j.getJSONArray("extras")
+        assertEquals(3, ex.length())
+        assertEquals("ремонт", ex.getJSONObject(1).getJSONObject("data").getString("phrase"))
+        assertTrue(j.getBoolean("ai"))
+    }
+
+    @Test
+    fun extraFilesSkipWhatIsAlreadyThere() {
+        assertFalse(Artifacts.extraFile("videos.json"))
+        assertFalse(Artifacts.extraFile("comments/a1.json"))
+        assertFalse(Artifacts.extraFile("transcripts/a1.txt"))
+        assertFalse(Artifacts.extraFile("ai/x.json"))
+        assertFalse(Artifacts.extraFile("recs.json.tmp"))
+        assertFalse(Artifacts.extraFile("img/a.png"))
+        assertTrue(Artifacts.extraFile("diagrams/d1.json"))
+        assertEquals(listOf("project.json", "recs.json", "diagrams/d1.json", "zzz.json"),
+            Artifacts.orderFiles(listOf("zzz.json", "diagrams/d1.json", "recs.json", "videos.json", "project.json")))
+        assertEquals("Стиль видео · a1", Artifacts.label("style_a1.json"))
+    }
 }

@@ -180,3 +180,29 @@ class EditKeysTest {
         assertFalse(StudioEdit.overlayKey(listOf(k), 2_500) { 0L } == StudioEdit.overlayKey(listOf(k), 2_600) { 0L })
     }
 }
+
+class EditDissolveTest {
+    @Test
+    fun thePictureBeforeFadesOutOverTheNextPiece() {
+        val clips = listOf(VClip("a", 0, 2_000), VClip("b", 2_000, 5_000, trans = "dissolve", transMs = 1_000))
+        assertEquals(null, EditColor.dissolveAt(clips, 1_900))
+        assertEquals(1f, EditColor.dissolveAt(clips, 2_000)!!.first, 1e-4f)
+        assertEquals(0.5f, EditColor.dissolveAt(clips, 2_500)!!.first, 1e-4f)
+        assertEquals(0, EditColor.dissolveAt(clips, 2_500)!!.second)
+        assertEquals(null, EditColor.dissolveAt(clips, 3_000))
+        assertTrue(EditColor.dissolvesAfter(clips, 0))
+        assertFalse(EditColor.dissolvesAfter(clips, 1))
+        // a dissolve is not a dip to a colour
+        assertEquals(null, EditColor.fadeAt(clips, 2_000))
+        // on the first piece it fades in from black
+        assertEquals(0xFF000000.toInt(), EditColor.fadeAt(listOf(VClip("a", 0, 2_000, trans = "dissolve")), 0)!!.color)
+    }
+
+    @Test
+    fun mixIntoBlends() {
+        val pix = intArrayOf((0xFF shl 24) or (200 shl 16))
+        EditColor.mixInto(pix, intArrayOf((0xFF shl 24) or 100), 0.5f)
+        assertEquals(100, (pix[0] shr 16) and 0xFF)
+        assertEquals(50, pix[0] and 0xFF)
+    }
+}

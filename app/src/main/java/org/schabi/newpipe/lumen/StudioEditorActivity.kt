@@ -138,6 +138,8 @@ class StudioEditorActivity : LumenBase() {
     private val thumbMap = HashMap<String, List<Pair<Long, Bitmap>>>()
     private var fadeView: View? = null
     private var blurView: android.widget.ImageView? = null
+    private var stillView: android.widget.ImageView? = null
+    private var stillOf = -1
     private var previewBox: FrameLayout? = null
     private var topBarView: View? = null
     private var ratioChip: TextView? = null
@@ -464,6 +466,13 @@ class StudioEditorActivity : LumenBase() {
         val st = EditStage(this) { w, h -> StudioEditPainter(w, h, dir, words, StudioPrefs.accent, styleDir) }
         val mb = FrameLayout(this)
         mb.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // dissolves on the preview: the last picture of the piece before, fading out over the video
+        val still = android.widget.ImageView(this).apply {
+            scaleType = android.widget.ImageView.ScaleType.FIT_XY
+            visibility = View.GONE
+        }
+        mb.addView(still, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        stillView = still
         val sb = FrameLayout(this).apply {
             visibility = View.GONE
             setBackgroundColor(0xFF000000.toInt())
@@ -1156,6 +1165,12 @@ class StudioEditorActivity : LumenBase() {
         }
         val prev = list[curClip]
         val n = list[i]
+        // a dissolve: the last picture of this piece is kept on top and fades out over the next one
+        if (n.trans == "dissolve") runCatching {
+            val tv = texture ?: return@runCatching
+            stillView?.setImageBitmap(tv.getBitmap(max(1, tv.width / 2), max(1, tv.height / 2)))
+            stillOf = curClip
+        }
         curMs = EditTrack.starts(list)[i]
         applyClip(i)
         // the next piece right after this one in the original plays on without a seek
@@ -1341,6 +1356,15 @@ class StudioEditorActivity : LumenBase() {
         timeText?.text = StudioEdit.clock(curMs) + " / " + StudioEdit.clock(total)
         layoutSplit()
         syncMusic()
+        stillView?.let { sv ->
+            val d = EditColor.dissolveAt(clips, curMs)
+            if (d == null || d.second != stillOf || !playing) {
+                if (sv.visibility != View.GONE) sv.visibility = View.GONE
+            } else {
+                sv.alpha = d.first
+                sv.visibility = View.VISIBLE
+            }
+        }
         fadeView?.let { fv ->
             val f = EditColor.fadeAt(clips, curMs)
             if (f == null) {

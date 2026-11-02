@@ -471,6 +471,12 @@ object StudioEditRender {
             var frame = IntArray(vw * vh) { 0xFF000000.toInt() }
             var tinted = IntArray(vw * vh)
             val mixed = IntArray(w * h)
+            // dissolves: the last picture of the piece before (and which piece it was)
+            val dissolves = clips.any { it.trans == "dissolve" }
+            val still = IntArray(if (dissolves) w * h else 0)
+            var stillOf = -1
+            val tail = IntArray(if (dissolves) w * h else 0)
+            var tailOf = -1
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             // the video frame as a picture, drawn onto the canvas (turned, enlarged, into its half of a split screen)
@@ -609,6 +615,18 @@ object StudioEditRender {
                 bmp.getPixels(mixed, 0, w, 0, 0, w, h)
                 // a transition at a seam: the whole frame dips to a colour and back
                 EditColor.fadeAt(clips, tMs)?.let { EditColor.blend(mixed, it) }
+                // a dissolve: the kept last picture of the piece before fades out over this one
+                EditColor.dissolveAt(clips, tMs)?.let { (a, k0) ->
+                    if (tailOf == k0 && stillOf != k0) {
+                        System.arraycopy(tail, 0, still, 0, tail.size)
+                        stillOf = k0
+                    }
+                    if (k0 == stillOf) EditColor.mixInto(mixed, still, a)
+                }
+                if (EditColor.dissolvesAfter(clips, pos.index)) {
+                    System.arraycopy(mixed, 0, tail, 0, mixed.size)
+                    tailOf = pos.index
+                }
                 Studio.argbToYuv420(mixed, w, h, y, u, v)
                 var idx: Int
                 while (true) {
@@ -1125,6 +1143,21 @@ private object StudioEditGl {
                 android.opengl.GLES20.glTexParameteri(android.opengl.GLES20.GL_TEXTURE_2D, k, v)
             }
             android.opengl.GLUtils.texImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, layer, 0)
+            // dissolves: the last pictures of a piece are copied here and fade out over the next one
+            val stillTex = IntArray(1).also { android.opengl.GLES20.glGenTextures(1, it, 0) }[0]
+            var stillReady = false
+            android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, stillTex)
+            for ((k, v) in listOf(android.opengl.GLES20.GL_TEXTURE_MIN_FILTER to android.opengl.GLES20.GL_LINEAR, android.opengl.GLES20.GL_TEXTURE_MAG_FILTER to android.opengl.GLES20.GL_LINEAR,
+                android.opengl.GLES20.GL_TEXTURE_WRAP_S to android.opengl.GLES20.GL_CLAMP_TO_EDGE, android.opengl.GLES20.GL_TEXTURE_WRAP_T to android.opengl.GLES20.GL_CLAMP_TO_EDGE)) {
+                android.opengl.GLES20.glTexParameteri(android.opengl.GLES20.GL_TEXTURE_2D, k, v)
+            }
+            android.opengl.GLES20.glTexImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, android.opengl.GLES20.GL_RGBA, w, h, 0,
+                android.opengl.GLES20.GL_RGBA, android.opengl.GLES20.GL_UNSIGNED_BYTE, null)
+            val ident = FloatArray(16).also { android.opengl.Matrix.setIdentityM(it, 0) }
+            // the piece being written: its index and whether its last pictures are kept for a dissolve
+            var curK = 0
+            var keepTail = false
+            var tailFromUs = Long.MAX_VALUE
 
             val texture = android.graphics.SurfaceTexture(oes)
             st = texture
@@ -1252,6 +1285,21 @@ private object StudioEditGl {
                 }
                 // a transition at a seam: the whole frame dips to a colour and back
                 EditColor.fadeAt(clips, tMs)?.let { fd -> fill(fd.color, fd.alpha) }
+                // a dissolve: the kept last picture of the piece before, fading out
+                val dz = EditColor.dissolveAt(clips, tMs)
+                if (dz != null && stillReady && dz.second == curK - 1) {
+                    android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
+                    android.opengl.GLES20.glBlendColor(0f, 0f, 0f, dz.first)
+                    android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_CONSTANT_ALPHA, android.opengl.GLES20.GL_ONE_MINUS_CONSTANT_ALPHA)
+                    draw(prog2d, android.opengl.GLES20.GL_TEXTURE_2D, stillTex, ident)
+                    android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
+                }
+                // the last pictures of a piece that dissolves into the next: copied before the swap
+                if (keepTail && outUs >= tailFromUs) {
+                    android.opengl.GLES20.glBindTexture(android.opengl.GLES20.GL_TEXTURE_2D, stillTex)
+                    android.opengl.GLES20.glCopyTexSubImage2D(android.opengl.GLES20.GL_TEXTURE_2D, 0, 0, 0, 0, 0, w, h)
+                    stillReady = true
+                }
                 val err = android.opengl.GLES20.glGetError()
                 if (err != android.opengl.GLES20.GL_NO_ERROR) error("GL error $err")
                 android.opengl.EGLExt.eglPresentationTimeANDROID(dpy, surf, outUs * 1000)
@@ -1299,6 +1347,10 @@ private object StudioEditGl {
                 blurPos = floats(*EditCanvas.quad(false, 1f, c.rot))
                 val segStart = starts[k] * 1000
                 val segEnd = segStart + c.outMs * 1000
+                curK = k
+                if (!EditColor.dissolvesAfter(clips, k - 1)) stillReady = false
+                keepTail = EditColor.dissolvesAfter(clips, k)
+                tailFromUs = segEnd - 400_000
                 val fromUs = if (plain) 0L else c.fromMs * 1000
                 val toUs = when {
                     plain || (!c.isHold && c.toMs >= curDur - 1) -> Long.MAX_VALUE

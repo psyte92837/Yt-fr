@@ -36,7 +36,7 @@ object EditColor {
     }
 
     /** Transitions into a piece from the one before it ("" = a plain cut). */
-    val TRANSITIONS = listOf("", "black", "white", "flash")
+    val TRANSITIONS = listOf("", "dissolve", "black", "white", "flash")
     val TRANS_MS = listOf(300L, 500L, 800L, 1200L)
     const val DEFAULT_TRANS_MS = 500L
 
@@ -44,6 +44,7 @@ object EditColor {
         "black" -> t("Через чёрный", "Dip to black")
         "white" -> t("Через белый", "Dip to white")
         "flash" -> t("Вспышка", "Flash")
+        "dissolve" -> t("Растворение", "Dissolve")
         else -> t("Без перехода", "None")
     }
 
@@ -172,7 +173,7 @@ object EditColor {
         var best: Fade? = null
         for (k in clips.indices) {
             val c = clips[k]
-            if (c.trans.isEmpty()) continue
+            if (c.trans.isEmpty() || (c.trans == "dissolve" && k > 0)) continue
             val half = max(1L, c.transMs / 2)
             val seam = st[k]
             val d = abs(tMs - seam)
@@ -190,7 +191,41 @@ object EditColor {
         return best?.takeIf { it.alpha > 0.002f }
     }
 
-    private fun color(trans: String): Int = if (trans == "black") 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+    private fun color(trans: String): Int = if (trans == "black" || trans == "dissolve") 0xFF000000.toInt() else 0xFFFFFFFF.toInt()
+
+    /**
+     * A dissolve into piece k: over its first [VClip.transMs] the last picture of the piece before fades out over it.
+     * Returns the opacity of that picture at [tMs] (null outside a dissolve) and the index of the piece it ends.
+     */
+    fun dissolveAt(clips: List<VClip>, tMs: Long): Pair<Float, Int>? {
+        if (clips.size < 2) return null
+        val st = EditTrack.starts(clips)
+        for (k in 1 until clips.size) {
+            val c = clips[k]
+            if (c.trans != "dissolve") continue
+            val d = tMs - st[k]
+            val len = min(c.transMs, c.outMs)
+            if (d in 0 until len) return (1f - d.toFloat() / max(1L, len)) to k - 1
+        }
+        return null
+    }
+
+    /** The piece [k] ends in a dissolve: its last pictures are kept for the next one. */
+    fun dissolvesAfter(clips: List<VClip>, k: Int): Boolean = clips.getOrNull(k + 1)?.trans == "dissolve"
+
+    /** [still] laid over the first [n] pixels of [pix] at opacity [a], in place. */
+    fun mixInto(pix: IntArray, still: IntArray, a: Float, n: Int = pix.size) {
+        val k = a.coerceIn(0f, 1f)
+        val j = 1f - k
+        for (i in 0 until n) {
+            val p = pix[i]
+            val q = still[i]
+            val r = (((p shr 16) and 0xFF) * j + ((q shr 16) and 0xFF) * k).roundToInt()
+            val g = (((p shr 8) and 0xFF) * j + ((q shr 8) and 0xFF) * k).roundToInt()
+            val b = ((p and 0xFF) * j + (q and 0xFF) * k).roundToInt()
+            pix[i] = (p and 0xFF000000.toInt()) or (r.coerceIn(0, 255) shl 16) or (g.coerceIn(0, 255) shl 8) or b.coerceIn(0, 255)
+        }
+    }
 
     /** A flash is short and bright: it peaks harder and falls away faster than a dip. */
     private fun shape(trans: String, a: Float): Float = if (trans == "flash") min(1f, a * a * 1.2f) else a

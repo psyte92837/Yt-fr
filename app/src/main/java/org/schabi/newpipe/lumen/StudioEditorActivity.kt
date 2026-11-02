@@ -63,6 +63,9 @@ class StudioEditorActivity : LumenBase() {
         private const val REQ_SPLIT = 7713
         private const val REQ_AUDIO = 7714
         private const val REQ_CLIP = 7715
+        private const val REQ_LOTTIE = 7716
+        private const val REQ_FONT = 7717
+        private const val REQ_THEME_IMG = 7718
 
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
@@ -80,6 +83,10 @@ class StudioEditorActivity : LumenBase() {
 
         /** The list of editor projects. */
         fun open(ctx: Context) = ctx.startActivity(Intent(ctx, StudioEditorActivity::class.java))
+
+        /** An editor project by its id (e.g. the one an answer of another AI belongs to). */
+        fun openProject(ctx: Context, id: String) = ctx.startActivity(Intent(ctx, StudioEditorActivity::class.java).putExtra(EXTRA_PROJECT, id)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
         /** Intent that opens [video] in the editor (for a notification). */
         fun intentFor(ctx: Context, video: File): Intent = Intent(ctx, StudioEditorActivity::class.java).putExtra(EXTRA_FILE, video.absolutePath)
@@ -231,8 +238,18 @@ class StudioEditorActivity : LumenBase() {
                 scheduleAnim(300)
             }
             override fun pause() = this@StudioEditorActivity.pause()
+            override fun fps(): Int = videoFps
+            override fun platform(): String = this@StudioEditorActivity.platform()
+            override fun themesDir(): File = this@StudioEditorActivity.themesDir
+            override fun cuts(): List<Long> = seams()
+            override fun stat(s: InsertStat) {
+                InsertStats.add(applicationContext, s)
+            }
         }
     }
+    private val themesDir: File get() = File(applicationContext.filesDir, "lumen/studio/themes")
+    @Volatile private var videoFps = 30
+    private var hints: List<InsertHint> = emptyList()
     private val insert by lazy { InsertWizard(insertHost) }
     /** Errors of the JS of animation blocks (by block id) until they are fixed. */
     private val animErr = HashMap<String, String>()
@@ -509,6 +526,7 @@ class StudioEditorActivity : LumenBase() {
         srcList = listOf("")
         buildEditor()
         loadThumbs(p)
+        readFps(p)
     }
 
     // ---------- layout ----------
@@ -994,7 +1012,19 @@ class StudioEditorActivity : LumenBase() {
                     add(done { select(null) })
                     add(act("✎", t("Изменить", "Edit")) { edit(b) })
                     if (b.kind != "emoji" && b.kind != EditInsert.KIND) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
-                    if (b.kind == "scheme" || b.kind == EditInsert.KIND) {
+                    if (b.req.isNotEmpty()) {
+                        add(act("⧉", t("Запрос ещё раз", "Request again")) { copyRequestOf(b) })
+                        add(act("📥", t("Вставить ответ", "Paste answer")) { pasteAnswerTo(b) })
+                        add(danger("✕", t("Не ждать", "Stop waiting")) {
+                            if (EditInsert.isPending(b)) delete(b.id) else change(b.id) { it.copy(req = "") }
+                        })
+                    }
+                    if (b.kind == EditInsert.KIND && AnimRender.code(dir, b)?.let { AnimV11.header(it).params.isNotEmpty() } == true)
+                        add(act("🎛", t("Параметры", "Parameters")) { paramsSheet(b) })
+                    if (b.kind == EditLottie.KIND) add(act("🌀", t("Lottie", "Lottie")) { lottieSheet(b) })
+                    if (b.kind == EditMotion.KIND) add(act("🔁", t("Шаблон", "Template")) { motionSheet(b) })
+                    if (b.kind != "audio") add(act("🎯", t("Прилипнуть", "Track"), on = b.keys.size > 2) { trackBlock(b) })
+                    if (b.kind == "scheme" || b.kind == EditInsert.KIND || b.kind == EditMotion.KIND) {
                         add(act("🤖", t("Переделать", "Redo")) { insert.redo(b) })
                         add(act("🛠", t("Проверить", "Check"), on = b.id in animErr) { insert.check(b, animErr[b.id].orEmpty()) })
                         add(act("🌓", t("Под блоком", "Under it"), on = b.dim > 0f) { dimSheet(b) })
@@ -1084,6 +1114,9 @@ class StudioEditorActivity : LumenBase() {
                 listOfNotNull(
                     back(),
                     act("✨", t("Схема или анимация", "Scheme or animation")) { insert.start() },
+                    if (words.isNotEmpty()) act("💡", t("Где нужны вставки", "Where inserts")) { hintsSheet() } else null,
+                    act("📊", t("Отчёт", "Report")) { reportSheet() },
+                    act("🌐", t("Перевести", "Translate")) { translateSheet() },
                     if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
                     act("T", t("Надпись ИИ", "AI caption")) { captionSheet(null) },
                     act("🌐", t("Фото ИИ", "AI photo")) { photoSheet(null) }
@@ -1101,6 +1134,7 @@ class StudioEditorActivity : LumenBase() {
                 act("☀", t("Настройка", "Adjust")) { adjustSheet(clipHere()) },
                 act("⇆", t("Переходы", "Transitions")) { transitionSheet(seamHere()) },
                 act("▭", t("Формат", "Format"), on = project?.ratio?.isNotEmpty() == true) { canvasSheet() },
+                act("🖌", t("Тема", "Theme"), on = project?.theme?.isNotEmpty() == true) { themeSheet() },
                 act("🧩", t("ИИ", "AI")) { openCat("ai") },
                 act("☰", t("Слои", "Layers")) { blocksSheet() }
             )
@@ -1945,7 +1979,19 @@ class StudioEditorActivity : LumenBase() {
         "fade" -> t("Плавно", "Fade")
         "pop" -> t("Пружина", "Pop")
         "slide" -> t("Снизу", "Slide")
+        "wipe" -> t("Шторка", "Wipe")
+        "drop" -> t("Падение", "Drop")
+        "spin" -> t("Вращение", "Spin")
+        "type" -> t("Печать", "Typewriter")
         else -> t("Наезд", "Zoom")
+    }
+
+    private fun emphName(e: String) = when (e) {
+        "pulse" -> t("Пульс", "Pulse")
+        "shake" -> t("Дрожь", "Shake")
+        "wiggle" -> t("Покачивание", "Wiggle")
+        "bounce" -> t("Подпрыгивание", "Bounce")
+        else -> t("Нет", "None")
     }
 
     private fun styles(): List<Pair<String, String>> = SchemeStyles.list(styleDir).filter { it.place == "overlay" || it.place == "panel" || it.id == SchemeStyles.AUTO }
@@ -1990,7 +2036,9 @@ class StudioEditorActivity : LumenBase() {
                 muted(sub)
             }
             if (words.isNotEmpty()) item(t("📝 По тексту речи", "📝 From the speech text"), t("выделите фразу — блок встанет ровно на неё", "select a phrase — the block goes exactly on it")) { textSheet() }
-            item(t("✨ Схема или анимация от ИИ", "✨ AI scheme or animation"), t("помощник: что показать → бриф → встроенный или другой ИИ → проверка", "wizard: what to show → brief → built-in or another AI → check")) { insert.start() }
+            item(t("✨ Схема или анимация от ИИ", "✨ AI scheme or animation"), t("помощник: что показать → бриф → без ИИ сразу или ИИ → проверка", "wizard: what to show → brief → at once without AI or the AI → check")) { insert.start() }
+            if (words.isNotEmpty()) item(t("💡 Где нужны вставки", "💡 Where inserts are needed"), t("Lumen найдёт по речи числа, перечисления, даты, сравнения", "Lumen finds numbers, lists, dates and comparisons in the speech")) { hintsSheet() }
+            item(t("🌀 Lottie-анимация (.json)", "🌀 Lottie animation (.json)"), t("готовый вектор: LottieFiles и т. п., тексты и цвет темы меняются", "ready vector art: LottieFiles etc., texts and the theme colour change")) { pickLottie() }
             if (words.isNotEmpty()) item(t("🤖 Схемы на весь ролик", "🤖 Schemes for the whole video"), t("ИИ сам выберет места и поставит схемы", "the AI picks the places and puts schemes there")) { autoSchemes() }
             item(t("✍️ Схема своим текстом", "✍️ Scheme from your text"), t("строки «эмодзи Подпись — значение», без ИИ", "lines \"emoji Label — value\", no AI")) { textSchemeSheet(null) }
             item(t("🖼 Картинка из галереи", "🖼 Picture from the gallery"), t("фото, скриншот, логотип (PNG с прозрачностью тоже)", "a photo, screenshot or logo (transparent PNG too)")) { pickImage(null) }
@@ -2479,6 +2527,9 @@ class StudioEditorActivity : LumenBase() {
             REQ_SPLIT -> importSplit(uri)
             REQ_AUDIO -> importAudio(uri)
             REQ_CLIP -> importClip(uri)
+            REQ_LOTTIE -> importLottie(uri)
+            REQ_FONT -> importFont(uri)
+            REQ_THEME_IMG -> themeFromImage(uri)
         }
     }
 
@@ -2679,6 +2730,8 @@ class StudioEditorActivity : LumenBase() {
     private fun edit(b: EBlock) = when (b.kind) {
         "scheme" -> textSchemeSheet(b)
         EditInsert.KIND -> insert.check(b, animErr[b.id].orEmpty())
+        EditMotion.KIND -> insert.redo(b)
+        EditLottie.KIND -> lottieSheet(b)
         "image" -> imageSheet(b)
         "text" -> captionSheet(b)
         EditSplit.KIND -> splitSheet(b)
@@ -2731,7 +2784,9 @@ class StudioEditorActivity : LumenBase() {
             label(this, t("Появление", "In"))
             add(choiceChips(ctx, StudioEdit.ANIMS.map { it to animName(it) }, b.animIn) { v -> change(b.id) { it.copy(animIn = v) } })
             label(this, t("Исчезновение", "Out"))
-            add(choiceChips(ctx, StudioEdit.ANIMS.map { it to animName(it) }, b.animOut) { v -> change(b.id) { it.copy(animOut = v) } })
+            add(choiceChips(ctx, StudioEdit.ANIMS.filter { it != "type" }.map { it to animName(it) }, b.animOut) { v -> change(b.id) { it.copy(animOut = v) } })
+            label(this, t("Акцент всё время", "Accent all the time"))
+            add(choiceChips(ctx, StudioEdit.EMPHS.map { it to emphName(it) }, b.emph) { v -> change(b.id) { it.copy(emph = v) } })
             button(t("▶ Посмотреть", "▶ Preview"), style = BtnStyle.TONAL) {
                 dismiss()
                 val cur = StudioEdit.find(blocks, b.id) ?: return@button
@@ -3411,7 +3466,7 @@ class StudioEditorActivity : LumenBase() {
             ex3.prepare()
             musicSeekAt = 0L
         }
-        val g = if (recording && recMute) 0f else EditMusic.gain(m, curMs).coerceIn(0f, 1f)
+        val g = if (recording && recMute) 0f else (EditMusic.gain(m, curMs) * EditMusic.duck(blocks, m, curMs)).coerceIn(0f, 1f)
         if (ex3.volume != g) ex3.volume = g
         val want = m.srcMs + (curMs - m.startMs).coerceAtLeast(0)
         val now = SystemClock.uptimeMillis()
@@ -3435,6 +3490,507 @@ class StudioEditorActivity : LumenBase() {
     // ---------- export ----------
 
     /** Quality and a word on how the export works, then the export. */
+    // ---------- inserts v2: platform, theme, report, places, Lottie, tracking, translation ----------
+
+    private fun platform(): String = Lumen.prefs.getString("studio_edit_platform", "")?.takeIf { it in EditInsert.PLATFORMS }
+        ?: project?.let { EditCanvas.frame(it).let { (w, h) -> EditInsert.defaultPlatform(w, h) } } ?: "shorts"
+
+    /** Seams of the main track, output ms. */
+    private fun seams(): List<Long> {
+        var acc = 0L
+        return clips.dropLast(1).map { acc += it.outMs; acc }
+    }
+
+    /** Frames a second of the base video: animations are rendered as smooth as it is (≤ 60). */
+    private fun readFps(p: EProject) {
+        val f = File(StudioEditStore.dir(applicationContext, p.id), StudioEditStore.BASE)
+        Lumen.async({
+            val ex = android.media.MediaExtractor()
+            try {
+                ex.setDataSource(f.absolutePath)
+                (0 until ex.trackCount).map { ex.getTrackFormat(it) }.firstOrNull { it.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                    ?.let { if (it.containsKey(android.media.MediaFormat.KEY_FRAME_RATE)) it.getInteger(android.media.MediaFormat.KEY_FRAME_RATE) else 30 } ?: 30
+            } finally {
+                runCatching { ex.release() }
+            }
+        }, { videoFps = 30 }) { fps -> videoFps = fps.coerceIn(12, 60) }
+    }
+
+    private fun clipboardText(): String? = runCatching {
+        getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+    }.getOrNull()
+
+    /** «⧉ Запрос ещё раз»: the request of a waiting block, kept in insert/<mark>.txt. */
+    private fun copyRequestOf(b: EBlock) {
+        val f = File(dir, "insert/${b.req}.txt")
+        if (!f.exists()) return toast(t("Запрос не сохранился — откройте «🤖 Переделать»", "The request was not kept — open \"🤖 Redo\""))
+        runCatching { getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("lumen", f.readText())) }
+        toast(t("Запрос скопирован — вставьте его в ИИ, скопируйте ответ и вернитесь", "Request copied — paste it into the AI, copy the answer and come back"))
+    }
+
+    /** «📥 Вставить ответ» into a waiting block: from the clipboard or typed. */
+    private fun pasteAnswerTo(b: EBlock) {
+        val c = clipboardText()
+        prompt(t("Ответ ИИ", "AI answer"), t("вставьте ответ", "paste the answer"), c?.takeIf { !RelayText.isOwnRequest(it) }.orEmpty(), multiline = true) { text ->
+            val a = AnimV11.detectAll(text).firstOrNull()?.let { if (it.req.isEmpty()) it else it }
+                ?: return@prompt toast(t("Не похоже на схему или код анимации", "Does not look like a scheme or animation code"))
+            val target = if (a.req.isEmpty() || a.req == b.req) a.let { x ->
+                when (x) {
+                    is InsertAnswer.Scheme -> x.copy(req = b.req)
+                    is InsertAnswer.Anim -> x.copy(req = b.req)
+                }
+            } else a
+            Relay.lastTaken = text
+            if (!insert.deliver(target)) toast(t("Ответ не подошёл к этому блоку", "The answer does not fit this block"))
+        }
+    }
+
+    /** «🎛 Параметры» of an animation: its `// param` lines as fields; a change draws the frames again. */
+    private fun paramsSheet(b: EBlock) {
+        val code = AnimRender.code(dir, b) ?: return
+        val hd = AnimV11.header(code)
+        val br0 = EditInsert.briefFrom(b.brief) ?: EditBrief()
+        var values = br0.params
+        bottomSheet(t("🎛 Параметры анимации", "🎛 Animation parameters")) { dismiss ->
+            muted(t("Меняются без ИИ: кадры перерисуются сами.", "They change without AI: the frames are redrawn by themselves."))
+            for (pr in hd.params) {
+                val name = pr.label.ifBlank { pr.name }
+                val v = values[pr.name] ?: pr.def
+                when (pr.kind) {
+                    "text" -> {
+                        label(this, name)
+                        val e = edt(ctx, name, v)
+                        e.addTextChangedListener(object : android.text.TextWatcher {
+                            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                            override fun afterTextChanged(s: android.text.Editable?) { values = values + (pr.name to s.toString()) }
+                        })
+                        add(e, 2)
+                    }
+                    "bool" -> check(name, v == "true") { values = values + (pr.name to it.toString()) }
+                    "range" -> slider(name, v.toFloatOrNull() ?: pr.min.toFloat(), pr.min.toFloat(), pr.max.toFloat(), { String.format(Locale.US, "%.2f", it) }) { x, done ->
+                        if (done) values = values + (pr.name to x.toString())
+                    }
+                    "choice" -> {
+                        label(this, name)
+                        add(choiceChips(ctx, pr.options.map { it to it }, v) { x -> values = values + (pr.name to x) })
+                    }
+                    "color" -> {
+                        label(this, name)
+                        add(choiceChips(ctx, listOf("theme.accent" to t("Тема", "Theme"), "#FFD60A" to "🟡", "#FF3B30" to "🔴", "#34C759" to "🟢", "#0A84FF" to "🔵", "#BF5AF2" to "🟣", "#FFFFFF" to "⚪"),
+                            v) { x -> values = values + (pr.name to x) })
+                    }
+                }
+            }
+            button(t("✓ Применить", "✓ Apply"), primary = true) {
+                dismiss()
+                change(b.id) { it.copy(brief = EditInsert.briefJson((EditInsert.briefFrom(it.brief) ?: EditBrief()).copy(params = values)).toString()) }
+                scheduleAnim(200)
+            }
+        }
+    }
+
+    /** A native motion block: another template, its texts. */
+    private fun motionSheet(b: EBlock) {
+        bottomSheet(t("🔁 Шаблон", "🔁 Template")) { dismiss ->
+            add(choiceChips(ctx, EditMotion.PRESETS.map { it.id to it.name }, b.look) { v -> change(b.id) { it.copy(look = v, text = EditMotion.preset(v)?.name.orEmpty()) } })
+            button(t("✎ Тексты и данные (помощник)", "✎ Texts and data (wizard)"), style = BtnStyle.TONAL) {
+                dismiss()
+                StudioEdit.find(blocks, b.id)?.let { insert.redo(it) }
+            }
+        }
+    }
+
+    // ---------- Lottie ----------
+
+    private fun pickLottie() {
+        pause()
+        pickAt = curMs
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain", "application/octet-stream")), REQ_LOTTIE)
+    }
+
+    private fun importLottie(uri: Uri) {
+        val p = project ?: return
+        val at = pickAt
+        val d = dir
+        Lumen.async({
+            val json = (contentResolver.openInputStream(uri) ?: error(t("Файл не открывается", "The file cannot be opened"))).use { it.readBytes().toString(Charsets.UTF_8) }
+            val info = EditLottie.info(json) ?: error(t("Это не Lottie-анимация (нужен .json из LottieFiles, After Effects + Bodymovin)", "Not a Lottie animation (a .json from LottieFiles or After Effects + Bodymovin is needed)"))
+            val rel = "lottie/" + EditInsert.codeHash(json) + ".json"
+            File(d, rel).apply { parentFile?.mkdirs() }.writeText(json)
+            Triple(rel, info, (uri.lastPathSegment ?: "Lottie").substringAfterLast('/').substringBeforeLast('.').take(30))
+        }, { e -> if (!isDestroyed) err(e) }) { (rel, info, name) ->
+            if (project?.id != p.id) return@async
+            val ratio = if (info.w > 0) info.h.toFloat() / info.w else 1f
+            val len = (if (info.ms in 500..30_000) info.ms else 3000L).coerceAtMost(max(StudioEdit.MIN_MS, outLen(p) - at))
+            addNew(EditLottie.KIND, at, len, ratio) {
+                it.copy(file = rel, look = "fit", text = name, animIn = "none", animOut = "none",
+                    brief = EditInsert.briefJson(EditBrief(type = "own", fields = info.texts.associate { tx -> "lottie:$tx" to tx })).toString(), theme = p.theme)
+            }
+            toast(t("Lottie: ", "Lottie: ") + name + " · " + StudioEdit.secs(info.ms) + t(" с", " s") + if (info.texts.isNotEmpty()) t(" · текстов ${info.texts.size}", " · ${info.texts.size} texts") else "")
+        }
+    }
+
+    private fun lottieSheet(b: EBlock) {
+        val br0 = EditInsert.briefFrom(b.brief) ?: EditBrief()
+        var fields = br0.fields
+        bottomSheet(t("🌀 Lottie", "🌀 Lottie")) { dismiss ->
+            label(this, t("Время", "Time"))
+            add(choiceChips(ctx, listOf("fit" to t("Под длину блока", "To the block length"), "loop" to t("Своя скорость, по кругу", "Own speed, looped")), b.look) { v ->
+                change(b.id) { it.copy(look = v) }
+            })
+            muted(t("Маркеры intro / loop / outro в файле делают середину повторяемой — финал всегда в конце блока.", "Markers intro / loop / outro in the file make the middle repeat — the end always comes at the end of the block."))
+            check(t("Перекрасить в акцент темы", "Recolour to the theme accent"), fields["lottie_tint"] == "theme") { on ->
+                fields = if (on) fields + ("lottie_tint" to "theme") else fields - "lottie_tint"
+            }
+            val texts = fields.keys.filter { it.startsWith("lottie:") }
+            if (texts.isNotEmpty()) label(this, t("Тексты анимации", "Texts of the animation"))
+            for (k in texts) {
+                val e = edt(ctx, k.removePrefix("lottie:"), fields[k].orEmpty())
+                e.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) { fields = fields + (k to s.toString()) }
+                })
+                add(e, 4)
+            }
+            button(t("✓ Применить", "✓ Apply"), primary = true) {
+                dismiss()
+                change(b.id) { it.copy(brief = EditInsert.briefJson((EditInsert.briefFrom(it.brief) ?: EditBrief()).copy(fields = fields)).toString()) }
+                stage?.refresh()
+            }
+        }
+    }
+
+    // ---------- tracking ----------
+
+    /** «🎯 Прилипнуть к объекту»: the block follows what is under it now through its time (keyframes every 0.1 s). */
+    private fun trackBlock(b: EBlock) {
+        val p = project ?: return
+        pause()
+        if (b.durMs > 30_000) return toast(t("Блок длиннее 30 с — разрежьте его", "The block is longer than 30 s — split it"))
+        val (fw, fh) = EditCanvas.frame(p)
+        val hw = b.w / 2
+        val hh = b.w * b.ratio * fw / fh / 2
+        val start = FRect((b.x - hw).coerceIn(0f, 1f), (b.y - hh).coerceIn(0f, 1f), (b.x + hw).coerceIn(0f, 1f), (b.y + hh).coerceIn(0f, 1f))
+        if (start.w < 0.02f || start.h < 0.02f) return toast(t("Поставьте блок на объект", "Put the block over the object"))
+        val cl = clips
+        val gw = 96
+        val gh = (gw * fh / fw.toFloat()).roundToInt().coerceAtLeast(8)
+        toast(t("Слежу за объектом под блоком…", "Following the object under the block…"))
+        Lumen.async({
+            val times = (b.startMs until b.endMs step 100L).toList().take(300)
+            val r = MediaMetadataRetriever()
+            var cur: String? = null
+            try {
+                val frames = times.map { t0 ->
+                    BgTasks.checkpoint()
+                    val pos = EditTrack.locate(cl, t0)
+                    val src = cl.getOrNull(pos.index)?.src.orEmpty()
+                    if (src != cur) {
+                        r.setDataSource(srcFile(src).absolutePath)
+                        cur = src
+                    }
+                    val bmp = r.getFrameAtTime(pos.srcMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                    val small = bmp?.let { Bitmap.createScaledBitmap(it, gw, gh, true) }
+                    bmp?.recycle()
+                    val px = IntArray(gw * gh)
+                    small?.getPixels(px, 0, gw, 0, 0, gw, gh)
+                    small?.recycle()
+                    IntArray(px.size) { EditTracker.grey(px[it]) }
+                }
+                EditTracker.track(frames, gw, gh, start) to times
+            } finally {
+                runCatching { r.release() }
+            }
+        }, { e -> if (!isDestroyed) err(e) }) { (path, times) ->
+            if (project?.id != p.id) return@async
+            val keys = EditTracker.keys(b, path, times)
+            if (keys.size < 2) return@async toast(t("Не получилось проследить", "Could not follow it"))
+            change(b.id) { it.copy(keys = keys) }
+            toast(t("Готово: блок едет за объектом (${keys.size} ключей)", "Done: the block follows the object (${keys.size} keys)"))
+        }
+    }
+
+    // ---------- the theme of the video ----------
+
+    private fun themeSheet() {
+        val p = project ?: return
+        pause()
+        val cur = EditThemes.parse(p.theme)
+        val frame = runCatching { texture?.bitmap }.getOrNull()
+        bottomSheet(t("🖌 Тема вставок ролика", "🖌 Theme of the video's inserts")) { dismiss ->
+            muted(if (cur != null) t("Сейчас: ", "Now: ") + cur.name + " · " + EditThemes.describe(cur).substringAfter(": ")
+                else t("Тема не задана: каждая вставка в своём стиле. Тема задаёт цвета, шрифт, подложку и темп сразу всем схемам, надписям и анимациям.",
+                    "No theme: each insert has its own style. A theme sets the colours, font, plate and pace of all schemes, captions and animations at once."))
+            val grid = FlowLayout(ctx, dp(8), dp(8))
+            for (th in EditThemes.list(themesDir)) grid.addView(themeCard(th, frame, th.id == cur?.id) {
+                dismiss()
+                themeApplySheet(th)
+            }, ViewGroup.LayoutParams(dp(104), ViewGroup.LayoutParams.WRAP_CONTENT))
+            add(grid, 8)
+            row(
+                btn(ctx, t("🎨 Из цветов видео", "🎨 From the video"), style = BtnStyle.TONAL) {
+                    dismiss()
+                    themeFromVideo(frame)
+                },
+                btn(ctx, t("🖼 По картинке", "🖼 From a picture"), style = BtnStyle.TONAL) {
+                    dismiss()
+                    @Suppress("DEPRECATION")
+                    startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_THEME_IMG)
+                }
+            )
+            button(t("🔤 Свой шрифт (.ttf, .otf)", "🔤 Own font (.ttf, .otf)"), style = BtnStyle.TEXT) {
+                dismiss()
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_FONT)
+            }
+            val issues = EditThemes.issues(blocks)
+            if (issues.isNotEmpty()) {
+                add(text(ctx, "⚠ " + issues.joinToString("; ") { it.text }, 14f), 12)
+                if (cur != null) button(t("Привести все вставки к теме «${cur.name}»", "Bring all inserts to «${cur.name}»"), style = BtnStyle.TONAL) {
+                    dismiss()
+                    applyTheme(cur, true)
+                }
+            }
+            label(this, t("Площадка (зоны интерфейса)", "Platform (interface zones)"))
+            add(choiceChips(ctx, EditInsert.PLATFORMS.map { it to EditInsert.platformName(it) }, platform()) { v ->
+                Lumen.prefs.edit().putString("studio_edit_platform", v).apply()
+            })
+            if (cur != null) button(t("Убрать тему ролика", "Remove the video theme"), style = BtnStyle.TEXT) {
+                dismiss()
+                project = project?.copy(theme = "")
+                save()
+                tools()
+            }
+        }
+    }
+
+    /** A miniature of a theme: a sample counter over the current frame. */
+    private fun themeCard(th: EditTheme, frame: Bitmap?, selected: Boolean, on: () -> Unit): View {
+        val p = project
+        val (fw, fh) = p?.let { EditCanvas.frame(it) } ?: (1080 to 1920)
+        val pw = dp(100)
+        val ph = (pw * fh / fw.toFloat()).roundToInt().coerceIn(dp(56), dp(180))
+        val bmp = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
+        val cv = android.graphics.Canvas(bmp)
+        cv.drawColor(0xFF202024.toInt())
+        frame?.let { cv.drawBitmap(it, null, android.graphics.RectF(0f, 0f, pw.toFloat(), ph.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG)) }
+        val sample = EBlock("s", EditMotion.KIND, 0, 4000, x = 0.5f, y = 0.5f, w = 0.84f, ratio = 0.56f, look = "counter",
+            brief = EditInsert.briefJson(EditBrief(type = "number", rows = listOf(BriefRow(th.name, "72", "%")))).toString(), theme = EditThemes.json(th).toString())
+        runCatching { StudioEditPainter(pw, ph, dir, emptyList(), th.accent, styleDir).use { it.draw(cv, listOf(sample), 3000) } }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = ripple(context, roundBg(if (selected) Palette.ACCENT_SOFT else Palette.CARD, 12f, context, if (selected) Palette.ACCENT else 0), Palette.ON_SURFACE)
+            contentDescription = th.name + if (selected) t(", выбрана", ", selected") else ""
+            addView(android.widget.ImageView(context).apply {
+                setImageBitmap(bmp)
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            }, LinearLayout.LayoutParams(pw, ph))
+            addView(text(context, th.name, 12f, bold = true).apply { gravity = Gravity.CENTER })
+            setOnClickListener { on() }
+        }
+    }
+
+    private fun themeApplySheet(th: EditTheme) {
+        val n = blocks.count { it.kind in setOf("scheme", "text", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND) }
+        bottomSheet(t("🖌 Тема «", "🖌 Theme «") + th.name + "»") { dismiss ->
+            muted(EditThemes.describe(th))
+            button(t("Перекрасить все вставки ($n)", "Recolour all inserts ($n)"), primary = true) {
+                dismiss()
+                applyTheme(th, true)
+            }
+            button(t("Только для новых вставок", "Only for new inserts"), style = BtnStyle.TONAL) {
+                dismiss()
+                applyTheme(th, false)
+            }
+        }
+    }
+
+    /** The theme of the video; [all] — every insert recoloured now (one undo step), animations drawn again. */
+    private fun applyTheme(th: EditTheme, all: Boolean) {
+        project = project?.copy(theme = EditThemes.json(th).toString())
+        if (all) commit(EditThemes.apply(blocks, th)) else save()
+        stage?.refresh()
+        tools()
+        scheduleAnim(300)
+        toast(t("Тема «", "Theme «") + th.name + "»" + if (all) t(" — вставки перекрашены", " — inserts recoloured") else "")
+    }
+
+    private fun themeFromVideo(frame: Bitmap?) {
+        val pics = listOfNotNull(frame) + thumbList.map { it.second }.let { l -> if (l.size <= 6) l else l.filterIndexed { i, _ -> i % (l.size / 6) == 0 } }
+        if (pics.isEmpty()) return toast(t("Кадров пока нет", "No frames yet"))
+        val px = pics.flatMap { b ->
+            val s = Bitmap.createScaledBitmap(b, 48, (48 * b.height / b.width.toFloat()).roundToInt().coerceAtLeast(1), true)
+            val a = IntArray(s.width * s.height)
+            s.getPixels(a, 0, s.width, 0, 0, s.width, s.height)
+            if (s !== b) s.recycle()
+            a.toList()
+        }.toIntArray()
+        val th = EditThemes.save(themesDir, EditThemes.fromPalette(EditThemes.palette(px, 6), t("Из видео", "From the video")))
+        themeApplySheet(th)
+    }
+
+    /** «🖼 По картинке»: a vision AI reads the colours and the mood of a picture (a logo, a screenshot) into lumen.theme. */
+    private fun themeFromImage(uri: Uri) {
+        val b64 = runCatching {
+            val src = contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) } ?: return@runCatching null
+            val k = min(1f, 768f / max(src.width, src.height))
+            val b = Bitmap.createScaledBitmap(src, max(1, (src.width * k).toInt()), max(1, (src.height * k).toInt()), true)
+            val o = java.io.ByteArrayOutputStream()
+            b.compress(Bitmap.CompressFormat.JPEG, 85, o)
+            android.util.Base64.encodeToString(o.toByteArray(), android.util.Base64.NO_WRAP)
+        }.getOrNull() ?: return toast(t("Картинка не открылась", "The picture did not open"))
+        toast(t("ИИ смотрит картинку…", "The AI looks at the picture…"))
+        BgTasks.run(this, TASK_AI, t("Редактор: тема по картинке", "Editor: a theme from a picture"), BgTasks.reopen(this), {
+            val prov = AiTasks.requireProvider()
+            val r = Llm.complete(prov, prov.smartModel, "You are a brand designer. Answer with JSON only.",
+                Prompts.fill("studio_theme_from_image", mapOf("protocol" to EditThemes.json(EditThemes.preset("science")!!).toString())),
+                json = true, maxTokens = 900, task = "studio_theme_from_image", pid = "studio", image = b64, imageMime = "image/jpeg")
+            EditThemes.parse(r.text) ?: throw LlmException(t("ИИ не вернул тему", "The AI returned no theme"), r.text)
+        }, { e -> if (!isDestroyed) err(e) }) { th ->
+            val saved = EditThemes.save(themesDir, th.copy(builtIn = false))
+            if (!isDestroyed) themeApplySheet(saved)
+        }
+    }
+
+    /** «🔤 Свой шрифт»: a font file into fonts/ of the project and a theme with it. */
+    private fun importFont(uri: Uri) {
+        val p = project ?: return
+        runCatching {
+            val name = (uri.lastPathSegment ?: "brand").substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_").take(40)
+                .let { if (it.endsWith(".ttf", true) || it.endsWith(".otf", true)) it else "$it.ttf" }
+            val f = File(dir, "fonts/$name").apply { parentFile?.mkdirs() }
+            (contentResolver.openInputStream(uri) ?: error("")).use { i -> f.outputStream().use { i.copyTo(it) } }
+            Typeface.createFromFile(f)
+            val base = EditThemes.parse(p.theme) ?: EditThemes.preset("science")!!
+            val th = EditThemes.save(themesDir, base.copy(name = base.name + " · " + name.substringBeforeLast('.'), font = "file:$name", builtIn = false))
+            themeApplySheet(th)
+        }.onFailure { toast(t("Шрифт не открылся (нужен .ttf или .otf)", "The font did not open (.ttf or .otf is needed)")) }
+    }
+
+    // ---------- the report and the places for inserts ----------
+
+    private fun reportSheet() {
+        val p = project ?: return
+        pause()
+        val (fw, fh) = EditCanvas.frame(p)
+        val r = EditSuggest.report(blocks, total, fw, fh, platform())
+        bottomSheet(t("📊 Вставки ролика", "📊 The video's inserts")) { dismiss ->
+            p(t("Вставок ${r.count} · ${String.format(Locale.US, "%.1f", r.perMinute)} в минуту · покрыто ${(r.coverage * 100).roundToInt()} % ролика",
+                "Inserts ${r.count} · ${String.format(Locale.US, "%.1f", r.perMinute)} a minute · ${(r.coverage * 100).roundToInt()} % of the video covered"))
+            if (r.lines.isEmpty()) muted(t("Замечаний нет ✓", "No remarks ✓"))
+            for (l in r.lines.take(30)) add(text(ctx, (if (l.bad) "⚠ " else "ℹ ") + l.text, 14f).apply {
+                setPadding(0, dp(6), 0, dp(6))
+                l.id?.let { id -> setOnClickListener { dismiss(); select(id, seek = true) } }
+            }, 2)
+            if (words.isNotEmpty()) button(t("💡 Где ещё нужны вставки", "💡 Where else inserts are needed"), style = BtnStyle.TONAL) {
+                dismiss()
+                hintsSheet()
+            }
+            label(this, t("Статистика вставок", "Insert statistics"))
+            EditSuggest.statsLines(InsertStats.list(applicationContext)).forEach { muted(it) }
+            muted(t("Кадры анимаций этого ролика: ", "Animation frames of this video: ") + (AnimRender.size(dir) / 1_048_576) + t(" МБ", " MB"))
+        }
+    }
+
+    private val visualKinds = setOf("scheme", "image", "text", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)
+
+    /** «💡 Где нужны вставки»: places by the speech; one by one through the wizard or the native ones all at once. */
+    private fun hintsSheet() {
+        pause()
+        if (words.isEmpty()) return toast(t("Нет речи с таймингом: подсказки ищутся по словам", "No timed speech: places are found by the words"))
+        hints = EditSuggest.suggest(words).filter { hn -> blocks.none { it.kind in visualKinds && !EditCaptions.isSub(it) && it.startMs < hn.endMs && it.endMs > hn.startMs } }
+        timeline?.hints = hints.map { it.startMs }
+        if (hints.isEmpty()) return toast(t("Свободных мест для вставок по речи не нашлось", "No free places for inserts found in the speech"))
+        val picked = hints.indices.filter { EditMotion.forType(hints[it].type) != null || EditSuggest.layoutFor(hints[it].type, max(3, hints[it].rows.size)) != null }.toMutableSet()
+        bottomSheet(t("💡 Где нужны вставки", "💡 Where inserts are needed")) { dismiss ->
+            muted(t("Отмечены места, которые Lumen вставит сам без ИИ; тап по строке — помощник на это место.", "Marked are places Lumen inserts itself without AI; tap a line for the wizard on that place."))
+            for ((i, hn) in hints.withIndex()) {
+                val ty = EditInsert.type(hn.type)
+                val row = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                row.addView(chk(ctx, "", i in picked) { on -> if (on) picked += i else picked -= i })
+                row.addView(text(ctx, StudioEdit.clock(hn.startMs).substringBefore('.') + "  " + ty.emoji + " " + ty.name + " · " + hn.why + "\n«" + hn.text.take(90) + "»", 14f).apply {
+                    setOnClickListener {
+                        dismiss()
+                        seekTo(hn.startMs)
+                        insert.startHint(hn)
+                    }
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                add(row, 6)
+            }
+            button(t("⚡ Вставить отмеченные без ИИ", "⚡ Insert the marked ones without AI"), primary = true) {
+                dismiss()
+                batchInsert(picked.sorted().map { hints[it] })
+            }
+        }
+    }
+
+    /** The native inserts of [list] at once: motion blocks and schemes of the data, in the theme of the video; one undo step. */
+    private fun batchInsert(list: List<InsertHint>) {
+        val p = project ?: return
+        val (fw, fh) = EditCanvas.frame(p)
+        val th = EditThemes.parse(p.theme)
+        val brand = EditInsert.briefFrom(p.brand)
+        var bl = blocks
+        var n = 0
+        for (hn in list) {
+            val br0 = EditInsert.defaults(hn.type, hn.text, brand, null)
+            val br = if (hn.rows.isNotEmpty() && br0.rows.size < hn.rows.size) br0.copy(rows = hn.rows) else br0
+            val preset = EditMotion.forType(hn.type)
+            val scheme = if (preset == null) EditSuggest.schemeFromRows(hn.type, br.rows, "") else null
+            if (preset == null && scheme == null) continue
+            val (s0, d0) = StudioEdit.placeAt(hn.startMs, total, max(hn.endMs - hn.startMs, EditInsert.readMs(EditInsert.screenWords(br))))
+            var b = EBlock(StudioEdit.nextId(bl), if (preset != null) EditMotion.KIND else "scheme", s0, d0, look = preset ?: "", scheme = scheme,
+                text = if (preset != null) EditMotion.preset(preset)?.name.orEmpty() else "", animIn = if (preset != null) "none" else "pop",
+                animOut = if (preset != null) "none" else "fade", brief = EditInsert.briefJson(br).toString(),
+                theme = th?.let { EditThemes.json(it).toString() } ?: "", over = th?.let { EditThemes.toLook(it) })
+            b = EditInsert.toBlock(b, EditInsert.place(br, fw, fh), fw, fh)
+            bl = bl + b
+            n++
+            InsertStats.add(applicationContext, InsertStat(b.kind, "native", at = System.currentTimeMillis()))
+        }
+        if (n == 0) return toast(t("Эти места нужно делать через помощник ✨", "These places need the wizard ✨"))
+        commit(bl, null)
+        stage?.refresh()
+        hints = emptyList()
+        timeline?.hints = emptyList()
+        toast(t("Вставлено: $n (отмена — ↶)", "Inserted: $n (undo — ↶)"))
+    }
+
+    // ---------- translation ----------
+
+    private fun translateSheet() {
+        val tx = EditSuggest.texts(blocks)
+        if (tx.isEmpty()) return toast(t("Во вставках нет текста", "The inserts have no text"))
+        prompt(t("🌐 Перевести вставки (${tx.size} текстов)", "🌐 Translate the inserts (${tx.size} texts)"), t("на какой язык: English, Español…", "into which language: English, Español…"), "English") { lang ->
+            if (lang.isBlank()) return@prompt
+            val p = project ?: return@prompt
+            BgTasks.run(this, TASK_AI, t("Редактор: перевод вставок", "Editor: translating the inserts"), BgTasks.reopen(this), {
+                val prov = AiTasks.requireProvider()
+                val r = Llm.complete(prov, prov.smartModel, "You translate short on-screen texts of videos. Answer with JSON only.",
+                    Prompts.fill("studio_edit_translate", mapOf("lang" to lang.trim(), "json" to JSONObject(tx as Map<*, *>).toString())),
+                    json = true, maxTokens = 400 + tx.values.sumOf { it.length } * 3, task = "studio_edit_translate", pid = "studio")
+                val o = runCatching { JSONObject(RelayText.tidyJson(r.text.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())) }.getOrNull()
+                    ?: throw LlmException(t("ИИ не вернул перевод", "The AI returned no translation"), r.text)
+                o.keys().asSequence().associateWith { o.optString(it) }
+            }, { e -> if (!isDestroyed) err(e) }) { map ->
+                if (project?.id != p.id) return@run
+                commit(EditSuggest.applyTexts(blocks, map))
+                stage?.refresh()
+                scheduleAnim(300)
+                toast(t("Переведено: ${map.size} (отмена — ↶)", "Translated: ${map.size} (undo — ↶)"))
+            }
+        }
+    }
+
     // ---------- animation blocks: frames ----------
 
     private fun scheduleAnim(delay: Long = 1500) {
@@ -3482,21 +4038,32 @@ class StudioEditorActivity : LumenBase() {
 
     /** What the frames of [b] are drawn from now, and the key they must have (size, length, words, brief — not the place). */
     private fun animJob(p: EProject, b: EBlock): Pair<JSONObject, String> {
-        val (fw, fh) = EditCanvas.outSize(p.w, p.h, p.ratio, Lumen.prefs.getInt("studio_edit_side", 1920))
+        // frames are made for 1080p: a 720p export scales them down instead of drawing them again
+        val (fw, fh) = EditCanvas.outSize(p.w, p.h, p.ratio, 1920)
         val hw = b.w / 2
         val hh = b.w * b.ratio * fw / fh / 2
         val br = EditInsert.briefFrom(b.brief) ?: EditBrief()
         val st = SchemeStyles.find(styleDir, br.style.ifEmpty { SchemeStyles.AUTO })
+        val th = EditThemes.parse(b.theme)
+        val hd = AnimRender.code(dir, b)?.let { AnimV11.header(it) }
         val cx = InsertCtx(fw, fh, FRect(b.x - hw, b.y - hh, b.x + hw, b.y + hh), "", b.startMs, b.durMs, words, br.lang.ifBlank { lang() }, b.ask, "",
-            accent = hex(br.accent ?: st?.accent ?: StudioPrefs.accent), ink = hex(st?.ink ?: 0xFFFFFFFF.toInt()), card = hex(st?.bg ?: 0xFF101318.toInt()), fps = b.fps)
-        val d = EditInsert.animData(cx, br)
-        // moving the block does not redraw it; its size, length, words and brief do
+            accent = hex(br.accent ?: th?.accent ?: st?.accent ?: StudioPrefs.accent), ink = hex(th?.ink ?: st?.ink ?: 0xFFFFFFFF.toInt()),
+            card = hex(th?.surface ?: st?.bg ?: 0xFF101318.toInt()), fps = b.fps, platform = platform(), totalMs = total, theme = th,
+            cues = AnimV11.cues(words, b.startMs, b.endMs, br.rows.map { it.label to it.main }, seams()))
+        val d = EditInsert.animData(cx, br, hd, EditInsert.renderScale(b))
+        // moving the block does not redraw it; its size, length, words and brief do (a looped or segmented one ignores its length)
+        val free = b.loopMs > 0 || b.seg.isNotEmpty()
         val keyData = JSONObject(d.toString()).apply {
             remove("place")
             optJSONObject("brief")?.remove("avoid")
-            if (b.loopMs > 0) remove("dur")
+            if (free) {
+                remove("dur")
+                remove("words")
+                remove("cues")
+                optJSONObject("seg")?.remove("total")
+            }
         }.toString()
-        return d to EditInsert.renderKey(d.optInt("w"), d.optInt("h"), b.durMs, b.fps, b.loopMs, keyData)
+        return d to EditInsert.renderKey(d.optInt("w"), d.optInt("h"), if (free) 0 else b.durMs, b.fps, b.loopMs, keyData + b.seg)
     }
 
     private fun staleAnims(p: EProject): List<EBlock> = p.blocks.filter { b ->
@@ -3531,10 +4098,12 @@ class StudioEditorActivity : LumenBase() {
         val host = attachCanvas()
         val name = b.text.ifBlank { t("Анимация", "Animation") }
         badge("🎞 " + name.take(18) + " · 0 %")
+        val t0 = System.currentTimeMillis()
         val pid = p.id
         Lumen.async({
             synchronized(host) {
-                AnimRender.run(host, code, d, out, key, b.durMs, b.fps, b.loopMs, { animCancel || isDestroyed }) { i, n ->
+                AnimRender.run(host, code, d, out, key, EditInsert.animLen(b), b.fps, if (b.seg.isNotEmpty()) 0 else b.loopMs, { animCancel || isDestroyed },
+                    themeFont(dir, EditThemes.parse(b.theme))) { i, n ->
                     if (i % 6 == 0 || i == n) runOnUiThread { if (animBusy == b.id) badge("🎞 " + name.take(18) + " · " + (i * 100 / n) + " %") }
                 }
             }
@@ -3551,6 +4120,7 @@ class StudioEditorActivity : LumenBase() {
             if (!animCancel) scheduleAnim(1000)
         }) { _ ->
             animBusy = null
+            InsertStats.add(applicationContext, InsertStat(EditInsert.KIND, "render", renderMs = System.currentTimeMillis() - t0, at = System.currentTimeMillis()))
             if (!isDestroyed && project?.id == pid) {
                 val code0 = AnimRender.codeRel(b)
                 setBlocks(blocks.map { if (it.id == b.id && AnimRender.codeRel(it) == code0) it.copy(file = rel) else it })
@@ -3609,6 +4179,21 @@ class StudioEditorActivity : LumenBase() {
             muted(t("Слоёв: ${p.blocks.size} · кусков: $pieces · длина $len · кадр $ow×$oh", "Layers: ${p.blocks.size} · pieces: $pieces · length $len · frame $ow×$oh") + " · " +
                 if (rebuilt) t("звук собирается заново (куски, музыка, второе видео).", "the sound is rebuilt (pieces, music, second video).")
                 else t("звук оригинала копируется без потерь.", "the original sound is copied without loss."))
+            val waiting = p.blocks.count { EditInsert.isPending(it) }
+            val noFrames = p.blocks.count { it.kind == EditInsert.KIND && it.file.isNotEmpty() && AnimRender.meta(dir, it) == null }
+            if (waiting + noFrames > 0) {
+                add(text(ctx, "⚠ " + listOfNotNull(
+                    if (noFrames > 0) t("анимаций без кадров: $noFrames", "animations without frames: $noFrames") else null,
+                    if (waiting > 0) t("ждут ответ ИИ: $waiting", "waiting for the AI: $waiting") else null
+                ).joinToString(", ") + t(" — в ролик не попадут", " — they will not get into the video"), 14f), 10)
+                if (noFrames > 0) button(t("🎞 Дорисовать и экспортировать", "🎞 Draw them and export"), style = BtnStyle.TONAL) {
+                    prefs.edit().putInt("studio_edit_side", side).apply()
+                    dismiss()
+                    animErr.clear()
+                    exportAfter = side
+                    renderStale()
+                }
+            }
             label(this, t("Качество", "Quality"))
             add(choiceChips(ctx, listOf(1920 to t("1080p · как оригинал", "1080p · as the original"), 1280 to t("720p — быстрее и легче", "720p — faster and smaller")), side) { side = it })
             muted(t("Ролик собирается на видеокарте телефона (обычно быстрее реального времени); если она откажет — на процессоре, медленнее. Экран можно закрыть: прогресс в уведомлении.",

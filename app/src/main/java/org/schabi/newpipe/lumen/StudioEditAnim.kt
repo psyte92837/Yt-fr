@@ -56,7 +56,7 @@ object AnimRender {
      * Continues an interrupted render of the same [key] from its first missing frame. Worker thread; [host] in the window.
      */
     fun run(host: CanvasHost, code: String, data: JSONObject, out: File, key: String, durMs: Long, fps: Int, loopMs: Long,
-            cancel: () -> Boolean, progress: (Int, Int) -> Unit): AnimMeta {
+            cancel: () -> Boolean, font: File? = null, progress: (Int, Int) -> Unit): AnimMeta {
         val w = data.optInt("w")
         val h = data.optInt("h")
         val count = EditInsert.frameCount(durMs, fps, loopMs)
@@ -71,7 +71,7 @@ object AnimRender {
         fun savePart(next: Int) = runCatching {
             part.writeText(JSONObject().put("key", key).put("next", next).put("empty", JSONArray().apply { empty.forEach { put(it) } }).toString())
         }
-        host.load(code, data)
+        host.load(code, data, font)
         var next = host.frame(start.toDouble() / fps)
         val fmt = if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else @Suppress("DEPRECATION") Bitmap.CompressFormat.WEBP
         for (f in start until count) {
@@ -116,10 +116,10 @@ object AnimRender {
         val covered: List<Float> = emptyList()
     )
 
-    fun trial(host: CanvasHost, code: String, data: JSONObject, times: List<Double>, zones: List<FRect> = emptyList()): Trial {
+    fun trial(host: CanvasHost, code: String, data: JSONObject, times: List<Double>, zones: List<FRect> = emptyList(), font: File? = null): Trial {
         val errors = mutableListOf<String>()
         try {
-            host.load(code, data)
+            host.load(code, data, font)
         } catch (e: CanvasHost.LayerError) {
             return Trial(emptyList(), 0.0, listOf(e.message.orEmpty()), false, false)
         }
@@ -276,5 +276,35 @@ class InsertLibrary(private val dir: File) {
 
     fun rename(id: String, name: String): SavedInsert? = get(id)?.let { put(it.copy(name = name.trim().take(40).ifBlank { it.name })) }
 
-    fun delete(id: String) = file(id).delete()
+    fun delete(id: String) {
+        file(id).delete()
+        File(dir, "$id.png").delete()
+    }
+
+    /** A small picture of the entry (saved with it). */
+    fun thumb(id: String): Bitmap? = File(dir, "$id.png").takeIf { it.exists() }?.let { runCatching { BitmapFactory.decodeFile(it.absolutePath) }.getOrNull() }
+
+    fun saveThumb(id: String, b: Bitmap) = runCatching {
+        dir.mkdirs()
+        File(dir, "$id.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 90, it) }
+    }
+}
+
+/** The font file of a theme ("file:<name>" → fonts/<name> of the project), null — a system font. */
+fun themeFont(dir: File, th: EditTheme?): File? = th?.font?.takeIf { it.startsWith("file:") }?.let { File(dir, "fonts/" + it.removePrefix("file:")) }?.takeIf { it.exists() }
+
+/** Local statistics of the inserts (files/lumen/studio/edit/insert_stats.json, the last 300). */
+object InsertStats {
+    private fun file(ctx: android.content.Context) = File(ctx.filesDir, "lumen/studio/edit/insert_stats.json")
+
+    fun list(ctx: android.content.Context): List<InsertStat> = runCatching {
+        val a = JSONArray(file(ctx).readText())
+        (0 until a.length()).mapNotNull { a.optJSONObject(it)?.let { o -> InsertStat.of(o) } }
+    }.getOrDefault(emptyList())
+
+    fun add(ctx: android.content.Context, s: InsertStat) = runCatching {
+        val l = (list(ctx) + s).takeLast(300)
+        file(ctx).parentFile?.mkdirs()
+        file(ctx).writeText(JSONArray().apply { l.forEach { put(it.json()) } }.toString())
+    }
 }

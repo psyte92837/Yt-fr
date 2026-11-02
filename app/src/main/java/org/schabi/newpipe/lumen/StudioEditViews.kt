@@ -351,6 +351,9 @@ class EditTimeline(ctx: Context) : View(ctx) {
         set(v) { field = v; invalidate() }
     /** Width / height of a video frame. */
     var aspect = 9f / 16f
+    /** Places that ask for an insert («💡»): small marks over the ruler. */
+    var hints: List<Long> = emptyList()
+        set(v) { field = v; invalidate() }
     /** The voice with times: a row of words under the frames; edges stick to word starts. */
     var words: List<SWord> = emptyList()
         set(v) {
@@ -518,6 +521,11 @@ class EditTimeline(ctx: Context) : View(ctx) {
             val s = if (step >= 1000) StudioEdit.clock(t0).substringBefore('.') else StudioEdit.clock(t0)
             c.drawText(s, x + 3 * dp, rulerH - 9 * dp, labelP)
             t0 += step
+        }
+        for (hm in hints) {
+            val x = xOf(hm)
+            if (x < -8 * dp || x > w + 8 * dp) continue
+            c.drawText("💡", x - 5 * dp, rulerH - 1 * dp, labelP)
         }
         // frames of the video
         val sx0 = xOf(0).coerceAtLeast(0f)

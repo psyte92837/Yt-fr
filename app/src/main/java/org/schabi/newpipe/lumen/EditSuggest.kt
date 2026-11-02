@@ -261,8 +261,11 @@ object EditSuggest {
 
     /** Lines of the local statistics: inserts without AI, the first AI answer passing the checks, fix rounds, by provider. */
     fun statsLines(list: List<InsertStat>): List<String> {
-        if (list.isEmpty()) return listOf(t("Пока нет данных", "No data yet"))
+        val renders = list.filter { it.source == "render" }
+        val list = list.filter { it.source != "render" }
+        if (list.isEmpty() && renders.isEmpty()) return listOf(t("Пока нет данных", "No data yet"))
         val out = mutableListOf<String>()
+        if (list.isEmpty()) return listOf(t("Рендер анимации в среднем ${renders.map { it.renderMs }.average().toLong() / 1000} с", "Animation render on average ${renders.map { it.renderMs }.average().toLong() / 1000} s"))
         val native = list.count { it.source in setOf("native", "example", "library") }
         out += t("Вставок: ${list.size}, без ИИ: $native (${native * 100 / list.size} %)", "Inserts: ${list.size}, without AI: $native (${native * 100 / list.size} %)")
         list.filter { it.source == "ai" }.groupBy { it.provider.ifBlank { "?" } }.forEach { (p, l) ->
@@ -270,7 +273,7 @@ object EditSuggest {
             out += "$p: " + t("первый ответ прошёл проверки ${ok * 100 / l.size} % (${l.size}), кругов исправления в среднем ${"%.1f".format(l.map { it.rounds }.average())}",
                 "first answer passed ${ok * 100 / l.size} % (${l.size}), fix rounds on average ${"%.1f".format(l.map { it.rounds }.average())}")
         }
-        list.filter { it.renderMs > 0 }.takeIf { it.isNotEmpty() }?.let { l -> out += t("Рендер анимации в среднем ${l.map { it.renderMs }.average().toLong() / 1000} с", "Animation render on average ${l.map { it.renderMs }.average().toLong() / 1000} s") }
+        renders.filter { it.renderMs > 0 }.takeIf { it.isNotEmpty() }?.let { l -> out += t("Рендер анимации в среднем ${l.map { it.renderMs }.average().toLong() / 1000} с", "Animation render on average ${l.map { it.renderMs }.average().toLong() / 1000} s") }
         return out
     }
 

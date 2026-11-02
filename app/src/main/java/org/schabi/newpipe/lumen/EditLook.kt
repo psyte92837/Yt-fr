@@ -353,6 +353,21 @@ object EditMusic {
         return g
     }
 
+    /** A sound effect of an insert (added by the wizard): music ducks under it. */
+    fun isSfx(b: EBlock): Boolean = b.kind == KIND && b.text.startsWith("✨")
+
+    /** Music [b] at [tMs] ducks to 55 % while a sound of an insert plays (80 ms ramps). */
+    fun duck(blocks: List<EBlock>, b: EBlock, tMs: Long): Float {
+        if (isSfx(b)) return 1f
+        var k = 1f
+        for (s in blocks) {
+            if (!isSfx(s) || tMs < s.startMs - 80 || tMs > s.endMs + 80) continue
+            val edge = min(tMs - (s.startMs - 80), (s.endMs + 80) - tMs).coerceAtLeast(0)
+            k = min(k, 1f - 0.45f * (edge / 80f).coerceIn(0f, 1f))
+        }
+        return k
+    }
+
     /** Loudness of the video itself at [tMs]: quieter under music that asks for it. */
     fun mainVolume(blocks: List<EBlock>, tMs: Long): Float = active(blocks, tMs).fold(1f) { v, b -> v * b.mainVolume }
 

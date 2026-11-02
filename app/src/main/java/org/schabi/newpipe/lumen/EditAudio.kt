@@ -101,8 +101,10 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                     val need = b.durMs * rate / 1000
                     if (side(File(dir, b.file), b, need, rate, outCh, f, cancelled)) {
                         val fade = if (b.kind == EditMusic.KIND) minOf(EditMusic.FADE_MS, b.durMs / 2) * rate / 1000 else 0L
+                        val ducks = b.kind == EditMusic.KIND && !EditMusic.isSfx(b) && splits.any { EditMusic.isSfx(it) }
                         sides += SideMix(b.startMs * rate / 1000, b.startMs * rate / 1000 + need, b.volume, b.mainVolume, f, outCh,
-                            if (b.animIn == "fade") fade else 0L, if (b.animOut == "fade") fade else 0L)
+                            if (b.animIn == "fade") fade else 0L, if (b.animOut == "fade") fade else 0L,
+                            if (ducks) { fr: Long -> EditMusic.duck(splits, b, fr * 1000 / rate) } else null)
                     }
                 }
                 // a quieter main video without a heard second one
@@ -237,13 +239,16 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
     /** A second video's sound (raw PCM file) heard over output frames [startF, endF); the main one at [mainVol] meanwhile. */
     private class SideMix(
         val startF: Long, val endF: Long, val vol: Float, val mainVol: Float, file: File?, private val ch: Int,
-        private val fadeInF: Long = 0, private val fadeOutF: Long = 0
+        private val fadeInF: Long = 0, private val fadeOutF: Long = 0,
+        /** Ducking of music under the sounds of inserts, by output frame. */
+        private val duck: ((Long) -> Float)? = null
     ) : java.io.Closeable {
         /** Loudness of output frame [f]: [vol] with the fades in and out. */
         fun gain(f: Long): Float {
             var g = vol
             if (fadeInF > 0) g *= ((f - startF).toFloat() / fadeInF).coerceIn(0f, 1f)
             if (fadeOutF > 0) g *= ((endF - f).toFloat() / fadeOutF).coerceIn(0f, 1f)
+            duck?.let { g *= it(f) }
             return g
         }
 

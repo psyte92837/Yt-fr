@@ -57,6 +57,16 @@ interface InsertHost {
     /** The code or the size of an animation block changed: render its frames. */
     fun animChanged(id: String)
     fun pause()
+    /** Frames a second of the video (≤ 60). */
+    fun fps(): Int
+    /** shorts | reels | tiktok | youtube */
+    fun platform(): String
+    /** The folder of the user's themes. */
+    fun themesDir(): File
+    /** Seams of the main track, output ms (cues of the animations). */
+    fun cuts(): List<Long>
+    /** A record for the local statistics of the inserts. */
+    fun stat(s: InsertStat)
 }
 
 /**
@@ -72,6 +82,7 @@ class InsertWizard(private val h: InsertHost) {
         private val SWATCHES = listOf(0xFFFFD60A, 0xFFFF3B30, 0xFF34C759, 0xFF0A84FF, 0xFFBF5AF2, 0xFFFF9F0A, 0xFF64D2FF, 0xFFFFFFFF).map { it.toInt() }
         private const val PREF_LAST = "edit_insert_last"
         private const val PREF_RECIPES = "edit_insert_recipes"
+        private const val PREF_DRAFT = "edit_insert_draft"
 
         fun library(ctx: Context) = InsertLibrary(File(ctx.filesDir, "lumen/studio/edit/anims"))
     }
@@ -106,6 +117,25 @@ class InsertWizard(private val h: InsertHost) {
     private var frameLum = -1.0
     private var counter = 0
     private var aiEdit = ""
+    private var provider = ""
+    /** Several answers of one request (variants), [answer] is the chosen one. */
+    private var answers: List<InsertAnswer> = emptyList()
+    private var variants = 1
+    private var inserted = false
+    private var source = "ai"
+    private var firstPass = true
+    private var flipFrames: List<Bitmap> = emptyList()
+    private var flipView: ImageView? = null
+    private var flipIndex = 0
+    private val flipTick = object : Runnable {
+        override fun run() {
+            val v = flipView ?: return
+            if (flipFrames.isEmpty() || !isOpen) return
+            flipIndex = (flipIndex + 1) % flipFrames.size
+            v.setImageBitmap(flipFrames[flipIndex])
+            v.postDelayed(this, 1000L / 12)
+        }
+    }
 
     val isOpen: Boolean get() = dialog?.isShowing == true
 
@@ -205,6 +235,12 @@ class InsertWizard(private val h: InsertHost) {
         openSec = setOf()
         aiEdit = ""
         baseDur = 5000L
+        answers = emptyList()
+        variants = 1
+        inserted = false
+        source = "ai"
+        firstPass = true
+        flipFrames = emptyList()
     }
 
     private fun newReq(): String = EditInsert.reqId(System.currentTimeMillis(), ++counter)
@@ -241,11 +277,36 @@ class InsertWizard(private val h: InsertHost) {
         val (s, d) = timing()
         val st = SchemeStyles.find(h.styleDir(), brief.style.ifEmpty { SchemeStyles.AUTO })
         fun hex(c: Int) = String.format("#%06X", c and 0xFFFFFF)
-        val zones = if (brief.avoidSubs != false && subsInVideo(p)) listOf(EditInsert.subsZone(fw, fh)) else emptyList()
+        val zones = mutableListOf<InsertZone>()
+        // the subtitles where they really stand, else where they usually do
+        if (brief.avoidSubs != false && subsInVideo(p)) {
+            val subs = p.blocks.filter { EditCaptions.isSub(it) && it.startMs < s + d && it.endMs > s }.map { rectOf(it, fw, fh) }
+            zones += if (subs.isEmpty()) EditInsert.subsZone(fw, fh)
+            else InsertZone(FRect(0f, subs.minOf { it.t }, 1f, subs.maxOf { it.b }), t("субтитры", "subtitles"))
+        }
+        // other blocks shown at the same time
+        p.blocks.filter { it.id != target && it.startMs < s + d && it.endMs > s && !EditCaptions.isSub(it) &&
+            it.kind in setOf("scheme", "image", "text", "emoji", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND) && !EditInsert.isPending(it) }
+            .take(4).forEach { zones += InsertZone(rectOf(it, fw, fh), t("блок «", "block «") + EditSuggest.name(it).take(14) + "»") }
+        val th = theme(p)
+        val labels = brief.rows.map { it.label to it.main }
         return InsertCtx(fw, fh, rect, EditInsert.placeName(brief.place.ifEmpty { EditInsert.defaultPlace(brief, fw, fh) }), s, d, words,
             brief.lang.ifBlank { h.lang() }, wish, req, zones,
-            accent = hex(brief.accent ?: st?.accent ?: StudioPrefs.accent), ink = hex(st?.ink ?: 0xFFFFFFFF.toInt()),
-            card = hex(st?.bg ?: 0xFF101318.toInt()), font = when (brief.font) { "serif" -> "serif"; "mono" -> "monospace"; else -> "sans-serif" })
+            accent = hex(brief.accent ?: th?.accent ?: st?.accent ?: StudioPrefs.accent), ink = hex(th?.ink ?: st?.ink ?: 0xFFFFFFFF.toInt()),
+            card = hex(th?.surface ?: st?.bg ?: 0xFF101318.toInt()), font = th?.let { EditThemes.cssFont(it.font) } ?: when (brief.font) { "serif" -> "serif"; "mono" -> "monospace"; else -> "sans-serif" },
+            fps = h.fps(), platform = h.platform(), totalMs = h.outLen(), theme = th, cues = AnimV11.cues(words, s, s + d, labels, h.cuts()))
+    }
+
+    /** The theme of the brief: its own, else the video's. */
+    private fun theme(p: EProject): EditTheme? = EditThemes.resolve(brief.theme, p.theme, h.themesDir())
+
+    /** A native way to draw this brief without AI: a motion template or a scheme of the data (null — only the AI). */
+    private fun native(): Pair<String, Any>? {
+        val k = kind()
+        if (k == EditInsert.KIND) EditMotion.forType(brief.type)?.let { return EditMotion.KIND to it }
+        EditSuggest.schemeFromRows(brief.type, brief.rows, brief.title)?.let { return "scheme" to it }
+        if (k == "scheme") EditMotion.forType(brief.type)?.let { return EditMotion.KIND to it }
+        return null
     }
 
     private fun speech(p: EProject): String {
@@ -324,7 +385,12 @@ class InsertWizard(private val h: InsertHost) {
         d.setOnDismissListener {
             dialog = null
             col = null
+            flipView = null
             if (busy.isEmpty()) frameBmp = null
+            // a brief left without inserting waits for «↺ Продолжить бриф»
+            if (!inserted && step >= 1) runCatching {
+                Lumen.prefs.edit().putString(PREF_DRAFT, JSONObject().put("brief", EditInsert.briefJson(brief)).put("wish", wish).toString()).apply()
+            }
         }
         dialog = d
         col = c
@@ -376,7 +442,14 @@ class InsertWizard(private val h: InsertHost) {
             0 -> add(btn(ui, t("Закрыть", "Close"), style = BtnStyle.TEXT) { close() }, 1f)
             1 -> {
                 val blocking = warnings().any { it.blocking }
-                add(btn(ui, t("Дальше ›", "Next ›"), primary = true) {
+                val nat = native()
+                if (nat != null) {
+                    add(btn(ui, t("ИИ ›", "AI ›"), style = BtnStyle.TONAL) {
+                        if (blocking) return@btn say(t("Опишите, что показать", "Describe what to show"))
+                        toWho()
+                    }, 1.2f)
+                    add(btn(ui, t("⚡ Вставить без ИИ", "⚡ Insert without AI"), primary = true) { insertNative() }, 2f)
+                } else add(btn(ui, t("Дальше ›", "Next ›"), primary = true) {
                     if (blocking) return@btn say(t("Опишите, что показать", "Describe what to show"))
                     toWho()
                 }, 2f)
@@ -396,6 +469,16 @@ class InsertWizard(private val h: InsertHost) {
         if (said.isNotBlank()) c.muted("«" + said.take(200) + "»")
         else c.muted(t("В этом месте нет речи с таймингом — опишите, что показать, на следующем шаге.", "No timed speech here — describe what to show on the next step."))
         val quick = mutableListOf<View>()
+        draft()?.let { (b0, w0) ->
+            quick += chip(ui, t("↺ Продолжить бриф", "↺ Continue the brief")) {
+                brief = b0.copy(face = brief.face)
+                wish = w0
+                if (span == null) baseDur = max(5000L, EditInsert.readMs(EditInsert.screenWords(brief)))
+                lum()
+                step = 1
+                redraw(false)
+            }
+        }
         lastBrief()?.let { last -> quick += chip(ui, t("↺ Как в прошлый раз", "↺ Like last time")) { pickType(last.type, last) } }
         if (recipes().isNotEmpty()) quick += chip(ui, t("⭐ Мои рецепты", "⭐ My recipes")) { recipesSheet() }
         quick += chip(ui, t("📚 Моя библиотека", "📚 My library")) { librarySheet() }
@@ -462,6 +545,11 @@ class InsertWizard(private val h: InsertHost) {
         c.add(text(ui, ty.emoji + " " + ty.name + " · " + (if (k == "scheme") t("схема", "scheme") else t("анимация", "animation")) + " · " +
             StudioEdit.clock(cx.startMs) + "–" + StudioEdit.clock(cx.endMs), Type.TITLE_M, bold = true), 12)
         c.add(mockView(p, cx), 8)
+        themeRow(c, p)
+        native()?.let { nat ->
+            label(c, t("⚡ Без ИИ — так будет сразу", "⚡ Without AI — this is it at once"))
+            c.add(flipbook(p, cx, nat), 4)
+        }
         if (ty.draws.size > 1) {
             label(c, t("Как нарисовать", "How to draw"))
             c.add(segBar(ui, ty.draws.map { if (it == "scheme") t("Как схема (без кода)", "As a scheme (no code)") else t("Как анимация (код ИИ)", "As an animation (AI code)") },
@@ -603,7 +691,8 @@ class InsertWizard(private val h: InsertHost) {
     private fun sectionLook(c: Col, k: String) {
         val p = h.project() ?: return
         val styles = SchemeStyles.list(h.styleDir()).filter { it.place == "overlay" || it.place == "panel" || it.id == SchemeStyles.AUTO }
-        choice(c, t("Стиль", "Style"), listOf("" to (if (p.brand.isNotEmpty()) t("Стиль ролика", "Video style") else t("Авто", "Auto"))) + styles.filter { it.id != SchemeStyles.AUTO }.map { it.id to it.name },
+        c.muted(t("Тема — над разделами, под макетом; здесь — точечные правки поверх неё.", "The theme is above the sections, under the mock-up; here — point edits over it."))
+        choice(c, t("Стиль схемы", "Scheme style"), listOf("" to (if (p.brand.isNotEmpty()) t("Стиль ролика", "Video style") else t("Авто", "Auto"))) + styles.filter { it.id != SchemeStyles.AUTO }.map { it.id to it.name },
             brief.style) { v -> brief = brief.copy(style = v) }
         accentPicker(c)
         if (k == EditInsert.KIND) choice(c, t("Палитра", "Palette"), listOf("" to t("Из стиля", "From the style"), "mono" to t("Монохром + акцент", "Mono + accent"), "bright" to t("Яркая", "Bright"), "pastel" to t("Пастель", "Pastel")),
@@ -845,6 +934,115 @@ class InsertWizard(private val h: InsertHost) {
         say(t("Применено", "Applied"))
     }
 
+    // ---------- theme, flipbook, parameters ----------
+
+    private fun themeRow(c: Col, p: EProject) {
+        val list = EditThemes.list(h.themesDir())
+        label(c, t("🎨 Тема", "🎨 Theme"))
+        c.add(choiceChips(ui, listOf("" to (if (p.theme.isNotEmpty()) t("Тема ролика", "Video theme") else t("Без темы", "No theme"))) + list.map { it.id to it.name },
+            brief.theme) { v -> set { it.copy(theme = v) } }, 4)
+    }
+
+    private fun draft(): Pair<EditBrief, String>? = runCatching {
+        val o = JSONObject(Lumen.prefs.getString(PREF_DRAFT, "") ?: return null)
+        EditInsert.briefFrom(o.optJSONObject("brief"))?.let { it to o.optString("wish") }
+    }.getOrNull()
+
+    /** A small picture of the current frame to draw over. */
+    private fun base(pw: Int, ph: Int): Pair<Bitmap, Canvas> {
+        val bmp = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
+        val cv = Canvas(bmp)
+        cv.drawColor(0xFF202024.toInt())
+        frameBmp?.let { cv.drawBitmap(it, null, RectF(0f, 0f, pw.toFloat(), ph.toFloat()), Paint(Paint.FILTER_BITMAP_FLAG)) }
+        return bmp to cv
+    }
+
+    /** The native way of this brief, played: 12 frames by the editor painter over the current frame. */
+    private fun flipbook(p: EProject, cx: InsertCtx, nat: Pair<String, Any>): View {
+        val (fw, fh) = frameSize(p)
+        val pw = 320
+        val ph = (pw * fh / fw.toFloat()).roundToInt().coerceAtLeast(2)
+        val b0 = blockFor(p, null, null).copy(id = "preview", req = "")
+        val draft = if (nat.first == EditMotion.KIND) b0.copy(kind = EditMotion.KIND, look = nat.second as String, animIn = "none", animOut = "none")
+            else b0.copy(kind = "scheme", scheme = nat.second as SScheme)
+        val painter = StudioEditPainter(pw, ph, h.dir(), words, StudioPrefs.accent, h.styleDir())
+        val frames = (0 until 12).map { i ->
+            val (bmp, cv) = base(pw, ph)
+            runCatching { painter.draw(cv, listOf(draft), draft.startMs + (draft.durMs * (i + 0.5) / 12).toLong()) }
+            bmp
+        }
+        painter.close()
+        return flipView(frames, pw, ph)
+    }
+
+    /** The trial frames of an animation in their place over the current frame, played. */
+    private fun flipOf(p: EProject, cx: InsertCtx, fr: List<Bitmap>): View {
+        val (fw, fh) = frameSize(p)
+        val pw = 320
+        val ph = (pw * fh / fw.toFloat()).roundToInt().coerceAtLeast(2)
+        val r = cx.block
+        val frames = fr.map { f ->
+            val (bmp, cv) = base(pw, ph)
+            if (brief.dim > 0) {
+                val dp = Paint().apply { color = Color.argb((brief.dim * 255).toInt(), 0, 0, 0) }
+                if (brief.dimAll) cv.drawRect(0f, 0f, pw.toFloat(), ph.toFloat(), dp) else cv.drawRect(r.l * pw, r.t * ph, r.r * pw, r.b * ph, dp)
+            }
+            cv.drawBitmap(f, null, RectF(r.l * pw, r.t * ph, r.r * pw, r.b * ph), Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = (brief.opacity * 255).toInt() })
+            bmp
+        }
+        return flipView(frames, pw, ph)
+    }
+
+    private fun flipView(frames: List<Bitmap>, pw: Int, ph: Int): View {
+        val maxW = ui.resources.displayMetrics.widthPixels - ui.dp(40)
+        val maxH = ui.dp(260)
+        val k = min(maxW / pw.toFloat(), maxH / ph.toFloat())
+        val iv = ImageView(ui).apply {
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            contentDescription = t("Превью движения", "Motion preview")
+            frames.firstOrNull()?.let { setImageBitmap(it) }
+        }
+        flipView?.removeCallbacks(flipTick)
+        flipFrames = frames
+        flipIndex = 0
+        flipView = iv
+        iv.postDelayed(flipTick, 1000L / 12)
+        return android.widget.FrameLayout(ui).apply {
+            addView(iv, android.widget.FrameLayout.LayoutParams((pw * k).toInt(), (ph * k).toInt(), Gravity.CENTER_HORIZONTAL))
+        }
+    }
+
+    /** «🎛 Параметры»: what the animation lets change without AI (lumen.anim v1.1 `// param`). */
+    private fun paramsPanel(c: Col, a: InsertAnswer.Anim) {
+        val hd = AnimV11.header(a.code)
+        if (hd.params.isEmpty()) return
+        label(c, t("🎛 Параметры (без ИИ)", "🎛 Parameters (no AI)"))
+        for (pr in hd.params) {
+            val name = pr.label.ifBlank { pr.name }
+            val v = brief.params[pr.name] ?: pr.def
+            fun put(x: String) {
+                brief = brief.copy(params = brief.params + (pr.name to x))
+            }
+            when (pr.kind) {
+                "text" -> {
+                    label(c, name)
+                    val e = edt(ui, name, v)
+                    e.watch { put(it) }
+                    c.add(e, 2)
+                }
+                "bool" -> c.check(name, v == "true") { put(if (it) "true" else "false") }
+                "range" -> slider(c, name, v.toFloatOrNull() ?: pr.min.toFloat(), pr.min.toFloat(), pr.max.toFloat(), { String.format("%.2f", it) }) { x, done -> if (done) put(x.toString()) }
+                "choice" -> choice(c, name, pr.options.map { it to it }, v) { put(it) }
+                "color" -> {
+                    label(c, name)
+                    c.chips(listOf(chip(ui, t("Тема", "Theme"), v.startsWith("theme.")) { put(pr.def.takeIf { it.startsWith("theme.") } ?: "theme.accent"); redraw() }) +
+                        SWATCHES.map { col -> swatch(col, v.equals(hexOf(col), true)) { put(hexOf(col)); redraw() } }, 20)
+                }
+            }
+        }
+        c.add(btn(ui, t("↻ Обновить кадры с параметрами", "↻ Refresh the frames with the parameters"), style = BtnStyle.TONAL) { runTrial() }, 8)
+    }
+
     // ---------- the mock-up ----------
 
     private fun mockView(p: EProject, cx: InsertCtx): View {
@@ -897,10 +1095,16 @@ class InsertWizard(private val h: InsertHost) {
     private fun toWho() {
         val p = h.project() ?: return
         if (req.isEmpty()) req = newReq()
-        request = EditInsert.request(ctx(p), brief, kind())
+        request = EditInsert.request(ctx(p), brief, kind(), variants)
+        saveRequest()
         saveLast()
         step = 2
         redraw(false)
+    }
+
+    /** The request in insert/<mark>.txt: «⧉ Запрос ещё раз» from the «⏳» block after the sheet is gone. */
+    private fun saveRequest() = runCatching {
+        File(h.dir(), "insert").apply { mkdirs() }.let { File(it, "$req.txt").writeText(request) }
     }
 
     private fun taskKey(fix: Boolean) = if (kind() == EditInsert.KIND) (if (fix) "studio_edit_anim_fix" else "studio_edit_anim") else (if (fix) "studio_edit_insert_fix" else "studio_edit_insert")
@@ -914,6 +1118,13 @@ class InsertWizard(private val h: InsertHost) {
         val prov = Provider.active()
         val manual = prov == Provider.MANUAL || Relay.routes(taskKey(false))
         c.add(text(ui, t("Кто сделает?", "Who makes it?"), Type.TITLE_M, bold = true), 12)
+        label(c, t("Вариантов", "Variants"))
+        c.add(choiceChips(ui, listOf(1 to "1", 3 to t("🎲 3 сразу", "🎲 3 at once")), variants) { v ->
+            variants = v
+            h.project()?.let { request = EditInsert.request(ctx(it), brief, kind(), variants) }
+            saveRequest()
+            redraw()
+        }, 4)
         if (prov != null) {
             val name = prov.title.let { if (Settings.lang == "en") it.substringAfter(" / ") else it.substringBefore(" / ") }
             c.add(btn(ui, t("🤖 Встроенный ИИ", "🤖 Built-in AI") + " (" + name + ")", primary = true) { runAi(null, "") }, 8)
@@ -952,10 +1163,12 @@ class InsertWizard(private val h: InsertHost) {
         if (step != 2 || busy.isNotEmpty() || !copied) return
         val c = clip() ?: return
         if (c == Relay.lastTaken || RelayText.isOwnRequest(c)) return
-        val a = EditInsert.detect(c) ?: return
+        val all = AnimV11.detectAll(c)
+        val a = all.firstOrNull() ?: return
         if (a.req.isNotEmpty() && a.req != req) return
         Relay.lastTaken = c
-        onAnswer(a, false)
+        source = "paste"
+        if (all.size > 1) onAnswers(all, false) else onAnswer(a, false)
     }
 
     private fun chat(url: String) {
@@ -973,6 +1186,7 @@ class InsertWizard(private val h: InsertHost) {
     }
 
     private fun copyRequest() {
+        saveRequest()
         runCatching { clipboard()?.setPrimaryClip(ClipData.newPlainText("lumen", request)) }
         copied = true
         ensurePending()
@@ -994,7 +1208,14 @@ class InsertWizard(private val h: InsertHost) {
     }
 
     private fun take(text: String) {
-        val a = EditInsert.detect(text)
+        val all = AnimV11.detectAll(text)
+        if (all.size > 1 && all.all { it.req.isEmpty() || it.req == req }) {
+            Relay.lastTaken = text
+            source = "paste"
+            onAnswers(all, false)
+            return
+        }
+        val a = all.firstOrNull()
         if (a == null) {
             if (RelayText.isOwnRequest(text)) say(t("Это ваш запрос — скопируйте ответ ИИ", "That is your request — copy the AI answer"))
             else say(t("Не похоже на схему или код анимации", "Does not look like a scheme or animation code"))
@@ -1002,6 +1223,7 @@ class InsertWizard(private val h: InsertHost) {
         }
         if (a.req.isNotEmpty() && a.req != req) return say(t("Это ответ на другой запрос (#${a.req})", "This answers another request (#${a.req})"))
         Relay.lastTaken = text
+        source = "paste"
         onAnswer(a, false)
     }
 
@@ -1021,13 +1243,18 @@ class InsertWizard(private val h: InsertHost) {
         busy = if (fix) t("ИИ правит…", "The AI is editing…") else t("ИИ рисует…", "The AI is drawing…")
         step = 2
         redraw(false)
+        val many = !fix && variants > 1
         BgTasks.run(ui, TASK, t("Редактор: ИИ делает вставку", "Editor: the AI makes an insert"), BgTasks.reopen(ui), {
             val prov = AiTasks.requireProvider()
             fun ask(text: String, task: String): String = Llm.complete(prov, prov.smartModel, SYSTEM, Prompts.fill(task, mapOf("request" to text)),
-                json = k == "scheme", maxTokens = if (k == "scheme") 1800 else 9000, task = task, pid = "studio").text
+                json = k == "scheme" && !many, maxTokens = (if (k == "scheme") 1800 else 9000) * (if (many) 2 else 1), task = task, pid = "studio").text
+            fun fixed(x: InsertAnswer): InsertAnswer = if (x is InsertAnswer.Scheme) x.copy(scheme = StudioScheme.repair(x.scheme, range.takeIf { !it.isEmpty() })) else x
             var raw = ask(prompt, taskKey(fix))
+            val all = if (many) AnimV11.detectAll(raw).filter { it.kind == k } else emptyList()
+            if (all.size > 1) return@run Triple(all.map { fixed(it) }, all.all { check(it, range).isEmpty() }, prov.name)
             var a = parse(raw, k, myReq)
             var pr = check(a, range)
+            val first = pr.isEmpty()
             if (pr.isNotEmpty()) {
                 BgTasks.progress(TASK, t("Исправляю", "Fixing"))
                 raw = ask(EditInsert.fixRequest(request, k, pr, raw.take(60_000), edit), taskKey(true))
@@ -1035,14 +1262,21 @@ class InsertWizard(private val h: InsertHost) {
                 pr = check(a, range)
             }
             if (a == null || (a is InsertAnswer.Scheme && pr.isNotEmpty())) throw LlmException(t("ИИ не смог: ", "The AI could not: ") + pr.joinToString("; "), raw)
-            if (a is InsertAnswer.Scheme) a.copy(scheme = StudioScheme.repair(a.scheme, range.takeIf { !it.isEmpty() })) else a
+            Triple(listOf(fixed(a)), first, prov.name)
         }, { e ->
             busy = ""
             if (isOpen) redraw()
             if (!ui.isDestroyed) ui.err(e)
-        }) { a ->
+        }) { (list, first, provName) ->
             busy = ""
-            if (isOpen && req == myReq) onAnswer(a, true)
+            source = "ai"
+            provider = provName
+            if (!first) {
+                firstPass = false
+                rounds++
+            }
+            val a = list.first()
+            if (isOpen && req == myReq) onAnswers(list, true)
             else {
                 // the sheet was closed: the result goes into its block
                 h.deliverTo(pid) { pr, list, _ ->
@@ -1069,7 +1303,14 @@ class InsertWizard(private val h: InsertHost) {
         is InsertAnswer.Anim -> EditInsert.animProblems(a.code)
     }
 
-    private fun onAnswer(a: InsertAnswer, fromAi: Boolean) {
+    /** Several variants: the first is shown, the others are a tap away. */
+    private fun onAnswers(list: List<InsertAnswer>, fromAi: Boolean) {
+        answers = list
+        list.firstOrNull()?.let { onAnswer(it, fromAi, keepVariants = true) }
+    }
+
+    private fun onAnswer(a: InsertAnswer, fromAi: Boolean, keepVariants: Boolean = false) {
+        if (!keepVariants) answers = emptyList()
         answer = a
         trial = null
         val range = StudioEdit.wordRange(words, timing().first, timing().first + timing().second)
@@ -1086,14 +1327,20 @@ class InsertWizard(private val h: InsertHost) {
         val p = h.project() ?: return
         val a = answer as? InsertAnswer.Anim ?: return
         val cx = ctx(p)
-        val data = EditInsert.animData(cx, brief).put("fps", EditInsert.DEFAULT_FPS)
-        val dur = cx.durMs / 1000.0
-        val times = listOf(0.1, 0.35, 0.6, 0.9).map { Math.round(dur * it * 100) / 100.0 }
+        val hd = AnimV11.header(a.code)
+        val data = EditInsert.animData(cx, brief, hd).put("fps", EditInsert.DEFAULT_FPS)
+        val dur = data.optDouble("dur", cx.durMs / 1000.0)
+        // 8 moments: the checks and a flipbook of the motion
+        val times = (0 until 8).map { Math.round(dur * (0.06 + it * 0.125) * 100) / 100.0 }
+        val zones = EditInsert.inBlock(cx.block, EditInsert.zones(brief, cx.fw, cx.fh, false, cx.platform) + cx.zones).filter { cx.block.w < 0.99f }
         busy = t("Пробный прогон…", "Trial run…")
         redraw()
         val host = h.canvas()
         val code = a.code
-        Lumen.async({ synchronized(host) { AnimRender.trial(host, code, data, times) } }, { e ->
+        val minFont = (EditInsert.minFontPx(cx.fw, cx.fh, brief.size) * data.optInt("w") / (cx.block.w * cx.fw).coerceAtLeast(1f)).toInt()
+        val themed = cx.theme != null
+        val font = themeFont(h.dir(), cx.theme)
+        Lumen.async({ synchronized(host) { AnimRender.trial(host, code, data, times, zones.map { it.r }, font) } }, { e ->
             busy = ""
             problems = listOf(e.message ?: e.javaClass.simpleName)
             if (isOpen) redraw()
@@ -1101,7 +1348,10 @@ class InsertWizard(private val h: InsertHost) {
             busy = ""
             trial = tr
             trialFor = code + "|" + data.toString().hashCode()
-            problems = EditInsert.animProblems(code) + EditInsert.trialProblems(tr.msPerFrame, tr.errors, tr.allEmpty, tr.opaque, cx.block.w >= 0.99f)
+            problems = EditInsert.animProblems(code) + EditInsert.trialProblems(tr.msPerFrame, tr.errors, tr.allEmpty, tr.opaque, cx.block.w >= 0.99f && !hd.opaque) +
+                AnimV11.reportProblems(tr.probe, minFont) +
+                zones.mapIndexedNotNull { i, z -> tr.covered.getOrNull(i)?.takeIf { it > 0.08f }?.let { k -> t("закрывает «${z.why}» на ${(k * 100).toInt()} %", "covers «${z.why}» by ${(k * 100).toInt()} %") } } +
+                (if (themed) EditInsert.themeProblems(code) else emptyList())
             if (autoFix && problems.isNotEmpty() && rounds < 2 && Provider.active() != null) {
                 rounds++
                 runAi(code, "")
@@ -1121,9 +1371,17 @@ class InsertWizard(private val h: InsertHost) {
         }
         val cx = ctx(p)
         c.add(text(ui, (if (a is InsertAnswer.Scheme) "🧩 " else "🎞 ") + a.name.ifBlank { EditInsert.type(brief.type).name }, Type.TITLE_M, bold = true), 12)
+        if (answers.size > 1) {
+            label(c, t("Варианты", "Variants"))
+            c.add(choiceChips(ui, answers.mapIndexed { i, x -> i to "${i + 1}. " + x.name.take(18) }, answers.indexOf(a).coerceAtLeast(0)) { i ->
+                onAnswer(answers[i], false, keepVariants = true)
+            }, 4)
+        }
         if (busy.isNotEmpty()) c.working(busy)
-        // frames of the result over the video
+        // frames of the result over the video, and the motion as a flipbook
         c.add(resultFrames(p, cx, a), 8)
+        if (a is InsertAnswer.Anim) trial?.frames?.takeIf { it.size >= 4 }?.let { fr -> c.add(flipOf(p, cx, fr), 6) }
+        if (a is InsertAnswer.Anim) paramsPanel(c, a)
         trial?.let { tr -> c.muted(t("Пробный прогон: ", "Trial run: ") + String.format("%.0f", tr.msPerFrame) + t(" мс/кадр", " ms/frame")) }
         if (problems.isNotEmpty()) {
             c.add(text(ui, "⚠ " + problems.joinToString("\n⚠ "), 14f), 10)
@@ -1176,7 +1434,9 @@ class InsertWizard(private val h: InsertHost) {
             }
         }
         more += chip(ui, t("💾 В библиотеку", "💾 To the library")) {
-            library(ui).add(a.kind, body(a), a.name, wish, "ai", System.currentTimeMillis())
+            val lib = library(ui)
+            val saved = lib.add(a.kind, body(a), a.name, wish, source, System.currentTimeMillis())
+            thumbFor(p, cx, a)?.let { lib.saveThumb(saved.id, it) }
             say(t("Сохранено в библиотеку", "Saved to the library"))
         }
         val tb = target?.let { id -> h.blocks().firstOrNull { it.id == id } }
@@ -1188,6 +1448,25 @@ class InsertWizard(private val h: InsertHost) {
         }
         c.chips(more, 9)
     }
+
+    /** A picture of the result for the library: the middle of a scheme or of the trial frames over the current frame. */
+    private fun thumbFor(p: EProject, cx: InsertCtx, a: InsertAnswer): Bitmap? = runCatching {
+        val (fw, fh) = frameSize(p)
+        val pw = 240
+        val ph = (pw * fh / fw.toFloat()).roundToInt().coerceAtLeast(2)
+        val (bmp, cv) = base(pw, ph)
+        if (a is InsertAnswer.Scheme) {
+            val draft = blockFor(p, null, a).copy(id = "thumb")
+            val painter = StudioEditPainter(pw, ph, h.dir(), words, StudioPrefs.accent, h.styleDir())
+            painter.draw(cv, listOf(draft), draft.startMs + draft.durMs * 9 / 10)
+            painter.close()
+        } else {
+            val f = trial?.frames?.let { it.getOrNull(it.size / 2) } ?: return@runCatching null
+            val r = cx.block
+            cv.drawBitmap(f, null, RectF(r.l * pw, r.t * ph, r.r * pw, r.b * ph), Paint(Paint.FILTER_BITMAP_FLAG))
+        }
+        bmp
+    }.getOrNull()
 
     private fun body(a: InsertAnswer): String = when (a) {
         is InsertAnswer.Scheme -> StudioScheme.toJson(a.scheme).toString()
@@ -1267,13 +1546,19 @@ class InsertWizard(private val h: InsertHost) {
             brief = EditInsert.briefJson(brief).toString(), over = EditInsert.lookOf(brief), dim = brief.dim, dimAll = brief.dimAll,
             history = base?.history.orEmpty())
         b = EditInsert.toBlock(b, cx.block, fw, fh)
+        // the theme travels with the block: its frames and its look follow it
+        cx.theme?.let { th -> b = b.copy(theme = EditThemes.json(th).toString(), over = if (k == "scheme") EditThemes.toLook(th) else b.over) }
         return if (a == null) b else withContent(p, b, a)
     }
 
     private fun withContent(p: EProject, b: EBlock, a: InsertAnswer): EBlock = when (a) {
-        is InsertAnswer.Scheme -> b.copy(kind = "scheme", scheme = a.scheme, text = a.name, file = "", req = "")
-        is InsertAnswer.Anim -> b.copy(kind = EditInsert.KIND, scheme = null, file = AnimRender.saveCode(h.dir(), a.code), text = a.name,
-            loopMs = if (a.loopMs > 0) a.loopMs else brief.loopS * 1000L, req = "")
+        is InsertAnswer.Scheme -> b.copy(kind = "scheme", scheme = a.scheme, text = a.name, file = "", req = "", seg = "")
+        is InsertAnswer.Anim -> {
+            val hd = AnimV11.header(a.code)
+            b.copy(kind = EditInsert.KIND, scheme = null, file = AnimRender.saveCode(h.dir(), a.code), text = a.name,
+                loopMs = if (hd.hasSegments) 0 else if (a.loopMs > 0) a.loopMs else brief.loopS * 1000L, req = "",
+                seg = AnimV11.segString(hd), fps = (if (hd.fps > 0) hd.fps else h.fps()).coerceIn(12, 60))
+        }
     }
 
     /** The answer into a block already on the timeline (pending or being redone): the previous content goes to its history. */
@@ -1314,7 +1599,45 @@ class InsertWizard(private val h: InsertHost) {
         list = withSounds(p, list, made)
         h.commit(list, made.id)
         saveLast()
+        inserted = true
+        Lumen.prefs.edit().remove(PREF_DRAFT).apply()
+        h.stat(InsertStat(made.kind, source, provider, firstPass, rounds, 0, System.currentTimeMillis()))
         if (a is InsertAnswer.Anim) h.animChanged(made.id)
+        close()
+    }
+
+    /** «✨ Где нужны вставки» → this place: the type and the time of the hint, its data. */
+    fun startHint(hn: InsertHint) {
+        start(null)
+        startMs = hn.startMs
+        pickType(hn.type, null)
+        baseDur = max(StudioEdit.MIN_MS, max(hn.endMs - hn.startMs, EditInsert.readMs(EditInsert.screenWords(brief))))
+        if (hn.rows.isNotEmpty()) brief = brief.copy(rows = hn.rows)
+        lum()
+        redraw(false)
+    }
+
+    /** «⚡ Вставить без ИИ»: a native motion block or a scheme of the data, at once. */
+    private fun insertNative() {
+        val p = h.project() ?: return
+        val (k, what) = native() ?: return
+        val base = blockFor(p, target?.let { i -> p.blocks.firstOrNull { it.id == i } }, null).copy(req = "")
+        val made = when (k) {
+            EditMotion.KIND -> {
+                val id = what as String
+                base.copy(kind = EditMotion.KIND, look = id, text = EditMotion.preset(id)?.name.orEmpty(), animIn = "none", animOut = "none",
+                    over = theme(p)?.let { EditThemes.toLook(it) } ?: base.over)
+            }
+            else -> base.copy(kind = "scheme", scheme = what as SScheme, text = what.title, file = "")
+        }
+        val old = target?.let { i -> p.blocks.firstOrNull { it.id == i } }
+        var list = if (old != null) p.blocks.map { if (it.id == old.id) made.copy(history = old.history) else it } else placed(p.blocks, made)
+        list = withSounds(p, list, made)
+        h.commit(list, made.id)
+        saveLast()
+        inserted = true
+        Lumen.prefs.edit().remove(PREF_DRAFT).apply()
+        h.stat(InsertStat(made.kind, "native", "", true, 0, 0, System.currentTimeMillis()))
         close()
     }
 
@@ -1322,9 +1645,16 @@ class InsertWizard(private val h: InsertHost) {
     private fun withSounds(p: EProject, list0: List<EBlock>, b: EBlock): List<EBlock> {
         if (brief.sound.isEmpty() || brief.sound == "none") return list0
         var list = list0
-        val times = when (brief.sound) {
-            "whoosh" -> listOf(b.startMs)
-            else -> b.scheme?.let { StudioEdit.schemeTimes(it, words, b) }?.takeIf { it.isNotEmpty() } ?: listOf(b.startMs)
+        val times = when {
+            brief.sound == "whoosh" -> listOf(b.startMs)
+            b.kind == "scheme" -> b.scheme?.let { StudioEdit.schemeTimes(it, words, b) }?.takeIf { it.isNotEmpty() } ?: listOf(b.startMs)
+            b.kind == EditMotion.KIND -> {
+                val ws = words.filter { it.startMs >= b.startMs && it.startMs < b.endMs }.map { it.text to (it.startMs - b.startMs) / 1000.0 }
+                EditMotion.beats(b.look, EditMotion.content(brief, ws), b.durMs / 1000.0).map { b.startMs + (it * 1000).toLong() }
+            }
+            // an animation: the items of its brief on their words, else its start
+            else -> AnimV11.cues(words, b.startMs, b.endMs, brief.rows.map { it.label to it.main }, emptyList()).filter { it.kind == "item" }
+                .map { b.startMs + (it.t * 1000).toLong() }.ifEmpty { listOf(b.startMs) }
         }
         val name = if (brief.sound == "whoosh") "whoosh" else "pop"
         val file = InsertSfx.file(h.dir(), name) ?: return list0
@@ -1377,27 +1707,82 @@ class InsertWizard(private val h: InsertHost) {
         }
     }
 
+    private var libQuery = ""
+    private var libKind = ""
+
     private fun librarySheet() {
         val lib = library(ui)
-        val saved = lib.list()
         ui.bottomSheet(t("📚 Моя библиотека", "📚 My library")) { dismiss ->
+            val saved = lib.list()
+            val q = edt(ui, t("🔍 Поиск по названию", "🔍 Search by name"), libQuery)
+            add(q, 8)
+            add(choiceChips(ui, listOf("" to t("Все", "All"), "scheme" to t("Схемы", "Schemes"), EditInsert.KIND to t("Анимации", "Animations")), libKind) { v ->
+                libKind = v
+                libQuery = q.text.toString()
+                dismiss()
+                librarySheet()
+            }, 4)
+            q.onEnter {
+                libQuery = it
+                dismiss()
+                librarySheet()
+            }
+            val shown = saved.filter { (libKind.isEmpty() || it.kind == libKind) && (libQuery.isBlank() || it.name.contains(libQuery.trim(), true)) }
             if (saved.isEmpty()) muted(t("Пусто: в шаге «Проверка» нажмите «💾 В библиотеку».", "Empty: tap \"💾 To the library\" on the Check step."))
-            for (s in saved) {
-                row(
-                    btn(ctx, (if (s.kind == "scheme") "🧩 " else "🎞 ") + s.name, style = BtnStyle.TONAL) {
+            else if (shown.isEmpty()) muted(t("Ничего не найдено", "Nothing found"))
+            for (s in shown.take(40)) {
+                val row = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    background = ripple(ctx, roundBg(Palette.CARD, 12f, ctx), Palette.ON_SURFACE)
+                    setPadding(ctx.dp(8), ctx.dp(8), ctx.dp(8), ctx.dp(8))
+                    setOnClickListener {
                         dismiss()
                         fromSaved(s)
-                    },
-                    btn(ctx, t("Имя", "Name"), style = BtnStyle.TEXT) {
-                        dismiss()
-                        ui.prompt(t("Название", "Name"), "", s.name) { n -> lib.rename(s.id, n) }
-                    },
-                    btn(ctx, "🗑", style = BtnStyle.TEXT) {
-                        dismiss()
-                        lib.delete(s.id)
                     }
-                )
+                }
+                val th = lib.thumb(s.id)
+                row.addView(ImageView(ctx).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    if (th != null) setImageBitmap(th) else setImageDrawable(android.graphics.drawable.ColorDrawable(0xFF2A2D33.toInt()))
+                }, LinearLayout.LayoutParams(ctx.dp(72), ctx.dp(72)))
+                row.addView(LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(ctx.dp(10), 0, 0, 0)
+                    addView(text(ctx, (if (s.kind == "scheme") "🧩 " else "🎞 ") + s.name, 15f, bold = true))
+                    addView(text(ctx, (if (s.kind == "scheme") t("схема", "scheme") else t("анимация", "animation")) + " · " +
+                        java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(java.util.Date(s.updated)), 12f, color = Palette.MUTED))
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                row.addView(iconBtn(ctx, "✎") {
+                    dismiss()
+                    ui.prompt(t("Название", "Name"), "", s.name) { n -> lib.rename(s.id, n) }
+                })
+                row.addView(iconBtn(ctx, "🗑") {
+                    dismiss()
+                    lib.delete(s.id)
+                    say(t("Удалено", "Deleted"))
+                })
+                add(row, 6)
             }
+            divider()
+            row(
+                btn(ctx, t("↗ Экспорт пакета", "↗ Export a pack"), style = BtnStyle.TONAL) {
+                    val f = File(ui.cacheDir, "lumen_pack.json")
+                    f.writeText(EditSuggest.pack(lib.list(), EditThemes.list(h.themesDir()), recipes()).toString())
+                    ReportKit.share(ui, f, false, "Lumen pack", "application/json")
+                },
+                btn(ctx, t("📥 Пакет из буфера", "📥 Pack from clipboard"), style = BtnStyle.TEXT) {
+                    val pk = clip()?.let { EditSuggest.unpack(it) } ?: return@btn say(t("В буфере нет пакета lumen.pack", "No lumen.pack in the clipboard"))
+                    val now = System.currentTimeMillis()
+                    pk.inserts.forEach { lib.add(it.kind, it.body, it.name, it.ask, "pack", now) }
+                    pk.themes.forEach { EditThemes.save(h.themesDir(), it) }
+                    pk.recipes.forEach { (n, r) -> saveRecipe(n, r) }
+                    dismiss()
+                    say(t("Добавлено: вставок ${pk.inserts.size}, тем ${pk.themes.size}, рецептов ${pk.recipes.size}", "Added: inserts ${pk.inserts.size}, themes ${pk.themes.size}, recipes ${pk.recipes.size}"))
+                }
+            )
+            muted(t("Пакет — файл lumen.pack v1: вставки, свои темы и рецепты. Откройте его текст и скопируйте, чтобы добавить на другом телефоне.",
+                "A pack is a lumen.pack v1 file: inserts, own themes and recipes. Open its text and copy it to add it on another phone."))
         }
     }
 
@@ -1408,6 +1793,7 @@ class InsertWizard(private val h: InsertHost) {
         if (brief.type == "own" && step == 0) brief = EditInsert.defaults(if (s.kind == "scheme") "steps" else "own", speech(p), brand(p), brief.face).copy(draw = s.kind)
         if (req.isEmpty()) req = newReq()
         request = EditInsert.request(ctx(p), brief, s.kind)
+        source = "library"
         onAnswer(a, false)
     }
 
@@ -1421,6 +1807,7 @@ class InsertWizard(private val h: InsertHost) {
                 if (span == null) baseDur = max(4000L, EditInsert.readMs(EditInsert.screenWords(brief)))
                 if (req.isEmpty()) req = newReq()
                 request = EditInsert.request(ctx(p), brief, EditInsert.KIND)
+                source = "example"
                 onAnswer(InsertAnswer.Anim(e.code, "", e.name, 0), false)
             }, 8)
         }

@@ -50,6 +50,17 @@ class RelayActivity : LumenBase() {
             Relay.lastTaken = text
             toast(t("Ответ передан в Lumen", "Answer handed to Lumen"))
             backToLumen()
+        } else if (AnimV11.detectAll(text).isNotEmpty()) {
+            // an answer for the editor: its waiting block takes it from the clipboard when the editor opens
+            copy(text)
+            val a = AnimV11.detectAll(text).first()
+            val pid = StudioEditStore.root(this).listFiles().orEmpty().firstOrNull { d ->
+                StudioEditStore.load(d)?.blocks?.let { EditInsert.match(it, a) } != null
+            }?.name
+            if (pid != null) {
+                toast(t("Ответ для Редактора — открываю", "An answer for the editor — opening it"))
+                StudioEditorActivity.openProject(this, pid)
+            } else toast(t("Ответ скопирован — откройте Редактор: блок «⏳» возьмёт его сам", "The answer is copied — open the editor: the «⏳» block takes it"))
         } else {
             copy(text)
             toast(t("Lumen сейчас не ждёт ответа ИИ — текст скопирован в буфер", "Lumen is not waiting for an AI answer — the text is copied"))

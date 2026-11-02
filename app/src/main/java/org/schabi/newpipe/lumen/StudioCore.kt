@@ -1386,6 +1386,18 @@ val STUDIO_PROMPTS = linkedMapOf(
     "studio_edit_anim_fix" to "{request}",
     "studio_edit_insert" to "{request}",
     "studio_edit_insert_fix" to "{request}",
+    "studio_edit_translate" to (
+        "Переведи короткие тексты вставок ролика (схемы, надписи, подписи анимаций) на язык: {lang}. " +
+            "Сохраняй смысл и краткость экранного текста, числа, единицы и эмодзи не меняй, имена собственные не переводи. " +
+            "Верни строго JSON с теми же ключами: {\"ключ\":\"перевод\"}.\n\nТексты:\n{json}"
+        ),
+    "studio_theme_from_image" to (
+        "Посмотри на картинку (логотип, скриншот или кадр) и сделай по ней тему вставок ролика в протоколе lumen.theme v1. " +
+            "Цвета возьми из картинки: surface — тёмная или светлая подложка под текст, ink — текст с контрастом не меньше 4.5:1 к surface, " +
+            "accent и accent2 — самые характерные яркие цвета. Шрифт (family: sans|condensed|serif|mono|rounded), скругление (none|s|m|l), " +
+            "подложку (none|glass|semi|solid), темп (calm|normal|drive) подбери по настроению. name — 1–2 слова. " +
+            "Верни строго JSON того же вида, что этот образец:\n{protocol}"
+        ),
     "studio_edit_query" to (
         "Подбери поисковый запрос для бесплатного стокового фото (Openverse: Wikimedia, Flickr) к моменту ролика. " +
             "Что звучит: «{moment}». {wish}\n" +

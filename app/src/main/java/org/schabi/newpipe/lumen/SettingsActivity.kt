@@ -80,6 +80,15 @@ class SettingsActivity : LumenBase() {
             }
             2 -> {
                 backup(c)
+                c.h2(t("Кадры анимаций Редактора", "Animation frames of the editor"))
+                val root = StudioEditStore.root(applicationContext)
+                val size = root.listFiles().orEmpty().sumOf { AnimRender.size(it) }
+                c.muted(t("Занято: ", "Used: ") + (size / 1_048_576) + t(" МБ", " MB") + if (size > 200L * 1_048_576) t(" — много, очистите неиспользуемые", " — a lot, clean the unused ones") else "")
+                c.button(t("🧹 Очистить неиспользуемые кадры", "🧹 Clean the unused frames"), style = BtnStyle.TONAL) {
+                    root.listFiles().orEmpty().forEach { d -> StudioEditStore.load(d)?.let { p -> runCatching { AnimRender.clean(d, p.blocks) } } }
+                    toast(t("Готово", "Done"))
+                    render()
+                }
                 c.h2(t("Статистика AI", "AI usage"))
                 usage(c)
                 c.h2(t("Журнал", "Logs"))

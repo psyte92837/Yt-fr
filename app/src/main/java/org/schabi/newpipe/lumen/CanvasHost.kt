@@ -89,14 +89,23 @@ class CanvasHost(private val act: Activity) {
     }
 
     /** Loads the page with [code] and calls init(data); throws [LayerError] on a broken layer (worker thread). */
-    fun load(code: String, d: JSONObject) {
+    fun load(code: String, d: JSONObject, font: java.io.File? = null) {
         val latch = CountDownLatch(1)
-        val html = WebLayer.page(code, d.optInt("w"), d.optInt("h"))
+        val b64 = font?.takeIf { it.exists() && it.length() < 4_000_000 }?.let { android.util.Base64.encodeToString(it.readBytes(), android.util.Base64.NO_WRAP) }.orEmpty()
+        val html = WebLayer.page(code, d.optInt("w"), d.optInt("h"), b64)
         act.runOnUiThread {
             pageReady = { latch.countDown() }
             view().loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
         }
         if (!latch.await(20, TimeUnit.SECONDS)) throw LayerError(t("страница слоя не загрузилась", "the layer page did not load"))
+        // a brand font is ready before the first frame
+        if (b64.isNotEmpty()) {
+            jsAsync("document.fonts.load('48px LumenBrand').then(function(){window.__font=1});0")()
+            for (i in 0 until 20) {
+                if (jsAsync("window.__font?1:0")() == "1") break
+                Thread.sleep(50)
+            }
+        }
         val r = jsAsync("__lumen.init(" + d.toString() + ")")() ?: throw LayerError(t("WebView не ответил", "The WebView gave no answer"))
         val s = runCatching { org.json.JSONArray("[$r]").getString(0) }.getOrDefault(r)
         if (s != "OK") throw LayerError(s.removePrefix("ERR:").ifBlank { t("слой не запустился", "the layer did not start") })

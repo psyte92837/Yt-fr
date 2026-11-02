@@ -179,12 +179,14 @@ frame:function(t){window.__t=t;__seed(1+Math.round(t*30));
     }
 
     /** The page the WebView loads: the canvas, [PRELUDE], the author's code, [HARNESS]. */
-    fun page(code: String, w: Int, h: Int): String {
+    /** [fontB64] — a brand font (TTF/OTF, base64) as the family "LumenBrand"; "" = none. */
+    fun page(code: String, w: Int, h: Int, fontB64: String = ""): String {
         val safe = code.replace(Regex("</(script)", RegexOption.IGNORE_CASE), "<\\\\/$1")
+        val font = if (fontB64.isEmpty()) "" else "@font-face{font-family:LumenBrand;src:url(data:font/ttf;base64,$fontB64)}"
         return "<!doctype html><html><head><meta charset=\"utf-8\">" +
             "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:\">" +
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-            "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}canvas{width:100%;height:auto;display:block}</style>" +
+            "<style>" + font + "html,body{margin:0;padding:0;background:transparent;overflow:hidden}canvas{width:100%;height:auto;display:block}</style>" +
             "</head><body><canvas id=\"c\" width=\"$w\" height=\"$h\"></canvas>" +
             // everything before the author's code stays on line 1, so the error line numbers are the code's own (+1)
             "<script>" + PRELUDE.replace('\n', ' ') + "</script><script>\n$safe\n</script><script>" + HARNESS.replace('\n', ' ') + "</script></body></html>"

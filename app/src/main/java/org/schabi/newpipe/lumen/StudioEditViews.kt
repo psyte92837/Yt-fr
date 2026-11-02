@@ -486,6 +486,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
         EditMusic.KIND -> 0xFF2E7D32.toInt()
         "text" -> 0xFFB45309.toInt()
         EditInsert.KIND -> 0xFF8E24AA.toInt()
+        EditMotion.KIND -> 0xFF5E35B1.toInt()
+        EditLottie.KIND -> 0xFF00897B.toInt()
         else -> 0xFFC2185B.toInt()
     }
 
@@ -498,6 +500,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
         EditSplit.KIND -> "⊟ " + t("Экран надвое", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") } + if (b.volume <= 0f) " 🔇" else ""
         "text" -> "T " + b.text.replace('\n', ' ')
+        EditMotion.KIND -> "⚡ " + b.text.ifBlank { EditMotion.preset(b.look)?.name.orEmpty() }
+        EditLottie.KIND -> "🌀 " + b.text.ifBlank { "Lottie" }
         else -> b.text
     }
 

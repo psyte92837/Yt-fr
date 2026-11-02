@@ -1011,7 +1011,7 @@ class StudioEditorActivity : LumenBase() {
                 buildList {
                     add(done { select(null) })
                     add(act("✎", t("Изменить", "Edit")) { edit(b) })
-                    if (b.kind != "emoji" && b.kind != EditInsert.KIND) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                    if (b.kind !in setOf("emoji", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
                     if (b.req.isNotEmpty()) {
                         add(act("⧉", t("Запрос ещё раз", "Request again")) { copyRequestOf(b) })
                         add(act("📥", t("Вставить ответ", "Paste answer")) { pasteAnswerTo(b) })
@@ -2318,6 +2318,8 @@ class StudioEditorActivity : LumenBase() {
         else b.text.ifBlank { t("Анимация", "Animation") })
         EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") }
+        EditMotion.KIND -> "⚡ " + b.text.ifBlank { EditMotion.preset(b.look)?.name ?: t("Анимация", "Animation") }
+        EditLottie.KIND -> "🌀 " + b.text.ifBlank { "Lottie" }
         else -> b.text + " " + t("эмодзи", "emoji")
     }
 

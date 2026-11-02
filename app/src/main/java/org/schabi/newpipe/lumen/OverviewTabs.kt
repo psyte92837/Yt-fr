@@ -239,7 +239,29 @@ fun ProjectActivity.channelsTab(c: Col) {
     val known = ChannelStore.all(project.id).values.filter { it.error.isEmpty() }.sortedByDescending { it.subscribers }
     if (known.isNotEmpty()) {
         c.h2(t("Каналы видео проекта", "Channels of project videos") + " (${known.size})")
-        known.take(50).forEach { ch ->
+        // live filter by name: only the list below is rebuilt, the field keeps focus
+        val filter = c.edit(t("Найти канал по названию", "Find a channel by name"), ui["chFilter"] as? String ?: "")
+        filter.onEnter { }
+        val box = Col(this, 0)
+        c.add(box.root, 0)
+        fun fill() {
+            box.clear()
+            val q = SearchIndex.tokens(filter.text.toString())
+            val shown = known.filter { ch -> q.isEmpty() || SearchIndex.norm(ch.name).let { n -> q.all { n.contains(it) } } }
+            if (shown.isEmpty()) box.muted(t("Нет каналов под запрос.", "No channels match."))
+            if (shown.size > 50) box.muted(t("Показаны 50 из ${shown.size} — уточните запрос.", "Showing 50 of ${shown.size} — refine the query."))
+            shown.take(50).forEach { ch -> channelCard(box, ch) }
+        }
+        filter.addTextChangedListener(SimpleWatcher {
+            ui["chFilter"] = it
+            fill()
+        })
+        fill()
+    }
+}
+
+/** One channel of the project videos: name, stats, how many project videos; tap — the channel screen. */
+private fun ProjectActivity.channelCard(c: Col, ch: ChannelData) {
             val card = c.card {
                 add(text(ctx, ch.name + if (ch.verified) " ✓" else "", 14f, bold = true), 0)
                 muted(ChannelStats.line(ch))
@@ -247,8 +269,6 @@ fun ProjectActivity.channelsTab(c: Col) {
                 muted(t("видео в проекте: ", "videos in project: ") + inProject + t(" · ссылок: ", " · links: ") + ch.links.size + t(" · плейлистов: ", " · playlists: ") + ch.playlists.size)
             }
             card.setOnClickListener { ChannelActivity.open(this, project.id, ch.url) }
-        }
-    }
 }
 
 /** Report "Pains and cases of people": AI part with checked quotes, or keyword signals without AI. */

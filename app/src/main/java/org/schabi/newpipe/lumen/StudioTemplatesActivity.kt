@@ -264,13 +264,22 @@ class StudioTemplatesActivity : LumenBase() {
     private fun currentJson(id: String): String? = if (motion) store.motions().firstOrNull { it.id == id }?.json else store.edits().firstOrNull { it.id == id }?.json
 
     /** Edit by a prompt: the AI sends a JSON Patch (or the whole template). */
-    private fun change(id: String, askText: String) = run(t("AI меняет шаблон…", "AI is changing the template…"), {
-        val cur = currentJson(id) ?: error("no template")
-        val reply = ai("studio_tpl_patch", Prompts.fill("studio_tpl_patch", mapOf("kind" to "lumen.$kind", "ask" to askText, "data" to cur)), 3000)
-        applyReply(id, cur, reply)
-    }) { done ->
-        toast(t("Изменено: $done", "Changed: $done"))
-        if (motion) store.motions().firstOrNull { it.id == id }?.let { preview(it) }
+    private fun change(id: String, askText: String) {
+        val before = currentJson(id)
+        val wasMotion = motion
+        run(t("AI меняет шаблон…", "AI is changing the template…"), {
+            val cur = currentJson(id) ?: error("no template")
+            val reply = ai("studio_tpl_patch", Prompts.fill("studio_tpl_patch", mapOf("kind" to "lumen.$kind", "ask" to askText, "data" to cur)), 3000)
+            applyReply(id, cur, reply)
+        }) { done ->
+            // the AI edit can be taken back: the template as it was before
+            if (before != null) snack(t("Изменено: $done", "Changed: $done"), t("Вернуть как было", "Undo")) {
+                runCatching { checkAndSave(before, id, false, wasMotion) }.onFailure { err(it) }
+                previews.remove(id)
+                render()
+            } else toast(t("Изменено: $done", "Changed: $done"))
+            if (motion) store.motions().firstOrNull { it.id == id }?.let { preview(it) }
+        }
     }
 
     /** A patch reply applied to [cur], or a whole template; then checked and saved as [id]. */

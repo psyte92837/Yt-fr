@@ -326,9 +326,17 @@ class StudioMixActivity : LumenBase() {
     private fun shuffle() {
         val ready = readyClips()
         if (ready.isEmpty()) return
-        Prefs.seed = System.nanoTime()
-        saveItems(StudioMix.mix(ready.map { it.id to it.lenMs }, Prefs.pieceMs, Prefs.seed))
-        render()
+        val before = items
+        val oldSeed = Prefs.seed
+        undoable(t("Раскадровка перемешана", "Storyboard shuffled"), apply = {
+            Prefs.seed = System.nanoTime()
+            saveItems(StudioMix.mix(ready.map { it.id to it.lenMs }, Prefs.pieceMs, Prefs.seed))
+            render()
+        }, revert = {
+            Prefs.seed = oldSeed
+            saveItems(before)
+            render()
+        })
     }
 
     // ---------- storyboard ----------
@@ -351,8 +359,14 @@ class StudioMixActivity : LumenBase() {
             btn(ctx, t("✕ Удалить отмеченные", "✕ Delete ticked"), style = BtnStyle.TEXT) {
                 if (items.none { it.marked }) toast(t("Ничего не отмечено", "Nothing is ticked"))
                 else {
-                    saveItems(StudioMix.removeMarked(items))
-                    render()
+                    val before = items
+                    undoable(t("Удалено кадров: ${items.count { it.marked }}", "Frames deleted: ${items.count { it.marked }}"), apply = {
+                        saveItems(StudioMix.removeMarked(items))
+                        render()
+                    }, revert = {
+                        saveItems(before)
+                        render()
+                    })
                 }
             }
         )
@@ -445,7 +459,7 @@ class StudioMixActivity : LumenBase() {
                 background = roundBg(0x99000000.toInt(), 12f, ctx)
                 contentDescription = t("Удалить", "Delete")
             }
-            root.addView(del, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.START).apply { setMargins(dp(4), dp(4), 0, 0) })
+            root.addView(del, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.TOP or Gravity.START).apply { setMargins(dp(2), dp(2), 0, 0) })
             val h = Tile(root, image, label, mark, del)
             root.setOnClickListener {
                 val p = h.bindingAdapterPosition
@@ -457,11 +471,16 @@ class StudioMixActivity : LumenBase() {
             del.setOnClickListener {
                 val p = h.bindingAdapterPosition
                 if (p < 0 || busy.isNotEmpty()) return@setOnClickListener
+                val before = items
                 saveItems(items.filterIndexed { i, _ -> i != p })
                 notifyItemRemoved(p)
                 notifyItemRangeChanged(p, items.size - p)
                 updateInfo()
                 if (items.isEmpty()) render()
+                this@StudioMixActivity.snack(t("Кадр удалён", "Frame deleted"), t("Отменить", "Undo")) {
+                    saveItems(before)
+                    render()
+                }
             }
             return h
         }

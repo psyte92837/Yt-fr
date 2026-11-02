@@ -220,17 +220,54 @@ class ProjectActivity : LumenBase() {
     }
 
     private fun projectMenu() {
-        val items = arrayOf(t("Импорт видео", "Import videos"), t("Фильтры поиска проекта", "Project search filters"), t("🗺 Карта знаний", "🗺 Knowledge map"))
-        AlertDialog.Builder(this).setTitle(project.name).setItems(items) { _, i ->
-            when (i) {
-                0 -> importDialog()
-                2 -> KnowledgeMapActivity.open(this, project.id)
-                else -> {
-                    tab = "settings"
-                    render()
-                }
-            }
-        }.show()
+        val acts = listOf<Pair<String, () -> Unit>>(
+            t("Импорт видео (канал, плейлист)", "Import videos (channel, playlist)") to { importDialog() },
+            t("Переименовать", "Rename") to { renameProject() },
+            t("Дублировать", "Duplicate") to {
+                Store.duplicate(project.id)?.let { toast(t("Копия: ${it.name}", "Copy: ${it.name}")) }
+            },
+            (if (project.archived) t("Вернуть из архива", "Unarchive") else t("В архив", "Archive")) to {
+                project.archived = !project.archived
+                Store.save(project)
+                Monitoring.apply(this, project)
+                toast(if (project.archived) t("Проект в архиве", "Project archived") else t("Проект возвращён", "Project unarchived"))
+                render()
+            },
+            t("Фильтры поиска и мониторинг", "Search filters and monitoring") to {
+                tab = "settings"
+                render()
+            },
+            t("Удалить (в корзину)", "Delete (to trash)") to { deleteProject() }
+        )
+        AlertDialog.Builder(this).setTitle(project.name).setItems(acts.map { it.first }.toTypedArray()) { _, i -> acts[i].second() }.show()
+    }
+
+    private fun renameProject() {
+        prompt(t("Название проекта", "Project name"), t("Название", "Name"), project.name.ifBlank { project.phrase }) { s ->
+            val name = s.trim()
+            if (name.isEmpty()) return@prompt
+            val old = project.name
+            undoable(t("Переименовано", "Renamed"), apply = {
+                project.name = name
+                Store.save(project)
+                render()
+            }, revert = {
+                project.name = old
+                Store.save(project)
+                render()
+            })
+        }
+    }
+
+    private fun deleteProject() {
+        confirm(t("Удалить проект?", "Delete project?"), t("Проект попадёт в корзину на главной: ${TrashLogic.KEEP_DAYS} дней его можно восстановить.",
+            "The project goes to the trash on the home screen: it can be restored for ${TrashLogic.KEEP_DAYS} days."), t("Удалить", "Delete")) {
+            Monitoring.cancel(this, project.id)
+            Store.trash(project.id)
+            android.widget.Toast.makeText(this, t("Проект в корзине (главная → ⋮ → Корзина)", "Project in the trash (home → ⋮ → Trash)"),
+                android.widget.Toast.LENGTH_LONG).show()
+            finish()
+        }
     }
 
     // ------------------------------------------------------------------ Videos
@@ -655,7 +692,7 @@ class ProjectActivity : LumenBase() {
         row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
         if (v.url.isNotBlank()) {
             row.setPadding(dp(4), dp(8), 0, dp(8))
-            row.addView(mediaBtn(this, v.url, v.title), LinearLayout.LayoutParams(dp(44), dp(48)))
+            row.addView(mediaBtn(this, v.url, v.title), LinearLayout.LayoutParams(dp(48), dp(48)))
         }
         row.setOnClickListener {
             startActivity(Intent(this, VideoActivity::class.java).putExtra("pid", project.id).putExtra("vid", v.id))
@@ -904,7 +941,7 @@ class ProjectActivity : LumenBase() {
             bgTask(label, work, {
                 busy = ""
                 render()
-                err(it)
+                err(it) { aiRun(label, estimateTokens, work) }
             }) { r ->
                 busy = ""
                 render()
@@ -1352,14 +1389,7 @@ class ProjectActivity : LumenBase() {
             finish()
         }
         c.button(t("Удалить проект", "Delete project"), style = BtnStyle.TEXT) {
-            confirm(t("Удалить проект?", "Delete project?"), t("Проект попадёт в корзину на главной: ${TrashLogic.KEEP_DAYS} дней его можно восстановить.",
-                "The project goes to the trash on the home screen: it can be restored for ${TrashLogic.KEEP_DAYS} days."), t("Удалить", "Delete")) {
-                Monitoring.cancel(this, project.id)
-                Store.trash(project.id)
-                android.widget.Toast.makeText(this, t("Проект в корзине (главная → ⋮ → Корзина)", "Project in the trash (home → ⋮ → Trash)"),
-                    android.widget.Toast.LENGTH_LONG).show()
-                finish()
-            }
+            deleteProject()
         }
     }
 

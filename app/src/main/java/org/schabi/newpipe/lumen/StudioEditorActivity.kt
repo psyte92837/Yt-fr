@@ -552,6 +552,7 @@ class StudioEditorActivity : LumenBase() {
         chrome = listOfNotNull(tlBox, bottom, topBarView)
         stage = st
         timeline = tl
+        timelineA11y(tl)
         texture = tv
         toolsRow = row
         toolsLine = ctxLine
@@ -1412,6 +1413,42 @@ class StudioEditorActivity : LumenBase() {
     }
 
     /** Moves to [ms]; while the finger still moves ([final] false) the player seeks at most every 40 ms. */
+    /**
+     * TalkBack on the timeline canvas: a spoken summary and actions instead of drags
+     * (±1 s, previous/next seam, select the piece under the cursor, the list of blocks).
+     */
+    private fun timelineA11y(tl: View) {
+        val ids = intArrayOf(0x7f0f0a01, 0x7f0f0a02, 0x7f0f0a03, 0x7f0f0a04, 0x7f0f0a05, 0x7f0f0a06)
+        tl.isFocusable = true
+        tl.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        tl.accessibilityDelegate = object : View.AccessibilityDelegate() {
+            override fun onInitializeAccessibilityNodeInfo(host: View, info: android.view.accessibility.AccessibilityNodeInfo) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.contentDescription = t("Таймлайн", "Timeline") + ": " + StudioEdit.clock(curMs) + t(" из ", " of ") + StudioEdit.clock(total) +
+                    t(", кусков ", ", pieces ") + maxOf(1, clips.size) + t(", блоков ", ", blocks ") + blocks.size
+                val labels = listOf(t("Назад на секунду", "Back one second"), t("Вперёд на секунду", "Forward one second"),
+                    t("К предыдущему шву", "To the previous seam"), t("К следующему шву", "To the next seam"),
+                    t("Выбрать кусок под курсором", "Select the piece under the cursor"), t("Список блоков", "List of blocks"))
+                ids.forEachIndexed { i, id -> info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(id, labels[i])) }
+            }
+
+            override fun performAccessibilityAction(host: View, action: Int, args: android.os.Bundle?): Boolean {
+                val starts = if (clips.size > 1) EditTrack.starts(clips).toList() else emptyList()
+                when (action) {
+                    ids[0] -> seekTo((curMs - 1000).coerceAtLeast(0))
+                    ids[1] -> seekTo((curMs + 1000).coerceAtMost(total))
+                    ids[2] -> seekTo(starts.lastOrNull { it < curMs - 50 } ?: 0L)
+                    ids[3] -> seekTo(starts.firstOrNull { it > curMs + 50 } ?: total)
+                    ids[4] -> if (clips.isNotEmpty()) selectClip(maxOf(0, starts.indexOfLast { it <= curMs }))
+                    ids[5] -> blocksSheet()
+                    else -> return super.performAccessibilityAction(host, action, args)
+                }
+                host.announceForAccessibility(StudioEdit.clock(curMs))
+                return true
+            }
+        }
+    }
+
     private fun seekTo(ms: Long, final: Boolean = true, fromTimeline: Boolean = false) {
         curMs = ms.coerceIn(0, total)
         sync(fromTimeline)

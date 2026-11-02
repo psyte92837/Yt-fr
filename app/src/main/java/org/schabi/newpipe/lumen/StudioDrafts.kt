@@ -91,6 +91,20 @@ object StudioDrafts {
         File(root, "${d.task}/${d.id}").deleteRecursively()
     }
 
+    /** Moves the draft aside (outside the task folder, so lists skip it); [unhide] brings it back, [purge] erases it. */
+    fun hide(root: File, d: SDraft): Boolean {
+        val dst = File(root, ".undo/${d.task}_${d.id}")
+        dst.deleteRecursively()
+        dst.parentFile?.mkdirs()
+        return File(root, "${d.task}/${d.id}").renameTo(dst)
+    }
+
+    fun unhide(root: File, d: SDraft): Boolean = File(root, ".undo/${d.task}_${d.id}").renameTo(File(root, "${d.task}/${d.id}"))
+
+    fun purge(root: File, d: SDraft) {
+        File(root, ".undo/${d.task}_${d.id}").deleteRecursively()
+    }
+
     fun deleteAll(root: File, task: String) {
         File(root, task).deleteRecursively()
     }

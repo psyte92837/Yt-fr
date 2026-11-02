@@ -1352,7 +1352,10 @@ abstract class LumenBase : Activity() {
     }
 
     /** Shows an error, logs it, and offers to share a developer report. */
-    fun err(t: Throwable) {
+    fun err(t: Throwable) = err(t, null)
+
+    /** Shows an error with "Retry" ([retry] repeats the failed action), a report and the last AI answer. */
+    fun err(t: Throwable, retry: (() -> Unit)?) {
         if (t is java.util.concurrent.CancellationException) {
             if (!isFinishing && !isDestroyed) toast(t("Задача остановлена", "Task stopped"))
             return
@@ -1361,7 +1364,8 @@ abstract class LumenBase : Activity() {
         L.e("ui", "${javaClass.simpleName}: $msg", t)
         // the screen may be gone by the time a background job fails: no window to attach a dialog to
         if (isFinishing || isDestroyed) return
-        AlertDialog.Builder(this).setTitle(t("Ошибка", "Error")).setMessage(msg).setPositiveButton("OK", null)
+        AlertDialog.Builder(this).setTitle(t("Ошибка", "Error")).setMessage(msg)
+            .also { b -> if (retry != null) b.setPositiveButton(t("Повторить", "Retry")) { _, _ -> retry() } else b.setPositiveButton("OK", null) }
             .setNeutralButton(t("Отчёт", "Report")) { _, _ ->
                 shareText("Lumen report", L.report(this, t, "screen: ${javaClass.simpleName}", errorsOnly = true, maxLines = 150))
             }

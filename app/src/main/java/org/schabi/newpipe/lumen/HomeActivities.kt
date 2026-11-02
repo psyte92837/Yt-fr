@@ -344,8 +344,6 @@ class LumenActivity : LumenBase() {
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
         })
         items.add(t("⚙ Задачи", "⚙ Tasks") + TaskHub.count(this).let { if (it > 0) " ($it)" else "" } to { TasksActivity.open(this) })
-        items.add("🎬 Lumen Studio" to { StudioActivity.open(this) })
-        items.add(t("🤖 Мои ТГ боты", "🤖 My Telegram bots") to { BotsActivity.open(this) })
         items.add(t("Справка и о проекте", "Help and about") to { HelpActivity.open(this, "about") })
         items.add(t("Журнал и отчёт об ошибке", "Logs and bug report") to {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))
@@ -435,7 +433,8 @@ class LumenActivity : LumenBase() {
             t("Открыть", "Open"), t("🗺 Карта знаний", "🗺 Knowledge map"), t("Дублировать", "Duplicate"),
             if (p.archived) t("Вернуть из архива", "Unarchive") else t("В архив", "Archive"),
             t("Удалить", "Delete"),
-            if (pinned) t("Открепить", "Unpin") else t("📌 Закрепить сверху", "📌 Pin to top")
+            if (pinned) t("Открепить", "Unpin") else t("📌 Закрепить сверху", "📌 Pin to top"),
+            t("Переименовать", "Rename")
         )
         AlertDialog.Builder(this).setTitle(p.name).setItems(items) { _, which ->
             when (which) {
@@ -461,6 +460,13 @@ class LumenActivity : LumenBase() {
                 }
                 4 -> trashProject(p)
                 5 -> togglePin(p.id)
+                6 -> prompt(t("Название проекта", "Project name"), t("Название", "Name"), p.name.ifBlank { p.phrase }) { name ->
+                    if (name.isNotBlank()) {
+                        p.name = name.trim()
+                        Store.save(p)
+                        render()
+                    }
+                }
             }
         }.show()
     }

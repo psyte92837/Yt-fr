@@ -578,6 +578,11 @@ class StudioTplStore(private val dir: java.io.File) {
     fun saveMotion(t: MotionTpl) = java.io.File(sub("motion"), t.id + ".json").writeText(JSONObject(t.json).put("id", t.id).toString(2))
     fun saveEdit(t: EditTpl) = java.io.File(sub("edit"), t.id + ".json").writeText(JSONObject(t.json).put("id", t.id).toString(2))
     fun delete(kind: String, id: String) = java.io.File(sub(kind), "$id.json").delete()
+
+    /** The stored text of a template (to put it back after a delete). */
+    fun raw(kind: String, id: String): String? = java.io.File(sub(kind), "$id.json").takeIf { it.exists() }?.readText()
+
+    fun restore(kind: String, id: String, text: String) = java.io.File(sub(kind), "$id.json").writeText(text)
 }
 
 /** A template from a video: what the AI gets about it and how its answer (a way of editing + motions) is split. */

@@ -191,3 +191,52 @@ object SelectionLogic {
         return (current - v) + v.filter { it !in current }
     }
 }
+
+/** Settings file: every preference of lumen_prefs except secrets, typed, as JSON (protocol lumen.settings v1). */
+object PrefsIo {
+    const val PROTOCOL = "lumen.settings"
+    private val secret = Regex("(?i)(key|token|secret|password|pin|vault|crash_|_at$|^vl_|pending|last_)")
+
+    fun keepKey(k: String) = !secret.containsMatchIn(k)
+
+    fun export(all: Map<String, *>): String {
+        val o = org.json.JSONObject().put("protocol", PROTOCOL).put("v", 1)
+        val v = org.json.JSONObject()
+        for ((k, x) in all.toSortedMap()) {
+            if (!keepKey(k)) continue
+            val typed = when (x) {
+                is Boolean -> org.json.JSONObject().put("b", x)
+                is Int -> org.json.JSONObject().put("i", x)
+                is Long -> org.json.JSONObject().put("l", x)
+                is Float -> org.json.JSONObject().put("f", x.toDouble())
+                is String -> org.json.JSONObject().put("s", x)
+                is Set<*> -> org.json.JSONObject().put("ss", org.json.JSONArray(x.map { it.toString() }))
+                else -> null
+            } ?: continue
+            v.put(k, typed)
+        }
+        return o.put("values", v).toString(1)
+    }
+
+    /** Parsed values (key → Boolean/Int/Long/Float/String/Set<String>); null if the file is not a settings file. */
+    fun parse(text: String): Map<String, Any>? {
+        val o = runCatching { org.json.JSONObject(text) }.getOrNull() ?: return null
+        if (o.optString("protocol") != PROTOCOL) return null
+        val v = o.optJSONObject("values") ?: return null
+        val out = LinkedHashMap<String, Any>()
+        for (k in v.keys()) {
+            if (!keepKey(k)) continue
+            val x = v.optJSONObject(k) ?: continue
+            out[k] = when {
+                x.has("b") -> x.getBoolean("b")
+                x.has("i") -> x.getInt("i")
+                x.has("l") -> x.getLong("l")
+                x.has("f") -> x.getDouble("f").toFloat()
+                x.has("s") -> x.getString("s")
+                x.has("ss") -> x.getJSONArray("ss").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
+                else -> continue
+            }
+        }
+        return out
+    }
+}

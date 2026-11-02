@@ -113,4 +113,22 @@ class UxLogicTest {
         assertEquals(setOf("9"), SelectionLogic.none(visible, setOf("1", "9")))
         assertEquals(setOf("2", "3", "9"), SelectionLogic.invert(visible, setOf("1", "9")))
     }
+
+    @Test
+    fun settingsFileSkipsSecretsAndKeepsTypes() {
+        val prefs = mapOf<String, Any>("lang" to "en", "text_scale" to 110, "seen" to 5L, "ratio" to 0.5f, "dark" to true,
+            "tags" to setOf("a", "b"), "api_key_gemini" to "SECRET", "bot_token" to "123:abc", "crash_seen_at" to 1L)
+        val text = PrefsIo.export(prefs)
+        assertFalse(text.contains("SECRET") || text.contains("123:abc"))
+        val back = PrefsIo.parse(text)!!
+        assertEquals("en", back["lang"])
+        assertEquals(110, back["text_scale"])
+        assertEquals(5L, back["seen"])
+        assertEquals(0.5f, back["ratio"])
+        assertEquals(true, back["dark"])
+        assertEquals(setOf("a", "b"), back["tags"])
+        assertFalse(back.containsKey("crash_seen_at"))
+        assertNull(PrefsIo.parse("{\"protocol\":\"other\"}"))
+        assertNull(PrefsIo.parse("not json"))
+    }
 }

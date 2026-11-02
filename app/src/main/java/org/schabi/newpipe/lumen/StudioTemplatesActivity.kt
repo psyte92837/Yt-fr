@@ -461,9 +461,16 @@ class StudioTemplatesActivity : LumenBase() {
         toast(t("Скопировано", "Copied"))
     }
 
-    private fun remove(id: String, name: String) = confirm(t("Удалить «$name»?", "Delete \"$name\"?"), "", t("Удалить", "Delete")) {
-        store.delete(kind, id)
-        previews.remove(id)
-        render()
+    private fun remove(id: String, name: String) {
+        val k = kind
+        val text = store.raw(k, id) ?: return
+        undoable(t("Шаблон «$name» удалён", "Template \"$name\" deleted"), apply = {
+            store.delete(k, id)
+            previews.remove(id)
+            render()
+        }, revert = {
+            store.restore(k, id, text)
+            render()
+        })
     }
 }

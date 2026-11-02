@@ -509,6 +509,21 @@ class SettingsActivity : LumenBase() {
                 backupToTree(Uri.parse(f))
             }
         }
+        c.h2(t("Настройки и промпты", "Settings and prompts"))
+        c.muted(t("Отдельный файл только с настройками и вашими промптами — перенести их на другой телефон. Ключей в нём нет.",
+            "A separate file with settings and your prompts only — to move them to another phone. No keys inside."))
+        c.row(
+            btn(this, t("⬇ Экспорт", "⬇ Export"), style = BtnStyle.TONAL) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json")
+                    .putExtra(Intent.EXTRA_TITLE, "lumen-settings-${Fmt.isoDay(System.currentTimeMillis())}.json"), REQ_PREFS_OUT)
+            },
+            btn(this, t("Импорт…", "Import…"), style = BtnStyle.OUTLINED) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_PREFS_IN)
+            }
+        )
+        c.h2(t("Восстановление", "Restore"))
         c.button(t("Восстановить из копии…", "Restore from backup…"), style = BtnStyle.OUTLINED) {
             confirm(t("Восстановить?", "Restore?"), t("Файлы из копии заменят совпадающие данные.", "Files from the backup will overwrite matching data.")) {
                 @Suppress("DEPRECATION")
@@ -536,6 +551,42 @@ class SettingsActivity : LumenBase() {
         val uri = data?.data
         if (resultCode != RESULT_OK || uri == null) return
         when (requestCode) {
+            REQ_PREFS_OUT -> Lumen.async({
+                contentResolver.openOutputStream(uri)?.use { it.write(PrefsIo.export(Lumen.prefs.all).toByteArray()) }
+            }, ::err) { toast(t("Настройки сохранены", "Settings saved")) }
+            REQ_PREFS_IN -> Lumen.async({
+                val text = contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }.orEmpty()
+                PrefsIo.parse(text) ?: throw IllegalArgumentException(t("Это не файл настроек Lumen", "This is not a Lumen settings file"))
+            }, ::err) { values ->
+                confirm(t("Импортировать настройки?", "Import the settings?"),
+                    t("Параметров: ${values.size}. Совпадающие заменятся; ключи AI не меняются.", "Values: ${values.size}. Matching ones are replaced; AI keys stay."),
+                    t("Импорт", "Import")) {
+                    val before = PrefsIo.parse(PrefsIo.export(Lumen.prefs.all)).orEmpty()
+                    fun apply(m: Map<String, Any>) {
+                        val e = Lumen.prefs.edit()
+                        m.forEach { (k, v) ->
+                            @Suppress("UNCHECKED_CAST")
+                            when (v) {
+                                is Boolean -> e.putBoolean(k, v)
+                                is Int -> e.putInt(k, v)
+                                is Long -> e.putLong(k, v)
+                                is Float -> e.putFloat(k, v)
+                                is String -> e.putString(k, v)
+                                is Set<*> -> e.putStringSet(k, v as Set<String>)
+                            }
+                        }
+                        e.apply()
+                    }
+                    undoable(t("Настройки импортированы", "Settings imported"), apply = { apply(values); render() },
+                        revert = {
+                            val e = Lumen.prefs.edit()
+                            values.keys.filter { it !in before }.forEach { e.remove(it) }
+                            e.apply()
+                            apply(before)
+                            render()
+                        })
+                }
+            }
             REQ_LOG_FILE -> Lumen.async({ contentResolver.openOutputStream(uri)?.use { it.write(L.report(this, maxLines = 2000).toByteArray()) } }, ::err) {
                 toast(t("Сохранено", "Saved"))
             }
@@ -766,5 +817,7 @@ class SettingsActivity : LumenBase() {
         const val REQ_BACKUP_FILE = 52
         const val REQ_RESTORE = 53
         const val REQ_LOG_FILE = 54
+        const val REQ_PREFS_OUT = 55
+        const val REQ_PREFS_IN = 56
     }
 }

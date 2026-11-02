@@ -414,12 +414,14 @@ class StudioActivity : LumenBase() {
                 row(
                     btn(ctx, t("Открыть", "Open"), style = BtnStyle.TONAL) { dismiss(); openDraft(d) },
                     btn(ctx, t("Удалить", "Delete"), style = BtnStyle.TEXT) {
-                        confirm(t("Удалить черновик?", "Delete the draft?"), d.title, t("Удалить", "Delete")) {
-                            StudioDrafts.delete(draftsDir, d)
-                            dismiss()
+                        dismiss()
+                        undoable(t("Черновик удалён", "Draft deleted"), apply = {
+                            if (!StudioDrafts.hide(draftsDir, d)) StudioDrafts.delete(draftsDir, d)
                             render()
-                            draftsSheet()
-                        }
+                        }, revert = {
+                            StudioDrafts.unhide(draftsDir, d)
+                            render()
+                        }, commit = { StudioDrafts.purge(draftsDir, d) })
                     }
                 )
             }

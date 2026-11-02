@@ -892,7 +892,7 @@ class StudioEditorActivity : LumenBase() {
                 )
             }
             b != null && b.kind == EditMusic.KIND -> {
-                line = "🎵 " + b.text.ifBlank { t("Музыка", "Music") } + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
+                line = blockName(b) + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
                 listOf(
                     done { select(null) },
                     act(if (b.volume > 0f) "🔊" else "🔇", t("Громкость", "Volume")) { musicSheet(b) },
@@ -963,6 +963,7 @@ class StudioEditorActivity : LumenBase() {
                 listOf(
                     back(),
                     act("🎵", t("Музыка", "Music")) { pickAudio(null) },
+                    act("🎙", t("Озвучка", "Voice-over")) { voiceSheet() },
                     act("🔊", t("Громкость видео", "Video volume")) { allVolumeSheet() },
                     act(if (muted) "🔈" else "🔇", if (muted) t("Вернуть звук", "Unmute video") else t("Без звука", "Mute video"), on = muted) {
                         commitClips(clips.map { if (it.isHold) it else it.copy(volume = if (muted) 1f else 0f) })
@@ -1244,7 +1245,8 @@ class StudioEditorActivity : LumenBase() {
     private fun syncSide(sp: EBlock?) {
         // the main video quieter during a split screen (above 100 % is heard in the export only)
         player?.let { ex ->
-            val v = (EditSplit.mainVolume(blocks, curMs, clips.getOrNull(curClip)?.volume ?: 1f) * EditMusic.mainVolume(blocks, curMs)).coerceIn(0f, 1f)
+            val v = if (recording && recMute) 0f
+            else (EditSplit.mainVolume(blocks, curMs, clips.getOrNull(curClip)?.volume ?: 1f) * EditMusic.mainVolume(blocks, curMs)).coerceIn(0f, 1f)
             if (ex.volume != v) ex.volume = v
         }
         if (sp == null) {
@@ -2034,7 +2036,7 @@ class StudioEditorActivity : LumenBase() {
         "image" -> "🖼 " + (b.ask.ifBlank { t("Картинка", "Picture") })
         "text" -> "T " + b.text.replace('\n', ' ').take(40)
         EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
-        EditMusic.KIND -> "🎵 " + b.text.ifBlank { t("Музыка", "Music") }
+        EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") }
         else -> b.text + " " + t("эмодзи", "emoji")
     }
 
@@ -2758,6 +2760,87 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private var clipAtEnd = true
+    // voice-over: the microphone records while the video plays from the playhead
+    private var recorder: StudioRecorder? = null
+    private var recording = false
+    private var recMute = true
+
+    private fun voiceSheet() {
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            runCatching { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 3) }
+            return toast(t("Разрешите микрофон и нажмите «🎙 Озвучка» ещё раз", "Allow the microphone and tap \"🎙 Voice-over\" again"))
+        }
+        if (project == null) return
+        pause()
+        val at0 = curMs
+        var keep = true
+        recMute = Lumen.prefs.getBoolean("studio_rec_mute", true)
+        bottomSheet(t("🎙 Озвучка", "🎙 Voice-over"), onDismiss = { finishVoice(at0, keep) }) { dismiss ->
+            muted(t("Видео играет с ${StudioEdit.clock(at0)}, вы говорите в микрофон. «⏹ Готово» — запись встанет звуковой дорожкой с этого места. Лучше в наушниках.",
+                "The video plays from ${StudioEdit.clock(at0)} while you speak. \"⏹ Done\" puts the recording in as a sound track from there. Headphones work best."))
+            check(t("Без звука видео во время записи", "Mute the video while recording"), recMute) {
+                recMute = it
+                Lumen.prefs.edit().putBoolean("studio_rec_mute", it).apply()
+            }
+            val level = text(ctx, "", 18f, bold = true, color = Palette.ACCENT).apply { typeface = Typeface.MONOSPACE }
+            add(level, 12)
+            lateinit var go: android.widget.Button
+            go = btn(ctx, t("● Начать запись", "● Start recording"), primary = true) {
+                if (recorder == null) {
+                    val rec = StudioRecorder { lvl, ms ->
+                        val bars = (lvl.coerceIn(0f, 1f) * 12).roundToInt()
+                        level.text = "● " + StudioEdit.clock(ms) + "  " + "▮".repeat(bars) + "▯".repeat(12 - bars)
+                    }
+                    try {
+                        rec.start()
+                    } catch (e: Exception) {
+                        return@btn toast(t("Микрофон недоступен: ", "The microphone is unavailable: ") + e.message)
+                    }
+                    recorder = rec
+                    recording = true
+                    play()
+                    go.text = t("⏹ Готово", "⏹ Done")
+                } else dismiss()
+            }
+            add(go, 8)
+            button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) {
+                keep = false
+                dismiss()
+            }
+        }
+    }
+
+    /** The end of a voice-over: the recording as a sound block from [at] (or thrown away). */
+    private fun finishVoice(at: Long, keep: Boolean) {
+        val rec = recorder ?: return
+        recorder = null
+        recording = false
+        val pcm = runCatching { rec.stop() }.getOrDefault(ShortArray(0))
+        pause()
+        val rate = rec.rate
+        if (!keep || pcm.size < rate / 4) return
+        val p = project ?: return
+        val d = dir
+        Lumen.async({
+            val name = "img/r${System.currentTimeMillis()}.wav"
+            val f = File(d, name).apply { parentFile?.mkdirs() }
+            val data = java.nio.ByteBuffer.allocate(pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            data.asShortBuffer().put(pcm)
+            f.outputStream().use {
+                it.write(Studio.wavHeader(pcm.size * 2, rate))
+                it.write(data.array())
+            }
+            name
+        }, { e -> if (!isDestroyed) err(e) }) { file ->
+            if (project?.id != p.id) return@async
+            val len = Studio.durationMs(pcm.size, rate)
+            addNew(EditMusic.KIND, at, max(StudioEdit.MIN_MS, len), 1f) {
+                it.copy(file = file, text = t("🎙 Озвучка", "🎙 Voice-over"), x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "none")
+            }
+            musicFile = ""
+            toast(t("Озвучка добавлена", "Voice-over added"))
+        }
+    }
     /** Speech recognition for subtitles: its progress line (null = not running) and the stop flag. */
     private var recogMsg: String? = null
     private var recogStop = false
@@ -3014,7 +3097,7 @@ class StudioEditorActivity : LumenBase() {
             ex3.prepare()
             musicSeekAt = 0L
         }
-        val g = EditMusic.gain(m, curMs).coerceIn(0f, 1f)
+        val g = if (recording && recMute) 0f else EditMusic.gain(m, curMs).coerceIn(0f, 1f)
         if (ex3.volume != g) ex3.volume = g
         val want = m.srcMs + (curMs - m.startMs).coerceAtLeast(0)
         val now = SystemClock.uptimeMillis()

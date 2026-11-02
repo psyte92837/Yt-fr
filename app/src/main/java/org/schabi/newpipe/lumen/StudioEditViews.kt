@@ -486,7 +486,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.firstOrNull()?.label.orEmpty())
         "image" -> "🖼 " + t("Картинка", "Picture")
         EditSplit.KIND -> "⊟ " + t("Экран надвое", "Split screen")
-        EditMusic.KIND -> "🎵 " + b.text.ifBlank { t("Музыка", "Music") } + if (b.volume <= 0f) " 🔇" else ""
+        EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") } + if (b.volume <= 0f) " 🔇" else ""
         "text" -> "T " + b.text.replace('\n', ' ')
         else -> b.text
     }

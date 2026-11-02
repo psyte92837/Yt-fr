@@ -99,12 +99,15 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
         invalidate()
     }
 
-    private fun sel(): EBlock? = StudioEdit.find(blocks, selected)?.takeIf { timeMs >= it.startMs && timeMs < it.endMs }
+    /** The blocks as they are at [timeMs] (keyframes applied). */
+    private fun shown(): List<EBlock> = if (blocks.none { it.keys.isNotEmpty() }) blocks else blocks.map { EditKeys.at(it, timeMs) }
+
+    private fun sel(): EBlock? = StudioEdit.find(shown(), selected)?.takeIf { timeMs >= it.startMs && timeMs < it.endMs }
 
     override fun onDraw(c: Canvas) {
         val fw = width.toFloat()
         val fh = height.toFloat()
-        painter?.draw(c, StudioEdit.active(blocks, timeMs), timeMs)
+        painter?.draw(c, StudioEdit.active(shown(), timeMs), timeMs)
         if (portrait && moved && (mode == MOVE || mode == SCALE || mode == PINCH || mode == WIDTH)) {
             // YouTube Shorts / Reels: the title and buttons cover the bottom fifth and the right column
             c.drawRect(0f, fh * 0.8f, fw, fh, safeP)
@@ -210,7 +213,7 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
                     mode = CORNER
                     start = cur
                 } else {
-                    val hit = StudioEdit.top(StudioEdit.active(blocks, timeMs), fw, fh, e.x, e.y, 6 * dp)
+                    val hit = StudioEdit.top(StudioEdit.active(shown(), timeMs), fw, fh, e.x, e.y, 6 * dp)
                     if (hit != null) {
                         if (hit.id != selected) onSelect(hit.id)
                         mode = MOVE
@@ -410,6 +413,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val clipSelP = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * dp; color = 0xFFFFD60A.toInt() }
     private val seamP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt(); strokeWidth = 3 * dp; strokeCap = Paint.Cap.ROUND }
     private val liftP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0x66000000 }
+    private val keyP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt() }
     private val seamBox = 18 * dp
     private val seamBoxP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF2FFFFFF.toInt() }
     private val seamOnP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt() }
@@ -648,6 +652,15 @@ class EditTimeline(ctx: Context) : View(ctx) {
             val tx = max(r.left, 0f) + (if (isSel) handleW + 4 * dp else 8 * dp)
             c.drawText(label(b), tx, r.centerY() + nameP.textSize * 0.36f, nameP)
             c.restore()
+            // keyframes: small diamonds on the bar
+            for (k in b.keys) {
+                val kx = xOf(b.startMs + k.atMs)
+                if (kx < r.left - 1 || kx > r.right + 1) continue
+                val ky = r.bottom - 5 * dp
+                c.drawPath(Path().apply {
+                    moveTo(kx, ky - 4 * dp); lineTo(kx + 4 * dp, ky); lineTo(kx, ky + 4 * dp); lineTo(kx - 4 * dp, ky); close()
+                }, keyP)
+            }
             if (isSel) {
                 c.drawRoundRect(r, rad, rad, selP)
                 for (left in listOf(true, false)) {

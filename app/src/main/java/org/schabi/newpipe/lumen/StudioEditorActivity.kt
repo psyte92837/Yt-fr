@@ -928,6 +928,7 @@ class StudioEditorActivity : LumenBase() {
                     add(act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) })
                     add(act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } })
                     add(act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } })
+                    add(act("◆", t("Ключ", "Keyframe"), on = b.keys.isNotEmpty()) { toggleKey(b) })
                     add(act("◐", t("Прозрач­ность", "Opacity")) { opacitySheet(b) })
                     add(act("⬆", t("Выше", "Forward")) { commit(StudioEdit.reorder(blocks, b.id, 1)) })
                     add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
@@ -1473,7 +1474,34 @@ class StudioEditorActivity : LumenBase() {
 
     private fun change(id: String, f: (EBlock) -> EBlock) {
         val b = StudioEdit.find(blocks, id) ?: return
-        commit(StudioEdit.replace(blocks, StudioEdit.clampTime(f(b), total)))
+        commit(StudioEdit.replace(blocks, StudioEdit.clampTime(keyed(b, f(b)), total)))
+    }
+
+    /** With keyframes a new place, size, turn or opacity goes into the key at the playhead (made when there is none). */
+    private fun keyed(old: EBlock, new: EBlock): EBlock {
+        // moving or trimming on the timeline is not a change of the look
+        if (old.keys.isEmpty() || new.keys != old.keys || new.startMs != old.startMs || new.durMs != old.durMs) return new
+        val now = EditKeys.at(old, curMs)
+        // a field the change left as stored keeps its look at this moment
+        fun pick(n: Float, o: Float, i: Float) = if (n == o) i else n
+        val pose = new.copy(x = pick(new.x, old.x, now.x), y = pick(new.y, old.y, now.y), w = pick(new.w, old.w, now.w),
+            rot = pick(new.rot, old.rot, now.rot), opacity = pick(new.opacity, old.opacity, now.opacity))
+        val moved = now.x != pose.x || now.y != pose.y || now.w != pose.w || now.rot != pose.rot || now.opacity != pose.opacity
+        return if (moved && curMs >= new.startMs && curMs < new.endMs) EditKeys.set(new, curMs, pose) else new
+    }
+
+    /** ◆ at the playhead: a keyframe of the block as it looks now, or away when one is there. */
+    private fun toggleKey(b: EBlock) {
+        if (curMs < b.startMs || curMs >= b.endMs) return toast(t("Поставьте курсор на время блока", "Put the playhead on the block's time"))
+        if (EditKeys.near(b, curMs) != null) {
+            commit(StudioEdit.replace(blocks, EditKeys.remove(b, curMs)))
+            return toast(t("Ключ убран", "Keyframe removed"))
+        }
+        val first = b.keys.isEmpty()
+        commit(StudioEdit.replace(blocks, EditKeys.set(b, curMs, EditKeys.at(b, curMs))))
+        toast(if (first) t("◆ Ключ поставлен. Передвиньте курсор и измените блок на кадре — появится второй ключ, блок поедет между ними.",
+            "◆ Keyframe set. Move the playhead and change the block on the frame — a second key appears and the block moves between them.")
+        else t("◆ Ключ поставлен", "◆ Keyframe set"))
     }
 
     /** A block changed by a gesture on the frame or the timeline; [done] at its end. */
@@ -1482,7 +1510,8 @@ class StudioEditorActivity : LumenBase() {
             gestureBase = snapshot()
             pause()
         }
-        setBlocks(StudioEdit.replace(blocks, StudioEdit.clampTime(b, total)))
+        val old = StudioEdit.find(blocks, b.id)
+        setBlocks(StudioEdit.replace(blocks, StudioEdit.clampTime(if (old != null) keyed(old, b) else b, total)))
         if (done) {
             gestureBase?.let { history.push(it) }
             gestureBase = null

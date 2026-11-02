@@ -44,10 +44,15 @@ data class EBlock(
     val srcMs: Long = 0,
     /** Split screen: loudness of the second video (0..2) and of the main one meanwhile. */
     val volume: Float = 1f,
-    val mainVolume: Float = 1f
+    val mainVolume: Float = 1f,
+    /** Keyframes of place, size, turn and opacity (see [EditKeys]); empty = the block stands still. */
+    val keys: List<EKey> = emptyList()
 ) {
     val endMs: Long get() = startMs + durMs
 }
+
+/** A keyframe of a block: [atMs] from its start, its place, width, turn and opacity then. */
+data class EKey(val atMs: Long, val x: Float, val y: Float, val w: Float, val rot: Float, val opacity: Float)
 
 /** An editor project: the base video (copied into the project folder) and the blocks over it. */
 data class EProject(
@@ -518,7 +523,7 @@ object StudioEdit {
      */
     fun overlayKey(shown: List<EBlock>, tMs: Long, settle: (EBlock) -> Long): String = shown.joinToString("|") { b ->
         val d = animMs(b)
-        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b))
+        val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b)) || b.keys.size > 1
         b.id + "@" + b.hashCode() + if (moving) ":$tMs" else ""
     }
 
@@ -604,6 +609,7 @@ object StudioEdit {
             if (b.ask.isNotEmpty()) put("ask", b.ask)
             if (b.srcMs > 0) put("src", b.srcMs)
             if (b.kind == "split" || b.kind == "audio") put("vol", b.volume.toDouble()).put("mainVol", b.mainVolume.toDouble())
+            if (b.keys.isNotEmpty()) put("keys", EditKeys.json(b.keys))
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -617,7 +623,7 @@ object StudioEdit {
             f("x", 0.5f), f("y", 0.5f), f("w", 0.6f).coerceIn(MIN_W, MAX_W), f("ratio", 0.6f).coerceIn(0.05f, 20f), f("rot", 0f), f("opacity", 1f).coerceIn(0f, 1f),
             o.optString("in", "pop").takeIf { it in ANIMS } ?: "pop", o.optString("out", "fade").takeIf { it in ANIMS } ?: "fade",
             o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask"), max(0L, o.optLong("src")),
-            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f)
+            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f), EditKeys.from(o.optJSONArray("keys"))
         )
     }
 

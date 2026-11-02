@@ -55,7 +55,7 @@ class StudioEditPainter(
 
     /** Draws every block of [shown] (bottom first) at [tMs]. */
     fun draw(c: Canvas, shown: List<EBlock>, tMs: Long) {
-        for (b in shown) runCatching { block(c, b, tMs) }.onFailure { L.w("studio", "edit block ${b.kind}: ${it.message}") }
+        for (b in shown) runCatching { block(c, EditKeys.at(b, tMs), tMs) }.onFailure { L.w("studio", "edit block ${b.kind}: ${it.message}") }
     }
 
     private fun block(c: Canvas, b: EBlock, tMs: Long) {

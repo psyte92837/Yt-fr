@@ -140,3 +140,43 @@ class EditTurnTest {
         assertTrue(StudioEdit.fromJson(StudioEdit.toJson(p).toString())!!.blur)
     }
 }
+
+class EditKeysTest {
+    private val b = EBlock("b1", "text", 1_000, 4_000, x = 0.2f, y = 0.5f, text = "hi")
+
+    @Test
+    fun withoutKeysTheBlockStandsStill() {
+        assertEquals(b, EditKeys.at(b, 2_500))
+    }
+
+    @Test
+    fun theBlockMovesSmoothlyBetweenKeys() {
+        val k = EditKeys.set(EditKeys.set(b, 1_000, b), 3_000, b.copy(x = 0.8f, opacity = 0.5f))
+        assertEquals(2, k.keys.size)
+        assertEquals(0.2f, EditKeys.at(k, 500).x, 1e-4f)
+        assertEquals(0.5f, EditKeys.at(k, 2_000).x, 1e-4f)
+        assertEquals(0.8f, EditKeys.at(k, 3_000).x, 1e-4f)
+        assertEquals(0.8f, EditKeys.at(k, 4_900).x, 1e-4f)
+        // ease in-out: slower near the keys
+        assertTrue(EditKeys.at(k, 1_200).x - 0.2f < 0.6f * 200 / 2000)
+        assertEquals(0.75f, EditKeys.at(k, 2_000).opacity, 1e-4f)
+    }
+
+    @Test
+    fun aKeyNearAnotherReplacesIt() {
+        val k = EditKeys.set(EditKeys.set(b, 2_000, b), 2_050, b.copy(y = 0.9f))
+        assertEquals(1, k.keys.size)
+        assertEquals(0.9f, k.keys[0].y, 0f)
+        assertEquals(k.keys[0], EditKeys.near(k, 2_100))
+        assertTrue(EditKeys.remove(k, 2_000).keys.isEmpty())
+    }
+
+    @Test
+    fun keysSurviveJsonAndMakeTheLayerMove() {
+        val k = EditKeys.set(EditKeys.set(b, 1_000, b), 3_000, b.copy(x = 0.8f, rot = 30f))
+        assertEquals(k, StudioEdit.blockFrom(StudioEdit.blockJson(k)))
+        val still = StudioEdit.overlayKey(listOf(b), 2_500) { 0L }
+        assertEquals(still, StudioEdit.overlayKey(listOf(b), 2_600) { 0L })
+        assertFalse(StudioEdit.overlayKey(listOf(k), 2_500) { 0L } == StudioEdit.overlayKey(listOf(k), 2_600) { 0L })
+    }
+}

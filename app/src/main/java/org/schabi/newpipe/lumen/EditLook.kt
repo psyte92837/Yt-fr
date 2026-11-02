@@ -368,3 +368,64 @@ object EditCaptions {
         return out
     }
 }
+
+/**
+ * Keyframes of a block (like CapCut's ◆): at chosen moments the block has its own place, width, turn and opacity,
+ * and in between it moves smoothly (ease in-out); before the first and after the last key it stays. Pure, no Android.
+ */
+object EditKeys {
+    /** Two keys closer than this are one. */
+    const val NEAR_MS = 120L
+
+    fun keyOf(b: EBlock, atMs: Long): EKey = EKey(atMs, b.x, b.y, b.w, b.rot, b.opacity)
+
+    private fun ease(k: Float): Float = k * k * (3 - 2 * k)
+
+    private fun lerp(a: Float, b: Float, k: Float) = a + (b - a) * k
+
+    /** [b] as it is at output time [tMs]. */
+    fun at(b: EBlock, tMs: Long): EBlock {
+        val keys = b.keys
+        if (keys.isEmpty()) return b
+        val rel = tMs - b.startMs
+        val k = when {
+            rel <= keys.first().atMs -> keys.first()
+            rel >= keys.last().atMs -> keys.last()
+            else -> {
+                val i = keys.indexOfLast { it.atMs <= rel }
+                val a = keys[i]
+                val c = keys[i + 1]
+                val f = ease(((rel - a.atMs).toFloat() / max(1L, c.atMs - a.atMs)).coerceIn(0f, 1f))
+                EKey(rel, lerp(a.x, c.x, f), lerp(a.y, c.y, f), lerp(a.w, c.w, f), lerp(a.rot, c.rot, f), lerp(a.opacity, c.opacity, f))
+            }
+        }
+        return b.copy(x = k.x, y = k.y, w = k.w, rot = k.rot, opacity = k.opacity)
+    }
+
+    /** The key of [b] near output time [tMs], if any. */
+    fun near(b: EBlock, tMs: Long): EKey? = b.keys.firstOrNull { abs(it.atMs - (tMs - b.startMs)) <= NEAR_MS }
+
+    /** A key at [tMs] with the look of [pose] (replacing one that is near); the first key also keeps the look. */
+    fun set(b: EBlock, tMs: Long, pose: EBlock): EBlock {
+        val rel = (tMs - b.startMs).coerceIn(0, b.durMs)
+        val k = keyOf(pose, rel)
+        val keys = b.keys.filter { abs(it.atMs - rel) > NEAR_MS } + k
+        return b.copy(keys = keys.sortedBy { it.atMs }, x = pose.x, y = pose.y, w = pose.w, rot = pose.rot, opacity = pose.opacity)
+    }
+
+    /** Without the key near [tMs]. */
+    fun remove(b: EBlock, tMs: Long): EBlock = b.copy(keys = b.keys.filter { abs(it.atMs - (tMs - b.startMs)) > NEAR_MS })
+
+    fun json(keys: List<EKey>): org.json.JSONArray = org.json.JSONArray().apply {
+        keys.forEach { k ->
+            put(org.json.JSONObject().put("t", k.atMs).put("x", k.x.toDouble()).put("y", k.y.toDouble()).put("w", k.w.toDouble())
+                .put("rot", k.rot.toDouble()).put("op", k.opacity.toDouble()))
+        }
+    }
+
+    fun from(a: org.json.JSONArray?): List<EKey> = if (a == null) emptyList() else (0 until a.length()).mapNotNull { i ->
+        val o = a.optJSONObject(i) ?: return@mapNotNull null
+        fun f(k: String, d: Double) = o.optDouble(k, d).toFloat().takeIf { !it.isNaN() } ?: d.toFloat()
+        EKey(max(0L, o.optLong("t")), f("x", 0.5), f("y", 0.5), f("w", 0.6).coerceIn(StudioEdit.MIN_W, StudioEdit.MAX_W), f("rot", 0.0), f("op", 1.0).coerceIn(0f, 1f))
+    }.sortedBy { it.atMs }
+}

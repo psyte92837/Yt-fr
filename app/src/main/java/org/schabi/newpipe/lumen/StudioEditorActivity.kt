@@ -732,11 +732,11 @@ class StudioEditorActivity : LumenBase() {
         bar.addView(ratio, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
         bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         bar.addView(roundBtn("?") { HelpActivity.open(this, helpTopic) }.apply { contentDescription = t("Справка", "Help") })
-        bar.addView(text(this, t("Экспорт", "Export"), 14f, bold = true, color = ED_ON_ACCENT).apply {
+        bar.addView(text(this, t("Сохранить", "Save"), 14f, bold = true, color = ED_ON_ACCENT).apply {
             gravity = Gravity.CENTER
             setPadding(dp(18), dp(8), dp(18), dp(8))
             background = ripple(this@StudioEditorActivity, roundBg(edAccent, 20f, this@StudioEditorActivity), ED_ON_ACCENT)
-            contentDescription = t("Экспорт ролика", "Export the video")
+            contentDescription = t("Сохранить видео", "Save the video")
             setOnClickListener { exportSheet() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
         ratioChip = ratio
@@ -772,16 +772,16 @@ class StudioEditorActivity : LumenBase() {
         bottomSheet(t("Как работает редактор", "How the editor works")) { dismiss ->
             p(t("1. Тап по кадру — пауза. Таймлайн прокручивается пальцем, щипок — масштаб; белая линия — курсор.",
                 "1. Tap the frame to pause. Scroll the timeline with a finger, pinch to zoom; the white line is the playhead."))
-            p(t("2. Внизу разделы: ✂ Монтаж, 🎵 Аудио, T Текст, 😀 Стикеры, 🖼 Наложение, 🎨 Фильтры, ☀ Настройка, ⇆ Переходы, ▭ Формат, 🧩 ИИ. «‹ Назад» — к разделам.",
-                "2. Sections below: ✂ Edit, 🎵 Audio, T Text, 😀 Stickers, 🖼 Overlay, 🎨 Filters, ☀ Adjust, ⇆ Transitions, ▭ Format, 🧩 AI. \"‹ Back\" returns."))
+            p(t("2. Внизу разделы: ✂ Кусок, 🎵 Аудио, T Текст, 😀 Стикеры, 🖼 Наложение, 🌈 Фильтры, ☀ Настройка, ⇆ Переходы, ▭ Формат, 🧩 ИИ. «‹ Назад» — к разделам.",
+                "2. Sections below: ✂ Piece, 🎵 Audio, T Text, 😀 Stickers, 🖼 Overlay, 🌈 Filters, ☀ Adjust, ⇆ Transitions, ▭ Format, 🧩 AI. \"‹ Back\" returns."))
             p(t("3. Тап по кадрам ролика на таймлайне выделяет кусок: разрезать, скорость, громкость, фильтр, переход, удалить; удержание и перетаскивание — переставить. Белый квадрат на шве — переход.",
                 "3. Tap the frames on the timeline to select a piece: split, speed, volume, filter, transition, delete; hold and drag to reorder. The white square at a seam is a transition."))
             p(t("4. Надписи, картинки, схемы и музыка — цветные полоски под кадрами: тяните целиком или за края. На кадре блок двигается пальцем, два пальца — размер и поворот.",
                 "4. Captions, pictures, schemes and music are coloured bars under the frames: drag them or their edges. On the frame drag a block; two fingers scale and turn it."))
             if (words.isNotEmpty()) p(t("5. «T Текст → 📝 Текст речи» — вся речь: тап по слову ставит курсор, выделите фразу — и схема или надпись встанет ровно на неё.",
                 "5. \"T Text → 📝 Speech text\" is the whole speech: tap a word to go there, select a phrase to put a scheme or caption exactly on it."))
-            p(t("↶ ↷ — отмена любого шага, ⛶ — смотреть во весь экран, «Экспорт» — готовый ролик в галерею.",
-                "↶ ↷ undo any step, ⛶ watch full screen, \"Export\" saves the video to the gallery."))
+            p(t("↶ ↷ — отмена любого шага, ⛶ — смотреть во весь экран, «Сохранить» — готовый ролик в галерею.",
+                "↶ ↷ undo any step, ⛶ watch full screen, \"Save\" saves the video to the gallery."))
             button(t("Понятно", "Got it"), primary = true) { dismiss() }
         }
     }
@@ -1057,10 +1057,9 @@ class StudioEditorActivity : LumenBase() {
                         add(act("⏩", t("Скорость", "Speed"), on = c.speed != 1f) { speedSheet(ci) })
                         add(act(if (c.volume > 0f) "🔊" else "🔇", t("Громкость", "Volume"), on = c.volume != 1f) { volumeSheet(ci) })
                     }
-                    add(act("🎨", t("Фильтры", "Filters"), on = c.filter.isNotEmpty()) { filterSheet(ci) })
+                    add(act("🌈", t("Фильтры", "Filters"), on = c.filter.isNotEmpty()) { filterSheet(ci) })
                     add(act("☀", t("Настройка", "Adjust"), on = c.bright != 0f || c.contrast != 0f || c.sat != 0f || c.warm != 0f) { adjustSheet(ci) })
                     add(act("⇆", t("Переход", "Transition"), on = c.trans.isNotEmpty()) { transitionSheet(ci) })
-                    add(danger("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
                     add(act("⧉", t("Дубль", "Duplicate")) { clipDuplicate(ci) })
                     if (!c.isHold) add(act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() })
                     if (!c.isHold) add(act("⏪", t("Реверс", "Reverse")) { reverseClip(ci) })
@@ -1074,6 +1073,7 @@ class StudioEditorActivity : LumenBase() {
                     if (!c.looksPlain || c.isHold) add(act("↺", t("Сбросить", "Reset")) {
                         clipUpdate(ci) { VClip(it.id, it.fromMs, it.toMs, volume = if (it.isHold) 0f else 1f, holdMs = it.holdMs, trans = it.trans, transMs = it.transMs, src = it.src) }
                     })
+                    add(danger("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
                 }
             }
             cat == "audio" -> {
@@ -1116,21 +1116,19 @@ class StudioEditorActivity : LumenBase() {
                     act("✨", t("Схема или анимация", "Scheme or animation")) { insert.start() },
                     if (words.isNotEmpty()) act("💡", t("Где нужны вставки", "Where inserts")) { hintsSheet() } else null,
                     act("📊", t("Отчёт", "Report")) { reportSheet() },
-                    act("🌐", t("Перевести", "Translate")) { translateSheet() },
-                    if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
-                    act("T", t("Надпись ИИ", "AI caption")) { captionSheet(null) },
-                    act("🌐", t("Фото ИИ", "AI photo")) { photoSheet(null) }
+                    act("🔤", t("Перевести", "Translate")) { translateSheet() },
+                    if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null
                 )
             }
             else -> listOf(
                 Act("＋", t("Вставить", "Insert"), ActKind.PRIMARY) { insertSheet() },
-                act("✂", t("Монтаж", "Edit")) { selectClip(clipHere()) },
+                act("✂", t("Кусок", "Piece")) { selectClip(clipHere()) },
                 act("🎞", t("Добавить видео", "Add video")) { addClipSheet() },
                 act("🎵", t("Аудио", "Audio")) { openCat("audio") },
                 act("T", t("Текст", "Text")) { openCat("text") },
                 act("😀", t("Стикеры", "Stickers")) { emojiSheet(null) },
                 act("🖼", t("Наложение", "Overlay")) { openCat("overlay") },
-                act("🎨", t("Фильтры", "Filters")) { filterSheet(clipHere()) },
+                act("🌈", t("Фильтры", "Filters")) { filterSheet(clipHere()) },
                 act("☀", t("Настройка", "Adjust")) { adjustSheet(clipHere()) },
                 act("⇆", t("Переходы", "Transitions")) { transitionSheet(seamHere()) },
                 act("▭", t("Формат", "Format"), on = project?.ratio?.isNotEmpty() == true) { canvasSheet() },
@@ -2939,7 +2937,7 @@ class StudioEditorActivity : LumenBase() {
         focusClip(i)
         var cur = c0
         previewColor(cur)
-        bottomSheet(t("🎨 Фильтры", "🎨 Filters"), onDismiss = { keepColor(i, cur) }) { dismiss ->
+        bottomSheet(t("🌈 Фильтры", "🌈 Filters"), onDismiss = { keepColor(i, cur) }) { dismiss ->
             if (clips.size > 1) muted(t("Кусок ${i + 1} из ${clips.size}. Изменения видны на кадре сразу.", "Piece ${i + 1} of ${clips.size}. Changes show on the frame at once."))
             val thumb = thumbOf(c0)
             val strip = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
@@ -4175,7 +4173,7 @@ class StudioEditorActivity : LumenBase() {
         val prefs = Lumen.prefs
         var side = prefs.getInt("studio_edit_side", 1920)
         val (ow, oh) = EditCanvas.outSize(p.w, p.h, p.ratio, 1920)
-        bottomSheet(t("⬆ Экспорт ролика", "⬆ Export the video")) { dismiss ->
+        bottomSheet(t("🎬 Сохранить видео", "🎬 Save the video")) { dismiss ->
             val len = StudioEdit.clock(outLen(p)).substringBefore('.')
             val pieces = EditTrack.of(p).size
             muted(t("Слоёв: ${p.blocks.size} · кусков: $pieces · длина $len · кадр $ow×$oh", "Layers: ${p.blocks.size} · pieces: $pieces · length $len · frame $ow×$oh") + " · " +
@@ -4200,7 +4198,7 @@ class StudioEditorActivity : LumenBase() {
             add(choiceChips(ctx, listOf(1920 to t("1080p · как оригинал", "1080p · as the original"), 1280 to t("720p — быстрее и легче", "720p — faster and smaller")), side) { side = it })
             muted(t("Ролик собирается на видеокарте телефона (обычно быстрее реального времени); если она откажет — на процессоре, медленнее. Экран можно закрыть: прогресс в уведомлении.",
                 "The video is built on the phone's GPU (usually faster than real time); if it refuses, on the CPU, slower. You can close the screen: progress is in the notification."))
-            button(t("⬆ Экспортировать", "⬆ Export"), primary = true) {
+            button(t("🎬 Сохранить", "🎬 Save"), primary = true) {
                 prefs.edit().putInt("studio_edit_side", side).apply()
                 dismiss()
                 val stale = staleAnims(p)

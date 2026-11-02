@@ -366,8 +366,8 @@ class StudioMixActivity : LumenBase() {
     }
 
     private fun clipsCard(c: Col) = c.card {
-        add(text(ctx, t("1. Видео", "1. Videos"), Type.TITLE_M, bold = true), 0)
-        muted(t("Найдите видео, отметьте нужные и задайте им отрезок: начало и длину (до 30 с). Скачиваются только эти секунды, без звука. ⋮ у клипа — выбрать момент по кадрам видео, взять ещё отрезок, своя нарезка.",
+        add(text(ctx, t("1. Клипы", "1. Clips"), Type.TITLE_M, bold = true), 0)
+        muted(t("Найдите видео, выберите нужные и задайте им отрезок: начало и длину (до 30 с). Скачиваются только эти секунды, без звука. ⋮ у клипа — выбрать момент по кадрам видео, взять ещё отрезок, своя нарезка.",
             "Find videos, tick the ones you need and set their piece: start and length (up to 30 s). Only those seconds are downloaded, without sound. ⋮ at a clip — pick the moment by the video frames, take one more piece, own cutting."))
         clips.forEach { cl ->
             val ready = cl.file.isNotEmpty() && File(clipsDir, cl.file).exists()
@@ -396,7 +396,7 @@ class StudioMixActivity : LumenBase() {
         val views = mutableListOf<View>(btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findSheet() })
         if (clips.isNotEmpty()) {
             val all = clips.all { it.id in clipMarks }
-            views += btn(ctx, if (all) t("☐ Снять все", "☐ Untick all") else t("☑ Отметить все", "☑ Tick all"), style = BtnStyle.TEXT) {
+            views += btn(ctx, if (all) t("☐ Снять выбор", "☐ Clear selection") else t("☑ Выбрать все", "☑ Select all"), style = BtnStyle.TEXT) {
                 if (all) clipMarks.clear() else clipMarks += clips.map { it.id }
                 render()
             }
@@ -516,7 +516,7 @@ class StudioMixActivity : LumenBase() {
             randomMoments(ready)
         }
         val tickedClips = ready.filter { it.id in clipMarks }
-        if (tickedClips.isNotEmpty() && tickedClips.size < ready.size) button(t("🌐 Только у отмеченных клипов: ", "🌐 Only for the ticked clips: ") + tickedClips.joinToString(", ") { it.id },
+        if (tickedClips.isNotEmpty() && tickedClips.size < ready.size) button(t("🌐 Только у выбранных клипов: ", "🌐 Only for the selected clips: ") + tickedClips.joinToString(", ") { it.id },
             style = BtnStyle.TEXT) { dismiss(); randomMoments(tickedClips) }
         add(text(ctx, t("Длина ролика", "Video length"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         val total = StudioMix.totalMs(items)
@@ -1131,7 +1131,7 @@ class StudioMixActivity : LumenBase() {
     // ---------- step 4: the video ----------
 
     private fun finalCard(c: Col) = c.card {
-        add(text(ctx, t("4. Видео", "4. Video"), Type.TITLE_M, bold = true), 0)
+        add(text(ctx, t("4. Озвучка и сборка", "4. Voice-over and saving"), Type.TITLE_M, bold = true), 0)
         val voice = voiceFile.exists()
         if (voice) {
             val ms = voiceMs()
@@ -1154,25 +1154,18 @@ class StudioMixActivity : LumenBase() {
             if (Prefs.subs && words.isNotEmpty()) t("💬 субтитры", "💬 subtitles") else null
         )
         if (extras.isNotEmpty()) muted(t("Добавлено: ", "Added: ") + extras.joinToString(" · "))
-        progress("schemes", t("AI составляет схемы…", "AI composes schemes…"))
+        progress("schemes", t("ИИ составляет схемы…", "AI composes schemes…"))
         progress("subs", t("Распознавание речи…", "Recognising speech…"))
         if (rendering()) {
             renderBar = working(StudioJob.message)
             button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) { StudioService.cancel(this@StudioMixActivity) }
         }
         if (busy.isNotEmpty() || rendering()) return@card
-        muted(t("Видео сохраняется на телефон: Галерея → Фильмы/Lumen. Озвучка не обязательна — можно собрать одну картинку.",
-            "The video is saved on the phone: Gallery → Movies/Lumen. A voice-over is optional — the picture alone can be built."))
-        if (voice) {
-            button(t("🎬 Собрать видео с озвучкой", "🎬 Build the video with the voice-over"), primary = true) { build(false) }
-            button(t("🎬 Собрать без озвучки (только картинка)", "🎬 Build without the voice-over (picture only)"), style = BtnStyle.TEXT) { build(false, mute = true) }
-        } else {
-            button(t("🎬 Собрать и сохранить видео", "🎬 Build and save the video"), primary = true) { build(false) }
-            button(t("🎙 Начать озвучку", "🎙 Start the voice-over"), style = BtnStyle.TONAL) { startVoice() }
-        }
-        spinner(t("Язык озвучки, субтитров и схем", "Language of the voice-over, subtitles and schemes"),
+        // the order of the work: voice-over → language, subtitles, schemes → build
+        if (!voice) button(t("🎙 Записать озвучку (необязательно)", "🎙 Record a voice-over (optional)"), style = BtnStyle.TONAL) { startVoice() }
+        spinner(t("Язык озвучки, субтитров и схем (общий со Студией)", "Language of the voice-over, subtitles and schemes (shared with the Studio)"),
             Studio.VOICE_LANGS.map { it to Studio.langName(it) }, lang()) { StudioPrefs.voiceLang = it }
-        check(t("Только на отмеченных элементах", "Only on ticked elements"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
+        check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
         row(
             btn(ctx, if (schemes > 0) t("🧩 Схемы заново", "🧩 Schemes again") else t("🧩 Добавить схемы", "🧩 Add schemes"), style = BtnStyle.TONAL) { addSchemes() },
             btn(ctx, t("💬 Добавить субтитры", "💬 Add subtitles"), style = BtnStyle.TONAL) { addSubs() }
@@ -1189,6 +1182,12 @@ class StudioMixActivity : LumenBase() {
             }
             row(*views.toTypedArray())
         }
+        muted(t("Видео сохраняется на телефон: Галерея → Фильмы/Lumen. Озвучка не обязательна — можно сохранить одну картинку.",
+            "The video is saved on the phone: Gallery → Movies/Lumen. A voice-over is optional — the picture alone can be saved."))
+        if (voice) {
+            button(t("🎬 Сохранить видео с озвучкой", "🎬 Save the video with the voice-over"), primary = true) { build(false) }
+            button(t("🎬 Сохранить без озвучки (только картинка)", "🎬 Save without the voice-over (picture only)"), style = BtnStyle.TEXT) { build(false, mute = true) }
+        } else button(t("🎬 Сохранить видео", "🎬 Save the video"), primary = true) { build(false) }
         val video = lastVideo()
         if (video != null) {
             add(text(ctx, "✅ " + t("Сохранено в галерею: ", "Saved to the gallery: ") + Prefs.savedAs.ifBlank { video.name } +
@@ -1457,7 +1456,7 @@ class StudioMixActivity : LumenBase() {
             close()
             render()
             val diff = voiceMs() - StudioMix.totalMs(items)
-            toast(if (kotlin.math.abs(diff) > FIT_TOL_MS) t("Озвучка записана. Длина ролика другая — подгоните его в «4. Видео»", "Voice-over recorded. The video length differs — fit it in \"4. Video\"")
+            toast(if (kotlin.math.abs(diff) > FIT_TOL_MS) t("Озвучка записана. Длина ролика другая — подгоните его в «4. Озвучка и сборка»", "Voice-over recorded. The video length differs — fit it in \"4. Video\"")
             else t("Озвучка записана. Нажмите «Собрать видео с озвучкой»", "Voice-over recorded. Tap \"Build the video with the voice-over\""))
         }
 
@@ -1569,13 +1568,13 @@ class StudioMixActivity : LumenBase() {
         busy = "schemes"
         cancel = false
         render()
-        BgTasks.run(this, TASK + "schemes", t("Микс: AI составляет схемы", "Mix: AI composes schemes"), BgTasks.reopen(this), {
+        BgTasks.run(this, TASK + "schemes", t("Микс: ИИ составляет схемы", "Mix: AI composes schemes"), BgTasks.reopen(this), {
             val prov = AiTasks.requireProvider()
             val r = Llm.complete(prov, prov.smartModel, "You are an infographic designer for videos. Answer with JSON only.",
                 Prompts.fill("studio_schemes", vars), json = true, maxTokens = 900 + sel.size * 300, task = "studio_schemes", pid = "studio")
             if (cancel) throw java.util.concurrent.CancellationException()
             val list = StudioScheme.parseAnswer(r.text)
-                ?: throw LlmException(t("AI не вернул схемы в нужном формате", "AI did not return schemes in the expected format"), r.text)
+                ?: throw LlmException(t("ИИ не вернул схемы в нужном формате", "AI did not return schemes in the expected format"), r.text)
             val found = HashMap<String, SScheme>()
             for ((n, o) in list) {
                 val k = n - 1
@@ -1597,7 +1596,7 @@ class StudioMixActivity : LumenBase() {
             busy = ""
             if (isDestroyed) return@run
             render()
-            toast(if (found.isEmpty()) t("AI не нашёл, что показать схемой", "AI found nothing to show as a scheme") else t("Схем: ${found.size}. Соберите видео", "Schemes: ${found.size}. Build the video"))
+            toast(if (found.isEmpty()) t("ИИ не нашёл, что показать схемой", "AI found nothing to show as a scheme") else t("Схем: ${found.size}. Соберите видео", "Schemes: ${found.size}. Build the video"))
         }
     }
 

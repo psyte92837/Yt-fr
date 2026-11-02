@@ -229,7 +229,7 @@ class StudioCharEditor(
         if (im != null) imageSection(im) else partsSection()
         voiceSection()
         label(t("Характер", "Persona"))
-        col.muted(t("AI-сценарист пишет реплики героя в этом характере.", "The AI script writer keeps the character's persona."))
+        col.muted(t("ИИ-сценарист пишет реплики героя в этом характере.", "The AI script writer keeps the character's persona."))
         detach(personaE)
         col.add(personaE, 4)
     }
@@ -351,7 +351,7 @@ class StudioCharEditor(
                 "Mark the eyes and the mouth so the character blinks and talks. Best: a PNG with a transparent background, full body or half."))
         col.chips(listOf(
             chip(act, "📍 " + t("Глаза и рот", "Eyes and mouth")) { facePoints(im) },
-            chip(act, "✨ " + t("AI найдёт глаза и рот", "AI finds eyes and mouth")) { aiFace(im) },
+            chip(act, "✨ " + t("ИИ найдёт глаза и рот", "AI finds eyes and mouth")) { aiFace(im) },
             chip(act, "🪄 " + t("Убрать фон", "Remove background")) { removeBg(im) },
             chip(act, (if (im.flip) "✓ " else "") + t("Поворачивать к центру", "Turn to the middle"), im.flip) {
                 ch = ch.copy(image = im.copy(flip = !im.flip))
@@ -502,7 +502,7 @@ class StudioCharEditor(
         if (busy) return
         sync()
         busy = true
-        status.text = "⏳ " + t("AI создаёт персонажа…", "AI creates the character…")
+        status.text = "⏳ " + t("ИИ создаёт персонажа…", "AI creates the character…")
         val base = ch
         Thread {
             val res = runCatching {
@@ -516,7 +516,7 @@ class StudioCharEditor(
                 ))
                 val r = Llm.complete(prov, prov.smartModel, "You design cartoon characters. Answer with JSON only.", prompt,
                     json = true, maxTokens = 2000, task = "studio_char", pid = "studio", image = image)
-                StudioCharProto.parse(r.text, base) ?: throw LlmException(t("AI ответил не по протоколу. Откройте «Ответы AI».", "The AI answer does not follow the protocol. See \"AI answers\"."))
+                StudioCharProto.parse(r.text, base) ?: throw LlmException(t("ИИ ответил не по протоколу. Откройте «Ответы ИИ».", "The AI answer does not follow the protocol. See \"AI answers\"."))
             }
             act.runOnUiThread {
                 busy = false
@@ -532,7 +532,7 @@ class StudioCharEditor(
                             val bmp = BitmapFactory.decodeFile(im.path)
                             if (bmp != null) applyFace(im, bmp)
                             facePoints(ch.image ?: im)
-                        } else status.text = t("AI не нашёл глаза и рот — отметьте их сами", "The AI found no eyes and mouth — mark them yourself")
+                        } else status.text = t("ИИ не нашёл глаза и рот — отметьте их сами", "The AI found no eyes and mouth — mark them yourself")
                     }
                 }.onFailure { e ->
                     if (e is SendCancelled) {

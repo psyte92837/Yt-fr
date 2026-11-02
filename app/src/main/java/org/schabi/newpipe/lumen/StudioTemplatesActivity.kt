@@ -85,15 +85,15 @@ class StudioTemplatesActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        c.add(segBar(this, listOf(t("✨ Моушн", "✨ Motion"), t("🎬 Монтаж", "🎬 Editing")), tab) {
+        c.add(segBar(this, listOf(t("✨ Анимации графики", "✨ Graphics motion"), t("🎬 Способы режиссуры", "🎬 Ways of direction")), tab) {
             tab = it
             render()
         }, 0)
         c.muted(if (motion) t(
-            "Моушн-шаблон — анимированная графика сцены: слои, фигуры, тексты и эмодзи на ключевых кадрах, пункты появляются под слова. AI-режиссёр ставит его в сцены как вид «tpl:…».",
+            "Шаблон графики — анимированная графика сцены: слои, фигуры, тексты и эмодзи на ключевых кадрах, пункты появляются под слова. ИИ-режиссёр ставит его в сцены как вид «tpl:…».",
             "A motion template is the animated graphic of a scene: layers, shapes, texts and emoji on key frames, items appear with their words. The AI director puts it into scenes as kind \"tpl:…\"")
         else t(
-            "Подход к монтажу — правила для всего ролика: темп сцен, зумы, переходы, звуки, плашки и какие виды графики когда. Работает без AI и токенов: кнопка появится в шаге 3 Studio.",
+            "Способ режиссуры — правила для всего ролика: темп сцен, зумы, переходы, звуки, плашки и какие виды графики когда. Работает без ИИ и токенов: кнопка появится в шаге 3 Studio.",
             "A way of editing is the rules for the whole video: scene pace, zooms, transitions, sounds, stickers and which graphics when. It runs without AI or tokens: its button shows in step 3 of the Studio."))
         if (busy.isNotEmpty()) {
             status = c.working(busy).first
@@ -133,7 +133,7 @@ class StudioTemplatesActivity : LumenBase() {
                 btn(ctx, t("✏️ Править", "✏️ Edit"), style = BtnStyle.TEXT) { ask(m.id) }
             )
             row(
-                btn(ctx, t("👁 AI-проверка", "👁 AI look"), style = BtnStyle.TEXT) { look(m) },
+                btn(ctx, t("👁 ИИ-проверка", "👁 AI look"), style = BtnStyle.TEXT) { look(m) },
                 btn(ctx, t("⧉ Код", "⧉ Code"), style = BtnStyle.TEXT) { copy(JSONObject(m.json).toString(2)) },
                 btn(ctx, "🗑", style = BtnStyle.TEXT) { remove(m.id, m.name) }
             )
@@ -251,7 +251,7 @@ class StudioTemplatesActivity : LumenBase() {
         }
     }
 
-    private fun create(askText: String) = run(t("AI придумывает шаблон…", "AI is designing the template…"), {
+    private fun create(askText: String) = run(t("ИИ придумывает шаблон…", "AI is designing the template…"), {
         val key = if (motion) "studio_tpl_motion" else "studio_tpl_edit"
         val reply = ai(key, Prompts.fill(key, mapOf("ask" to askText, "tpls" to tplLine())), 6000)
         say(t("Проверка…", "Checking…"))
@@ -267,7 +267,7 @@ class StudioTemplatesActivity : LumenBase() {
     private fun change(id: String, askText: String) {
         val before = currentJson(id)
         val wasMotion = motion
-        run(t("AI меняет шаблон…", "AI is changing the template…"), {
+        run(t("ИИ меняет шаблон…", "AI is changing the template…"), {
             val cur = currentJson(id) ?: error("no template")
             val reply = ai("studio_tpl_patch", Prompts.fill("studio_tpl_patch", mapOf("kind" to "lumen.$kind", "ask" to askText, "data" to cur)), 3000)
             applyReply(id, cur, reply)
@@ -287,7 +287,7 @@ class StudioTemplatesActivity : LumenBase() {
         val ops = JsonPatch.ops(reply)
         val text = if (ops != null) {
             if (ops.length() == 0) return id
-            JsonPatch.apply(JSONObject(cur), ops)?.toString() ?: throw IllegalStateException(t("AI прислал изменения, которые не подходят к шаблону", "The AI sent changes that do not fit the template"))
+            JsonPatch.apply(JSONObject(cur), ops)?.toString() ?: throw IllegalStateException(t("ИИ прислал изменения, которые не подходят к шаблону", "The AI sent changes that do not fit the template"))
         } else reply
         return checkAndSave(text, id, true)
     }
@@ -309,7 +309,7 @@ class StudioTemplatesActivity : LumenBase() {
     })
 
     /** The AI looks at the preview frames and sends fixes (needs a model that sees images). */
-    private fun look(m: MotionTpl) = run(t("AI смотрит на превью…", "AI is looking at the preview…"), {
+    private fun look(m: MotionTpl) = run(t("ИИ смотрит на превью…", "AI is looking at the preview…"), {
         val fr = previews[m.id] ?: frames(m).also { previews[m.id] = it }
         val strip = Bitmap.createBitmap(fr.sumOf { it.width }, fr.maxOf { it.height }, Bitmap.Config.ARGB_8888)
         val cv = Canvas(strip)
@@ -328,7 +328,7 @@ class StudioTemplatesActivity : LumenBase() {
             previews[m.id] = store.motions().firstOrNull { it.id == m.id }?.let { frames(it) } ?: fr
             "fixed"
         }
-    }) { r -> toast(if (r == "ok") t("AI: всё хорошо", "AI: looks good") else t("AI поправил шаблон", "AI fixed the template")) }
+    }) { r -> toast(if (r == "ok") t("ИИ: всё хорошо", "AI: looks good") else t("ИИ поправил шаблон", "AI fixed the template")) }
 
     // ---------- from a video ----------
 
@@ -338,7 +338,7 @@ class StudioTemplatesActivity : LumenBase() {
             getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
         }.getOrNull()?.let { YtLink.classify(it) }?.takeIf { it.type == "video" }?.url
         bottomSheet(t("Шаблон по видео", "Template from a video")) { dismiss ->
-            muted(t("Lumen снимет замеры (темп речи, длины планов, паузы, цвета), возьмёт кадры раскадровки и субтитры, а AI воссоздаст подход к монтажу и 1–2 моушн-шаблона. Gemini смотрит само видео.",
+            muted(t("Lumen снимет замеры (темп речи, длины планов, паузы, цвета), возьмёт кадры раскадровки и субтитры, а ИИ воссоздаст подход к монтажу и 1–2 моушн-шаблона. Gemini смотрит само видео.",
                 "Lumen measures the video (speech pace, shot lengths, pauses, colours), takes storyboard frames and subtitles, and the AI recreates its way of editing and 1–2 motion templates. Gemini watches the video itself."))
             val link = edit(t("Ссылка на видео YouTube", "YouTube video link"), clip ?: "")
             val wish = edit(t("Пожелания (необязательно): например «только темп и зумы»", "Wishes (optional): e.g. \"only pace and zooms\""), multiline = true)
@@ -372,7 +372,7 @@ class StudioTemplatesActivity : LumenBase() {
             else -> "Видео ты не видишь: опирайся на замеры и речь, догадки о картинке помечай."
         }
         val prompt = Prompts.fill("studio_tpl_from_video", mapOf("mode" to mode, "ask" to wish.ifBlank { "нет" }, "data" to data))
-        say(t("AI разбирает приёмы видео…", "AI is working out the video's techniques…"))
+        say(t("ИИ разбирает приёмы видео…", "AI is working out the video's techniques…"))
         if (cancel) throw java.util.concurrent.CancellationException()
         val system = "You design motion graphics and video editing templates. Answer with JSON only."
         val r = try {
@@ -384,7 +384,7 @@ class StudioTemplatesActivity : LumenBase() {
             Llm.complete(prov, prov.smartModel, system, prompt.replace(mode, "Видео ты не видишь: опирайся на замеры и речь."), json = true,
                 maxTokens = 9000, task = "studio_tpl_from_video", pid = "studio")
         }
-        val parts = StudioVideoTpl.parse(r.text) ?: error(t("AI не вернул шаблоны в нужном формате. Откройте «Ответы AI».", "AI did not return templates in the expected format. See \"AI answers\"."))
+        val parts = StudioVideoTpl.parse(r.text) ?: error(t("ИИ не вернул шаблоны в нужном формате. Откройте «Ответы ИИ».", "AI did not return templates in the expected format. See \"AI answers\"."))
         val saved = mutableListOf<String>()
         parts.motions.forEachIndexed { i, mt ->
             say(t("Проверка моушна ${i + 1}…", "Checking motion ${i + 1}…"))

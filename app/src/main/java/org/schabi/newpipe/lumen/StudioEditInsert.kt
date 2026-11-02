@@ -483,7 +483,7 @@ class InsertWizard(private val h: InsertHost) {
         if (recipes().isNotEmpty()) quick += chip(ui, t("⭐ Мои рецепты", "⭐ My recipes")) { recipesSheet() }
         quick += chip(ui, t("📚 Моя библиотека", "📚 My library")) { librarySheet() }
         quick += chip(ui, t("🧪 Примеры (без ИИ)", "🧪 Examples (no AI)")) { examplesSheet() }
-        quick += chip(ui, t("🎛 Шаблон Монтажа", "🎛 Montage template")) { montageSheet() }
+        quick += chip(ui, t("🎛 Шаблон слоя ИИ", "🎛 AI layer template")) { montageSheet() }
         c.chips(quick, 9)
         c.add(text(ui, t("Что показать?", "What to show?"), Type.TITLE_M, bold = true), 16)
         val grid = FlowLayout(ui, ui.dp(8), ui.dp(8))
@@ -1128,7 +1128,7 @@ class InsertWizard(private val h: InsertHost) {
         if (prov != null) {
             val name = prov.title.let { if (Settings.lang == "en") it.substringAfter(" / ") else it.substringBefore(" / ") }
             c.add(btn(ui, t("🤖 Встроенный ИИ", "🤖 Built-in AI") + " (" + name + ")", primary = true) { runAi(null, "") }, 8)
-            if (manual) c.muted(t("Запрос уйдёт через «другой ИИ вручную» — так настроено в разделе AI.", "The request goes through \"another AI by hand\" — as set in the AI settings."))
+            if (manual) c.muted(t("Запрос уйдёт через «другой ИИ вручную» — так настроено в разделе ИИ.", "The request goes through \"another AI by hand\" — as set in the AI settings."))
         } else {
             c.muted(t("Встроенный ИИ не настроен.", "No built-in AI is set up."))
             c.add(btn(ui, t("Настроить ИИ", "Set up the AI"), style = BtnStyle.TEXT) { ui.startActivity(Intent(ui, SettingsActivity::class.java)) }, 4)
@@ -1816,8 +1816,8 @@ class InsertWizard(private val h: InsertHost) {
     /** Templates of the Montage (lumen.canvas) as an animation on this piece of the video. */
     private fun montageSheet() {
         val layers = LayerStore(File(WebLayerActivity.dir(ui), "layers")).list()
-        ui.bottomSheet(t("🎛 Шаблон Монтажа на отрезок", "🎛 Montage template on a piece")) { dismiss ->
-            if (layers.isEmpty()) muted(t("Шаблонов пока нет: они появляются во вкладке «🎛 Монтаж» Студии.", "No templates yet: they appear in the Studio's \"🎛 Montage\" tab."))
+        ui.bottomSheet(t("🎛 Шаблон слоя ИИ на отрезок", "🎛 AI layer template on a piece")) { dismiss ->
+            if (layers.isEmpty()) muted(t("Шаблонов пока нет: они появляются в «🎛 Слой ИИ ↗» внизу Студии.", "No templates yet: they appear in \"🎛 AI layer ↗\" at the bottom of the Studio."))
             else muted(t("Шаблон получит время и слова только этого отрезка, как будто это весь ролик.", "The template gets the time and words of this piece only, as if it were the whole video."))
             for (l in layers) add(btn(ctx, "🎛 " + l.name, style = BtnStyle.TONAL) {
                 dismiss()

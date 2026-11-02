@@ -552,17 +552,26 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Нарезка", "🎞 Cuts"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
+        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
             switchTask(StudioTask.entries[it])
         }, 0)
-        // the Mix, the Montage (hand editor + JS layers by the protocol) and the Editor are their own screens:
-        // entry buttons with "↗", not tabs, so it is clear they open another screen (Back returns here)
-        c.add(text(this, t("Другие инструменты", "Other tools"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        c.add(chipScroller(this, listOf(
-            chip(this, t("🔀 Микс ↗", "🔀 Mix ↗")) { StudioMixActivity.open(this) }.apply { contentDescription = t("Открыть Микс", "Open Mix") },
-            chip(this, t("🎛 Монтаж ↗", "🎛 Montage ↗")) { openMontage() }.apply { contentDescription = t("Открыть Монтаж", "Open Montage") },
-            chip(this, t("✏️ Редактор ↗", "✏️ Editor ↗")) { StudioEditorActivity.open(this) }.apply { contentDescription = t("Открыть редактор", "Open the editor") }
-        )), 4)
+        c.muted(when (task) {
+            StudioTask.SHORTS -> t(
+                "Короткие вертикальные ролики 9:16: слова появляются под голос, рядом схемы из эмодзи. Четыре шага, всё собирается на телефоне.",
+                "Short vertical 9:16 videos: words appear with the voice, next to emoji schemes. Four steps, everything is built on the phone.")
+            StudioTask.VIDEO -> t(
+                "Горизонтальный ролик для YouTube 16:9 на 2–10 минут: ИИ пишет сценарий с главами, голос озвучивает, ИИ-режиссёр ставит графику, зумы, плашки и звуки.",
+                "A horizontal 16:9 YouTube video of 2–10 minutes: AI writes a script with chapters, a voice reads it, the AI director adds graphics, zooms, stickers and sounds.")
+            StudioTask.VOICE -> t(
+                "Готовая озвучка → анимированный ролик. Загрузите аудио или запишите голос: ИИ-режиссёр сам разметит сцены, графику, зумы, плашки и звуки и вырежет оговорки. Кадр 9:16, 16:9 или 1:1.",
+                "A ready voice-over → an animated video. Upload audio or record your voice: the AI director lays out scenes, graphics, zooms, stickers and sounds and cuts slips. Frame 9:16, 16:9 or 1:1.")
+            StudioTask.CUTS -> t(
+                "Клипы под ваш текст: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, ИИ-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1. Ритмичная нарезка без текста — «🔀 Микс» внизу.",
+                "Clips for your text: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1. A rhythmic cut without a text is the «🔀 Mix» below.")
+            StudioTask.CARTOON -> t(
+                "Познавательная анимация: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
+                "An informational animation: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
+        })
         if (!foreign) {
             val n = StudioDrafts.count(draftsDir, task.id)
             c.row(
@@ -570,23 +579,6 @@ class StudioActivity : LumenBase() {
                 btn(this, t("🗂 Черновики", "🗂 Drafts") + if (n > 0) " ($n)" else "", style = BtnStyle.TONAL) { draftsSheet() }
             )
         }
-        c.muted(when (task) {
-            StudioTask.SHORTS -> t(
-                "Короткие вертикальные ролики 9:16: слова появляются под голос, рядом схемы из эмодзи. Четыре шага, всё собирается на телефоне.",
-                "Short vertical 9:16 videos: words appear with the voice, next to emoji schemes. Four steps, everything is built on the phone.")
-            StudioTask.VIDEO -> t(
-                "Горизонтальный ролик для YouTube 16:9 на 2–10 минут: AI пишет сценарий с главами, голос озвучивает, AI-режиссёр ставит графику, зумы, плашки и звуки.",
-                "A horizontal 16:9 YouTube video of 2–10 minutes: AI writes a script with chapters, a voice reads it, the AI director adds graphics, zooms, stickers and sounds.")
-            StudioTask.VOICE -> t(
-                "Готовая озвучка → анимированный ролик. Загрузите аудио или запишите голос: AI-режиссёр сам разметит сцены, графику, зумы, плашки и звуки и вырежет оговорки. Кадр 9:16, 16:9 или 1:1.",
-                "A ready voice-over → an animated video. Upload audio or record your voice: the AI director lays out scenes, graphics, zooms, stickers and sounds and cuts slips. Frame 9:16, 16:9 or 1:1.")
-            StudioTask.CUTS -> t(
-                "Нарезка с голосом за кадром: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, AI-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1.",
-                "A voice-over over cuts: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1.")
-            StudioTask.CARTOON -> t(
-                "Познавательная анимация: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
-                "An informational animation: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
-        })
         if (foreign) {
             c.card {
                 add(text(ctx, t("⏳ Задача выполняется в фоне", "⏳ A task is running in the background"), Type.TITLE_M, bold = true), 0)
@@ -594,22 +586,40 @@ class StudioActivity : LumenBase() {
                     "It was started by the previous Studio screen. This screen refreshes when it ends; progress is also in the notification."))
                 bars["foreign"] = working(BgTasks.find("studio:")?.let { it.title + ": " + it.message } ?: "…")
             }
+            otherTools(c)
             page("Lumen Studio", c.root, keepScroll = true)
             return
         }
-        c.steps(stepNow(), 4)
-        if (task == StudioTask.VOICE) {
-            voiceCard(c, 1)
-            scriptCard(c, 2)
-        } else {
-            scriptCard(c, 1)
-            voiceCard(c, 2)
-        }
-        if (task == StudioTask.CUTS) cutsCard(c)
-        if (task == StudioTask.CARTOON) castCard(c)
-        analyseCard(c)
-        videoCard(c)
+        val order = cards()
+        c.steps(stepNow(order.size), order.size)
+        order.forEachIndexed { i, card -> card(c, i + 1) }
+        otherTools(c)
         page("Lumen Studio", c.root, keepScroll = true)
+    }
+
+    /**
+     * Cards of the task in the order of the work: what the script refers to (characters, clips) and what changes
+     * it (frame, language) come before it; the voice after the text it reads.
+     */
+    private fun cards(): List<(Col, Int) -> Unit> = when (task) {
+        StudioTask.VOICE -> listOf({ c, n -> voiceCard(c, n) }, { c, n -> scriptCard(c, n) }, { c, n -> analyseCard(c, n) }, { c, n -> videoCard(c, n) })
+        StudioTask.CUTS -> listOf({ c, n -> scriptCard(c, n) }, { c, n -> cutsCard(c, n) }, { c, n -> voiceCard(c, n) },
+            { c, n -> analyseCard(c, n) }, { c, n -> videoCard(c, n) })
+        StudioTask.CARTOON -> listOf({ c, n -> castCard(c, n) }, { c, n -> scriptCard(c, n) }, { c, n -> voiceCard(c, n) },
+            { c, n -> analyseCard(c, n) }, { c, n -> videoCard(c, n) })
+        else -> listOf({ c, n -> scriptCard(c, n) }, { c, n -> voiceCard(c, n) }, { c, n -> analyseCard(c, n) }, { c, n -> videoCard(c, n) })
+    }
+
+    /** The Mix, the AI layer and the Editor are their own screens: entry chips with "↗" at the bottom, after the steps. */
+    private fun otherTools(c: Col) {
+        // the Mix, the Montage (hand editor + JS layers by the protocol) and the Editor are their own screens:
+        // entry buttons with "↗", not tabs, so it is clear they open another screen (Back returns here)
+        c.add(text(this, t("Другие инструменты", "Other tools"), Type.LABEL, bold = true, color = Palette.MUTED), 20)
+        c.add(chipScroller(this, listOf(
+            chip(this, t("🔀 Микс ↗", "🔀 Mix ↗")) { StudioMixActivity.open(this) }.apply { contentDescription = t("Открыть Микс", "Open Mix") },
+            chip(this, t("🎛 Слой ИИ ↗", "🎛 AI layer ↗")) { openMontage() }.apply { contentDescription = t("Открыть анимированный слой ИИ", "Open the AI layer") },
+            chip(this, t("✏️ Редактор ↗", "✏️ Editor ↗")) { StudioEditorActivity.open(this) }.apply { contentDescription = t("Открыть редактор", "Open the editor") }
+        )), 4)
     }
 
     /** Long work of the screen: runs through [BgTasks] with a notification, so it survives minimising or closing. */
@@ -626,13 +636,13 @@ class StudioActivity : LumenBase() {
     }
 
     private fun jobTitle(key: String) = when (key) {
-        "ai_script" -> t("AI пишет сценарий", "AI writes the script")
-        "ai_edit" -> t("AI правит сценарий", "AI edits the script")
+        "ai_script" -> t("ИИ пишет сценарий", "AI writes the script")
+        "ai_edit" -> t("ИИ правит сценарий", "AI edits the script")
         "analyse" -> t("озвучка и разметка", "voice and timing")
-        "ai_direct" -> t("AI-режиссёр", "AI director")
+        "ai_direct" -> t("ИИ-режиссёр", "AI director")
         "broll" -> t("поиск B-roll", "finding B-roll")
-        "schemes" -> t("AI составляет инфосхемы", "AI composes info-schemes")
-        "style" -> t("AI создаёт стиль инфосхем", "AI makes a scheme style")
+        "schemes" -> t("ИИ составляет инфосхемы", "AI composes info-schemes")
+        "style" -> t("ИИ создаёт стиль инфосхем", "AI makes a scheme style")
         "board" -> t("раскадровка", "storyboard")
         "music" -> t("музыка", "music")
         "bg" -> t("клипы фона", "background clips")
@@ -661,11 +671,10 @@ class StudioActivity : LumenBase() {
         }
     }
 
-    private fun stepNow(): Int = when {
-        lastVideo != null -> 4
-        words.isNotEmpty() -> 3
-        pcm != null || takeFile.exists() -> 2
-        else -> 1
+    private fun stepNow(total: Int): Int = when {
+        lastVideo != null || words.isNotEmpty() -> total - 1
+        pcm != null || takeFile.exists() -> total - 2
+        else -> 0
     }
 
     /** Status line + progress bar for a running job [key]; shown while [busy] == key. */
@@ -687,13 +696,14 @@ class StudioActivity : LumenBase() {
     private fun scriptCard(c: Col, n: Int) = c.card {
         if (task == StudioTask.VOICE) {
             add(text(ctx, "$n. " + t("Текст озвучки", "Voice-over text"), Type.TITLE_M, bold = true), 0)
-            muted(t("Необязательно. Вставьте текст, который звучит в записи, — слова встанут по времени точнее. Без текста запись распознаётся (Android 13+). Сцены, графику и эффекты расставит AI-режиссёр.",
+            muted(t("Необязательно. Вставьте текст, который звучит в записи, — слова встанут по времени точнее. Без текста запись распознаётся (Android 13+). Сцены, графику и эффекты расставит ИИ-режиссёр.",
                 "Optional. Paste the text spoken in the recording for more exact word timing. Without it the take is recognised (Android 13+). The AI director lays out scenes, graphics and effects."))
             add(detach(scriptEdit), 8)
             return@card
         }
         add(text(ctx, "$n. " + t("Сценарий", "Script"), Type.TITLE_M, bold = true), 0)
         add(detach(topicEdit), 8)
+        if (task == StudioTask.CUTS || task == StudioTask.CARTOON) aspectPicker(this)
         if (longScript()) {
             spinner(t("Длительность", "Length"), listOf(120 to "2 мин", 180 to "3 мин", 300 to "5 мин", 480 to "8 мин", 600 to "10 мин"), StudioPrefs.videoSeconds) {
                 StudioPrefs.videoSeconds = it
@@ -703,29 +713,14 @@ class StudioActivity : LumenBase() {
             StudioPrefs.seconds = it
             render()
         }
-        row(
-            btn(ctx, t("✨ Написать (AI)", "✨ Write (AI)"), style = BtnStyle.TONAL) { writeScript() },
-            btn(ctx, t("Формат", "Format"), style = BtnStyle.TEXT) { formatHelp() }
-        )
+        langPicker(this)
+        button(t("✨ Написать (ИИ)", "✨ Write (AI)"), style = BtnStyle.TONAL) { writeScript() }
         if (task == StudioTask.CARTOON && busy.isEmpty()) {
-            button(t("🤖 AI сделает всё: идея → готовый мультфильм", "🤖 AI makes everything: idea → finished cartoon"), style = BtnStyle.TONAL) { autoDialog() }
-            muted(t("Необязательно: опишите идею, сцены или сценарий — AI напишет реплики, озвучит героев, смонтирует и соберёт видео. Работает и в свёрнутом приложении.",
+            button(t("🤖 ИИ сделает всё: идея → готовый мультфильм", "🤖 AI makes everything: idea → finished cartoon"), style = BtnStyle.TONAL) { autoDialog() }
+            muted(t("Необязательно: опишите идею, сцены или сценарий — ИИ напишет реплики, озвучит героев, смонтирует и соберёт видео. Работает и в свёрнутом приложении.",
                 "Optional: describe an idea, scenes or a script; AI writes the lines, voices the characters, edits and builds the video. Works with the app minimised."))
         }
-        progress("ai_script", t("AI пишет сценарий…", "AI is writing the script…"))
-        if (scriptEdit.text.isNotBlank() && busy.isEmpty()) {
-            val undo = prevScript
-            if (undo != null) row(
-                btn(ctx, t("🪄 AI-помощник", "🪄 AI assistant"), style = BtnStyle.TONAL) { assist() },
-                btn(ctx, t("↩ Вернуть прежний", "↩ Undo"), style = BtnStyle.TEXT) {
-                    scriptEdit.setText(undo)
-                    prevScript = null
-                    resetAnalysis()
-                    render()
-                }
-            ) else button(t("🪄 AI-помощник: улучшить сценарий", "🪄 AI assistant: improve the script"), style = BtnStyle.TONAL) { assist() }
-        }
-        progress("ai_edit", t("AI правит сценарий…", "AI is editing the script…"))
+        progress("ai_script", t("ИИ пишет сценарий…", "AI is writing the script…"))
         add(detach(scriptEdit), 8)
         val sc = Studio.parseText(scriptEdit.text.toString())
         if (sc.scenes.isNotEmpty()) {
@@ -733,6 +728,20 @@ class StudioActivity : LumenBase() {
             muted(t("Сцен: ${sc.scenes.size} · слов: $n · примерно ${Studio.clock(n * 1000L * 10 / 24)}",
                 "Scenes: ${sc.scenes.size} · words: $n · about ${Studio.clock(n * 1000L * 10 / 24)}"))
         }
+        if (scriptEdit.text.isNotBlank() && busy.isEmpty()) {
+            val undo = prevScript
+            if (undo != null) row(
+                btn(ctx, t("🪄 ИИ-помощник", "🪄 AI assistant"), style = BtnStyle.TONAL) { assist() },
+                btn(ctx, t("↩ Вернуть прежний", "↩ Undo"), style = BtnStyle.TEXT) {
+                    scriptEdit.setText(undo)
+                    prevScript = null
+                    resetAnalysis()
+                    render()
+                }
+            ) else button(t("🪄 ИИ-помощник: улучшить сценарий", "🪄 AI assistant: improve the script"), style = BtnStyle.TONAL) { assist() }
+        }
+        progress("ai_edit", t("ИИ правит сценарий…", "AI is editing the script…"))
+        button(t("ⓘ Как писать сценарий", "ⓘ How to write the script"), style = BtnStyle.TEXT) { formatHelp() }
     }
 
     private fun voiceCard(c: Col, n: Int) = c.card {
@@ -743,6 +752,8 @@ class StudioActivity : LumenBase() {
             else -> listOf("edge", "mic", "file", "video")
         }
         if (task == StudioTask.VOICE) {
+            aspectPicker(this)
+            langPicker(this)
             button(t("🎙 Подкаст → ролик сам", "🎙 Podcast → video, hands-free"), primary = true) {
                 if (busy.isNotEmpty() || StudioJob.running) {
                     toast(t("Дождитесь окончания текущей задачи", "Wait for the current task to end"))
@@ -752,12 +763,11 @@ class StudioActivity : LumenBase() {
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
                     .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("audio/*", "video/*")), REQ_PODCAST)
             }
-            muted(t("Выберите запись диктофона или подкаст — дальше всё само: громкость, распознавание, AI-режиссёр (вырежет оговорки и паузы), инфосхемы, B-roll, стиль «Разбор» с главами по вопросам, звуки и сборка видео. Прежняя работа уйдёт в «Черновики».",
+            muted(t("Выберите запись диктофона или подкаст — дальше всё само: громкость, распознавание, ИИ-режиссёр (вырежет оговорки и паузы), инфосхемы, B-roll, стиль «Объяснение» с главами по вопросам, звуки и сборка видео. Прежняя работа уйдёт в «Черновики».",
                 "Pick a voice memo or a podcast and the rest happens by itself: loudness, recognition, the AI director (cuts slips and pauses), info-schemes, B-roll, the «Explainer» style with chapters from the questions, sounds and the video build. The previous work goes to Drafts."))
         }
-        val labels = if (task == StudioTask.VOICE) listOf(t("Аудиофайл", "Audio file"), t("Микрофон", "Mic"))
-        else listOf("Microsoft", t("Микрофон", "Mic"), t("Аудио", "Audio"), t("Видео", "Video")).take(modes.size)
-        langPicker(this)
+        val labels = if (task == StudioTask.VOICE) listOf(t("📎 Аудиофайл", "📎 Audio file"), t("🎙 Запись", "🎙 Record"))
+        else listOf(t("🗣 Синтез", "🗣 Synth"), t("🎙 Запись", "🎙 Record"), t("📎 Файл", "📎 File"), t("🎥 Видео", "🎥 Video")).take(modes.size)
         add(segBar(ctx, labels, modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)) {
             StudioPrefs.voiceMode = modes[it]
             resetAnalysis()
@@ -769,6 +779,21 @@ class StudioActivity : LumenBase() {
             "video" -> videoVoice(this)
             else -> fileVoice(this)
         }
+    }
+
+    /** Frame of the video: chosen first, the script length, the clips and the layout depend on it. */
+    private fun aspectPicker(c: Col) = with(c) {
+        add(text(ctx, t("Кадр", "Frame"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
+        val shapes = StudioAspect.entries
+        add(segBar(ctx, listOf(t("9:16 Shorts", "9:16 Shorts"), t("16:9 YouTube", "16:9 YouTube"), t("1:1 квадрат", "1:1 square")), shapes.indexOf(aspect())) {
+            when (task) {
+                StudioTask.CUTS -> StudioPrefs.cutsAspect = shapes[it].id
+                StudioTask.CARTOON -> StudioPrefs.cartoonAspect = shapes[it].id
+                else -> StudioPrefs.aspect = shapes[it].id
+            }
+            board = emptyList()
+            render()
+        }, 4)
     }
 
     /** Language of the voice-over; subtitles and schemes follow it (AI prompts get its name). */
@@ -784,7 +809,7 @@ class StudioActivity : LumenBase() {
             if (code.isEmpty() || text.isBlank() || foreign) return@spinner
             val name = Studio.langName(code)
             confirm(t("Перевести сценарий?", "Translate the script?"),
-                t("Озвучка, субтитры и схемы будут на языке «$name». Перевести сценарий на этот язык с помощью AI? Прежний текст можно вернуть отменой правки.",
+                t("Озвучка, субтитры и схемы будут на языке «$name». Перевести сценарий на этот язык с помощью ИИ? Прежний текст можно вернуть отменой правки.",
                     "The voice-over, subtitles and schemes will be in $name. Translate the script into it with AI? The previous text can be restored by undoing the edit."),
                 t("Перевести", "Translate")) {
                 runAssist("- Переведи весь сценарий на язык: $name — текст озвучки (say), заголовки и подписи плиток (title, items). " +
@@ -842,7 +867,7 @@ class StudioActivity : LumenBase() {
                 "The teleprompter lights up word by word; change the speed while recording too, ⏸ pauses, tap a word to say \"I am here\". " +
                     "What lit up when is remembered and times the words in the video when you read the script."))
         }
-        if (task != StudioTask.VOICE) c.check(t("Я читаю сценарий (иначе запись распознаётся)", "I read the script (otherwise the take is recognised)"), StudioPrefs.readScript) {
+        if (task != StudioTask.VOICE) c.check(readScriptLabel(), StudioPrefs.readScript) {
             StudioPrefs.readScript = it
             resetAnalysis()
         }
@@ -854,7 +879,7 @@ class StudioActivity : LumenBase() {
     private fun fileVoice(c: Col) {
         c.muted(t("MP3, M4A, WAV, OGG, а также видео: берётся звуковая дорожка. До 15 минут.",
             "MP3, M4A, WAV, OGG, or a video: its sound track is used. Up to 15 minutes."))
-        if (task != StudioTask.VOICE) c.check(t("В записи звучит текст сценария", "The recording speaks the script text"), StudioPrefs.readScript) {
+        if (task != StudioTask.VOICE) c.check(readScriptLabel(), StudioPrefs.readScript) {
             StudioPrefs.readScript = it
             resetAnalysis()
         }
@@ -872,7 +897,7 @@ class StudioActivity : LumenBase() {
     private fun videoVoice(c: Col) {
         c.muted(t("Снимите себя на камеру или выберите готовое видео. Звук станет озвучкой, а картинка — фоном ролика; графика встанет вставками.",
             "Film yourself or pick a video. Its sound becomes the voice-over, its picture the background; graphics are cut in."))
-        c.check(t("В видео звучит текст сценария", "The video speaks the script text"), StudioPrefs.readScript) {
+        c.check(readScriptLabel(), StudioPrefs.readScript) {
             StudioPrefs.readScript = it
             resetAnalysis()
         }
@@ -950,6 +975,10 @@ class StudioActivity : LumenBase() {
             render()
         }
     }
+
+    /** One wording for every way of the voice: with the script read aloud the words are timed by it, else recognised. */
+    private fun readScriptLabel() = t("В записи звучит мой сценарий (слова встанут точнее; иначе запись распознаётся)",
+        "The take speaks my script (more exact word timing; otherwise the take is recognised)")
 
     private fun cutCheck(c: Col) = c.check(t("✂ Вырезать паузы (джамп-каты)", "✂ Cut out pauses (jump cuts)"), StudioPrefs.cutPauses) {
         StudioPrefs.cutPauses = it
@@ -1058,15 +1087,15 @@ class StudioActivity : LumenBase() {
         }
     }
 
-    private fun analyseCard(c: Col) = c.card {
-        add(text(ctx, t("3. Разбор", "3. Analysis"), Type.TITLE_M, bold = true), 0)
+    private fun analyseCard(c: Col, n: Int) = c.card {
+        add(text(ctx, "$n. " + t("Сцены и режиссура", "Scenes and direction"), Type.TITLE_M, bold = true), 0)
         muted(when (StudioPrefs.voiceMode) {
             "edge" -> t("Озвучка сцен и разметка слов по времени.", "Voicing the scenes and timing every word.")
             else -> t("Поиск речи и пауз, темп, расстановка слов по времени.", "Finding speech and pauses, the pace, timing every word.")
         })
-        if (busy.isEmpty()) button(if (words.isEmpty()) t("🔍 Разобрать", "🔍 Analyse") else t("🔍 Разобрать заново", "🔍 Analyse again"), primary = words.isEmpty()) { analyse() }
+        if (busy.isEmpty()) button(if (words.isEmpty()) t("🔍 Разметить сцены", "🔍 Lay out scenes") else t("🔍 Разметить заново", "🔍 Lay out again"), primary = words.isEmpty()) { analyse() }
         progress("analyse", t("Подготовка…", "Preparing…"))
-        progress("ai_scenes", t("AI делит текст на сцены…", "AI is splitting the text into scenes…"))
+        progress("ai_scenes", t("ИИ делит текст на сцены…", "AI is splitting the text into scenes…"))
         val s = stats
         val sc = script
         if (s != null && sc != null && words.isNotEmpty()) {
@@ -1080,14 +1109,14 @@ class StudioActivity : LumenBase() {
                 Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val cur = StudioApproach.of(StudioPrefs.approach)
             val ownWay = editTpls.firstOrNull { "edit:" + it.id == StudioPrefs.approach }
-            muted(if (ownWay != null) "🧪 " + ownWay.name + t(" — свой подход, без AI и токенов. ", " — own way, no AI or tokens. ") + ownWay.use else approachHelp(cur))
+            muted(if (ownWay != null) "🧪 " + ownWay.name + t(" — свой подход, без ИИ и токенов. ", " — own way, no AI or tokens. ") + ownWay.use else approachHelp(cur))
             progress("ai_direct", t("Режиссёр размечает ролик…", "The director is planning the video…"))
             if (busy.isEmpty()) {
                 fun b(ap: StudioApproach, label: String) = btn(ctx, (if (ap == cur) "● " else "") + label,
                     style = if (ap == cur) BtnStyle.TONAL else BtnStyle.TEXT) { animate(ap) }
                 row(b(StudioApproach.RULES, t("⚡ Правила", "⚡ Rules")), b(StudioApproach.RHYTHM, t("🥁 Ритм", "🥁 Rhythm")))
-                row(b(StudioApproach.LITE, t("💸 Эконом AI", "💸 Lite AI")), b(StudioApproach.HYBRID, t("🧩 Гибрид", "🧩 Hybrid")))
-                add(b(StudioApproach.FULL, t("🎬 Полный AI-режиссёр", "🎬 Full AI director")), 4)
+                row(b(StudioApproach.LITE, t("💸 Эконом ИИ", "💸 Lite AI")), b(StudioApproach.HYBRID, t("🧩 Гибрид", "🧩 Hybrid")))
+                add(b(StudioApproach.FULL, t("🎬 Полный ИИ-режиссёр", "🎬 Full AI director")), 4)
                 // own ways of editing (lumen.edit), made by the AI on the templates screen: no tokens
                 editTpls.chunked(2).forEach { pair ->
                     row(*pair.map { e ->
@@ -1095,7 +1124,7 @@ class StudioActivity : LumenBase() {
                         btn(ctx, (if (on) "● " else "") + "🧪 " + e.name, style = if (on) BtnStyle.TONAL else BtnStyle.TEXT) { animateEdit(e) }
                     }.toTypedArray())
                 }
-                button(t("📚 Шаблоны: свои моушны и подходы (AI)", "📚 Templates: own motions and ways (AI)"), style = BtnStyle.TEXT) {
+                button(t("📚 Шаблоны: своя графика и способы режиссуры (ИИ)", "📚 Templates: own graphics and ways of direction (AI)"), style = BtnStyle.TEXT) {
                     StudioTemplatesActivity.open(this@StudioActivity)
                 }
                 if (transcript.isNotBlank()) button(t("Текст расшифровки", "Transcript"), style = BtnStyle.TEXT) { showText(t("Расшифровка", "Transcript"), transcript) }
@@ -1116,7 +1145,7 @@ class StudioActivity : LumenBase() {
                         " (" + StudioBroll.stockSources().size + "/3)", style = BtnStyle.TEXT) { stockKeys() }
                 }
             }
-            lastTokens?.let { (i, o) -> muted(t("Последний вызов AI: $i → $o токенов", "Last AI call: $i → $o tokens")) }
+            lastTokens?.let { (i, o) -> muted(t("Последний вызов ИИ: $i → $o токенов", "Last AI call: $i → $o tokens")) }
             progress("broll", t("Поиск B-roll…", "Finding B-roll…"))
             val (zooms, pops, sounds) = StudioDirector.summary(sc)
             val figures = sc.scenes.sumOf { it.shapes.size }
@@ -1127,14 +1156,17 @@ class StudioActivity : LumenBase() {
                 "zooms $zooms · stickers $pops · sounds $sounds · shapes $figures" + (if (asked > 0) " · photos $got of $asked" else "")) +
                 sc.scenes.count { StudioStock.isVideo(it.media) }.let { n -> if (n > 0) t(" (клипов $n)", " ($n clips)") else "" })
             if (busy.isEmpty() && got < asked) button(t("🖼 Подобрать B-roll", "🖼 Find B-roll"), style = BtnStyle.TEXT) { fetchBroll() }
-            progress("schemes", t("AI составляет инфосхемы…", "AI composes info-schemes…"))
+            progress("schemes", t("ИИ составляет инфосхемы…", "AI composes info-schemes…"))
             if (busy.isEmpty()) button(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes") +
                 sc.scenes.count { it.scheme != null }.let { if (it > 0) " ($it)" else "" }, style = BtnStyle.TEXT) { schemesSheet() }
             if (got > 0) button(t("⧉ Источники B-roll для описания", "⧉ B-roll credits for the description"), style = BtnStyle.TEXT) { copyText(StudioDirector.credits(sc)) }
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
-            if (pickable) muted(t("Нажмите на сцену, чтобы выбрать ей клип.", "Tap a scene to pick its clip."))
+            if (pickable) {
+                muted(t("Нажмите на сцену, чтобы выбрать ей клип.", "Tap a scene to pick its clip."))
+                if (busy.isEmpty()) button(t("🎞 Расставить клипы по сценам без ИИ", "🎞 Place the clips on scenes without AI"), style = BtnStyle.TEXT) { autoPlace() }
+            }
             val ready = readyIds()
             plan.times.take(60).forEach { st ->
                 val scn = sc.scenes[st.scene]
@@ -1178,11 +1210,12 @@ class StudioActivity : LumenBase() {
         else -> t("текст", "text")
     }
 
-    private fun videoCard(c: Col) = c.card {
-        add(text(ctx, t("4. Ролик", "4. Video"), Type.TITLE_M, bold = true), 0)
+    private fun videoCard(c: Col, n: Int) = c.card {
+        add(text(ctx, "$n. " + t("Ролик", "Video"), Type.TITLE_M, bold = true), 0)
         val styles = listOfNotNull(StudioStyle.DARK, StudioStyle.LIGHT, StudioStyle.EXPLAIN, if (montageReady()) StudioStyle.VIDEO else null)
-        val labels = listOf(t("Тёмный", "Dark"), t("Светлый", "Light"), t("Разбор", "Explainer"), t("Монтаж", "Montage")).take(styles.size)
-        if (cutMontage()) muted(t("Монтаж нарезки: клипы идут на своих сценах, между ними — графика, внизу слово под голос. Звук клипов выключен.",
+        val labels = listOf(t("Тёмный", "Dark"), t("Светлый", "Light"), t("Объяснение", "Explainer"),
+            if (videoReady()) t("Моё видео", "My video") else t("Клипы на фоне", "Clips behind")).take(styles.size)
+        if (cutMontage()) muted(t("Клипы на сценах: клипы идут на своих сценах, между ними — графика, внизу слово под голос. Звук клипов выключен.",
             "Cut montage: clips play on their scenes, graphics in between, the spoken word below. Clip sound is off."))
         else add(segBar(ctx, labels, styles.indexOf(currentStyle()).coerceAtLeast(0)) {
             StudioPrefs.style = styles[it].name
@@ -1191,7 +1224,7 @@ class StudioActivity : LumenBase() {
         if (!cutMontage()) muted(when (currentStyle()) {
             StudioStyle.DARK -> t("Слова появляются группами с размытием, схемы из эмодзи на тёмном фоне.", "Word groups blur in, emoji schemes on a dark screen.")
             StudioStyle.LIGHT -> t("Заголовок капсом и одно крупное слово под голос на светлом фоне.", "A capital headline and one big word at a time on a light screen.")
-            StudioStyle.EXPLAIN -> t("Современный разбор: графитовый фон, схемы на карточках, вопросы голоса — главы с номерами и прогрессом сверху, субтитры по 1–3 слова, звуки на склейках. B-roll — размытым фоном.",
+            StudioStyle.EXPLAIN -> t("Объяснение: графитовый фон, схемы на карточках, вопросы голоса — главы с номерами и прогрессом сверху, субтитры по 1–3 слова, звуки на склейках. B-roll — размытым фоном.",
                 "Modern explainer: graphite screen, schemes on cards, the voice's questions become numbered chapters with progress on top, 1–3 word captions, sounds on cuts. B-roll as a blurred background.")
             StudioStyle.VIDEO -> if (videoReady()) t("Ваше видео, слово под голос внизу, графика вставками.", "Your video, the spoken word below, graphics cut in.")
             else t("Фоновые клипы по кругу под озвучку, слово внизу, графика вставками.", "Background clips loop under the voice-over, the word below, graphics cut in.")
@@ -1239,7 +1272,7 @@ class StudioActivity : LumenBase() {
                     }
                 })
             } else if (currentStyle() == StudioStyle.VIDEO) muted(t("Схемы будут вставками на весь экран вместо видео.", "Schemes become full-screen inserts instead of the video."))
-            progress("style", t("AI создаёт стиль…", "AI makes a style…"))
+            progress("style", t("ИИ создаёт стиль…", "AI makes a style…"))
             if (busy.isEmpty()) button(t("🎨 Стиль инфосхем: ", "🎨 Scheme style: ") + schemeStyleNow().name + " · " + placeLabel(schemePlaceNow()),
                 style = BtnStyle.TONAL) { styleSheet() }
         }
@@ -1262,19 +1295,6 @@ class StudioActivity : LumenBase() {
                 render()
             }
         })
-        if (task == StudioTask.VOICE || task == StudioTask.CUTS || task == StudioTask.CARTOON) {
-            add(text(ctx, t("Кадр", "Frame"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val shapes = StudioAspect.entries
-            add(segBar(ctx, listOf(t("9:16 Shorts", "9:16 Shorts"), t("16:9 YouTube", "16:9 YouTube"), t("1:1 квадрат", "1:1 square")), shapes.indexOf(aspect())) {
-                when (task) {
-                    StudioTask.CUTS -> StudioPrefs.cutsAspect = shapes[it].id
-                    StudioTask.CARTOON -> StudioPrefs.cartoonAspect = shapes[it].id
-                    else -> StudioPrefs.aspect = shapes[it].id
-                }
-                board = emptyList()
-                render()
-            }, 4)
-        }
         spinner(t("Качество", "Quality"), listOf(720, 1080).map { q -> aspect().size(q).let { (a, b) -> q to "$a×$b" } }, StudioPrefs.quality) {
             StudioPrefs.quality = it
         }
@@ -1293,7 +1313,7 @@ class StudioActivity : LumenBase() {
         musicBlock(this)
         val plan = currentPlan()
         if (plan == null) {
-            muted(t("Сначала выполните разбор (шаг 3).", "Run the analysis first (step 3)."))
+            muted(t("Сначала разметьте сцены (шаг ${n - 1}).", "Lay out the scenes first (step ${n - 1})."))
             return@card
         }
         // preview of any moment
@@ -1330,7 +1350,7 @@ class StudioActivity : LumenBase() {
             muted(t("Сборка идёт в фоне: экран можно закрыть, прогресс — в уведомлении.", "Building in the background: you can close the screen, progress is in the notification."))
             button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) { StudioService.cancel(this@StudioActivity) }
         } else if (busy.isEmpty()) {
-            button(t("🎬 Создать ролик", "🎬 Make video"), primary = true) { renderVideo() }
+            button(t("🎬 Сохранить видео", "🎬 Save the video"), primary = true) { renderVideo() }
         }
         lastVideo?.takeIf { it.exists() }?.let { f ->
             p("✅ " + t("Готово: ", "Done: ") + savedAs.ifBlank { f.name })
@@ -1342,7 +1362,7 @@ class StudioActivity : LumenBase() {
             button(t("✏️ Открыть редактор: схемы, картинки, надписи", "✏️ Open the editor: schemes, pictures, captions"), primary = true) {
                 StudioEditorActivity.open(this@StudioActivity, f, plan.words)
             }
-            button(t("🎛 Монтаж по протоколу: шаблоны от ИИ (JS-слой)", "🎛 Montage by the protocol: AI templates (JS layer)"), style = BtnStyle.TEXT) { openLayer(f, plan.layers.subs) }
+            button(t("🎛 Анимированный слой ИИ поверх ролика", "🎛 An animated AI layer over the video"), style = BtnStyle.TEXT) { openLayer(f, plan.layers.subs) }
         }
     }
 
@@ -1767,9 +1787,9 @@ class StudioActivity : LumenBase() {
 
     private fun withClips(sc: SScript, ids: List<String>) = sc.copy(scenes = sc.scenes.mapIndexed { i, s -> s.copy(clip = ids.getOrElse(i) { "" }) })
 
-    private fun cutsCard(c: Col) = c.card {
-        add(text(ctx, t("🎞 Клипы с YouTube", "🎞 YouTube clips"), Type.TITLE_M, bold = true), 0)
-        muted(t("Отметьте куски видео: ссылка, начало и конец (до 30 с) и что в кадре — по этой подписи AI-режиссёр поймёт, куда поставить клип. " +
+    private fun cutsCard(c: Col, n: Int) = c.card {
+        add(text(ctx, "$n. " + t("🎞 Клипы с YouTube", "🎞 YouTube clips"), Type.TITLE_M, bold = true), 0)
+        muted(t("Отметьте куски видео: ссылка, начало и конец (до 30 с) и что в кадре — по этой подписи ИИ-режиссёр поймёт, куда поставить клип. " +
             "Скачиваются только эти секунды, без звука. Короткие вставки по 1–5 с безопаснее для авторских прав.",
             "Mark pieces of videos: link, start and end (up to 30 s) and what is in the shot; the AI director uses this note to place the clip. " +
                 "Only these seconds are downloaded, without sound. Short 1–5 s inserts are safer for copyright."))
@@ -1794,17 +1814,14 @@ class StudioActivity : LumenBase() {
         val findBtn = btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findClips() }
         row(addBtn, findBtn)
         if (cutClips.any { it !in readyCuts() }) button(t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() }
-        if (script != null && readyCuts().isNotEmpty()) {
-            button(t("🎞 Расставить по сценам без AI", "🎞 Place on scenes without AI"), style = BtnStyle.TEXT) { autoPlace() }
-        }
     }
 
     // ---------- cartoon characters ----------
 
     /** Characters of the cartoon: who they are, how they look and sound. */
-    private fun castCard(c: Col) = c.card {
-        add(text(ctx, t("🎭 Персонажи", "🎭 Characters"), Type.TITLE_M, bold = true), 0)
-        muted(t("До ${StudioToon.MAX_CAST} героев. Соберите своего из деталей, опишите словами, создайте по картинке или возьмите свою картинку — встроенным AI или любым другим через протокол lumen.char. В сценарии реплика начинается с @Имя:",
+    private fun castCard(c: Col, n: Int) = c.card {
+        add(text(ctx, "$n. " + t("🎭 Персонажи", "🎭 Characters"), Type.TITLE_M, bold = true), 0)
+        muted(t("До ${StudioToon.MAX_CAST} героев. Соберите своего из деталей, опишите словами, создайте по картинке или возьмите свою картинку — встроенным ИИ или любым другим через протокол lumen.char. В сценарии реплика начинается с @Имя:",
             "Up to ${StudioToon.MAX_CAST} characters. Build your own from parts, describe it, make it from a picture or use your picture as it is — with the built-in AI or any other through the lumen.char protocol. In the script a line starts with @Name:"))
         val cast = StudioPrefs.cast
         cast.forEachIndexed { i, ch ->
@@ -1937,7 +1954,7 @@ class StudioActivity : LumenBase() {
                     }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
                 }
             }
-            group(t("✨ Подобрал AI", "✨ Picked by AI"), picked)
+            group(t("✨ Подобрал ИИ", "✨ Picked by AI"), picked)
             group(t("Остальные", "Others"), rest)
             updateAdd()
         }
@@ -1954,7 +1971,7 @@ class StudioActivity : LumenBase() {
                     CutHit(it.url, it.title, it.channel, if (it.duration > 0) it.duration * 1000 else 0)
                 }
                 val picks = if (useAi && found.isNotEmpty()) {
-                    runOnUiThread { status.first.text = t("AI отбирает видео…", "AI is picking videos…") }
+                    runOnUiThread { status.first.text = t("ИИ отбирает видео…", "AI is picking videos…") }
                     aiJson("studio_cuts_filter", mapOf("want" to want, "lang" to aiLang(), "hits" to StudioCuts.hitsBlock(found)),
                         "You pick YouTube videos by their titles. Answer with JSON only.", 2000, fast = true) { StudioCuts.parsePicks(it, found.size) }
                 } else emptyMap()
@@ -1970,7 +1987,7 @@ class StudioActivity : LumenBase() {
                 marked += notes.keys
                 status.first.text = when {
                     found.isEmpty() -> t("Ничего не нашлось. Попробуйте другие слова.", "Nothing found. Try other words.")
-                    useAi -> t("Найдено: ${found.size}, AI подобрал: ${picks.size}", "Found: ${found.size}, AI picked: ${picks.size}")
+                    useAi -> t("Найдено: ${found.size}, ИИ подобрал: ${picks.size}", "Found: ${found.size}, AI picked: ${picks.size}")
                     else -> t("Найдено: ${found.size}. Отметьте нужные.", "Found: ${found.size}. Mark the ones you need.")
                 }
                 fill()
@@ -1979,15 +1996,15 @@ class StudioActivity : LumenBase() {
 
         bottomSheet(t("Найти видео для нарезки", "Find videos for cuts")) { dismiss ->
             dismissSheet = dismiss
-            muted(t("Поиск по названию на YouTube. AI-фильтр (необязательно) оставит видео, подходящие под описание, — по названиям; в AI уходят только названия. " +
+            muted(t("Поиск по названию на YouTube. ИИ-фильтр (необязательно) оставит видео, подходящие под описание, — по названиям; в ИИ уходят только названия. " +
                 "Отмеченные добавятся клипами с 0:00 на 5 с — время поправьте через ✎.",
                 "Search YouTube by title. The AI filter (optional) keeps videos that fit the description, by titles; only the titles go to AI. " +
                     "Marked ones are added as clips from 0:00 for 5 s; adjust the time with ✎."))
             val query = edit(t("Что искать, напр. «Хоумлендер реакция»", "What to search, e.g. \"shocked reaction meme\""))
-            val want = edit(t("AI-фильтр: что должно быть в кадре (можно пусто)", "AI filter: what must be in the shot (optional)"))
+            val want = edit(t("ИИ-фильтр: что должно быть в кадре (можно пусто)", "AI filter: what must be in the shot (optional)"))
             row(
                 btn(ctx, t("🔎 Искать", "🔎 Search"), style = BtnStyle.TONAL) { search(query.text.toString().trim(), "") },
-                btn(ctx, t("✨ Искать с AI", "✨ Search with AI"), primary = true) {
+                btn(ctx, t("✨ Искать с ИИ", "✨ Search with AI"), primary = true) {
                     val w = want.text.toString().trim().ifBlank { query.text.toString().trim() }
                     search(query.text.toString().trim(), w)
                 }
@@ -2296,7 +2313,7 @@ class StudioActivity : LumenBase() {
             "Учти черновик автора и сохрани его мысли:\n" + scriptEdit.text.toString().take(3000) else ""
         val go = { runWrite(topic, extra) {} }
         if (scriptEdit.text.isNotBlank()) confirm(t("Заменить сценарий?", "Replace the script?"),
-            t("AI напишет новый сценарий по теме; текущий текст будет учтён как черновик.", "AI will write a new script; the current text is used as a draft."),
+            t("ИИ напишет новый сценарий по теме; текущий текст будет учтён как черновик.", "AI will write a new script; the current text is used as a draft."),
             t("Написать", "Write"), onOk = go) else go()
     }
 
@@ -2331,7 +2348,7 @@ class StudioActivity : LumenBase() {
 
     private fun autoDialog() {
         if (Provider.active() == null) {
-            toast(t("Подключите AI в настройках", "Connect an AI in the settings"))
+            toast(t("Подключите ИИ в настройках", "Connect an AI in the settings"))
             return
         }
         val ideaE = edt(this, t("Идея: о чём мультфильм", "Idea: what the cartoon is about"), topicEdit.text.toString(), multiline = true)
@@ -2339,7 +2356,7 @@ class StudioActivity : LumenBase() {
         val scriptE = edt(this, t("Сценарий или реплики (необязательно)", "Script or lines (optional)"), scriptEdit.text.toString(), multiline = true).apply { maxLines = 8 }
         var build = true
         val col = Col(this, 20)
-        col.muted(t("Заполните любое из полей — остальное AI придумает сам: сценарий с репликами персонажей, сцены и графику, озвучку голосами героев, монтаж режиссёра и, если включено, сборку видео. Персонажи — из карточки «🎭 Персонажи», длительность и кадр — как выбраны на экране.",
+        col.muted(t("Заполните любое из полей — остальное ИИ придумает сам: сценарий с репликами персонажей, сцены и графику, озвучку голосами героев, монтаж режиссёра и, если включено, сборку видео. Персонажи — из карточки «🎭 Персонажи», длительность и кадр — как выбраны на экране.",
             "Fill in any of the fields; AI invents the rest: the script with the characters' lines, scenes and graphics, the voices, the director's edit and, if on, the video build. Characters come from the \"🎭 Characters\" card, length and frame as chosen on the screen."))
         col.add(ideaE, 12)
         col.add(scenesE, 8)
@@ -2349,7 +2366,7 @@ class StudioActivity : LumenBase() {
             isChecked = true
             setOnCheckedChangeListener { _, v -> build = v }
         }, 8)
-        android.app.AlertDialog.Builder(this).setTitle(t("🤖 AI сделает всё", "🤖 AI makes everything"))
+        android.app.AlertDialog.Builder(this).setTitle(t("🤖 ИИ сделает всё", "🤖 AI makes everything"))
             .setView(ScrollView(this).apply { addView(col.root) })
             .setPositiveButton(t("Начать", "Start")) { _, _ ->
                 val idea = ideaE.text.toString().trim()
@@ -2399,7 +2416,7 @@ class StudioActivity : LumenBase() {
             col.add(askE, 12)
         }
         build()
-        android.app.AlertDialog.Builder(this).setTitle(t("🪄 AI-помощник", "🪄 AI assistant"))
+        android.app.AlertDialog.Builder(this).setTitle(t("🪄 ИИ-помощник", "🪄 AI assistant"))
             .setView(ScrollView(this).apply { addView(col.root) })
             .setPositiveButton(t("Улучшить", "Improve")) { _, _ ->
                 val asks = presets.filter { it.id in chosen }.map { it.ask } + listOfNotNull(askE.text.toString().trim().takeIf { it.isNotEmpty() })
@@ -2469,7 +2486,7 @@ class StudioActivity : LumenBase() {
             if (r.truncated) limit = minOf(limit * 2, 32_000)
             prompt = Prompts.fill(key, vars) + "\n\nПредыдущий ответ был неполным или не в формате JSON. Верни только JSON, компактно."
         }
-        throw LlmException(t("AI не вернул ответ в нужном формате. Откройте «Ответы AI».", "AI did not answer in the expected format. See \"AI answers\"."))
+        throw LlmException(t("ИИ не вернул ответ в нужном формате. Откройте «Ответы ИИ».", "AI did not answer in the expected format. See \"AI answers\"."))
     }
 
     // ---------- step 2: recording and import ----------
@@ -2559,7 +2576,7 @@ class StudioActivity : LumenBase() {
             runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
         }
         if (moved) toast(t("Прежняя работа — в «Черновиках»", "The previous work is in Drafts"))
-        if (Provider.active() == null) toast(t("AI не подключён: монтаж будет по правилам, без инфосхем", "No AI connected: rule-based edit, no info-schemes"))
+        if (Provider.active() == null) toast(t("ИИ не подключён: монтаж будет по правилам, без инфосхем", "No AI connected: rule-based edit, no info-schemes"))
         podcastAuto = true
         busy = "import"
         cancel = false
@@ -2751,7 +2768,7 @@ class StudioActivity : LumenBase() {
         val chunks = Studio.groupSpans(speech, 180_000)
         return chunks.mapIndexedNotNull { k, c ->
             if (cancel) throw java.util.concurrent.CancellationException()
-            report("analyse", t("Расшифровка через AI ${k + 1}/${chunks.size}…", "AI transcription ${k + 1}/${chunks.size}…"))
+            report("analyse", t("Расшифровка через ИИ ${k + 1}/${chunks.size}…", "AI transcription ${k + 1}/${chunks.size}…"))
             val from = (c.startMs * take.rate / 1000).toInt().coerceIn(0, take.data.size)
             val to = (c.endMs * take.rate / 1000).toInt().coerceIn(from, take.data.size)
             val pcm16 = Studio.resample(take.data.copyOfRange(from, to), take.rate, StudioRecognizer.RATE)
@@ -2859,7 +2876,7 @@ class StudioActivity : LumenBase() {
         } } catch (e: EdgeTts.TtsException) {
             // "Read aloud" is the TTS screen's button; here the step is restarted, and the voiced scenes are kept
             throw EdgeTts.TtsException(e.message.orEmpty().substringBefore(t(" Нажмите", " Tap")).substringBefore(t(" Готово частей", " Parts done")) +
-                t(" Озвучено сцен: ${ready.get()} из $n, они сохранены — нажмите «🔍 Разобрать» ещё раз, продолжится с остальных. Проверьте интернет; держите Студию открытой или свёрнутой с уведомлением.",
+                t(" Озвучено сцен: ${ready.get()} из $n, они сохранены — нажмите «🔍 Разметить сцены» ещё раз, продолжится с остальных. Проверьте интернет; держите Студию открытой или свёрнутой с уведомлением.",
                     " Scenes voiced: ${ready.get()} of $n, they are kept — tap \"🔍 Analyse\" again to continue with the rest. Check the internet; keep the Studio open or minimised with its notification."))
         }
         if (cancel) throw java.util.concurrent.CancellationException()
@@ -2903,15 +2920,15 @@ class StudioActivity : LumenBase() {
     @Volatile private var lastTokens: Pair<Int, Int>? = null
 
     private fun approachHelp(a: StudioApproach) = when (a) {
-        StudioApproach.RULES -> t("⚡ Правила — без AI и токенов: цифры, шаги, сравнения, списки, цитаты и эмодзи по смыслу слов; зум и подсветка на главном слове.",
+        StudioApproach.RULES -> t("⚡ Правила — без ИИ и токенов: цифры, шаги, сравнения, списки, цитаты и эмодзи по смыслу слов; зум и подсветка на главном слове.",
             "⚡ Rules: no AI, no tokens. Numbers, steps, comparisons, lists, quotes and emoji from the words; zoom and highlight on the key word.")
-        StudioApproach.RHYTHM -> t("🥁 Ритм — без AI: сцены по паузам, зумы на самых громких словах и долях музыки, «бум» на пике, пульс картинки под голос.",
+        StudioApproach.RHYTHM -> t("🥁 Ритм — без ИИ: сцены по паузам, зумы на самых громких словах и долях музыки, «бум» на пике, пульс картинки под голос.",
             "🥁 Rhythm: no AI. Scenes by pauses, zooms on the loudest words and music beats, a boom on the peak, the picture pulses with the voice.")
-        StudioApproach.LITE -> t("💸 Эконом AI — быстрая модель и сжатый протокол: метки только в начале фраз, ответ короткими строками. В 3–5 раз меньше токенов.",
+        StudioApproach.LITE -> t("💸 Эконом ИИ — быстрая модель и сжатый протокол: метки только в начале фраз, ответ короткими строками. В 3–5 раз меньше токенов.",
             "💸 Lite AI: the fast model and a compact protocol (marks only at clause starts, short string answers). 3–5 times fewer tokens.")
         StudioApproach.HYBRID -> t("🧩 Гибрид — черновик по правилам, а умная модель переделывает только ключевые сцены (хук, цифры, вывод).",
             "🧩 Hybrid: a rules draft; the smart model redoes only the key scenes (hook, numbers, ending).")
-        StudioApproach.FULL -> t("🎬 Полный AI-режиссёр — подробный протокол: графика, фигуры на ключевых кадрах, B-roll, звуки, вырезка паразитов. Больше всего токенов.",
+        StudioApproach.FULL -> t("🎬 Полный ИИ-режиссёр — подробный протокол: графика, фигуры на ключевых кадрах, B-roll, звуки, вырезка паразитов. Больше всего токенов.",
             "🎬 Full AI director: the detailed protocol with graphics, key-frame shapes, B-roll, sounds and cutting fillers. Most tokens.")
     }
 
@@ -3000,7 +3017,7 @@ class StudioActivity : LumenBase() {
             board = emptyList()
             saveAnalysis()
             render()
-            if (ap.usesAi) lastTokens?.let { (i, o) -> toast(t("AI: $i → $o токенов", "AI: $i → $o tokens")) }
+            if (ap.usesAi) lastTokens?.let { (i, o) -> toast(t("ИИ: $i → $o токенов", "AI: $i → $o tokens")) }
             if (StudioPrefs.broll && StudioDirector.needBroll(ap2.script).isNotEmpty()) fetchBroll() else autoFinish()
         }
     }
@@ -3069,8 +3086,8 @@ class StudioActivity : LumenBase() {
             board = emptyList()
             saveAnalysis()
             render()
-            if (ap.dropped > 0) toast(t("AI-режиссёр вырезал слов: ${ap.dropped}", "The AI director cut ${ap.dropped} words"))
-            else lastTokens?.let { (i, o) -> toast(t("AI: $i → $o токенов", "AI: $i → $o tokens")) }
+            if (ap.dropped > 0) toast(t("ИИ-режиссёр вырезал слов: ${ap.dropped}", "The AI director cut ${ap.dropped} words"))
+            else lastTokens?.let { (i, o) -> toast(t("ИИ: $i → $o токенов", "AI: $i → $o tokens")) }
             if (StudioPrefs.broll && StudioDirector.needBroll(ap.script).isNotEmpty()) fetchBroll() else autoFinish()
         }
     }
@@ -3081,7 +3098,7 @@ class StudioActivity : LumenBase() {
         val sc = script ?: return
         val have = sc.scenes.count { it.scheme != null }
         bottomSheet(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes")) { dismiss ->
-            muted(t("AI выберет сцены, где схема объяснит лучше слов: цепочка, центр и связи, дерево, шкала времени, воронка, пирамида, матрица 2×2, пересечения. " +
+            muted(t("ИИ выберет сцены, где схема объяснит лучше слов: цепочка, центр и связи, дерево, шкала времени, воронка, пирамида, матрица 2×2, пересечения. " +
                 "Он описывает схему по протоколу lumen.scheme, Lumen проверяет её и при ошибках просит AI исправить. Блоки появляются на своих словах.",
                 "AI picks the scenes where a scheme explains better than words: chain, hub, tree, timeline, funnel, pyramid, 2×2 matrix, overlaps. " +
                     "It describes it in the lumen.scheme protocol; Lumen checks it and asks the AI to fix mistakes. Blocks appear on their words."))
@@ -3122,7 +3139,7 @@ class StudioActivity : LumenBase() {
     private fun styleSheet() {
         val cur = schemeStyleNow()
         bottomSheet(t("🎨 Стиль инфосхем", "🎨 Info-scheme style")) { dismiss ->
-            muted(t("Стиль задаёт цвета, подложку, шрифт, появление и встраивание схем в видео. Работает в стиле ролика «Монтаж» (своё видео, фон, нарезка).",
+            muted(t("Стиль задаёт цвета, подложку, шрифт, появление и встраивание схем в видео. Работает в стилях ролика «Моё видео» и «Клипы на фоне» (своё видео, фон, нарезка).",
                 "A style sets colours, backdrop, font, entrance and how schemes sit in the video. Works in the Montage style (own video, background, cuts)."))
             add(text(ctx, t("Встраивание в видео", "Placement in the video"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             chips((listOf("style") + SchemeStyles.PLACES).map { pl ->
@@ -3163,7 +3180,7 @@ class StudioActivity : LumenBase() {
             }
             add(text(ctx, t("Свой стиль", "Own style"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val ask = edit(t("Опишите стиль: например «тёмное стекло, мятный акцент, для подкаста сбоку»", "Describe it: e.g. “dark glass, mint accent, side panel for a podcast”"), multiline = true)
-            button(t("✨ Создать стиль по описанию (AI)", "✨ Make a style from a description (AI)"), primary = true) {
+            button(t("✨ Создать стиль по описанию (ИИ)", "✨ Make a style from a description (AI)"), primary = true) {
                 val text = ask.text.toString().trim()
                 if (text.isEmpty()) {
                     toast(t("Опишите стиль", "Describe the style"))
@@ -3302,7 +3319,7 @@ class StudioActivity : LumenBase() {
             }
             board = emptyList()
             render()
-            toast(if (found.isEmpty()) t("AI не нашёл сцен для схем", "AI found no scenes for schemes")
+            toast(if (found.isEmpty()) t("ИИ не нашёл сцен для схем", "AI found no scenes for schemes")
             else t("Инфосхем: ${found.size}", "Info-schemes: ${found.size}") + if (failed > 0) t(" · не удалось: $failed", " · failed: $failed") else "")
             then?.invoke()
         }

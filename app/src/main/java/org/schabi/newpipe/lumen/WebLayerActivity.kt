@@ -498,7 +498,7 @@ class WebLayerActivity : LumenBase() {
         }
 
         // 2. the video
-        c.h2(t("🧪 JS-монтаж по протоколу", "🧪 JS montage by the protocol"))
+        c.h2(t("🧪 Анимированный слой от ИИ", "🧪 An animated layer from an AI"))
         c.muted(t("ИИ пишет код слоя анимации (lumen.canvas), Lumen рисует его поверх видео в WebView без интернета. Каждый ответ ИИ сохраняется шаблоном — пробуйте разные монтажи на одном видео.",
             "AI writes the code of an animation layer (lumen.canvas), Lumen draws it over the video in a WebView without internet. Every AI answer is kept as a template — try different montages on one video."))
         if (v != null) {
@@ -639,7 +639,7 @@ class WebLayerActivity : LumenBase() {
             c.button(t("Остановить", "Stop"), style = BtnStyle.OUTLINED) { cancel = true }
         } else {
             host.detach()
-            if (idle && v != null && code.isNotBlank()) c.button(t("🎬 Рендер с этим монтажом", "🎬 Render with this montage"), primary = true) { renderVideo() }
+            if (idle && v != null && code.isNotBlank()) c.button(t("🎬 Сохранить видео со слоем", "🎬 Save the video with the layer"), primary = true) { renderVideo() }
         }
         result?.takeIf { it.exists() }?.let { f ->
             c.p("✅ " + t("Готово: ", "Done: ") + savedAs.ifBlank { f.name })
@@ -686,6 +686,6 @@ class WebLayerActivity : LumenBase() {
                 }
             }
         }
-        page(t("🎛 Монтаж", "🎛 Montage"), c.root, keepScroll = true)
+        page(t("🎛 Слой ИИ", "🎛 AI layer"), c.root, keepScroll = true)
     }
 }

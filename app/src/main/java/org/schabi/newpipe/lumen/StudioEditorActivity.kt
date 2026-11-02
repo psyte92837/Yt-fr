@@ -9,7 +9,10 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -58,6 +61,17 @@ class StudioEditorActivity : LumenBase() {
         private const val REQ_IMAGE = 7711
         private const val REQ_VIDEO = 7712
         private const val REQ_SPLIT = 7713
+        private const val REQ_AUDIO = 7714
+
+        // the editor is dark whatever the theme of the app, like video editors: the picture is judged on black
+        private const val ED_BG = 0xFF0E0F12.toInt()
+        private const val ED_PANEL = 0xFF15171B.toInt()
+        private const val ED_BAR = 0xFF121418.toInt()
+        private const val ED_CARD = 0xFF23262C.toInt()
+        private const val ED_CARD_HI = 0xFF33373F.toInt()
+        private const val ED_TEXT = 0xFFF2F3F5.toInt()
+        private const val ED_MUTED = 0xFFA4A8B0.toInt()
+        private const val ED_ON_ACCENT = 0xFF14161B.toInt()
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
         private const val TASK_AI = TASK + "ai"
@@ -123,6 +137,25 @@ class StudioEditorActivity : LumenBase() {
     private var splitKey = ""
     private var side2SeekAt = 0L
     private val sideSizes = HashMap<String, Pair<Int, Int>>()
+    // music on the preview
+    private var player3: ExoPlayer? = null
+    private var musicFile = ""
+    private var musicSeekAt = 0L
+    private var fadeView: View? = null
+    private var previewBox: FrameLayout? = null
+    private var topBarView: View? = null
+    private var ratioChip: TextView? = null
+    private var fullBtn: TextView? = null
+    private var toolsLine: TextView? = null
+    /** Views hidden in full screen. */
+    private var chrome: List<View> = emptyList()
+    private var fullscreen = false
+    /** Open section of the bottom bar (audio, text, overlay, ai), null = the main sections. */
+    private var cat: String? = null
+    private var savedBars: Int? = null
+    private var thumbList: List<Pair<Long, Bitmap>> = emptyList()
+    /** Accent of the dark editor: light enough to read on its background. */
+    private val edAccent: Int get() = if (Palette.contrast(Palette.ACCENT or 0xFF000000.toInt(), ED_BG) >= 4.5) Palette.ACCENT else Palette.FAB
     private var timeText: TextView? = null
     private var playBtn: TextView? = null
     private var undoBtn: TextView? = null
@@ -169,6 +202,7 @@ class StudioEditorActivity : LumenBase() {
         BgTasks.watchers -= watcher
         pause()
         player2?.pause()
+        player3?.pause()
         save()
     }
 
@@ -179,7 +213,8 @@ class StudioEditorActivity : LumenBase() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (selected != null) select(null) else if (clipSel >= 0) selectClip(-1) else {
+        if (fullscreen) setFullscreen(false)
+        else if (selected != null) select(null) else if (clipSel >= 0) selectClip(-1) else if (cat != null) openCat(null) else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
         }
@@ -288,17 +323,33 @@ class StudioEditorActivity : LumenBase() {
      */
     private fun chooser() {
         stopPlayer()
+        darkBars(false)
         project = null
         stage = null
         timeline = null
         statusRow = null
+        toolsRow = null
+        fullscreen = false
+        cat = null
         val c = Col(this)
-        c.p(t("Готовый ролик → схемы, картинки, надписи и эмодзи в нужные моменты. Остановите видео, нажмите «＋», двигайте блоки на кадре и на таймлайне, затем «⬆ Экспорт».",
-            "A finished video → schemes, pictures, captions and emoji at the right moments. Stop the video, tap \"＋\", move the blocks on the frame and the timeline, then \"⬆ Export\"."), color = Palette.MUTED)
-        c.row(
-            btn(this, t("📂 Видео с телефона", "📂 Video from the phone"), style = BtnStyle.TONAL) { pickVideo() },
-            btn(this, t("❓ Как пользоваться", "❓ How to use"), style = BtnStyle.TEXT) { HelpActivity.open(this, helpTopic) }
-        )
+        // a big "new project" tile on top, like the home screen of CapCut / YouCut
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(22), dp(16), dp(20))
+            background = ripple(this@StudioEditorActivity, roundBg(Palette.FAB, 24f, this@StudioEditorActivity), Palette.ON_FAB)
+            contentDescription = t("Новый проект: видео с телефона", "New project: a video from the phone")
+            setOnClickListener { pickVideo() }
+        }
+        hero.addView(text(this, "＋", 34f, bold = true, color = Palette.ON_FAB).apply { gravity = Gravity.CENTER })
+        hero.addView(text(this, t("Новый проект", "New project"), 18f, bold = true, color = Palette.ON_FAB).apply { gravity = Gravity.CENTER })
+        hero.addView(text(this, t("Видео с телефона → монтаж, музыка, надписи, фильтры, переходы, схемы ИИ",
+            "A video from the phone → cuts, music, captions, filters, transitions, AI schemes"), 13f, color = Palette.ON_FAB).apply {
+            gravity = Gravity.CENTER
+            alpha = 0.85f
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        c.add(hero, 4)
+        c.row(btn(this, t("❓ Как пользоваться", "❓ How to use"), style = BtnStyle.TEXT) { HelpActivity.open(this, helpTopic) })
         val df = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         val list = StudioEditStore.list(this)
         val inProjects = list.map { it.source }.toSet()
@@ -339,7 +390,8 @@ class StudioEditorActivity : LumenBase() {
         val n = p.blocks.groupingBy { it.kind }.eachCount()
         return listOfNotNull(
             n["scheme"]?.let { t("схем: $it", "schemes: $it") }, n["image"]?.let { t("картинок: $it", "pictures: $it") },
-            n["text"]?.let { t("надписей: $it", "captions: $it") }, n["emoji"]?.let { t("эмодзи: $it", "emoji: $it") }
+            n["text"]?.let { t("надписей: $it", "captions: $it") }, n["emoji"]?.let { t("эмодзи: $it", "emoji: $it") },
+            n[EditMusic.KIND]?.let { t("звуков: $it", "sounds: $it") }
         ).joinToString(" · ") + if (p.exported.isNotEmpty()) t(" · экспортирован", " · exported") else ""
     }
 
@@ -356,6 +408,9 @@ class StudioEditorActivity : LumenBase() {
         playing = false
         curClip = -1
         curMs = 0
+        cat = null
+        fullscreen = false
+        thumbList = emptyList()
         buildEditor()
         loadThumbs(p)
     }
@@ -364,9 +419,14 @@ class StudioEditorActivity : LumenBase() {
 
     private fun buildEditor() {
         val p = project ?: return
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val box = FrameLayout(this).apply { setBackgroundColor(0xFF000000.toInt()) }
-        val frame = FrameLayout(this)
+        darkBars(true)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(ED_BG)
+        }
+        root.addView(topBar())
+        val box = FrameLayout(this).apply { setBackgroundColor(ED_BG) }
+        val frame = FrameLayout(this).apply { setBackgroundColor(p.bg) }
         val tv = TextureView(this)
         val st = EditStage(this) { w, h -> StudioEditPainter(w, h, dir, words, StudioPrefs.accent, styleDir) }
         val mb = FrameLayout(this)
@@ -377,9 +437,15 @@ class StudioEditorActivity : LumenBase() {
         }
         val tv2 = TextureView(this)
         sb.addView(tv2, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // transitions: a colour over the whole frame at the seams
+        val fv = View(this).apply {
+            visibility = View.GONE
+            isClickable = false
+        }
         frame.addView(mb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(sb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(st, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        frame.addView(fv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addOnLayoutChangeListener { _, x0, y0, x1, y1, ox0, oy0, ox1, oy1 ->
             if (x1 - x0 != ox1 - ox0 || y1 - y0 != oy1 - oy0) frame.post {
                 splitKey = ""
@@ -390,6 +456,8 @@ class StudioEditorActivity : LumenBase() {
         mainBox = mb
         sideBox = sb
         texture2 = tv2
+        fadeView = fv
+        previewBox = box
         box.addView(frame, FrameLayout.LayoutParams(1, 1, Gravity.CENTER))
         box.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> box.post { fitFrame(box, frame) } }
         root.addView(box, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
@@ -402,25 +470,41 @@ class StudioEditorActivity : LumenBase() {
             blocks = p.blocks
             words = this@StudioEditorActivity.words
         }
-        root.addView(FrameLayout(this).apply {
-            setBackgroundColor(0xFF15171B.toInt())
+        val tlBox = FrameLayout(this).apply {
+            setBackgroundColor(ED_PANEL)
             setPadding(0, dp(6), 0, dp(4))
             addView(tl, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        })
+        }
+        root.addView(tlBox)
+        // the bottom bar: a line on what is being edited, then the tools (two levels, like CapCut)
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(ED_BAR)
+        }
+        val ctxLine = text(this, "", 12f, bold = true, color = ED_MUTED).apply {
+            isSingleLine = true
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(dp(16), dp(8), dp(16), 0)
+            visibility = View.GONE
+        }
+        bottom.addView(ctxLine)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(6), dp(2), dp(6), dp(6))
+            setPadding(dp(6), dp(6), dp(6), dp(8))
         }
-        root.addView(HorizontalScrollView(this).apply {
+        bottom.addView(HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             addView(row)
         })
+        root.addView(bottom)
+        chrome = listOfNotNull(tlBox, bottom, topBarView)
         stage = st
         timeline = tl
         texture = tv
         toolsRow = row
+        toolsLine = ctxLine
         st.blocks = EditSplit.overlays(p.blocks)
-        st.portrait = p.h > p.w * 1.1f
+        st.portrait = EditCanvas.frame(p).let { (w, h) -> h > w * 1.1f }
         st.onSelect = { id ->
             pause()
             select(id, seek = false)
@@ -447,12 +531,16 @@ class StudioEditorActivity : LumenBase() {
             pause()
             selectClip(if (i == clipSel) -1 else i)
         }
+        tl.onSeam = { k ->
+            pause()
+            transitionSheet(k)
+        }
         tl.onClipDrop = { from, to ->
             pause()
             EditTrack.moveTo(clips, from, to)?.let { (list, j) -> commitClips(list, j) }
         }
         tl.onChange = { b, done -> live(b, done) }
-        page(t("Редактор", "Editor"), root, actions = listOf("☰" to { blocksSheet() }), scroll = false)
+        editorScreen(root)
         tl.post {
             tl.fitAll()
             tl.setPlayhead(curMs)
@@ -465,19 +553,103 @@ class StudioEditorActivity : LumenBase() {
         hintOnce()
     }
 
+    /** The editor fills the screen itself (its own top bar), dark like video editors, padded by the system bars. */
+    private fun editorScreen(root: View) {
+        val frame = FrameLayout(this).apply { setBackgroundColor(ED_BG) }
+        frame.addView(root)
+        frame.setOnApplyWindowInsetsListener { v, insets ->
+            @Suppress("DEPRECATION")
+            v.setPadding(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, insets.systemWindowInsetBottom)
+            insets
+        }
+        setContentView(frame)
+        frame.requestApplyInsets()
+    }
+
+    /** Light icons of the status and navigation bars over the dark editor; the app's own look back on the list. */
+    private fun darkBars(on: Boolean) {
+        val v = window.decorView
+        @Suppress("DEPRECATION")
+        if (on) {
+            if (savedBars == null) savedBars = v.systemUiVisibility
+            var f = v.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+            if (Build.VERSION.SDK_INT >= 26) f = f and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            v.systemUiVisibility = f
+        } else savedBars?.let {
+            v.systemUiVisibility = it
+            savedBars = null
+        }
+    }
+
+    /** ✕ to the projects, the format of the frame, help and the export, like the top of CapCut. */
+    private fun topBar(): View {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(10), dp(4))
+            setBackgroundColor(ED_BG)
+        }
+        bar.addView(roundBtn("✕") { closeEditor() }.apply { contentDescription = t("Закрыть: к проектам", "Close: to the projects") })
+        val ratio = text(this, "", 13f, bold = true, color = ED_TEXT).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(6), dp(12), dp(6))
+            background = ripple(this@StudioEditorActivity, roundBg(ED_CARD, 16f, this@StudioEditorActivity), ED_TEXT)
+            contentDescription = t("Формат кадра", "Frame format")
+            setOnClickListener { canvasSheet() }
+        }
+        bar.addView(ratio, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
+        bar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        bar.addView(roundBtn("?") { HelpActivity.open(this, helpTopic) }.apply { contentDescription = t("Справка", "Help") })
+        bar.addView(text(this, t("Экспорт", "Export"), 14f, bold = true, color = ED_ON_ACCENT).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(8), dp(18), dp(8))
+            background = ripple(this@StudioEditorActivity, roundBg(edAccent, 20f, this@StudioEditorActivity), ED_ON_ACCENT)
+            contentDescription = t("Экспорт ролика", "Export the video")
+            setOnClickListener { exportSheet() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(6) })
+        ratioChip = ratio
+        topBarView = bar
+        refreshRatio()
+        return bar
+    }
+
+    private fun refreshRatio() {
+        val p = project ?: return
+        ratioChip?.text = "▭ " + (p.ratio.ifEmpty { t("Оригинал", "Original") }) + " ▾"
+    }
+
+    private fun closeEditor() {
+        if (fullscreen) return setFullscreen(false)
+        pause()
+        save()
+        chooser()
+    }
+
+    /** Only the picture and the play bar: to watch the video as it will look. */
+    private fun setFullscreen(on: Boolean) {
+        fullscreen = on
+        for (v in chrome) v.visibility = if (on) View.GONE else View.VISIBLE
+        fullBtn?.text = if (on) "⤡" else "⛶"
+    }
+
     /** The first time: how the editor works, in four lines. */
     private fun hintOnce() {
         val prefs = Lumen.prefs
-        if (prefs.getBoolean("studio_edit_hint", false)) return
-        prefs.edit().putBoolean("studio_edit_hint", true).apply()
+        if (prefs.getBoolean("studio_edit_hint2", false)) return
+        prefs.edit().putBoolean("studio_edit_hint2", true).apply()
         bottomSheet(t("Как работает редактор", "How the editor works")) { dismiss ->
-            p(t("1. Остановите видео в нужном месте (тап по кадру или прокрутка таймлайна) и нажмите «＋».", "1. Stop the video at a moment (tap the frame or scroll the timeline) and tap \"＋\"."))
-            p(t("2. Блок на кадре: тяните пальцем, угол ⤡ или два пальца — размер и поворот, ↔ — ширина текста.", "2. A block on the frame: drag it; the ⤡ corner or two fingers scale and turn it, ↔ sets the text width."))
-            p(t("3. На таймлайне: выбранный блок тянется целиком, края — длительность; края прилипают к словам и курсору.", "3. On the timeline: drag the selected block, its edges set the length and stick to words and the playhead."))
-            p(t("Монтаж как в CapCut: тап по кадрам ролика внизу выделяет кусок — ✂ разрезать, удалить, скорость, громкость, стоп-кадр, зеркало; удержание и перетаскивание — переставить. «⊟ Разделить экран» — второе видео рядом.",
-                "Editing like CapCut: tap the frames of the video below to select a piece — ✂ split, delete, speed, volume, freeze, mirror; hold and drag to reorder. \"⊟ Split screen\" puts a second video beside."))
-            if (words.isNotEmpty()) p(t("4. «📝 Текст» — вся речь: тап по слову ставит курсор, выделите фразу — и схема или надпись встанет ровно на неё.",
-                "4. \"📝 Text\" is the whole speech: tap a word to go there, select a phrase to put a scheme or caption exactly on it."))
+            p(t("1. Тап по кадру — пауза. Таймлайн прокручивается пальцем, щипок — масштаб; белая линия — курсор.",
+                "1. Tap the frame to pause. Scroll the timeline with a finger, pinch to zoom; the white line is the playhead."))
+            p(t("2. Внизу разделы: ✂ Монтаж, 🎵 Аудио, T Текст, 😀 Стикеры, 🖼 Наложение, 🎨 Фильтры, ☀ Настройка, ⇆ Переходы, ▭ Формат, 🧩 ИИ. «‹ Назад» — к разделам.",
+                "2. Sections below: ✂ Edit, 🎵 Audio, T Text, 😀 Stickers, 🖼 Overlay, 🎨 Filters, ☀ Adjust, ⇆ Transitions, ▭ Format, 🧩 AI. \"‹ Back\" returns."))
+            p(t("3. Тап по кадрам ролика на таймлайне выделяет кусок: разрезать, скорость, громкость, фильтр, переход, удалить; удержание и перетаскивание — переставить. Белый квадрат на шве — переход.",
+                "3. Tap the frames on the timeline to select a piece: split, speed, volume, filter, transition, delete; hold and drag to reorder. The white square at a seam is a transition."))
+            p(t("4. Надписи, картинки, схемы и музыка — цветные полоски под кадрами: тяните целиком или за края. На кадре блок двигается пальцем, два пальца — размер и поворот.",
+                "4. Captions, pictures, schemes and music are coloured bars under the frames: drag them or their edges. On the frame drag a block; two fingers scale and turn it."))
+            if (words.isNotEmpty()) p(t("5. «T Текст → 📝 Текст речи» — вся речь: тап по слову ставит курсор, выделите фразу — и схема или надпись встанет ровно на неё.",
+                "5. \"T Text → 📝 Speech text\" is the whole speech: tap a word to go there, select a phrase to put a scheme or caption exactly on it."))
+            p(t("↶ ↷ — отмена любого шага, ⛶ — смотреть во весь экран, «Экспорт» — готовый ролик в галерею.",
+                "↶ ↷ undo any step, ⛶ watch full screen, \"Export\" saves the video to the gallery."))
             button(t("Понятно", "Got it"), primary = true) { dismiss() }
         }
     }
@@ -487,56 +659,59 @@ class StudioEditorActivity : LumenBase() {
         redoBtn?.alpha = if (history.canRedo) 1f else 0.35f
     }
 
-    /** The video frame keeps the shape of the video inside the black area. */
+    /** The frame keeps the shape of the canvas (the format of the project) inside the dark area. */
     private fun fitFrame(box: View, frame: View) {
         val p = project ?: return
         if (box.width <= 0 || box.height <= 0) return
-        val k = min(box.width.toFloat() / p.w, box.height.toFloat() / p.h)
-        val w = max(1, (p.w * k).toInt())
-        val h = max(1, (p.h * k).toInt())
+        val (cw, ch) = EditCanvas.frame(p)
+        val pad = dp(8)
+        val k = min((box.width - pad * 2).toFloat() / cw, (box.height - pad * 2).toFloat() / ch).coerceAtLeast(0.01f)
+        val w = max(1, (cw * k).toInt())
+        val h = max(1, (ch * k).toInt())
         val lp = frame.layoutParams as FrameLayout.LayoutParams
         if (lp.width != w || lp.height != h) frame.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.CENTER)
     }
 
-    private fun roundBtn(glyph: String, big: Boolean = false, onClick: () -> Unit): TextView = text(this, glyph, if (big) 20f else 17f, bold = true,
-        color = if (big) Palette.ON_ACCENT else Palette.ON_SURFACE).apply {
+    private fun roundBtn(glyph: String, big: Boolean = false, onClick: () -> Unit): TextView = text(this, glyph, if (big) 22f else 18f, bold = true,
+        color = if (big) ED_BG else ED_TEXT).apply {
         gravity = Gravity.CENTER
-        val s = dp(if (big) 48 else 40)
-        layoutParams = LinearLayout.LayoutParams(s, s).apply { marginStart = dp(4) }
-        background = ripple(this@StudioEditorActivity, roundBg(if (big) Palette.ACCENT else 0x00000000, if (big) 24f else 20f, this@StudioEditorActivity),
-            Palette.ON_SURFACE)
+        val s = dp(if (big) 52 else 44)
+        layoutParams = LinearLayout.LayoutParams(s, s).apply { marginStart = dp(2) }
+        background = ripple(this@StudioEditorActivity, roundBg(if (big) ED_TEXT else 0x00000000, if (big) 26f else 22f, this@StudioEditorActivity), if (big) ED_BG else ED_TEXT)
         setOnClickListener { onClick() }
     }
 
+    /** Time on the left, ▶ in the middle, undo / redo and full screen on the right. */
     private fun transport(): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(12), dp(4), dp(8), dp(4))
+            setPadding(dp(14), dp(2), dp(6), dp(2))
+            setBackgroundColor(ED_BG)
         }
-        val tt = text(this, "", 12f, bold = true).apply {
+        val tt = text(this, "", 12f, bold = true, color = ED_TEXT).apply {
             typeface = Typeface.MONOSPACE
             isSingleLine = true
         }
         tt.setOnClickListener { goToTime() }
         tt.contentDescription = t("Время; тап — перейти к моменту", "Time; tap to go to a moment")
         row.addView(tt, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val un = roundBtn("↶") { undo() }.apply { contentDescription = t("Отменить", "Undo") }
-        val re = roundBtn("↷") { redo() }.apply { contentDescription = t("Вернуть", "Redo") }
-        row.addView(un)
-        row.addView(re)
         val play = roundBtn("▶", big = true) { toggle() }.apply { contentDescription = t("Играть / пауза", "Play / pause") }
         row.addView(play)
+        val right = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+        }
+        val un = roundBtn("↶") { undo() }.apply { contentDescription = t("Отменить", "Undo") }
+        val re = roundBtn("↷") { redo() }.apply { contentDescription = t("Вернуть", "Redo") }
+        val full = roundBtn("⛶") { setFullscreen(!fullscreen) }.apply { contentDescription = t("Во весь экран", "Full screen") }
+        right.addView(un)
+        right.addView(re)
+        right.addView(full)
+        row.addView(right, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         undoBtn = un
         redoBtn = re
-        row.addView(text(this, "＋", 22f, bold = true, color = Palette.ON_FAB).apply {
-            gravity = Gravity.CENTER
-            contentDescription = t("Вставить", "Insert")
-            background = ripple(this@StudioEditorActivity, roundBg(Palette.FAB, 14f, this@StudioEditorActivity), Palette.ON_FAB)
-            setOnClickListener { insertSheet() }
-        }, LinearLayout.LayoutParams(dp(48), dp(44)).apply { marginStart = dp(8) })
-        row.addView(btn(this, t("⬆ Экспорт", "⬆ Export"), primary = true) { exportSheet() },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { marginStart = dp(8) })
+        fullBtn = full
         timeText = tt
         playBtn = play
         return row
@@ -553,9 +728,9 @@ class StudioEditorActivity : LumenBase() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val tv = text(this, "", 13f).apply { isSingleLine = true }
+        val tv = text(this, "", 13f, color = ED_TEXT).apply { isSingleLine = true }
         line.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val stop = text(this, t("Стоп", "Stop"), 13f, bold = true, color = Palette.ACCENT).apply { setPadding(dp(12), dp(4), dp(4), dp(4)) }
+        val stop = text(this, t("Стоп", "Stop"), 13f, bold = true, color = edAccent).apply { setPadding(dp(12), dp(4), dp(4), dp(4)) }
         line.addView(stop)
         row.addView(line)
         val bar = busyBar(this)
@@ -583,108 +758,224 @@ class StudioEditorActivity : LumenBase() {
         statusStop?.setOnClickListener { BgTasks.stop(task) }
     }
 
-    /** A button of the quick bar like in CapCut: an icon over a short name. */
-    private fun tool(row: LinearLayout, icon: String, label: String, on: () -> Unit) {
+    /** A button of the bottom bar like in CapCut: an icon in a round tile over a short name; [on] marks a setting that is on. */
+    private fun tool(row: LinearLayout, a: Act) {
         val v = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(2), dp(6), dp(2), dp(6))
-            background = ripple(this@StudioEditorActivity, roundBg(0x00000000, 12f, this@StudioEditorActivity), Palette.ON_SURFACE)
-            contentDescription = label
-            setOnClickListener { on() }
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+            background = ripple(this@StudioEditorActivity, roundBg(0x00000000, 14f, this@StudioEditorActivity), ED_TEXT)
+            contentDescription = a.label
+            setOnClickListener { a.f() }
         }
-        v.addView(text(this, icon, 20f).apply { gravity = Gravity.CENTER; isSingleLine = true })
-        v.addView(text(this, label, 11f, color = Palette.MUTED).apply {
+        val tile = when {
+            a.kind == ActKind.PRIMARY -> edAccent
+            a.kind == ActKind.BACK || a.on -> ED_CARD_HI
+            else -> ED_CARD
+        }
+        v.addView(text(this, a.icon, 19f, bold = true, color = when {
+            a.kind == ActKind.PRIMARY -> ED_ON_ACCENT
+            a.kind == ActKind.DANGER -> 0xFFFF8A80.toInt()
+            a.on -> edAccent
+            else -> ED_TEXT
+        }).apply {
+            gravity = Gravity.CENTER
+            isSingleLine = true
+            background = roundBg(tile, 14f, this@StudioEditorActivity, stroke = if (a.on) edAccent else 0)
+        }, LinearLayout.LayoutParams(dp(46), dp(46)))
+        v.addView(text(this, a.label, 11f, color = if (a.on) edAccent else ED_MUTED).apply {
             gravity = Gravity.CENTER
             maxLines = 2
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(2) })
-        row.addView(v, LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+        row.addView(v, LinearLayout.LayoutParams(dp(68), ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
-    private fun act(icon: String, label: String, f: () -> Unit): Triple<String, String, () -> Unit> = Triple(icon, label, f)
+    private enum class ActKind { NORMAL, PRIMARY, BACK, DANGER }
 
-    /** Quick bar at the bottom: editing of the video and inserting; of the selected piece; of the selected block. */
+    private class Act(val icon: String, val label: String, val kind: ActKind = ActKind.NORMAL, val on: Boolean = false, val f: () -> Unit)
+
+    private fun act(icon: String, label: String, on: Boolean = false, f: () -> Unit) = Act(icon, label, ActKind.NORMAL, on, f)
+    private fun done(f: () -> Unit) = Act("✓", t("Готово", "Done"), ActKind.PRIMARY, f = f)
+    private fun back() = Act("‹", t("Назад", "Back"), ActKind.BACK) { openCat(null) }
+    private fun danger(icon: String, label: String, f: () -> Unit) = Act(icon, label, ActKind.DANGER, f = f)
+
+    private fun openCat(c: String?) {
+        cat = c
+        tools()
+    }
+
+    private fun catName(c: String) = when (c) {
+        "audio" -> t("🎵 Аудио", "🎵 Audio")
+        "text" -> t("T Текст", "T Text")
+        "overlay" -> t("🖼 Наложение", "🖼 Overlay")
+        "ai" -> t("🧩 ИИ-помощник", "🧩 AI helper")
+        else -> c
+    }
+
+    /** The piece of the main track under the playhead. */
+    private fun clipHere(): Int = EditTrack.locate(clips, curMs).index
+
+    /** The seam nearest to the playhead (1..size-1), or 0 (the start of the video) when there is one piece. */
+    private fun seamHere(): Int {
+        val list = clips
+        if (list.size < 2) return 0
+        val st = EditTrack.starts(list)
+        return (1 until list.size).minByOrNull { kotlin.math.abs(st[it] - curMs) } ?: 1
+    }
+
+    /**
+     * The bottom bar: main sections (Edit, Audio, Text, Stickers, Overlay, Filters, Adjust, Transitions, Format, AI,
+     * Layers), a section's tools with ‹ back, the tools of the selected piece of the video or of the selected block.
+     */
     private fun tools() {
         val row = toolsRow ?: return
         row.removeAllViews()
         val b = StudioEdit.find(blocks, selected)
         val ci = clipSel.takeIf { b == null && it in clips.indices }
-        val items: List<Triple<String, String, () -> Unit>> = when {
-            b != null && b.kind == EditSplit.KIND -> listOf(
-                act("✓", t("Готово", "Done")) { select(null) },
-                act("⊟", t("Раскладка", "Layout")) { splitSheet(b) },
-                act("⏮", t("Начало 2-го видео", "2nd video from")) { splitFrom(b) },
-                act(if (b.volume > 0f) "🔊" else "🔇", t("Звук", "Sound")) { splitSoundSheet(b) },
-                act("⏱", t("Время", "Timing")) { timingSheet(b) },
-                act("✂", t("Разделить", "Split")) { split(b) },
-                act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) },
-                act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } },
-                act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } },
-                act("🔁", t("Заменить видео", "Replace video")) { pickSplit(b.id) },
-                act("🗑", t("Удалить", "Delete")) { delete(b.id) }
-            )
-            b != null -> buildList {
-                add(act("✓", t("Готово", "Done")) { select(null) })
-                add(act("✎", t("Изменить", "Edit")) { edit(b) })
-                if (b.kind != "emoji") add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
-                add(act("⏱", t("Время", "Timing")) { timingSheet(b) })
-                add(act("✂", t("Разделить", "Split")) { split(b) })
-                add(act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) })
-                add(act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } })
-                add(act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } })
-                add(act("🎞", t("Анимация", "Animation")) { animSheet(b) })
-                add(act("◐", t("Прозрач\u00adность", "Opacity")) { opacitySheet(b) })
-                add(act("⬆", t("Выше", "Forward")) { commit(StudioEdit.reorder(blocks, b.id, 1)) })
-                add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
-                add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
-                if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
-                add(act("🗑", t("Удалить", "Delete")) { delete(b.id) })
+        var line = ""
+        val items: List<Act> = when {
+            b != null && b.kind == EditSplit.KIND -> {
+                line = "⊟ " + t("Разделённый экран", "Split screen") + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
+                listOf(
+                    done { select(null) },
+                    act("⊟", t("Раскладка", "Layout")) { splitSheet(b) },
+                    act("⏮", t("Начало 2-го видео", "2nd video from")) { splitFrom(b) },
+                    act(if (b.volume > 0f) "🔊" else "🔇", t("Звук", "Sound")) { splitSoundSheet(b) },
+                    act("⏱", t("Время", "Timing")) { timingSheet(b) },
+                    act("✂", t("Разделить", "Split")) { split(b) },
+                    act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) },
+                    act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } },
+                    act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } },
+                    act("🔁", t("Заменить видео", "Replace video")) { pickSplit(b.id) },
+                    danger("🗑", t("Удалить", "Delete")) { delete(b.id) }
+                )
+            }
+            b != null && b.kind == EditMusic.KIND -> {
+                line = "🎵 " + b.text.ifBlank { t("Музыка", "Music") } + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
+                listOf(
+                    done { select(null) },
+                    act(if (b.volume > 0f) "🔊" else "🔇", t("Громкость", "Volume")) { musicSheet(b) },
+                    act("〰", t("Затухание", "Fade"), on = b.animIn == "fade" || b.animOut == "fade") { musicFadeSheet(b) },
+                    act("⏮", t("Начало трека", "Track from")) { musicFrom(b) },
+                    act("⏱", t("Время", "Timing")) { timingSheet(b) },
+                    act("✂", t("Разделить", "Split")) { split(b) },
+                    act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) },
+                    act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } },
+                    act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } },
+                    act("🔁", t("Заменить", "Replace")) { pickAudio(b.id) },
+                    danger("🗑", t("Удалить", "Delete")) { delete(b.id) }
+                )
+            }
+            b != null -> {
+                line = blockName(b) + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
+                buildList {
+                    add(done { select(null) })
+                    add(act("✎", t("Изменить", "Edit")) { edit(b) })
+                    if (b.kind != "emoji") add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                    add(act("🎞", t("Анимация", "Animation")) { animSheet(b) })
+                    add(act("⏱", t("Время", "Timing")) { timingSheet(b) })
+                    add(act("✂", t("Разделить", "Split")) { split(b) })
+                    add(act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) })
+                    add(act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } })
+                    add(act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } })
+                    add(act("◐", t("Прозрач­ность", "Opacity")) { opacitySheet(b) })
+                    add(act("⬆", t("Выше", "Forward")) { commit(StudioEdit.reorder(blocks, b.id, 1)) })
+                    add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
+                    add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
+                    if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
+                    add(danger("🗑", t("Удалить", "Delete")) { delete(b.id) })
+                }
             }
             ci != null -> {
                 val c = clips[ci]
+                line = t("Кусок ${ci + 1} из ${clips.size}", "Piece ${ci + 1} of ${clips.size}") + " · " + StudioEdit.secs(c.outMs) + t(" с", " s") +
+                    (EditTrack.badges(c).takeIf { it.isNotEmpty() }?.let { " · $it" } ?: "")
                 buildList {
-                    add(act("✓", t("Готово", "Done")) { selectClip(-1) })
+                    add(done { selectClip(-1) })
                     add(act("✂", t("Разделить", "Split")) { clipSplit() })
                     if (c.isHold) add(act("⏱", t("Длина", "Length")) { holdSheet(ci) })
                     else {
-                        add(act("⏩", t("Скорость", "Speed")) { speedSheet(ci) })
-                        add(act("🔊", t("Громкость", "Volume")) { volumeSheet(ci) })
-                        add(if (c.volume > 0f) act("🔇", t("Без звука", "Mute")) { clipUpdate(ci) { it.copy(volume = 0f) } }
-                        else act("🔈", t("Со звуком", "Unmute")) { clipUpdate(ci) { it.copy(volume = 1f) } })
+                        add(act("⏩", t("Скорость", "Speed"), on = c.speed != 1f) { speedSheet(ci) })
+                        add(act(if (c.volume > 0f) "🔊" else "🔇", t("Громкость", "Volume"), on = c.volume != 1f) { volumeSheet(ci) })
                     }
-                    add(act("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
+                    add(act("🎨", t("Фильтры", "Filters"), on = c.filter.isNotEmpty()) { filterSheet(ci) })
+                    add(act("☀", t("Настройка", "Adjust"), on = c.bright != 0f || c.contrast != 0f || c.sat != 0f || c.warm != 0f) { adjustSheet(ci) })
+                    add(act("⇆", t("Переход", "Transition"), on = c.trans.isNotEmpty()) { transitionSheet(ci) })
+                    add(danger("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
                     add(act("⧉", t("Дубль", "Duplicate")) { clipDuplicate(ci) })
-                    add(act("◀", t("Переставить раньше", "Move earlier")) { clipMove(ci, -1) })
-                    add(act("▶", t("Переставить позже", "Move later")) { clipMove(ci, 1) })
+                    if (!c.isHold) add(act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() })
+                    add(act("⇋", t("Зеркало", "Mirror"), on = c.mirror) { clipUpdate(ci) { it.copy(mirror = !it.mirror) } })
+                    add(act("🔍", t("Масштаб", "Zoom"), on = c.zoom > 1f) { zoomSheet(ci) })
+                    add(act("◀", t("Раньше", "Earlier")) { clipMove(ci, -1) })
+                    add(act("▶", t("Позже", "Later")) { clipMove(ci, 1) })
                     add(act("⇤", t("Обрезать начало", "Trim start")) { clipTrim(ci, true) })
                     add(act("⇥", t("Обрезать конец", "Trim end")) { clipTrim(ci, false) })
-                    if (!c.isHold) add(act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() })
-                    add(act("⇋", t("Зеркало", "Mirror")) { clipUpdate(ci) { it.copy(mirror = !it.mirror) } })
-                    add(act("🔍", t("Масштаб", "Zoom")) { zoomSheet(ci) })
                     if (!c.looksPlain || c.isHold) add(act("↺", t("Сбросить", "Reset")) {
-                        clipUpdate(ci) { it.copy(speed = 1f, volume = if (it.isHold) 0f else 1f, mirror = false, zoom = 1f) }
+                        clipUpdate(ci) { VClip(it.id, it.fromMs, it.toMs, volume = if (it.isHold) 0f else 1f, holdMs = it.holdMs, trans = it.trans, transMs = it.transMs) }
                     })
                 }
             }
-            else -> listOfNotNull(
-                act("✂", t("Разделить", "Split")) { clipSplit() },
-                act("🎬", t("Монтаж", "Edit")) { selectClip(EditTrack.locate(clips, curMs).index) },
-                act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() },
-                act("⊟", t("Разделить экран", "Split screen")) { pickSplit(null) },
-                act("＋", t("Вставить", "Insert")) { insertSheet() },
-                act("T", t("Надпись", "Caption")) { captionSheet(null) },
-                act("😀", t("Эмодзи", "Emoji")) { emojiSheet(null) },
-                act("🖼", t("Картинка", "Picture")) { pickImage(null) },
-                act("🌐", t("Фото", "Photo")) { photoSheet(null) },
-                act("🧩", t("Схема ИИ", "AI scheme")) { aiSchemeSheet(null) },
-                act("✍️", t("Схема текстом", "Text scheme")) { textSchemeSheet(null) },
-                if (words.isNotEmpty()) act("📝", t("Текст", "Text")) { textSheet() } else null,
-                if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
-                act("☰", t("Блоки", "Blocks")) { blocksSheet() },
-                act("📂", t("Проекты", "Projects")) { chooser() }
+            cat == "audio" -> {
+                line = catName("audio")
+                val muted = clips.all { it.isHold || it.volume == 0f }
+                listOf(
+                    back(),
+                    act("🎵", t("Музыка", "Music")) { pickAudio(null) },
+                    act("🔊", t("Громкость видео", "Video volume")) { allVolumeSheet() },
+                    act(if (muted) "🔈" else "🔇", if (muted) t("Вернуть звук", "Unmute video") else t("Без звука", "Mute video"), on = muted) {
+                        commitClips(clips.map { if (it.isHold) it else it.copy(volume = if (muted) 1f else 0f) })
+                    },
+                    act("☰", t("Звуки", "Sounds")) { blocksSheet(EditMusic.KIND) }
+                )
+            }
+            cat == "text" -> {
+                line = catName("text")
+                listOfNotNull(
+                    back(),
+                    act("T", t("Надпись", "Caption")) { captionSheet(null) },
+                    act("✍️", t("Схема текстом", "Text scheme")) { textSchemeSheet(null) },
+                    if (words.isNotEmpty()) act("📝", t("Текст речи", "Speech text")) { textSheet() } else null
+                )
+            }
+            cat == "overlay" -> {
+                line = catName("overlay")
+                listOf(
+                    back(),
+                    act("🖼", t("Картинка", "Picture")) { pickImage(null) },
+                    act("🌐", t("Фото из сети", "Web photo")) { photoSheet(null) },
+                    act("⊟", t("Разделить экран", "Split screen")) { pickSplit(null) }
+                )
+            }
+            cat == "ai" -> {
+                line = catName("ai")
+                listOfNotNull(
+                    back(),
+                    act("🧩", t("Схема ИИ", "AI scheme")) { aiSchemeSheet(null) },
+                    if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
+                    act("T", t("Надпись ИИ", "AI caption")) { captionSheet(null) },
+                    act("🌐", t("Фото ИИ", "AI photo")) { photoSheet(null) }
+                )
+            }
+            else -> listOf(
+                Act("＋", t("Вставить", "Insert"), ActKind.PRIMARY) { insertSheet() },
+                act("✂", t("Монтаж", "Edit")) { selectClip(clipHere()) },
+                act("🎵", t("Аудио", "Audio")) { openCat("audio") },
+                act("T", t("Текст", "Text")) { openCat("text") },
+                act("😀", t("Стикеры", "Stickers")) { emojiSheet(null) },
+                act("🖼", t("Наложение", "Overlay")) { openCat("overlay") },
+                act("🎨", t("Фильтры", "Filters")) { filterSheet(clipHere()) },
+                act("☀", t("Настройка", "Adjust")) { adjustSheet(clipHere()) },
+                act("⇆", t("Переходы", "Transitions")) { transitionSheet(seamHere()) },
+                act("▭", t("Формат", "Format"), on = project?.ratio?.isNotEmpty() == true) { canvasSheet() },
+                act("🧩", t("ИИ", "AI")) { openCat("ai") },
+                act("☰", t("Слои", "Layers")) { blocksSheet() }
             )
         }
-        for ((icon, label, f) in items) tool(row, icon, label, f)
+        for (a in items) tool(row, a)
+        toolsLine?.let {
+            it.text = line
+            it.visibility = if (line.isEmpty()) View.GONE else View.VISIBLE
+        }
         (row.parent as? HorizontalScrollView)?.scrollTo(0, 0)
     }
 
@@ -723,6 +1014,7 @@ class StudioEditorActivity : LumenBase() {
             tv.scaleX = if (c.mirror) -c.zoom else c.zoom
             tv.scaleY = c.zoom
         }
+        previewColor(c)
     }
 
     /** Puts the player on the moment of the original under [curMs]; while the finger moves ([final] false) at most every 40 ms. */
@@ -795,6 +1087,9 @@ class StudioEditorActivity : LumenBase() {
         player = null
         player2?.let { runCatching { it.release() } }
         player2 = null
+        player3?.let { runCatching { it.release() } }
+        player3 = null
+        musicFile = ""
         side2File = ""
         splitKey = ""
     }
@@ -821,13 +1116,28 @@ class StudioEditorActivity : LumenBase() {
         val fw = fr.width.toFloat()
         val fh = fr.height.toFloat()
         if (fw <= 0f || fh <= 0f) return
+        val p = project ?: return
         val sp = EditSplit.active(blocks, curMs)
-        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh"
+        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}"
         if (key != splitKey) {
             splitKey = key
             if (sp == null) {
-                mb.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                tv.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                // the video on the canvas: a rectangle on the background, or covering the frame (format of the project)
+                val r = EditCanvas.videoRect(p.w.toFloat(), p.h.toFloat(), fw, fh, p.fill)
+                fun at(v: View, rect: FRect) {
+                    v.layoutParams = FrameLayout.LayoutParams(max(1, rect.w.roundToInt()), max(1, rect.h.roundToInt())).apply {
+                        gravity = Gravity.TOP or Gravity.START
+                        leftMargin = rect.l.roundToInt()
+                        topMargin = rect.t.roundToInt()
+                    }
+                }
+                if (p.fill) {
+                    mb.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    at(tv, r)
+                } else {
+                    at(mb, r)
+                    tv.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                }
                 sb.visibility = View.GONE
             } else {
                 val (mh, sh) = EditSplit.halves(sp.look)
@@ -845,7 +1155,7 @@ class StudioEditorActivity : LumenBase() {
                         topMargin = (c.t - half.t * fh).toInt()
                     }
                 }
-                fit(mb, tv, mh, fw, fh)
+                fit(mb, tv, mh, p.w.toFloat(), p.h.toFloat())
                 val (vw, vh) = sideSize(sp.file)
                 fit(sb, tv2, sh, vw.toFloat(), vh.toFloat())
                 sb.visibility = View.VISIBLE
@@ -857,7 +1167,7 @@ class StudioEditorActivity : LumenBase() {
     private fun syncSide(sp: EBlock?) {
         // the main video quieter during a split screen (above 100 % is heard in the export only)
         player?.let { ex ->
-            val v = EditSplit.mainVolume(blocks, curMs, clips.getOrNull(curClip)?.volume ?: 1f).coerceIn(0f, 1f)
+            val v = (EditSplit.mainVolume(blocks, curMs, clips.getOrNull(curClip)?.volume ?: 1f) * EditMusic.mainVolume(blocks, curMs)).coerceIn(0f, 1f)
             if (ex.volume != v) ex.volume = v
         }
         if (sp == null) {
@@ -909,6 +1219,17 @@ class StudioEditorActivity : LumenBase() {
         if (!fromTimeline) timeline?.setPlayhead(curMs)
         timeText?.text = StudioEdit.clock(curMs) + " / " + StudioEdit.clock(total)
         layoutSplit()
+        syncMusic()
+        fadeView?.let { fv ->
+            val f = EditColor.fadeAt(clips, curMs)
+            if (f == null) {
+                if (fv.visibility != View.GONE) fv.visibility = View.GONE
+            } else {
+                fv.setBackgroundColor(f.color)
+                fv.alpha = f.alpha
+                fv.visibility = View.VISIBLE
+            }
+        }
     }
 
     private fun updatePlay() {
@@ -918,6 +1239,7 @@ class StudioEditorActivity : LumenBase() {
     private fun pause() {
         playing = false
         player?.pause()
+        player3?.pause()
         updatePlay()
     }
 
@@ -968,20 +1290,31 @@ class StudioEditorActivity : LumenBase() {
                     // the strip fills in as frames come, not after the last one
                     if (got.size % 8 == 0 && got.isNotEmpty()) {
                         val part = got.toList()
-                        Lumen.ui { if (project?.id == p.id) timeline?.thumbs = part }
+                        Lumen.ui {
+                            if (project?.id == p.id) {
+                                thumbList = part
+                                timeline?.thumbs = part
+                            }
+                        }
                     }
                 }
                 got.toList()
             } finally {
                 runCatching { r.release() }
             }
-        }) { list -> if (project?.id == p.id) timeline?.thumbs = list }
+        }) { list ->
+            if (project?.id == p.id) {
+                thumbList = list
+                timeline?.thumbs = list
+            }
+        }
     }
 
     // ---------- changes ----------
 
     private fun snapshot(): String = JSONObject().put("b", StudioEdit.blocksJson(blocks))
-        .put("c", EditTrack.json(project?.clips.orEmpty())).toString()
+        .put("c", EditTrack.json(project?.clips.orEmpty()))
+        .put("r", project?.ratio.orEmpty()).put("f", project?.fill == true).put("bg", project?.bg ?: 0xFF000000.toInt()).toString()
 
     private fun setBlocks(list: List<EBlock>) {
         val p = project ?: return
@@ -1055,6 +1388,13 @@ class StudioEditorActivity : LumenBase() {
         val o = runCatching { JSONObject(s) }.getOrNull()
         val list = StudioEdit.blocksFrom(o?.optJSONArray("b") ?: runCatching { JSONArray(s) }.getOrNull())
         setTrack(EditTrack.from(o?.optJSONArray("c")).ifEmpty { EditTrack.initial(p.durMs) }, list)
+        if (o != null && o.has("r")) project?.let { cur ->
+            val n = cur.copy(ratio = o.optString("r").takeIf { it in EditCanvas.RATIOS } ?: "", fill = o.optBoolean("f"), bg = o.optInt("bg", cur.bg) or 0xFF000000.toInt())
+            if (n != cur) {
+                project = n
+                applyCanvas()
+            }
+        }
         save()
         refreshUndo()
         if (clipSel >= clips.size) clipSel = -1
@@ -1100,6 +1440,7 @@ class StudioEditorActivity : LumenBase() {
 
     private fun selectClip(i: Int) {
         clipSel = if (i in clips.indices) i else -1
+        if (clipSel >= 0) focusClip(clipSel)
         if (clipSel >= 0) {
             selected = null
             stage?.selected = null
@@ -1214,8 +1555,9 @@ class StudioEditorActivity : LumenBase() {
     /** A new block at [at] of project [p] (list [list]); its place and size by kind. */
     private fun newBlock(p: EProject, list: List<EBlock>, kind: String, at: Long, durMs: Long, ratio: Float, build: (EBlock) -> EBlock): EBlock {
         val (s, d) = StudioEdit.placeAt(at, outLen(p), durMs)
-        val portrait = p.h >= p.w
-        val w = StudioEdit.fitWidth(StudioEdit.defaultWidth(kind, portrait), ratio, p.w, p.h)
+        val (fw, fh) = EditCanvas.frame(p)
+        val portrait = fh >= fw
+        val w = StudioEdit.fitWidth(StudioEdit.defaultWidth(kind, portrait), ratio, fw, fh)
         val y = when (kind) {
             "text" -> 0.24f
             "emoji" -> 0.2f
@@ -1296,13 +1638,20 @@ class StudioEditorActivity : LumenBase() {
     private fun lang(): String = Studio.langName(Studio.voiceLang(StudioPrefs.voiceLang,
         EdgeTts.detectLang(words.take(400).joinToString(" ") { it.text }), Settings.lang == "en"))
 
-    private fun formatText(p: EProject) = when {
+    /** Shape of a scheme block in the frame of [p] (its format). */
+    private fun schemeRatio(p: EProject): Float = EditCanvas.frame(p).let { (w, h) -> StudioEdit.schemeRatio(w, h) }
+
+    private fun formatText(p0: EProject) = EditCanvas.frame(p0).let { (w, h) -> p0.copy(w = w, h = h) }.let { p -> formatTextOf(p) }
+
+    private fun formatTextOf(p: EProject) = when {
         p.h > p.w * 1.1f -> t("вертикального ролика 9:16 (Shorts)", "vertical 9:16 video (Shorts)")
         p.w > p.h * 1.1f -> t("горизонтального ролика 16:9", "horizontal 16:9 video")
         else -> t("квадратного ролика 1:1", "square 1:1 video")
     }
 
-    private fun aspect(p: EProject) = when {
+    private fun aspect(p0: EProject) = EditCanvas.frame(p0).let { (w, h) -> aspectOf(p0.copy(w = w, h = h)) }
+
+    private fun aspectOf(p: EProject) = when {
         p.h > p.w * 1.1f -> StudioAspect.PORTRAIT
         p.w > p.h * 1.1f -> StudioAspect.LANDSCAPE
         else -> StudioAspect.SQUARE
@@ -1330,6 +1679,8 @@ class StudioEditorActivity : LumenBase() {
             item(t("🌐 Фото по запросу", "🌐 Photo search"), t("бесплатные фото Openverse; запрос может подобрать ИИ", "free Openverse photos; the AI can suggest the query")) { photoSheet(null) }
             item(t("T Надпись", "T Caption"), t("свой текст или варианты от ИИ", "your text or AI suggestions")) { captionSheet(null) }
             item(t("😀 Эмодзи", "😀 Emoji"), t("крупный значок поверх кадра", "a big icon over the frame")) { emojiSheet(null) }
+            item(t("🎵 Музыка", "🎵 Music"), t("трек с телефона с этого места; громкость и затухание", "a track from the phone from here; volume and fades")) { pickAudio(null) }
+            item(t("⊟ Второе видео рядом", "⊟ A second video beside"), t("разделённый экран: реакция, сравнение", "split screen: a reaction, a comparison")) { pickSplit(null) }
         }
     }
 
@@ -1378,7 +1729,7 @@ class StudioEditorActivity : LumenBase() {
         // a placeholder shows at once where the scheme goes; it can be moved and trimmed while the AI works
         val ph: EBlock? = if (replaceId == null) {
             val (st, du) = span?.let { StudioEdit.spanOf(words, it, outLen(p)) } ?: (at to durMs)
-            newBlock(p, blocks, "scheme", st, du, StudioEdit.schemeRatio(p.w, p.h)) { it.copy(look = style, ask = wish, animIn = "fade", animOut = "fade") }
+            newBlock(p, blocks, "scheme", st, du, schemeRatio(p)) { it.copy(look = style, ask = wish, animIn = "fade", animOut = "fade") }
                 .also { commit(blocks + it, it.id) }
         } else null
         val target = replaceId ?: ph?.id ?: return
@@ -1486,7 +1837,7 @@ class StudioEditorActivity : LumenBase() {
                 var cur = list
                 for ((i, sc) in found) {
                     val (st, du) = StudioEdit.spanOf(ws, segs[i], outLen(pr))
-                    cur = cur + newBlock(pr, cur, "scheme", st, du, StudioEdit.schemeRatio(pr.w, pr.h)) {
+                    cur = cur + newBlock(pr, cur, "scheme", st, du, schemeRatio(pr)) {
                         it.copy(scheme = sc, look = style, animIn = "fade", animOut = "fade")
                     }
                 }
@@ -1596,16 +1947,20 @@ class StudioEditorActivity : LumenBase() {
         "image" -> "🖼 " + (b.ask.ifBlank { t("Картинка", "Picture") })
         "text" -> "T " + b.text.replace('\n', ' ').take(40)
         EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
+        EditMusic.KIND -> "🎵 " + b.text.ifBlank { t("Музыка", "Music") }
         else -> b.text + " " + t("эмодзи", "emoji")
     }
 
     /** All blocks by time: a tap selects one and goes to it. */
-    private fun blocksSheet() {
+    private fun blocksSheet(kind: String? = null) {
         if (project == null) return
         pause()
-        bottomSheet(t("☰ Блоки", "☰ Blocks") + " (${blocks.size})") { dismiss ->
-            if (blocks.isEmpty()) muted(t("Пока пусто: остановите видео в нужном месте и нажмите «＋».", "Empty so far: stop the video at a moment and tap \"＋\"."))
-            for (b in blocks.sortedBy { it.startMs }) add(text(ctx, blockName(b) + "\n" + StudioEdit.clock(b.startMs) + " – " + StudioEdit.clock(b.endMs), 15f).apply {
+        val list = blocks.filter { kind == null || it.kind == kind }
+        bottomSheet((if (kind == EditMusic.KIND) t("🎵 Звуки", "🎵 Sounds") else t("☰ Слои", "☰ Layers")) + " (${list.size})") { dismiss ->
+            if (list.isEmpty()) muted(if (kind == EditMusic.KIND) t("Пока нет музыки: «🎵 Музыка» добавит трек с телефона с места курсора.",
+                "No music yet: \"🎵 Music\" adds a track from the phone at the playhead.")
+            else t("Пока пусто: остановите видео в нужном месте и нажмите «＋ Вставить».", "Empty so far: stop the video at a moment and tap \"＋ Insert\"."))
+            for (b in list.sortedBy { it.startMs }) add(text(ctx, blockName(b) + "\n" + StudioEdit.clock(b.startMs) + " – " + StudioEdit.clock(b.endMs), 15f).apply {
                 setPadding(dp(8), dp(10), dp(8), dp(10))
                 if (b.id == selected) setTextColor(Palette.ACCENT)
                 background = ripple(ctx, roundBg(0x00000000, 12f, ctx), Palette.ON_SURFACE)
@@ -1643,7 +1998,7 @@ class StudioEditorActivity : LumenBase() {
                 dismiss()
                 lastStyle = style
                 if (old != null) change(old.id) { it.copy(scheme = s, look = style) }
-                else project?.let { p -> addNew("scheme", at, 5000L, StudioEdit.schemeRatio(p.w, p.h)) { it.copy(scheme = s, look = style, animIn = "fade", animOut = "fade") } }
+                else project?.let { p -> addNew("scheme", at, 5000L, schemeRatio(p)) { it.copy(scheme = s, look = style, animIn = "fade", animOut = "fade") } }
                 stage?.refresh()
             }
             if (old != null) button(t("🤖 Переделать ИИ", "🤖 Redo with AI"), style = BtnStyle.TEXT) {
@@ -1752,6 +2107,7 @@ class StudioEditorActivity : LumenBase() {
             REQ_IMAGE -> importImage(uri)
             REQ_VIDEO -> importVideo(uri)
             REQ_SPLIT -> importSplit(uri)
+            REQ_AUDIO -> importAudio(uri)
         }
     }
 
@@ -1954,6 +2310,7 @@ class StudioEditorActivity : LumenBase() {
         "image" -> imageSheet(b)
         "text" -> captionSheet(b)
         EditSplit.KIND -> splitSheet(b)
+        EditMusic.KIND -> musicSheet(b)
         else -> emojiSheet(b)
     }
 
@@ -2040,27 +2397,417 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
+    // ---------- colour, transitions, format, music ----------
+
+    /** A slider row: name, value on the right, a bar; [onMove] gets the value and whether the finger is up. */
+    private fun Col.slider(name: String, value: Float, from: Float, to: Float, fmt: (Float) -> String, onMove: (Float, Boolean) -> Unit): SeekBar {
+        val head = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        head.addView(text(ctx, name, 14f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val v = text(ctx, fmt(value), 14f, bold = true, color = Palette.ACCENT)
+        head.addView(v)
+        add(head, 14)
+        fun at(p: Int) = from + (to - from) * p / 1000f
+        val bar = SeekBar(ctx).apply {
+            max = 1000
+            progress = ((value - from) / (to - from) * 1000).roundToInt().coerceIn(0, 1000)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                    v.text = fmt(at(p))
+                    if (fromUser) onMove(at(p), false)
+                }
+
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {
+                    onMove(at(s?.progress ?: 0), true)
+                }
+            })
+        }
+        add(bar, 2)
+        return bar
+    }
+
+    private fun pct(v: Float): String = (if (v > 0.005f) "+" else "") + (v * 100).roundToInt()
+
+    /** The colour of a piece on the picture of the preview (a colour filter on the video layer). */
+    private fun previewColor(c: VClip?) {
+        val tv = texture ?: return
+        val m = c?.let { EditColor.matrix(it) }
+        tv.setLayerPaint(m?.let { Paint().apply { colorFilter = ColorMatrixColorFilter(ColorMatrix(it)) } })
+    }
+
+    private fun sameColor(a: VClip, b: VClip) =
+        a.filter == b.filter && a.filterK == b.filterK && a.bright == b.bright && a.contrast == b.contrast && a.sat == b.sat && a.warm == b.warm
+
+    private fun withColor(c: VClip, from: VClip) =
+        c.copy(filter = from.filter, filterK = from.filterK, bright = from.bright, contrast = from.contrast, sat = from.sat, warm = from.warm)
+
+    /** The playhead into piece [i] so that its picture is seen while its colour is set. */
+    private fun focusClip(i: Int) {
+        val list = clips
+        if (i !in list.indices) return
+        val st = EditTrack.starts(list)[i]
+        if (curMs < st || curMs >= st + list[i].outMs) seekTo(st + min(list[i].outMs / 2, 600L))
+    }
+
+    /** A change of piece [i] without selecting it. */
+    private fun clipSet(i: Int, f: (VClip) -> VClip) {
+        if (i !in clips.indices) return
+        commitClips(EditTrack.update(clips, i, f))
+    }
+
+    /** The colour tried in a sheet is kept when the sheet closes (one step of undo), else the picture goes back. */
+    private fun keepColor(i: Int, tried: VClip) {
+        val c = clips.getOrNull(i)
+        if (c != null && c.id == tried.id && !sameColor(c, tried)) clipSet(i) { withColor(it, tried) }
+        else previewColor(clips.getOrNull(curClip))
+    }
+
+    /** A small frame of the piece for the filter tiles. */
+    private fun thumbOf(c: VClip): Bitmap? {
+        val list = thumbList
+        if (list.isEmpty()) return null
+        val at = if (c.isHold) c.fromMs else (c.fromMs + c.toMs) / 2
+        return list.minByOrNull { kotlin.math.abs(it.first - at) }?.second
+    }
+
+    private fun filterSheet(i: Int) {
+        val c0 = clips.getOrNull(i) ?: return
+        pause()
+        focusClip(i)
+        var cur = c0
+        previewColor(cur)
+        bottomSheet(t("🎨 Фильтры", "🎨 Filters"), onDismiss = { keepColor(i, cur) }) { dismiss ->
+            if (clips.size > 1) muted(t("Кусок ${i + 1} из ${clips.size}. Изменения видны на кадре сразу.", "Piece ${i + 1} of ${clips.size}. Changes show on the frame at once."))
+            val thumb = thumbOf(c0)
+            val strip = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            val tiles = ArrayList<Pair<String, View>>()
+            var power: SeekBar? = null
+            fun mark() = tiles.forEach { (id, v) -> v.background = roundBg(0x00000000, 12f, ctx, if (id == cur.filter) Palette.ACCENT else 0) }
+            for (id in EditColor.FILTERS) {
+                val tile = LinearLayout(ctx).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(dp(4), dp(4), dp(4), dp(4))
+                    contentDescription = EditColor.filterName(id)
+                    setOnClickListener {
+                        cur = cur.copy(filter = id, filterK = if (id.isEmpty()) 1f else cur.filterK.takeIf { it > 0f } ?: 1f)
+                        power?.progress = (cur.filterK * 1000).roundToInt()
+                        previewColor(cur)
+                        mark()
+                    }
+                }
+                val iv = android.widget.ImageView(ctx).apply {
+                    scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+                    clipToOutline = true
+                    background = roundBg(0xFF5A6270.toInt(), 10f, ctx)
+                    if (thumb != null) setImageBitmap(thumb)
+                    if (id.isNotEmpty()) colorFilter = ColorMatrixColorFilter(ColorMatrix(EditColor.filter(id)))
+                }
+                tile.addView(iv, LinearLayout.LayoutParams(dp(60), dp(60)))
+                tile.addView(text(ctx, EditColor.filterName(id), 12f).apply { gravity = Gravity.CENTER },
+                    LinearLayout.LayoutParams(dp(64), ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+                strip.addView(tile)
+                tiles += id to tile
+            }
+            mark()
+            add(HorizontalScrollView(ctx).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(strip)
+            }, 12)
+            power = slider(t("Сила", "Strength"), cur.filterK, 0f, 1f, { "${(it * 100).roundToInt()} %" }) { v, _ ->
+                cur = cur.copy(filterK = v)
+                previewColor(cur)
+            }
+            if (clips.size > 1) button(t("Применить ко всем кускам", "Apply to all pieces"), style = BtnStyle.TEXT) {
+                val tried = cur
+                commitClips(clips.map { it.copy(filter = tried.filter, filterK = tried.filterK) })
+                cur = clips.getOrNull(i) ?: tried
+                dismiss()
+                toast(t("Фильтр на всём ролике", "Filter on the whole video"))
+            }
+            button(t("Готово", "Done"), primary = true) { dismiss() }
+        }
+    }
+
+    private fun adjustSheet(i: Int) {
+        val c0 = clips.getOrNull(i) ?: return
+        pause()
+        focusClip(i)
+        var cur = c0
+        previewColor(cur)
+        bottomSheet(t("☀ Настройка", "☀ Adjust"), onDismiss = { keepColor(i, cur) }) { dismiss ->
+            if (clips.size > 1) muted(t("Кусок ${i + 1} из ${clips.size}.", "Piece ${i + 1} of ${clips.size}."))
+            val bars = ArrayList<SeekBar>()
+            bars += slider(t("☀ Яркость", "☀ Brightness"), cur.bright, -1f, 1f, { pct(it) }) { v, _ -> cur = cur.copy(bright = v); previewColor(cur) }
+            bars += slider(t("◑ Контраст", "◑ Contrast"), cur.contrast, -1f, 1f, { pct(it) }) { v, _ -> cur = cur.copy(contrast = v); previewColor(cur) }
+            bars += slider(t("🎨 Насыщенность", "🎨 Saturation"), cur.sat, -1f, 1f, { pct(it) }) { v, _ -> cur = cur.copy(sat = v); previewColor(cur) }
+            bars += slider(t("🌡 Температура", "🌡 Warmth"), cur.warm, -1f, 1f, { pct(it) }) { v, _ -> cur = cur.copy(warm = v); previewColor(cur) }
+            row(
+                btn(ctx, t("↺ Сбросить", "↺ Reset"), style = BtnStyle.TEXT) {
+                    cur = cur.copy(bright = 0f, contrast = 0f, sat = 0f, warm = 0f)
+                    bars.forEach { it.progress = 500 }
+                    previewColor(cur)
+                },
+                btn(ctx, t("Ко всем кускам", "To all pieces"), style = BtnStyle.TEXT) {
+                    val tried = cur
+                    commitClips(clips.map { it.copy(bright = tried.bright, contrast = tried.contrast, sat = tried.sat, warm = tried.warm) })
+                    cur = clips.getOrNull(i) ?: tried
+                    dismiss()
+                }
+            )
+            button(t("Готово", "Done"), primary = true) { dismiss() }
+        }
+    }
+
+    /** The transition into piece [k] (at the seam before it; [k] 0 — the very start of the video). */
+    private fun transitionSheet(k: Int) {
+        val c = clips.getOrNull(k) ?: return
+        pause()
+        val st = EditTrack.starts(clips)[k]
+        bottomSheet(t("⇆ Переход", "⇆ Transition")) { dismiss ->
+            muted(if (k == 0) t("Начало ролика: картинка появляется из цвета. Чтобы поставить переход между кусками, сначала разрежьте ролик (✂).",
+                "The start of the video: the picture comes in from a colour. To put a transition between pieces, split the video first (✂).")
+            else t("Шов между кусками $k и ${k + 1} (${StudioEdit.clock(st)}). Тап по белому квадратику на шве таймлайна открывает это же окно.",
+                "The seam between pieces $k and ${k + 1} (${StudioEdit.clock(st)}). A tap on the white square at a seam of the timeline opens this too."))
+            label(this, t("Вид", "Kind"))
+            add(choiceChips(ctx, EditColor.TRANSITIONS.map { it to EditColor.transName(it) }, c.trans) { v -> clipSet(k) { it.copy(trans = v) } })
+            label(this, t("Длительность", "Length"))
+            add(choiceChips(ctx, EditColor.TRANS_MS.map { it to StudioEdit.secs(it) + t(" с", " s") }, c.transMs.takeIf { it in EditColor.TRANS_MS } ?: EditColor.DEFAULT_TRANS_MS) { v ->
+                clipSet(k) { it.copy(transMs = v) }
+            })
+            row(
+                btn(ctx, t("▶ Посмотреть", "▶ Preview"), style = BtnStyle.TONAL) {
+                    dismiss()
+                    seekTo(max(0L, st - 1200))
+                    play()
+                },
+                btn(ctx, t("Ко всем швам", "To all seams"), style = BtnStyle.TEXT) {
+                    val now = clips.getOrNull(k) ?: return@btn
+                    if (clips.size < 2) return@btn toast(t("В ролике один кусок — швов нет", "One piece — no seams"))
+                    commitClips(clips.mapIndexed { j, it -> if (j == 0) it else it.copy(trans = now.trans, transMs = now.transMs) })
+                    dismiss()
+                    toast(t("Переход на всех швах", "Transition on all seams"))
+                }
+            )
+        }
+    }
+
+    /** The format of the frame (Shorts, YouTube, square…), the video fitted or filling it, the background colour. */
+    private fun canvasSheet() {
+        val p = project ?: return
+        pause()
+        bottomSheet(t("▭ Формат кадра", "▭ Frame format")) { dismiss ->
+            muted(t("Форма готового ролика. Видео вписывается целиком на фон или заполняет кадр — тогда края обрезаются. Надписи и схемы остаются на своих местах.",
+                "The shape of the exported video. The video fits whole on a background or fills the frame, cutting the edges. Captions and schemes keep their places."))
+            label(this, t("Соотношение сторон", "Aspect ratio"))
+            add(choiceChips(ctx, EditCanvas.RATIOS.map { it to EditCanvas.ratioName(it) }, p.ratio) { v -> setCanvas { it.copy(ratio = v) } })
+            label(this, t("Видео в кадре", "Video in the frame"))
+            add(choiceChips(ctx, listOf(false to t("Вписать целиком", "Fit whole"), true to t("Заполнить кадр", "Fill the frame")), p.fill) { v -> setCanvas { it.copy(fill = v) } })
+            label(this, t("Фон", "Background"))
+            val sw = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            val dots = ArrayList<Pair<Int, View>>()
+            fun mark(sel: Int) = dots.forEach { (col, v) -> v.background = roundBg(col, 18f, ctx, if (col == sel) Palette.ACCENT else Palette.OUTLINE) }
+            for (col in EditCanvas.BACKGROUNDS) {
+                val d = View(ctx).apply {
+                    contentDescription = t("Цвет фона", "Background colour")
+                    setOnClickListener {
+                        setCanvas { it.copy(bg = col) }
+                        mark(col)
+                    }
+                }
+                sw.addView(d, LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginEnd = dp(10) })
+                dots += col to d
+            }
+            mark(p.bg)
+            add(HorizontalScrollView(ctx).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(sw)
+            }, 8)
+            button(t("Готово", "Done"), primary = true) { dismiss() }
+        }
+    }
+
+    /** A change of the canvas: one step of undo, saved, the preview reshaped. */
+    private fun setCanvas(f: (EProject) -> EProject) {
+        val p = project ?: return
+        val n = f(p)
+        if (n == p) return
+        history.push(snapshot())
+        project = n
+        save()
+        refreshUndo()
+        applyCanvas()
+    }
+
+    private fun applyCanvas() {
+        val p = project ?: return
+        frameView?.setBackgroundColor(p.bg or 0xFF000000.toInt())
+        stage?.portrait = EditCanvas.frame(p).let { (w, h) -> h > w * 1.1f }
+        val box = previewBox
+        val fr = frameView
+        if (box != null && fr != null) fitFrame(box, fr)
+        splitKey = ""
+        layoutSplit()
+        stage?.refresh()
+        refreshRatio()
+        tools()
+    }
+
+    private fun allVolumeSheet() {
+        val heard = clips.filter { !it.isHold }
+        val now = heard.map { (it.volume * 100).roundToInt() }.distinct().singleOrNull() ?: -1
+        bottomSheet(t("🔊 Громкость видео", "🔊 Video volume")) { dismiss ->
+            muted(t("Для всех кусков сразу. Громкость одного куска — тап по нему на таймлайне. Больше 100 % слышно только в готовом ролике.",
+                "For all pieces at once. One piece's volume — tap it on the timeline. Above 100 % is heard in the exported video only."))
+            add(choiceChips(ctx, EditTrack.VOLUMES.map { it to "$it %" }, now) { v ->
+                commitClips(clips.map { if (it.isHold) it else it.copy(volume = v / 100f) })
+                dismiss()
+            })
+        }
+    }
+
+    private fun pickAudio(replace: String?) {
+        pause()
+        pickFor = replace
+        pickAt = curMs
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"), REQ_AUDIO)
+    }
+
+    /** Music or a sound from the phone: copied into the project, put at the playhead for its length (or to the end). */
+    private fun importAudio(uri: Uri) {
+        val p = project ?: return
+        val replace = pickFor
+        val at = pickAt
+        val d = dir
+        val cr = applicationContext.contentResolver
+        toast(t("Копирую звук…", "Copying the sound…"))
+        Lumen.async({
+            val title = runCatching {
+                cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            }.getOrNull().orEmpty()
+            val ext = title.substringAfterLast('.', "").lowercase().takeIf { it.length in 2..4 && it.all { ch -> ch.isLetterOrDigit() } } ?: "m4a"
+            val name = "img/a${System.currentTimeMillis()}.$ext"
+            val f = File(d, name).apply { parentFile?.mkdirs() }
+            (cr.openInputStream(uri) ?: error(t("Файл не открывается", "The file cannot be opened"))).use { i -> f.outputStream().use { i.copyTo(it) } }
+            val r = MediaMetadataRetriever()
+            val dur = try {
+                r.setDataSource(f.absolutePath)
+                r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            } catch (e: Exception) {
+                0L
+            } finally {
+                runCatching { r.release() }
+            }
+            if (dur <= 0) {
+                f.delete()
+                error(t("Это не звук или формат не поддерживается", "Not a sound, or the format is not supported"))
+            }
+            Triple(name, dur, title.substringBeforeLast('.').take(60))
+        }, { e -> if (!isDestroyed) err(e) }) { (file, dur, title) ->
+            if (project?.id != p.id) return@async
+            if (replace != null) change(replace) { it.copy(file = file, srcMs = 0, text = title) }
+            else {
+                val len = min(dur, max(StudioEdit.MIN_MS, outLen(p) - at)).coerceAtLeast(StudioEdit.MIN_MS)
+                addNew(EditMusic.KIND, at, len, 1f) {
+                    it.copy(file = file, text = title, x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "fade")
+                }
+            }
+            musicFile = ""
+            syncMusic()
+        }
+    }
+
+    private fun musicSheet(b: EBlock) {
+        bottomSheet(t("🔊 Громкость музыки", "🔊 Music volume")) { dismiss ->
+            label(this, t("Музыка", "Music"))
+            add(choiceChips(ctx, EditTrack.VOLUMES.map { it to "$it %" }, (b.volume * 100).roundToInt()) { v -> change(b.id) { it.copy(volume = v / 100f) } })
+            label(this, t("Звук видео под музыкой", "Video sound under the music"))
+            add(choiceChips(ctx, listOf(0, 25, 50, 75, 100).map { it to "$it %" }, (b.mainVolume * 100).roundToInt()) { v -> change(b.id) { it.copy(mainVolume = v / 100f) } })
+            muted(t("Фоновая музыка под голос: музыка 25–50 %, видео 100 %. Больше 100 % слышно только в готовом ролике.",
+                "Background music under a voice: music 25–50 %, video 100 %. Above 100 % is heard in the exported video only."))
+            button(t("Готово", "Done"), primary = true) { dismiss() }
+        }
+    }
+
+    private fun musicFadeSheet(b: EBlock) {
+        bottomSheet(t("〰 Затухание", "〰 Fade")) { dismiss ->
+            muted(t("Музыка плавно нарастает в начале и стихает в конце (до ${EditMusic.FADE_MS / 1000.0} с).",
+                "The music rises at the start and dies away at the end (up to ${EditMusic.FADE_MS / 1000.0} s)."))
+            check(t("Плавное начало", "Fade in"), b.animIn == "fade") { on -> change(b.id) { it.copy(animIn = if (on) "fade" else "none") } }
+            check(t("Плавный конец", "Fade out"), b.animOut == "fade") { on -> change(b.id) { it.copy(animOut = if (on) "fade" else "none") } }
+            button(t("Готово", "Done"), primary = true) { dismiss() }
+        }
+    }
+
+    private fun musicFrom(b: EBlock) {
+        pause()
+        prompt(t("С какого момента трека", "Track from"), t("Секунды или 0:12.5", "Seconds or 0:12.5"), StudioEdit.clock(b.srcMs)) { v ->
+            StudioEdit.parseTime(v)?.let { ms -> change(b.id) { it.copy(srcMs = max(0L, ms)) } } ?: toast(t("Не понял время", "Not a time"))
+        }
+    }
+
+    /** Music on the preview: the top sound block under the playhead plays along at its loudness and fades. */
+    private fun syncMusic() {
+        val m = EditMusic.active(blocks, curMs).lastOrNull()
+        if (m == null) {
+            player3?.takeIf { it.playWhenReady }?.pause()
+            return
+        }
+        val ex3 = player3 ?: ExoPlayer.Builder(this).build().also { player3 = it }
+        if (musicFile != m.file) {
+            musicFile = m.file
+            ex3.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(dir, m.file))))
+            ex3.prepare()
+            musicSeekAt = 0L
+        }
+        val g = EditMusic.gain(m, curMs).coerceIn(0f, 1f)
+        if (ex3.volume != g) ex3.volume = g
+        val want = m.srcMs + (curMs - m.startMs).coerceAtLeast(0)
+        val now = SystemClock.uptimeMillis()
+        if (playing) {
+            if (!ex3.playWhenReady) {
+                ex3.seekTo(want)
+                ex3.play()
+            } else if (kotlin.math.abs(ex3.currentPosition - want) > 300 && now - musicSeekAt > 500) {
+                musicSeekAt = now
+                ex3.seekTo(want)
+            }
+        } else {
+            if (ex3.playWhenReady) ex3.pause()
+            if (kotlin.math.abs(ex3.currentPosition - want) > 60 && now - musicSeekAt > 120) {
+                musicSeekAt = now
+                ex3.seekTo(want)
+            }
+        }
+    }
+
     // ---------- export ----------
 
     /** Quality and a word on how the export works, then the export. */
     private fun exportSheet() {
         val p = project ?: return
         if (BgTasks.has(TASK_EXPORT)) return toast(t("Экспорт уже идёт", "The export is already running"))
-        val cut = !EditTrack.plain(EditTrack.of(p), p.durMs) || EditSplit.mixes(p.blocks)
-        if (!cut && p.blocks.none { it.kind != "scheme" || it.scheme != null }) return toast(t("Добавьте блок «＋» или измените ролик: ✂ Разделить, скорость…", "Add a block \"＋\" or edit the video: ✂ Split, speed…"))
+        val track = EditTrack.of(p)
+        val cut = !EditTrack.plain(track, p.durMs) || EditCanvas.reshaped(p) || p.fill
+        val rebuilt = !EditTrack.soundPlain(track, p.durMs) || EditSplit.mixes(p.blocks) || EditMusic.mixes(p.blocks)
+        if (!cut && !rebuilt && p.blocks.none { it.kind != "scheme" || it.scheme != null })
+            return toast(t("Пока нечего сохранять: добавьте надпись, музыку, фильтр или разрежьте ролик (✂).", "Nothing to save yet: add a caption, music, a filter or split the video (✂)."))
         pause()
         val prefs = Lumen.prefs
         var side = prefs.getInt("studio_edit_side", 1920)
-        val (ow, oh) = StudioEdit.outSize(p.w, p.h)
+        val (ow, oh) = EditCanvas.outSize(p.w, p.h, p.ratio, 1920)
         bottomSheet(t("⬆ Экспорт ролика", "⬆ Export the video")) { dismiss ->
             val len = StudioEdit.clock(outLen(p)).substringBefore('.')
             val pieces = EditTrack.of(p).size
-            muted(if (cut) t("Блоков: ${p.blocks.size} · кусков: $pieces · длина $len · звук собирается заново (куски, второе видео).",
-                "Blocks: ${p.blocks.size} · pieces: $pieces · length $len · the sound is rebuilt (pieces, second video).")
-            else t("Блоков: ${p.blocks.size} · длина $len · звук оригинала копируется без потерь.",
-                "Blocks: ${p.blocks.size} · length $len · the original sound is copied without loss."))
+            muted(t("Слоёв: ${p.blocks.size} · кусков: $pieces · длина $len · кадр $ow×$oh", "Layers: ${p.blocks.size} · pieces: $pieces · length $len · frame $ow×$oh") + " · " +
+                if (rebuilt) t("звук собирается заново (куски, музыка, второе видео).", "the sound is rebuilt (pieces, music, second video).")
+                else t("звук оригинала копируется без потерь.", "the original sound is copied without loss."))
             label(this, t("Качество", "Quality"))
-            add(choiceChips(ctx, listOf(1920 to t("Как оригинал ($ow×$oh)", "As the original ($ow×$oh)"), 1280 to t("720p — быстрее и легче", "720p — faster and smaller")), side) { side = it })
+            add(choiceChips(ctx, listOf(1920 to t("1080p · как оригинал", "1080p · as the original"), 1280 to t("720p — быстрее и легче", "720p — faster and smaller")), side) { side = it })
             muted(t("Ролик собирается на видеокарте телефона (обычно быстрее реального времени); если она откажет — на процессоре, медленнее. Экран можно закрыть: прогресс в уведомлении.",
                 "The video is built on the phone's GPU (usually faster than real time); if it refuses, on the CPU, slower. You can close the screen: progress is in the notification."))
             button(t("⬆ Экспортировать", "⬆ Export"), primary = true) {

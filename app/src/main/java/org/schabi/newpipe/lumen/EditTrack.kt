@@ -26,11 +26,26 @@ data class VClip(
     /** 1..3: the frame enlarged around its centre (the edges are cut off). */
     val zoom: Float = 1f,
     /** > 0: a still picture of [fromMs] for this long. */
-    val holdMs: Long = 0
+    val holdMs: Long = 0,
+    /** Colour filter ([EditColor.FILTERS], "" = none) and its strength 0..1. */
+    val filter: String = "",
+    val filterK: Float = 1f,
+    /** Adjust sliders, -1..1 each (0 = as recorded). */
+    val bright: Float = 0f,
+    val contrast: Float = 0f,
+    val sat: Float = 0f,
+    val warm: Float = 0f,
+    /** Transition into this piece from the one before it ([EditColor.TRANSITIONS]); on the first piece — from the start. */
+    val trans: String = "",
+    val transMs: Long = EditColor.DEFAULT_TRANS_MS
 ) {
     val isHold: Boolean get() = holdMs > 0
     val outMs: Long get() = if (holdMs > 0) holdMs else max(1L, ((toMs - fromMs) / speed.toDouble()).roundToLong())
-    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L
+    val hasColor: Boolean get() = (filter.isNotEmpty() && filterK > 0f) || bright != 0f || contrast != 0f || sat != 0f || warm != 0f
+    /** Nothing changed in this piece (its place and length aside). */
+    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty()
+    /** Its sound is as recorded. */
+    val soundPlain: Boolean get() = speed == 1f && volume == 1f && holdMs == 0L
 }
 
 /**
@@ -56,6 +71,10 @@ object EditTrack {
     /** The whole video untouched: export copies it as before (sound without re-encoding). */
     fun plain(clips: List<VClip>, durMs: Long): Boolean =
         clips.size == 1 && clips[0].let { it.fromMs <= 0 && it.toMs >= durMs - 1 && it.looksPlain }
+
+    /** The sound of the whole video untouched (the picture may have filters or transitions): export copies it. */
+    fun soundPlain(clips: List<VClip>, durMs: Long): Boolean =
+        clips.size == 1 && clips[0].let { it.fromMs <= 0 && it.toMs >= durMs - 1 && it.soundPlain }
 
     fun total(clips: List<VClip>): Long = max(1L, clips.sumOf { it.outMs })
 
@@ -106,9 +125,10 @@ object EditTrack {
         val nid = newId(clips)
         val (a, b) = if (c.isHold) c.copy(holdMs = pos.offMs) to c.copy(id = nid, holdMs = c.holdMs - pos.offMs)
         else c.copy(toMs = pos.srcMs) to c.copy(id = nid, fromMs = pos.srcMs)
+        val right = b.copy(trans = "")
         val list = clips.toMutableList()
         list[pos.index] = a
-        list.add(pos.index + 1, b)
+        list.add(pos.index + 1, right)
         return list to pos.index + 1
     }
 
@@ -150,7 +170,7 @@ object EditTrack {
         val pos = locate(clips, outMs)
         val c = clips.getOrNull(pos.index) ?: return null
         if (c.isHold) return null
-        val still = VClip(newId(clips), pos.srcMs, pos.srcMs + 1, 1f, 0f, c.mirror, c.zoom, holdMs)
+        val still = c.copy(id = newId(clips), fromMs = pos.srcMs, toMs = pos.srcMs + 1, speed = 1f, volume = 0f, holdMs = holdMs, trans = "")
         val list = clips.toMutableList()
         if (pos.offMs < MIN_MS) {
             list.add(pos.index, still)
@@ -162,7 +182,7 @@ object EditTrack {
         }
         list[pos.index] = c.copy(toMs = pos.srcMs)
         list.add(pos.index + 1, still)
-        list.add(pos.index + 2, c.copy(id = newId(clips, 1), fromMs = pos.srcMs))
+        list.add(pos.index + 2, c.copy(id = newId(clips, 1), fromMs = pos.srcMs, trans = ""))
         return list to pos.index + 1
     }
 
@@ -193,7 +213,15 @@ object EditTrack {
         volume = c.volume.coerceIn(0f, 2f),
         zoom = c.zoom.coerceIn(1f, 3f),
         toMs = max(c.toMs, c.fromMs + 1),
-        holdMs = max(0L, c.holdMs)
+        holdMs = max(0L, c.holdMs),
+        filter = c.filter.takeIf { it in EditColor.FILTERS } ?: "",
+        filterK = c.filterK.coerceIn(0f, 1f),
+        bright = c.bright.coerceIn(-1f, 1f),
+        contrast = c.contrast.coerceIn(-1f, 1f),
+        sat = c.sat.coerceIn(-1f, 1f),
+        warm = c.warm.coerceIn(-1f, 1f),
+        trans = c.trans.takeIf { it in EditColor.TRANSITIONS } ?: "",
+        transMs = c.transMs.coerceIn(100L, 3000L)
     )
 
     /**
@@ -235,6 +263,8 @@ object EditTrack {
     fun remapBlocks(blocks: List<EBlock>, old: List<VClip>, new: List<VClip>): List<EBlock> {
         val tot = total(new)
         return blocks.map { b ->
+            // music keeps its place in time, like the audio track in CapCut
+            if (b.kind == EditMusic.KIND) return@map StudioEdit.clampTime(b, tot)
             val s = remap(old, new, b.startMs)
             val e = remap(old, new, max(b.startMs + 1, b.endMs), end = true)
             val d = if (e - s >= StudioEdit.MIN_MS) e - s else b.durMs
@@ -274,12 +304,21 @@ object EditTrack {
         if (!c.isHold && c.volume == 0f) append("🔇 ")
         if (c.mirror) append("⇋ ")
         if (c.zoom > 1.001f) append("🔍 ")
+        if (c.hasColor) append("🎨 ")
     }.trim()
 
     fun json(clips: List<VClip>): JSONArray = JSONArray().apply {
         clips.forEach { c ->
             put(JSONObject().put("id", c.id).put("from", c.fromMs).put("to", c.toMs).put("speed", c.speed.toDouble())
-                .put("volume", c.volume.toDouble()).put("mirror", c.mirror).put("zoom", c.zoom.toDouble()).put("hold", c.holdMs))
+                .put("volume", c.volume.toDouble()).put("mirror", c.mirror).put("zoom", c.zoom.toDouble()).put("hold", c.holdMs)
+                .apply {
+                    if (c.filter.isNotEmpty()) put("filter", c.filter).put("filterK", c.filterK.toDouble())
+                    if (c.bright != 0f) put("bright", c.bright.toDouble())
+                    if (c.contrast != 0f) put("contrast", c.contrast.toDouble())
+                    if (c.sat != 0f) put("sat", c.sat.toDouble())
+                    if (c.warm != 0f) put("warm", c.warm.toDouble())
+                    if (c.trans.isNotEmpty()) put("trans", c.trans).put("transMs", c.transMs)
+                })
         }
     }
 
@@ -289,8 +328,10 @@ object EditTrack {
         val from = o.optLong("from", -1)
         val to = o.optLong("to", -1)
         if (from < 0 || to <= from) return@mapNotNull null
-        clean(VClip(id, from, to, o.optDouble("speed", 1.0).toFloat(), o.optDouble("volume", 1.0).toFloat(),
-            o.optBoolean("mirror"), o.optDouble("zoom", 1.0).toFloat(), o.optLong("hold")))
+        fun f(k: String, d: Double = 0.0) = o.optDouble(k, d).toFloat().takeIf { !it.isNaN() } ?: d.toFloat()
+        clean(VClip(id, from, to, f("speed", 1.0), f("volume", 1.0), o.optBoolean("mirror"), f("zoom", 1.0), o.optLong("hold"),
+            o.optString("filter"), f("filterK", 1.0), f("bright"), f("contrast"), f("sat"), f("warm"),
+            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS)))
     }
 }
 
@@ -350,6 +391,6 @@ object EditSplit {
     /** Loudness of the main video at [tMs]: its piece's, times the split screen's setting. */
     fun mainVolume(blocks: List<EBlock>, tMs: Long, clipVolume: Float): Float = clipVolume * (active(blocks, tMs)?.mainVolume ?: 1f)
 
-    /** Blocks drawn over the picture (a split screen is not one of them). */
-    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { it.kind != KIND }
+    /** Blocks drawn over the picture (a split screen and sounds are not). */
+    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { it.kind != KIND && it.kind != EditMusic.KIND }
 }

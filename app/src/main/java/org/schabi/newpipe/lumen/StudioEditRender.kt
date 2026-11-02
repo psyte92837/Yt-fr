@@ -406,9 +406,10 @@ object StudioEditRender {
         val clips = EditTrack.of(p)
         // a cut track: the sound is put together once, for the GPU and (if needed) the CPU way
         val splits = job.blocks.filter { it.kind == EditSplit.KIND }
-        // the sound is rebuilt when the track is cut or a split screen is heard (or makes the main video quieter)
-        val sound = if (EditTrack.plain(clips, p.durMs) && !EditSplit.mixes(splits)) null
-        else EditAudio.build(File(dir, StudioEditStore.BASE), clips, splits, dir, cancelled, progress)
+        val music = job.blocks.filter { EditMusic.isSound(it) }
+        // the sound is rebuilt when the track is cut, a split screen is heard (or makes the main video quieter) or music plays
+        val sound = if (EditTrack.soundPlain(clips, p.durMs) && !EditSplit.mixes(splits) && !EditMusic.mixes(music)) null
+        else EditAudio.build(File(dir, StudioEditStore.BASE), clips, splits + music, dir, cancelled, progress)
         try {
             val n = StudioEditGl.render(job, dir, words, accent, styleDir, out, maxSide, sound, cancelled, progress)
             L.i("studio", "edit export on GPU: $n frames in ${(System.currentTimeMillis() - started) / 1000} s")
@@ -432,44 +433,53 @@ object StudioEditRender {
     ) {
         val base = File(dir, StudioEditStore.BASE)
         val pr = probe(base)
-        val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
+        val (w, h) = EditCanvas.outSize(pr.w, pr.h, p.ratio, maxSide)
         val fps = pr.fps
         val clips = EditTrack.of(p)
         val starts = EditTrack.starts(clips)
         val plain = EditTrack.plain(clips, pr.durMs)
         val totalMs = if (plain) pr.durMs else EditTrack.total(clips)
         val frames = Studio.frameCount(totalMs, fps)
+        // the video on the canvas (format of the project) and the size its frames are decoded at
+        val vRect = EditCanvas.videoRect(pr.w.toFloat(), pr.h.toFloat(), w.toFloat(), h.toFloat(), p.fill)
+        val k = min(1f, max(w, h).toFloat() / max(vRect.w, vRect.h))
+        val vw = max(2, (vRect.w * k).roundToInt() / 2 * 2)
+        val vh = max(2, (vRect.h * k).roundToInt() / 2 * 2)
         out.parentFile?.mkdirs()
         val enc = MediaCodec.createEncoderByType(MIME)
         enc.configure(videoFormat(w, h, fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         enc.start()
         val muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val audio: AudioOut = sound?.out() ?: if (plain) AudioCopy(base, totalMs * 1000) else NoAudio
+        val audio: AudioOut = sound?.out() ?: if (EditTrack.soundPlain(clips, pr.durMs)) AudioCopy(base, totalMs * 1000) else NoAudio
         val sink = VideoSink(enc, muxer, audio)
         var ok = false
         var src: StudioFrames? = null
         val painter = StudioEditPainter(w, h, dir, words, accent, styleDir)
         try {
-            src = StudioFrames(base, w, h)
-            val frame = IntArray(w * h) { 0xFF000000.toInt() }
+            src = StudioFrames(base, vw, vh)
+            val frame = IntArray(vw * vh) { 0xFF000000.toInt() }
+            val tinted = IntArray(vw * vh)
             val mixed = IntArray(w * h)
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
-            // mirrored or zoomed pieces: the frame is drawn turned / enlarged into a second picture
-            var lookBmp: Bitmap? = null
-            val lookPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+            // the video frame as a picture, drawn onto the canvas (turned, enlarged, into its half of a split screen)
+            val vidBmp = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+            val vidPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+            val dst = RectF()
             var lastSrc = Long.MIN_VALUE
             // split screen: frames of the second video, already cut to the size of its half
             val over = EditSplit.overlays(p.blocks)
             val splits = p.blocks.filter { it.kind == EditSplit.KIND }
-            val splitPix = IntArray(w * h)
             var sideId = ""
             var side: StudioFrames? = null
             var sidePix = IntArray(0)
+            var sideBmp: Bitmap? = null
             val y = ByteArray(w * h)
             val u = ByteArray(w * h / 4)
             val v = ByteArray(w * h / 4)
             val size = w * h * 3 / 2
+            var colorKey: VClip? = null
+            var colorM: FloatArray? = null
             for (f in 0 until frames) {
                 if (cancelled()) throw CancellationException()
                 val pts = Studio.frameTimeUs(f, fps)
@@ -479,34 +489,39 @@ object StudioEditRender {
                 val clip = clips[pos.index]
                 val srcUs = if (plain) pts else if (clip.isHold) clip.fromMs * 1000
                 else clip.fromMs * 1000 + ((pts - starts[pos.index] * 1000) * clip.speed.toDouble()).toLong()
-                var dec: StudioFrames = src ?: StudioFrames(base, w, h)
+                var dec: StudioFrames = src ?: StudioFrames(base, vw, vh)
                 src = dec
                 if (srcUs < lastSrc - 1000) {
                     // back in time (another order, a copy): the decoder starts over
                     dec.close()
-                    dec = StudioFrames(base, w, h)
+                    dec = StudioFrames(base, vw, vh)
                     src = dec
                 }
                 lastSrc = srcUs
                 dec.advance(srcUs, frame, true)
-                val shown = StudioEdit.active(over, tMs)
-                val look = clip.mirror || clip.zoom > 1.001f
-                var pix = frame
-                if (look) {
-                    // a mirrored or zoomed piece: the frame turned / enlarged
-                    bmp.setPixels(frame, 0, w, 0, 0, w, h)
-                    val lb = lookBmp ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { lookBmp = it }
-                    val lc = Canvas(lb)
-                    lc.drawColor(Color.BLACK)
-                    lc.save()
-                    lc.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, w / 2f, h / 2f)
-                    lc.drawBitmap(bmp, 0f, 0f, lookPaint)
-                    lc.restore()
-                    lb.getPixels(mixed, 0, w, 0, 0, w, h)
-                    pix = mixed.copyOf()
+                // the colour of the piece on a copy: the next frame may keep this picture when the source has fewer frames
+                if (colorKey !== clip) {
+                    colorKey = clip
+                    colorM = EditColor.matrix(clip)
                 }
+                val cm = colorM
+                val pix = if (cm == null) frame else {
+                    System.arraycopy(frame, 0, tinted, 0, frame.size)
+                    EditColor.applyTo(tinted, cm)
+                    tinted
+                }
+                vidBmp.setPixels(pix, 0, vw, 0, 0, vw, vh)
+                canvas.drawColor(p.bg or 0xFF000000.toInt())
                 val sp = EditSplit.active(splits, tMs)
-                if (sp != null) {
+                if (sp == null) {
+                    canvas.save()
+                    canvas.clipRect(vRect.l, vRect.t, vRect.r, vRect.b)
+                    // a mirrored or zoomed piece: the frame turned / enlarged around the middle of the video
+                    if (clip.mirror || clip.zoom > 1.001f) canvas.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, (vRect.l + vRect.r) / 2, (vRect.t + vRect.b) / 2)
+                    dst.set(vRect.l, vRect.t, vRect.r, vRect.b)
+                    canvas.drawBitmap(vidBmp, null, dst, vidPaint)
+                    canvas.restore()
+                } else {
                     val (mh, sh) = EditSplit.halves(sp.look)
                     val sx0 = (sh.l * w).roundToInt()
                     val sy0 = (sh.t * h).roundToInt()
@@ -514,40 +529,34 @@ object StudioEditRender {
                     val shh = (sh.b * h).roundToInt() - sy0
                     if (sp.id != sideId) {
                         side?.let { runCatching { it.close() } }
+                        sideBmp?.recycle()
                         sideId = sp.id
                         sidePix = IntArray(sw * shh) { 0xFF000000.toInt() }
+                        sideBmp = Bitmap.createBitmap(max(1, sw), max(1, shh), Bitmap.Config.ARGB_8888)
                         side = runCatching { StudioFrames(File(dir, sp.file), sw, shh) }
                             .onFailure { L.w("studio", "split screen: ${it.message}") }.getOrNull()
                     }
                     side?.advance(EditSplit.srcAt(sp, tMs) * 1000, sidePix, true)
-                    java.util.Arrays.fill(splitPix, 0xFF000000.toInt())
-                    // the main video at full size, centred in its half (the rest of it is cut off)
-                    val mc = EditSplit.cover(w.toFloat(), h.toFloat(), mh, w.toFloat(), h.toFloat())
-                    val ox = mc.l.roundToInt()
-                    val oy = mc.t.roundToInt()
-                    val mx0 = (mh.l * w).roundToInt()
-                    val mx1 = (mh.r * w).roundToInt()
-                    for (yy in (mh.t * h).roundToInt() until (mh.b * h).roundToInt()) {
-                        val ry = yy - oy
-                        if (ry !in 0 until h) continue
-                        val a = max(mx0, ox)
-                        val b = min(mx1, ox + w)
-                        if (b > a) System.arraycopy(pix, ry * w + (a - ox), splitPix, yy * w + a, b - a)
+                    // the main video covers its half, centred (the rest of it is cut off)
+                    val mc = EditSplit.cover(pr.w.toFloat(), pr.h.toFloat(), mh, w.toFloat(), h.toFloat())
+                    canvas.save()
+                    canvas.clipRect(mh.l * w, mh.t * h, mh.r * w, mh.b * h)
+                    if (clip.mirror || clip.zoom > 1.001f) canvas.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, (mc.l + mc.r) / 2, (mc.t + mc.b) / 2)
+                    dst.set(mc.l, mc.t, mc.r, mc.b)
+                    canvas.drawBitmap(vidBmp, null, dst, vidPaint)
+                    canvas.restore()
+                    val sb = sideBmp
+                    if (sb != null && sidePix.size == sw * shh && sw > 0 && shh > 0) {
+                        sb.setPixels(sidePix, 0, sw, 0, 0, sw, shh)
+                        canvas.drawBitmap(sb, sx0.toFloat(), sy0.toFloat(), null)
                     }
-                    if (sidePix.size == sw * shh) for (yy in 0 until shh) {
-                        if (sy0 + yy >= h) break
-                        System.arraycopy(sidePix, yy * sw, splitPix, (sy0 + yy) * w + sx0, min(sw, w - sx0))
-                    }
-                    pix = splitPix
                 }
-                if (shown.isEmpty()) Studio.argbToYuv420(pix, w, h, y, u, v)
-                else {
-                    // drawn on a copy: the next frame may keep this picture of the video when the source has fewer frames
-                    bmp.setPixels(pix, 0, w, 0, 0, w, h)
-                    painter.draw(canvas, shown, tMs)
-                    bmp.getPixels(mixed, 0, w, 0, 0, w, h)
-                    Studio.argbToYuv420(mixed, w, h, y, u, v)
-                }
+                val shown = StudioEdit.active(over, tMs)
+                if (shown.isNotEmpty()) painter.draw(canvas, shown, tMs)
+                bmp.getPixels(mixed, 0, w, 0, 0, w, h)
+                // a transition at a seam: the whole frame dips to a colour and back
+                EditColor.fadeAt(clips, tMs)?.let { EditColor.blend(mixed, it) }
+                Studio.argbToYuv420(mixed, w, h, y, u, v)
                 var idx: Int
                 while (true) {
                     idx = enc.dequeueInputBuffer(TIMEOUT)
@@ -572,7 +581,8 @@ object StudioEditRender {
             sink.drain(true)
             audio.write(muxer, Long.MAX_VALUE)
             bmp.recycle()
-            lookBmp?.recycle()
+            vidBmp.recycle()
+            sideBmp?.recycle()
             side?.let { runCatching { it.close() } }
             ok = true
         } finally {
@@ -732,15 +742,31 @@ private object StudioEditGl {
         }
     """.trimIndent()
 
+    // the video with the colour of its piece (filter and adjust, see [EditColor]): rgb' = uC * rgb + uO
     private val FS_OES = """
         #extension GL_OES_EGL_image_external : require
         precision mediump float;
         varying vec2 vUv;
         uniform samplerExternalOES uS;
+        uniform mat3 uC;
+        uniform vec3 uO;
         void main() {
-            gl_FragColor = texture2D(uS, vUv);
+            vec3 c = texture2D(uS, vUv).rgb;
+            gl_FragColor = vec4(clamp(uC * c + uO, 0.0, 1.0), 1.0);
         }
     """.trimIndent()
+
+    // a plain colour over the frame (transitions)
+    private val FS_FILL = """
+        precision mediump float;
+        uniform vec4 uF;
+        void main() {
+            gl_FragColor = uF;
+        }
+    """.trimIndent()
+
+    private val ID3 = floatArrayOf(1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f)
+    private val ZERO3 = floatArrayOf(0f, 0f, 0f)
 
     private val FS_2D = """
         precision mediump float;
@@ -921,10 +947,16 @@ private object StudioEditGl {
     ): Int {
         val base = File(dir, StudioEditStore.BASE)
         val pr = StudioEditRender.probe(base)
-        val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
+        val (w, h) = EditCanvas.outSize(pr.w, pr.h, p.ratio, maxSide)
+        // the video on the canvas: the whole frame, or a rectangle on the background colour (format of the project)
+        val vRect = EditCanvas.videoRect(pr.w.toFloat(), pr.h.toFloat(), w.toFloat(), h.toFloat(), p.fill)
+        val bgR = ((p.bg shr 16) and 0xFF) / 255f
+        val bgG = ((p.bg shr 8) and 0xFF) / 255f
+        val bgB = (p.bg and 0xFF) / 255f
         val clips = EditTrack.of(p)
         val starts = EditTrack.starts(clips)
         val plain = EditTrack.plain(clips, pr.durMs)
+        val soundPlain = EditTrack.soundPlain(clips, pr.durMs)
         val totalMs = if (plain) pr.durMs else EditTrack.total(clips)
         val expected = max(1, (totalMs * pr.fps / 1000).toInt())
         out.parentFile?.mkdirs()
@@ -966,7 +998,7 @@ private object StudioEditGl {
             e.start()
             val m = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             muxer = m
-            val a = sound?.out() ?: if (plain) AudioCopy(base, totalMs * 1000) else NoAudio
+            val a = sound?.out() ?: if (soundPlain) AudioCopy(base, totalMs * 1000) else NoAudio
             audio = a
             val sk = VideoSink(e, m, a)
             sink = sk
@@ -994,6 +1026,7 @@ private object StudioEditGl {
 
             val progOes = program(FS_OES)
             val prog2d = program(FS_2D)
+            val progFill = program(FS_FILL)
             val tex = IntArray(2)
             android.opengl.GLES20.glGenTextures(2, tex, 0)
             val oes = tex[0]
@@ -1031,8 +1064,15 @@ private object StudioEditGl {
                 android.opengl.Matrix.scaleM(it, 0, 1f, -1f, 1f)
             }
             var vidPos = pos
-            fun draw(prog: Int, target: Int, id: Int, mat: FloatArray, at: java.nio.FloatBuffer = pos) {
+            // colour of the piece being written (3×3 and offsets), identity for none
+            var colM = ID3
+            var colO = ZERO3
+            fun draw(prog: Int, target: Int, id: Int, mat: FloatArray, at: java.nio.FloatBuffer = pos, cm: FloatArray = ID3, co: FloatArray = ZERO3) {
                 android.opengl.GLES20.glUseProgram(prog)
+                if (prog == progOes) {
+                    android.opengl.GLES20.glUniformMatrix3fv(android.opengl.GLES20.glGetUniformLocation(prog, "uC"), 1, false, cm, 0)
+                    android.opengl.GLES20.glUniform3fv(android.opengl.GLES20.glGetUniformLocation(prog, "uO"), 1, co, 0)
+                }
                 android.opengl.GLES20.glActiveTexture(android.opengl.GLES20.GL_TEXTURE0)
                 android.opengl.GLES20.glBindTexture(target, id)
                 android.opengl.GLES20.glUniform1i(android.opengl.GLES20.glGetUniformLocation(prog, "uS"), 0)
@@ -1044,6 +1084,19 @@ private object StudioEditGl {
                 android.opengl.GLES20.glEnableVertexAttribArray(aUv)
                 android.opengl.GLES20.glVertexAttribPointer(aUv, 2, android.opengl.GLES20.GL_FLOAT, false, 8, uv)
                 android.opengl.GLES20.glDrawArrays(android.opengl.GLES20.GL_TRIANGLE_STRIP, 0, 4)
+            }
+            /** A colour with [alpha] over the whole frame. */
+            fun fill(color: Int, alpha: Float) {
+                android.opengl.GLES20.glUseProgram(progFill)
+                android.opengl.GLES20.glUniform4f(android.opengl.GLES20.glGetUniformLocation(progFill, "uF"),
+                    ((color shr 16) and 0xFF) / 255f, ((color shr 8) and 0xFF) / 255f, (color and 0xFF) / 255f, alpha)
+                val aPos = android.opengl.GLES20.glGetAttribLocation(progFill, "aPos")
+                android.opengl.GLES20.glEnableVertexAttribArray(aPos)
+                android.opengl.GLES20.glVertexAttribPointer(aPos, 2, android.opengl.GLES20.GL_FLOAT, false, 8, pos)
+                android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
+                android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_SRC_ALPHA, android.opengl.GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                android.opengl.GLES20.glDrawArrays(android.opengl.GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
             }
 
             val canvas = Canvas(layer)
@@ -1061,12 +1114,16 @@ private object StudioEditGl {
             /** The picture now in the texture, with the blocks of output moment [outUs], to the encoder. */
             fun present(outUs: Long) {
                 android.opengl.GLES20.glViewport(0, 0, w, h)
-                android.opengl.GLES20.glClearColor(0f, 0f, 0f, 1f)
+                android.opengl.GLES20.glClearColor(bgR, bgG, bgB, 1f)
                 android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
                 val tMs = outUs / 1000
                 val sp = EditSplit.active(splits, tMs)
-                if (sp == null) draw(progOes, OES, oes, texM, vidPos)
-                else {
+                fun viewport(r: FRect) = android.opengl.GLES20.glViewport(r.l.roundToInt(), (h - r.b).roundToInt(), r.w.roundToInt(), r.h.roundToInt())
+                if (sp == null) {
+                    viewport(vRect)
+                    draw(progOes, OES, oes, texM, vidPos, colM, colO)
+                    android.opengl.GLES20.glViewport(0, 0, w, h)
+                } else {
                     if (sp.id != trackId) {
                         track?.close()
                         trackId = sp.id
@@ -1078,11 +1135,10 @@ private object StudioEditGl {
                     val (mh, sh) = EditSplit.halves(sp.look)
                     fun scissor(r: FRect) = android.opengl.GLES20.glScissor((r.l * w).roundToInt(), ((1f - r.b) * h).roundToInt(),
                         (r.w * w).roundToInt(), (r.h * h).roundToInt())
-                    fun viewport(r: FRect) = android.opengl.GLES20.glViewport(r.l.roundToInt(), (h - r.b).roundToInt(), r.w.roundToInt(), r.h.roundToInt())
                     android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_SCISSOR_TEST)
                     scissor(mh)
-                    viewport(EditSplit.cover(w.toFloat(), h.toFloat(), mh, w.toFloat(), h.toFloat()))
-                    draw(progOes, OES, oes, texM, vidPos)
+                    viewport(EditSplit.cover(pr.w.toFloat(), pr.h.toFloat(), mh, w.toFloat(), h.toFloat()))
+                    draw(progOes, OES, oes, texM, vidPos, colM, colO)
                     if (tr != null && tr.shown) {
                         scissor(sh)
                         viewport(EditSplit.cover(tr.w, tr.h, sh, w.toFloat(), h.toFloat()))
@@ -1107,6 +1163,8 @@ private object StudioEditGl {
                     draw(prog2d, android.opengl.GLES20.GL_TEXTURE_2D, ov, flip)
                     android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
                 }
+                // a transition at a seam: the whole frame dips to a colour and back
+                EditColor.fadeAt(clips, tMs)?.let { fd -> fill(fd.color, fd.alpha) }
                 val err = android.opengl.GLES20.glGetError()
                 if (err != android.opengl.GLES20.GL_NO_ERROR) error("GL error $err")
                 android.opengl.EGLExt.eglPresentationTimeANDROID(dpy, surf, outUs * 1000)
@@ -1129,6 +1187,9 @@ private object StudioEditGl {
                 }
                 val sx = if (c.mirror) -c.zoom else c.zoom
                 vidPos = if (sx == 1f && c.zoom == 1f) pos else floats(-sx, -c.zoom, sx, -c.zoom, -sx, c.zoom, sx, c.zoom)
+                val cm = EditColor.matrix(c)?.let { EditColor.gl(it) }
+                colM = cm?.first ?: ID3
+                colO = cm?.second ?: ZERO3
                 if (k > 0) d.flush()
                 ex.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 var inDone = false

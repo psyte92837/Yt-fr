@@ -57,7 +57,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
         private const val MIME_OUT = MediaFormat.MIMETYPE_AUDIO_AAC
 
         /**
-         * The sound of [clips] with the second videos of split screens [splits] (folder [dir]) mixed in.
+         * The sound of [clips] with the second videos of split screens and the music blocks [splits] (folder [dir]) mixed in.
          * Null when there is no sound at all. Worker thread; throws CancellationException when [cancelled].
          */
         fun build(
@@ -71,7 +71,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
             try {
                 ex.setDataSource(base.absolutePath)
                 val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
-                val heard = splits.filter { it.kind == EditSplit.KIND && it.file.isNotEmpty() && it.volume > 0f }
+                val heard = splits.filter { (it.kind == EditSplit.KIND || it.kind == EditMusic.KIND) && it.file.isNotEmpty() && it.volume > 0f }
                 // a main video without sound: silence at 44.1 kHz, unless nothing is heard at all
                 if (idx == null && heard.isEmpty()) return null
                 var r: Remix? = null
@@ -93,16 +93,18 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                 // the second videos first: each one's sound at this rate into a file, read back while the main sound is encoded
                 heard.forEachIndexed { i, b ->
                     if (cancelled()) throw CancellationException()
-                    progress(t("Звук второго видео ${i + 1}/${heard.size}", "Sound of the second video ${i + 1}/${heard.size}"))
+                    progress(t("Звук дорожек ${i + 1}/${heard.size}", "Extra sound tracks ${i + 1}/${heard.size}"))
                     val f = File(dir, "side_${b.id}.pcm")
                     temps += f
                     val need = b.durMs * rate / 1000
                     if (side(File(dir, b.file), b, need, rate, outCh, f, cancelled)) {
-                        sides += SideMix(b.startMs * rate / 1000, b.startMs * rate / 1000 + need, b.volume, b.mainVolume, f, outCh)
+                        val fade = if (b.kind == EditMusic.KIND) minOf(EditMusic.FADE_MS, b.durMs / 2) * rate / 1000 else 0L
+                        sides += SideMix(b.startMs * rate / 1000, b.startMs * rate / 1000 + need, b.volume, b.mainVolume, f, outCh,
+                            if (b.animIn == "fade") fade else 0L, if (b.animOut == "fade") fade else 0L)
                     }
                 }
                 // a quieter main video without a heard second one
-                splits.filter { it.kind == EditSplit.KIND && it.file.isNotEmpty() && it.volume <= 0f && it.mainVolume != 1f }.forEach { b ->
+                splits.filter { (it.kind == EditSplit.KIND || it.kind == EditMusic.KIND) && it.file.isNotEmpty() && it.volume <= 0f && it.mainVolume != 1f }.forEach { b ->
                     sides += SideMix(b.startMs * rate / 1000, (b.startMs + b.durMs) * rate / 1000, 0f, b.mainVolume, null, outCh)
                 }
                 val e = MediaCodec.createEncoderByType(MIME_OUT)
@@ -188,7 +190,18 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
     }
 
     /** A second video's sound (raw PCM file) heard over output frames [startF, endF); the main one at [mainVol] meanwhile. */
-    private class SideMix(val startF: Long, val endF: Long, val vol: Float, val mainVol: Float, file: File?, private val ch: Int) : java.io.Closeable {
+    private class SideMix(
+        val startF: Long, val endF: Long, val vol: Float, val mainVol: Float, file: File?, private val ch: Int,
+        private val fadeInF: Long = 0, private val fadeOutF: Long = 0
+    ) : java.io.Closeable {
+        /** Loudness of output frame [f]: [vol] with the fades in and out. */
+        fun gain(f: Long): Float {
+            var g = vol
+            if (fadeInF > 0) g *= ((f - startF).toFloat() / fadeInF).coerceIn(0f, 1f)
+            if (fadeOutF > 0) g *= ((endF - f).toFloat() / fadeOutF).coerceIn(0f, 1f)
+            return g
+        }
+
         private val input = file?.let { java.io.DataInputStream(java.io.BufferedInputStream(it.inputStream(), 1 shl 16)) }
         private var bytes = ByteArray(0)
 
@@ -384,7 +397,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                 val add = sd.read(len)
                 val base = ((a - f0) * ch).toInt()
                 for (i in 0 until len * ch) {
-                    val v = pcm[base + i] * sd.mainVol + add[i] * sd.vol
+                    val v = pcm[base + i] * sd.mainVol + add[i] * sd.gain(a + i / ch)
                     pcm[base + i] = v.roundToInt().coerceIn(-32768, 32767).toShort()
                 }
             }

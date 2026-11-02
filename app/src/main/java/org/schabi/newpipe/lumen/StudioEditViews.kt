@@ -343,6 +343,9 @@ class EditTimeline(ctx: Context) : View(ctx) {
         private set
     var thumbs: List<Pair<Long, Bitmap>> = emptyList()
         set(v) { field = v; invalidate() }
+    /** Frames of the other videos of the track, by their file. */
+    var srcThumbs: Map<String, List<Pair<Long, Bitmap>>> = emptyMap()
+        set(v) { field = v; invalidate() }
     /** Width / height of a video frame. */
     var aspect = 9f / 16f
     /** The voice with times: a row of words under the frames; edges stick to word starts. */
@@ -412,6 +415,22 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private val seamOnP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFD60A.toInt() }
     private val seamTextP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14161B.toInt(); textSize = 11 * dp; textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
     private val seamOnTextP = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF14161B.toInt(); textSize = 12 * dp; textAlign = Paint.Align.CENTER; typeface = Typeface.DEFAULT_BOLD }
+
+    /** Colours for a light panel (the light theme of the app); dark is the default. */
+    fun light(on: Boolean) {
+        val ink = if (on) 0xFF1D1B20.toInt() else 0xFFFFFFFF.toInt()
+        tickP.color = (ink and 0x00FFFFFF) or 0x99000000.toInt()
+        labelP.color = (ink and 0x00FFFFFF) or 0xCC000000.toInt()
+        wordP.color = (ink and 0x00FFFFFF) or 0xD9000000.toInt()
+        wordTick.color = (ink and 0x00FFFFFF) or 0x66000000
+        headP.color = ink
+        stripBg.color = if (on) 0xFFD5D7DD.toInt() else 0xFF2A2D33.toInt()
+        sepP.color = if (on) 0xFFE9EAEE.toInt() else 0xFF15171B.toInt()
+        dimP.color = if (on) 0x99FFFFFF.toInt() else 0x99000000.toInt()
+        seamBoxP.color = if (on) 0xFF1D1B20.toInt() else 0xF2FFFFFF.toInt()
+        seamTextP.color = if (on) 0xFFFFFFFF.toInt() else 0xFF14161B.toInt()
+        invalidate()
+    }
 
     private fun relayout() {
         lanes = StudioEdit.lanes(blocks)
@@ -514,13 +533,13 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 if (r < 0 || l > w) continue
                 c.save()
                 c.clipRect(l, stripTop, r, stripTop + stripH)
-                if (thumbs.isNotEmpty()) {
+                if (thumbs.isNotEmpty() || srcThumbs.isNotEmpty()) {
                     // frames of this piece from its own left edge: a cut is seen as a seam
                     var x = l + ((max(l, 0f) - l) / cw).toInt() * cw
                     while (x < min(r, w)) {
                         val off = msAt(x + cw / 2) - st[i]
                         val at = if (ck.isHold) ck.fromMs else (ck.fromMs + (off * ck.speed).toLong()).coerceIn(ck.fromMs, ck.toMs)
-                        val bmp = nearest(at)
+                        val bmp = nearest(at, ck.src)
                         if (bmp != null) {
                             val ratio = cw / stripH
                             val bw = bmp.width.toFloat()
@@ -575,7 +594,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
                 }
                 val bw = max(stripH, min(xOf(d.outMs) - xOf(0), 110 * dp))
                 val box = RectF(lastX - bw / 2, stripTop - 6 * dp, lastX + bw / 2, stripTop + stripH - 6 * dp)
-                val bmp = nearest(if (d.isHold) d.fromMs else (d.fromMs + d.toMs) / 2)
+                val bmp = nearest(if (d.isHold) d.fromMs else (d.fromMs + d.toMs) / 2, d.src)
                 c.save()
                 c.clipPath(Path().apply { addRoundRect(box, 6 * dp, 6 * dp, Path.Direction.CW) })
                 c.drawRect(box, stripBg)
@@ -654,8 +673,8 @@ class EditTimeline(ctx: Context) : View(ctx) {
         c.drawCircle(px, 4 * dp, 4 * dp, headP)
     }
 
-    private fun nearest(ms: Long): Bitmap? {
-        val list = thumbs
+    private fun nearest(ms: Long, src: String = ""): Bitmap? {
+        val list = if (src.isEmpty()) thumbs else srcThumbs[src].orEmpty()
         if (list.isEmpty()) return null
         var lo = 0
         var hi = list.lastIndex

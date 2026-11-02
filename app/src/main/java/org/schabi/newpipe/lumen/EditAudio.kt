@@ -68,12 +68,14 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
             var enc: MediaCodec? = null
             val temps = ArrayList<File>()
             val sides = ArrayList<SideMix>()
+            val extractors = ArrayList<MediaExtractor>()
+            val decoders = ArrayList<MediaCodec>()
             try {
                 ex.setDataSource(base.absolutePath)
                 val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
                 val heard = splits.filter { (it.kind == EditSplit.KIND || it.kind == EditMusic.KIND) && it.file.isNotEmpty() && it.volume > 0f }
                 // a main video without sound: silence at 44.1 kHz, unless nothing is heard at all
-                if (idx == null && heard.isEmpty()) return null
+                if (idx == null && heard.isEmpty() && clips.none { it.src.isNotEmpty() }) return null
                 var r: Remix? = null
                 var rate = 44_100
                 var outCh = 2
@@ -116,13 +118,37 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                 }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 e.start()
                 val w = Writer(e, rate, outCh, sides)
+                // pieces of the other videos of the project: each video's sound decoded on its own
+                val others = HashMap<String, Remix?>()
+                fun remixOf(src: String): Remix? = if (src.isEmpty()) r else if (others.containsKey(src)) others[src] else run {
+                    val made = runCatching {
+                        val oex = MediaExtractor()
+                        extractors += oex
+                        oex.setDataSource(File(dir, src).absolutePath)
+                        val oi = (0 until oex.trackCount).firstOrNull { oex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                            ?: return@runCatching null
+                        oex.selectTrack(oi)
+                        val f = oex.getTrackFormat(oi)
+                        val od = MediaCodec.createDecoderByType(f.getString(MediaFormat.KEY_MIME)!!)
+                        decoders += od
+                        od.configure(f, null, null, 0)
+                        od.start()
+                        Remix(oex, od, f).also { it.probe() }
+                    }.onFailure { L.w("studio", "sound of $src: ${it.message}") }.getOrNull()
+                    others[src] = made
+                    made
+                }
                 clips.forEachIndexed { i, c ->
                     if (cancelled()) throw CancellationException()
                     progress(t("Звук: кусок ${i + 1}/${clips.size}", "Sound: piece ${i + 1}/${clips.size}"))
                     val need = (c.outMs * rate / 1000.0).roundToLong()
-                    val rm = r
-                    if (rm == null || c.isHold || c.volume <= 0f) w.silence(need)
-                    else rm.piece(c, need, rate, { a, n -> w.feed(a, n) }, cancelled)
+                    val rm = if (c.isHold || c.volume <= 0f) null else remixOf(c.src)
+                    if (rm == null) w.silence(need)
+                    else if (rm.outCh == outCh) rm.piece(c, need, rate, { a, n -> w.feed(a, n) }, cancelled)
+                    else rm.piece(c, need, rate, { a, n ->
+                        val m = channels(a, n, rm.outCh, outCh)
+                        w.feed(m, m.size)
+                    }, cancelled)
                 }
                 w.finish()
                 val fmt = w.format ?: error("no AAC format")
@@ -130,10 +156,29 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
             } finally {
                 sides.forEach { it.close() }
                 temps.forEach { it.delete() }
+                decoders.forEach { d -> runCatching { d.stop() }; runCatching { d.release() } }
+                extractors.forEach { x -> runCatching { x.release() } }
                 dec?.let { runCatching { it.stop() }; runCatching { it.release() } }
                 enc?.let { runCatching { it.stop() }; runCatching { it.release() } }
                 runCatching { ex.release() }
             }
+        }
+
+        /** [n] interleaved shorts of [a] with [inCh] channels as [outCh] channels: mono doubled, stereo averaged. */
+        fun channels(a: ShortArray, n: Int, inCh: Int, outCh: Int): ShortArray {
+            if (inCh == outCh) return a.copyOf(n)
+            val frames = n / max(1, inCh)
+            val out = ShortArray(frames * outCh)
+            for (f in 0 until frames) {
+                if (inCh == 1) for (c in 0 until outCh) out[f * outCh + c] = a[f]
+                else {
+                    var sum = 0
+                    for (c in 0 until inCh) sum += a[f * inCh + c]
+                    val v = (sum / inCh).toShort()
+                    for (c in 0 until outCh) out[f * outCh + c] = v
+                }
+            }
+            return out
         }
 
         /** The sound of split screen [b] (second video [file]) as [need] frames of [rate] / [outCh] into [out]; false when it has none. */

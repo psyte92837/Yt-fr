@@ -441,10 +441,18 @@ object StudioEditRender {
         val totalMs = if (plain) pr.durMs else EditTrack.total(clips)
         val frames = Studio.frameCount(totalMs, fps)
         // the video on the canvas (format of the project) and the size its frames are decoded at
-        val vRect = EditCanvas.videoRect(pr.w.toFloat(), pr.h.toFloat(), w.toFloat(), h.toFloat(), p.fill)
-        val k = min(1f, max(w, h).toFloat() / max(vRect.w, vRect.h))
-        val vw = max(2, (vRect.w * k).roundToInt() / 2 * 2)
-        val vh = max(2, (vRect.h * k).roundToInt() / 2 * 2)
+        // (each video of the project has its own; the base one first)
+        fun rectOf(sw: Int, sh: Int): FRect = EditCanvas.videoRect(sw.toFloat(), sh.toFloat(), w.toFloat(), h.toFloat(), p.fill)
+        fun decodeSize(r: FRect): Pair<Int, Int> {
+            val k = min(1f, max(w, h).toFloat() / max(r.w, r.h))
+            return max(2, (r.w * k).roundToInt() / 2 * 2) to max(2, (r.h * k).roundToInt() / 2 * 2)
+        }
+        var vRect = rectOf(pr.w, pr.h)
+        var vw = decodeSize(vRect).first
+        var vh = decodeSize(vRect).second
+        var curSrc = ""
+        var curW = pr.w.toFloat()
+        var curH = pr.h.toFloat()
         out.parentFile?.mkdirs()
         val enc = MediaCodec.createEncoderByType(MIME)
         enc.configure(videoFormat(w, h, fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -457,13 +465,13 @@ object StudioEditRender {
         val painter = StudioEditPainter(w, h, dir, words, accent, styleDir)
         try {
             src = StudioFrames(base, vw, vh)
-            val frame = IntArray(vw * vh) { 0xFF000000.toInt() }
-            val tinted = IntArray(vw * vh)
+            var frame = IntArray(vw * vh) { 0xFF000000.toInt() }
+            var tinted = IntArray(vw * vh)
             val mixed = IntArray(w * h)
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             // the video frame as a picture, drawn onto the canvas (turned, enlarged, into its half of a split screen)
-            val vidBmp = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+            var vidBmp = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
             val vidPaint = Paint(Paint.FILTER_BITMAP_FLAG)
             val dst = RectF()
             var lastSrc = Long.MIN_VALUE
@@ -489,12 +497,33 @@ object StudioEditRender {
                 val clip = clips[pos.index]
                 val srcUs = if (plain) pts else if (clip.isHold) clip.fromMs * 1000
                 else clip.fromMs * 1000 + ((pts - starts[pos.index] * 1000) * clip.speed.toDouble()).toLong()
-                var dec: StudioFrames = src ?: StudioFrames(base, vw, vh)
+                val file = if (clip.src.isEmpty()) base else File(dir, clip.src)
+                if (clip.src != curSrc) {
+                    // a piece of another video of the project: its own decoder, size and place on the canvas
+                    curSrc = clip.src
+                    val sp0 = if (clip.src.isEmpty()) pr else probe(file)
+                    curW = sp0.w.toFloat()
+                    curH = sp0.h.toFloat()
+                    vRect = rectOf(sp0.w, sp0.h)
+                    val (nw, nh) = decodeSize(vRect)
+                    if (nw != vw || nh != vh) {
+                        vw = nw
+                        vh = nh
+                        frame = IntArray(vw * vh) { 0xFF000000.toInt() }
+                        tinted = IntArray(vw * vh)
+                        vidBmp.recycle()
+                        vidBmp = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+                    }
+                    src?.let { runCatching { it.close() } }
+                    src = null
+                    lastSrc = Long.MIN_VALUE
+                }
+                var dec: StudioFrames = src ?: StudioFrames(file, vw, vh)
                 src = dec
                 if (srcUs < lastSrc - 1000) {
                     // back in time (another order, a copy): the decoder starts over
                     dec.close()
-                    dec = StudioFrames(base, vw, vh)
+                    dec = StudioFrames(file, vw, vh)
                     src = dec
                 }
                 lastSrc = srcUs
@@ -538,7 +567,7 @@ object StudioEditRender {
                     }
                     side?.advance(EditSplit.srcAt(sp, tMs) * 1000, sidePix, true)
                     // the main video covers its half, centred (the rest of it is cut off)
-                    val mc = EditSplit.cover(pr.w.toFloat(), pr.h.toFloat(), mh, w.toFloat(), h.toFloat())
+                    val mc = EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat())
                     canvas.save()
                     canvas.clipRect(mh.l * w, mh.t * h, mh.r * w, mh.b * h)
                     if (clip.mirror || clip.zoom > 1.001f) canvas.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, (mc.l + mc.r) / 2, (mc.t + mc.b) / 2)
@@ -949,7 +978,12 @@ private object StudioEditGl {
         val pr = StudioEditRender.probe(base)
         val (w, h) = EditCanvas.outSize(pr.w, pr.h, p.ratio, maxSide)
         // the video on the canvas: the whole frame, or a rectangle on the background colour (format of the project)
-        val vRect = EditCanvas.videoRect(pr.w.toFloat(), pr.h.toFloat(), w.toFloat(), h.toFloat(), p.fill)
+        var vRect = EditCanvas.videoRect(pr.w.toFloat(), pr.h.toFloat(), w.toFloat(), h.toFloat(), p.fill)
+        // the video being decoded now ("" = the base one), its size and length
+        var curSrc = ""
+        var curW = pr.w.toFloat()
+        var curH = pr.h.toFloat()
+        var curDur = pr.durMs
         val bgR = ((p.bg shr 16) and 0xFF) / 255f
         val bgG = ((p.bg shr 8) and 0xFF) / 255f
         val bgB = (p.bg and 0xFF) / 255f
@@ -961,7 +995,7 @@ private object StudioEditGl {
         val expected = max(1, (totalMs * pr.fps / 1000).toInt())
         out.parentFile?.mkdirs()
 
-        val ex = MediaExtractor()
+        var ex = MediaExtractor()
         var dec: MediaCodec? = null
         var enc: MediaCodec? = null
         var muxer: MediaMuxer? = null
@@ -1049,7 +1083,7 @@ private object StudioEditGl {
             val frames = Frames()
             texture.setOnFrameAvailableListener(frames, android.os.Handler(thread.looper))
             decSurface = android.view.Surface(texture)
-            val d = MediaCodec.createDecoderByType(inFmt.getString(MediaFormat.KEY_MIME)!!)
+            var d = MediaCodec.createDecoderByType(inFmt.getString(MediaFormat.KEY_MIME)!!)
             dec = d
             d.configure(inFmt, decSurface, null, 0)
             d.start()
@@ -1137,7 +1171,7 @@ private object StudioEditGl {
                         (r.w * w).roundToInt(), (r.h * h).roundToInt())
                     android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_SCISSOR_TEST)
                     scissor(mh)
-                    viewport(EditSplit.cover(pr.w.toFloat(), pr.h.toFloat(), mh, w.toFloat(), h.toFloat()))
+                    viewport(EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat()))
                     draw(progOes, OES, oes, texM, vidPos, colM, colO)
                     if (tr != null && tr.shown) {
                         scissor(sh)
@@ -1177,11 +1211,38 @@ private object StudioEditGl {
             // the pieces of the main track one after another; the whole video untouched is one piece from 0 to the end
             for ((k, c) in clips.withIndex()) {
                 if (cancelled()) throw CancellationException()
+                val switched = c.src != curSrc
+                if (switched) {
+                    // a piece of another video of the project: its own extractor and decoder on the same surface
+                    runCatching { d.stop() }
+                    runCatching { d.release() }
+                    runCatching { ex.release() }
+                    val f = if (c.src.isEmpty()) base else File(dir, c.src)
+                    val sp = StudioEditRender.probe(f)
+                    val nex = MediaExtractor()
+                    ex = nex
+                    nex.setDataSource(f.absolutePath)
+                    val vi = (0 until nex.trackCount).firstOrNull { nex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                        ?: error(t("В файле нет видео", "The file has no video"))
+                    nex.selectTrack(vi)
+                    val fmt = nex.getTrackFormat(vi)
+                    if (sp.rotation != 0 && !fmt.containsKey(MediaFormat.KEY_ROTATION)) fmt.setInteger(MediaFormat.KEY_ROTATION, sp.rotation)
+                    val nd = MediaCodec.createDecoderByType(fmt.getString(MediaFormat.KEY_MIME)!!)
+                    dec = nd
+                    d = nd
+                    nd.configure(fmt, decSurface, null, 0)
+                    nd.start()
+                    curSrc = c.src
+                    curDur = sp.durMs
+                    curW = sp.w.toFloat()
+                    curH = sp.h.toFloat()
+                    vRect = EditCanvas.videoRect(curW, curH, w.toFloat(), h.toFloat(), p.fill)
+                }
                 val segStart = starts[k] * 1000
                 val segEnd = segStart + c.outMs * 1000
                 val fromUs = if (plain) 0L else c.fromMs * 1000
                 val toUs = when {
-                    plain || (!c.isHold && c.toMs >= pr.durMs - 1) -> Long.MAX_VALUE
+                    plain || (!c.isHold && c.toMs >= curDur - 1) -> Long.MAX_VALUE
                     c.isHold -> fromUs + stepUs
                     else -> c.toMs * 1000
                 }
@@ -1190,7 +1251,7 @@ private object StudioEditGl {
                 val cm = EditColor.matrix(c)?.let { EditColor.gl(it) }
                 colM = cm?.first ?: ID3
                 colO = cm?.second ?: ZERO3
-                if (k > 0) d.flush()
+                if (k > 0 && !switched) d.flush()
                 ex.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 var inDone = false
                 var got = false

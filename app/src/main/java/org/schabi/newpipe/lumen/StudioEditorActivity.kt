@@ -62,16 +62,8 @@ class StudioEditorActivity : LumenBase() {
         private const val REQ_VIDEO = 7712
         private const val REQ_SPLIT = 7713
         private const val REQ_AUDIO = 7714
+        private const val REQ_CLIP = 7715
 
-        // the editor is dark whatever the theme of the app, like video editors: the picture is judged on black
-        private const val ED_BG = 0xFF0E0F12.toInt()
-        private const val ED_PANEL = 0xFF15171B.toInt()
-        private const val ED_BAR = 0xFF121418.toInt()
-        private const val ED_CARD = 0xFF23262C.toInt()
-        private const val ED_CARD_HI = 0xFF33373F.toInt()
-        private const val ED_TEXT = 0xFFF2F3F5.toInt()
-        private const val ED_MUTED = 0xFFA4A8B0.toInt()
-        private const val ED_ON_ACCENT = 0xFF14161B.toInt()
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
         private const val TASK_AI = TASK + "ai"
@@ -141,6 +133,9 @@ class StudioEditorActivity : LumenBase() {
     private var player3: ExoPlayer? = null
     private var musicFile = ""
     private var musicSeekAt = 0L
+    /** Videos in the player's playlist, in order ("" = the base video). */
+    private var srcList: List<String> = listOf("")
+    private val thumbMap = HashMap<String, List<Pair<Long, Bitmap>>>()
     private var fadeView: View? = null
     private var previewBox: FrameLayout? = null
     private var topBarView: View? = null
@@ -154,8 +149,42 @@ class StudioEditorActivity : LumenBase() {
     private var cat: String? = null
     private var savedBars: Int? = null
     private var thumbList: List<Pair<Long, Bitmap>> = emptyList()
-    /** Accent of the dark editor: light enough to read on its background. */
-    private val edAccent: Int get() = if (Palette.contrast(Palette.ACCENT or 0xFF000000.toInt(), ED_BG) >= 4.5) Palette.ACCENT else Palette.FAB
+    // colours of the editor: the app's light or dark theme (Settings), set by [editorColors]
+    private var ED_BG = 0
+    private var ED_PANEL = 0
+    private var ED_BAR = 0
+    private var ED_CARD = 0
+    private var ED_CARD_HI = 0
+    private var ED_TEXT = 0
+    private var ED_MUTED = 0
+    private var ED_ON_ACCENT = 0
+    private var edDark = true
+    /** Accent of the editor: readable on its background. */
+    private val edAccent: Int get() = if (Palette.contrast(Palette.ACCENT or 0xFF000000.toInt(), ED_BG or 0xFF000000.toInt()) >= 3.0) Palette.ACCENT
+        else if (edDark) Palette.FAB else Palette.ON_FAB
+
+    /** The editor follows the theme chosen in the settings: video-editor dark, or the light Material surface. */
+    private fun editorColors() {
+        edDark = isNight()
+        if (edDark) {
+            ED_BG = 0xFF0E0F12.toInt()
+            ED_PANEL = 0xFF15171B.toInt()
+            ED_BAR = 0xFF121418.toInt()
+            ED_CARD = 0xFF23262C.toInt()
+            ED_CARD_HI = 0xFF33373F.toInt()
+            ED_TEXT = 0xFFF2F3F5.toInt()
+            ED_MUTED = 0xFFA4A8B0.toInt()
+        } else {
+            ED_BG = Palette.SURFACE or 0xFF000000.toInt()
+            ED_PANEL = 0xFFE9EAEE.toInt()
+            ED_BAR = Palette.SURFACE or 0xFF000000.toInt()
+            ED_CARD = Palette.CARD or 0xFF000000.toInt()
+            ED_CARD_HI = Palette.ACCENT_SOFT or 0xFF000000.toInt()
+            ED_TEXT = Palette.ON_SURFACE
+            ED_MUTED = Palette.MUTED
+        }
+        ED_ON_ACCENT = if (Palette.contrast(0xFFFFFFFF.toInt(), edAccent) >= Palette.contrast(0xFF14161B.toInt(), edAccent)) 0xFFFFFFFF.toInt() else 0xFF14161B.toInt()
+    }
     private var timeText: TextView? = null
     private var playBtn: TextView? = null
     private var undoBtn: TextView? = null
@@ -411,6 +440,8 @@ class StudioEditorActivity : LumenBase() {
         cat = null
         fullscreen = false
         thumbList = emptyList()
+        thumbMap.clear()
+        srcList = listOf("")
         buildEditor()
         loadThumbs(p)
     }
@@ -419,7 +450,8 @@ class StudioEditorActivity : LumenBase() {
 
     private fun buildEditor() {
         val p = project ?: return
-        darkBars(true)
+        editorColors()
+        darkBars(edDark)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(ED_BG)
@@ -469,6 +501,7 @@ class StudioEditorActivity : LumenBase() {
             aspect = p.w.toFloat() / p.h
             blocks = p.blocks
             words = this@StudioEditorActivity.words
+            light(!edDark)
         }
         val tlBox = FrameLayout(this).apply {
             setBackgroundColor(ED_PANEL)
@@ -775,7 +808,7 @@ class StudioEditorActivity : LumenBase() {
         }
         v.addView(text(this, a.icon, 19f, bold = true, color = when {
             a.kind == ActKind.PRIMARY -> ED_ON_ACCENT
-            a.kind == ActKind.DANGER -> 0xFFFF8A80.toInt()
+            a.kind == ActKind.DANGER -> if (edDark) 0xFFFF8A80.toInt() else Palette.BAD
             a.on -> edAccent
             else -> ED_TEXT
         }).apply {
@@ -959,6 +992,7 @@ class StudioEditorActivity : LumenBase() {
             else -> listOf(
                 Act("＋", t("Вставить", "Insert"), ActKind.PRIMARY) { insertSheet() },
                 act("✂", t("Монтаж", "Edit")) { selectClip(clipHere()) },
+                act("🎞", t("Добавить видео", "Add video")) { addClipSheet() },
                 act("🎵", t("Аудио", "Audio")) { openCat("audio") },
                 act("T", t("Текст", "Text")) { openCat("text") },
                 act("😀", t("Стикеры", "Stickers")) { emojiSheet(null) },
@@ -994,12 +1028,40 @@ class StudioEditorActivity : LumenBase() {
                     toast(t("Видео не играет: ", "Cannot play: ") + (error.message ?: error.errorCodeName))
                 }
             })
-            ex.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(StudioEditStore.dir(this, p.id), StudioEditStore.BASE))))
-            ex.prepare()
+            // every video of the project is one item of the playlist; a piece plays inside its own item
+            ex.pauseAtEndOfMediaItems = true
+            loadSources(ex)
             curClip = -1
             place(true)
         }
         ex.setVideoTextureView(tv)
+    }
+
+    /** The videos of the track in the player (the base one first). */
+    private fun loadSources(ex: ExoPlayer) {
+        srcList = EditTrack.sources(clips)
+        ex.setMediaItems(srcList.map { MediaItem.fromUri(Uri.fromFile(srcFile(it))) })
+        ex.prepare()
+    }
+
+    /** A video of the project: "" — the base one. */
+    private fun srcFile(src: String): File = if (src.isEmpty()) File(dir, StudioEditStore.BASE) else File(dir, src)
+
+    private fun srcIndex(src: String): Int = srcList.indexOf(src).coerceAtLeast(0)
+
+    /** Display size of a video of the project. */
+    private fun srcSize(src: String): Pair<Int, Int> = project?.takeIf { src.isEmpty() }?.let { it.w to it.h } ?: sideSize(src)
+
+    /** After a change of the track: a new video in it goes into the player. */
+    private fun refreshSources() {
+        val ex = player ?: return
+        if (EditTrack.sources(clips) == srcList) return
+        val was = playing
+        pause()
+        loadSources(ex)
+        curClip = -1
+        place(true)
+        if (was) play()
     }
 
     /** Speed, sound and look of piece [i] on the player and the picture. */
@@ -1015,6 +1077,8 @@ class StudioEditorActivity : LumenBase() {
             tv.scaleY = c.zoom
         }
         previewColor(c)
+        // a piece of another video may have another shape
+        layoutSplit()
     }
 
     /** Puts the player on the moment of the original under [curMs]; while the finger moves ([final] false) at most every 40 ms. */
@@ -1030,7 +1094,7 @@ class StudioEditorActivity : LumenBase() {
             lastSeekAt = now
             // while the finger moves: the nearest key frame (fast); at the end: the exact frame
             ex.setSeekParameters(if (final) SeekParameters.EXACT else SeekParameters.CLOSEST_SYNC)
-            ex.seekTo(pos.srcMs)
+            ex.seekTo(srcIndex(c.src), pos.srcMs)
         }
         if (c.isHold) {
             holdT0 = now - pos.offMs
@@ -1050,7 +1114,8 @@ class StudioEditorActivity : LumenBase() {
         } else {
             val pos = ex.currentPosition
             curMs = start + ((pos - c.fromMs).coerceAtLeast(0) / c.speed.toDouble()).toLong().coerceAtMost(c.outMs)
-            pos >= c.toMs - 20 || ex.playbackState == Player.STATE_ENDED
+            // the end of the piece, of its video, or the player stopped at the end of its playlist item
+            pos >= c.toMs - 20 || ex.playbackState == Player.STATE_ENDED || ex.currentMediaItemIndex != srcIndex(c.src) || !ex.playWhenReady
         }
         if (done) nextClip(ex)
         sync()
@@ -1071,10 +1136,10 @@ class StudioEditorActivity : LumenBase() {
         curMs = EditTrack.starts(list)[i]
         applyClip(i)
         // the next piece right after this one in the original plays on without a seek
-        val seamless = !prev.isHold && !n.isHold && prev.toMs == n.fromMs
+        val seamless = !prev.isHold && !n.isHold && prev.toMs == n.fromMs && prev.src == n.src && ex.playWhenReady
         if (!seamless) {
             ex.setSeekParameters(SeekParameters.EXACT)
-            ex.seekTo(n.fromMs)
+            ex.seekTo(srcIndex(n.src), n.fromMs)
         }
         if (n.isHold) {
             ex.pause()
@@ -1118,12 +1183,14 @@ class StudioEditorActivity : LumenBase() {
         if (fw <= 0f || fh <= 0f) return
         val p = project ?: return
         val sp = EditSplit.active(blocks, curMs)
-        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}"
+        val src = clips.getOrNull(curClip)?.src ?: ""
+        val (vw0, vh0) = srcSize(src)
+        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}|$src"
         if (key != splitKey) {
             splitKey = key
             if (sp == null) {
                 // the video on the canvas: a rectangle on the background, or covering the frame (format of the project)
-                val r = EditCanvas.videoRect(p.w.toFloat(), p.h.toFloat(), fw, fh, p.fill)
+                val r = EditCanvas.videoRect(vw0.toFloat(), vh0.toFloat(), fw, fh, p.fill)
                 fun at(v: View, rect: FRect) {
                     v.layoutParams = FrameLayout.LayoutParams(max(1, rect.w.roundToInt()), max(1, rect.h.roundToInt())).apply {
                         gravity = Gravity.TOP or Gravity.START
@@ -1155,7 +1222,7 @@ class StudioEditorActivity : LumenBase() {
                         topMargin = (c.t - half.t * fh).toInt()
                     }
                 }
-                fit(mb, tv, mh, p.w.toFloat(), p.h.toFloat())
+                fit(mb, tv, mh, vw0.toFloat(), vh0.toFloat())
                 val (vw, vh) = sideSize(sp.file)
                 fit(sb, tv2, sh, vw.toFloat(), vh.toFloat())
                 sb.visibility = View.VISIBLE
@@ -1270,18 +1337,35 @@ class StudioEditorActivity : LumenBase() {
         place(final)
     }
 
+    /** Frames of every video of the track for the timeline (the base one first), each strip filled in as it comes. */
     private fun loadThumbs(p: EProject) {
-        val f = File(StudioEditStore.dir(this, p.id), StudioEditStore.BASE)
+        for (src in EditTrack.sources(EditTrack.of(p))) if (src !in thumbMap) loadThumbs(p, src)
+    }
+
+    private fun loadThumbs(p: EProject, src: String) {
+        val f = if (src.isEmpty()) File(StudioEditStore.dir(this, p.id), StudioEditStore.BASE) else File(StudioEditStore.dir(this, p.id), src)
+        thumbMap[src] = emptyList()
         val th = dp(46)
-        val tw = max(8, (th * p.w / p.h.toFloat()).toInt())
+        val (vw, vh) = if (src.isEmpty()) p.w to p.h else sideSize(src)
+        val tw = max(8, (th * vw / max(1, vh).toFloat()).toInt())
+        fun show(list: List<Pair<Long, Bitmap>>) {
+            if (project?.id != p.id) return
+            thumbMap[src] = list
+            if (src.isEmpty()) {
+                thumbList = list
+                timeline?.thumbs = list
+            }
+            timeline?.srcThumbs = HashMap(thumbMap)
+        }
         Lumen.async({
             val r = MediaMetadataRetriever()
             try {
                 r.setDataSource(f.absolutePath)
-                val n = (p.durMs / 1000).toInt().coerceIn(8, 48)
+                val dur = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0 } ?: p.durMs
+                val n = (dur / 1000).toInt().coerceIn(if (src.isEmpty()) 8 else 4, if (src.isEmpty()) 48 else 24)
                 val got = ArrayList<Pair<Long, Bitmap>>()
                 (0 until n).forEach { i ->
-                    val ms = p.durMs * i / n + p.durMs / (2 * n)
+                    val ms = dur * i / n + dur / (2 * n)
                     val bmp = if (Build.VERSION.SDK_INT >= 27) r.getScaledFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, tw * 2, th * 2)
                     else r.getFrameAtTime(ms * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { full ->
                         Bitmap.createScaledBitmap(full, tw * 2, th * 2, true).also { if (it !== full) full.recycle() }
@@ -1290,24 +1374,14 @@ class StudioEditorActivity : LumenBase() {
                     // the strip fills in as frames come, not after the last one
                     if (got.size % 8 == 0 && got.isNotEmpty()) {
                         val part = got.toList()
-                        Lumen.ui {
-                            if (project?.id == p.id) {
-                                thumbList = part
-                                timeline?.thumbs = part
-                            }
-                        }
+                        Lumen.ui { show(part) }
                     }
                 }
                 got.toList()
             } finally {
                 runCatching { r.release() }
             }
-        }) { list ->
-            if (project?.id == p.id) {
-                thumbList = list
-                timeline?.thumbs = list
-            }
-        }
+        }) { list -> show(list) }
     }
 
     // ---------- changes ----------
@@ -1421,6 +1495,7 @@ class StudioEditorActivity : LumenBase() {
         stage?.refresh()
         splitKey = ""
         layoutSplit()
+        refreshSources()
     }
 
     /** A finished change of the main track: blocks move with their pieces, the same picture stays under the playhead. */
@@ -1679,6 +1754,7 @@ class StudioEditorActivity : LumenBase() {
             item(t("🌐 Фото по запросу", "🌐 Photo search"), t("бесплатные фото Openverse; запрос может подобрать ИИ", "free Openverse photos; the AI can suggest the query")) { photoSheet(null) }
             item(t("T Надпись", "T Caption"), t("свой текст или варианты от ИИ", "your text or AI suggestions")) { captionSheet(null) }
             item(t("😀 Эмодзи", "😀 Emoji"), t("крупный значок поверх кадра", "a big icon over the frame")) { emojiSheet(null) }
+            item(t("🎞 Ещё видео в ролик", "🎞 Another video into the track"), t("клип с телефона: в конец или у курсора, как в CapCut", "a clip from the phone: at the end or at the playhead, like CapCut")) { addClipSheet() }
             item(t("🎵 Музыка", "🎵 Music"), t("трек с телефона с этого места; громкость и затухание", "a track from the phone from here; volume and fades")) { pickAudio(null) }
             item(t("⊟ Второе видео рядом", "⊟ A second video beside"), t("разделённый экран: реакция, сравнение", "split screen: a reaction, a comparison")) { pickSplit(null) }
         }
@@ -2108,6 +2184,7 @@ class StudioEditorActivity : LumenBase() {
             REQ_VIDEO -> importVideo(uri)
             REQ_SPLIT -> importSplit(uri)
             REQ_AUDIO -> importAudio(uri)
+            REQ_CLIP -> importClip(uri)
         }
     }
 
@@ -2467,7 +2544,7 @@ class StudioEditorActivity : LumenBase() {
 
     /** A small frame of the piece for the filter tiles. */
     private fun thumbOf(c: VClip): Bitmap? {
-        val list = thumbList
+        val list = thumbMap[c.src].orEmpty()
         if (list.isEmpty()) return null
         val at = if (c.isHold) c.fromMs else (c.fromMs + c.toMs) / 2
         return list.minByOrNull { kotlin.math.abs(it.first - at) }?.second
@@ -2666,6 +2743,62 @@ class StudioEditorActivity : LumenBase() {
                 commitClips(clips.map { if (it.isHold) it else it.copy(volume = v / 100f) })
                 dismiss()
             })
+        }
+    }
+
+    private var clipAtEnd = true
+
+    /** Another video into the main track: at the end or at the playhead (the piece there is cut in two). */
+    private fun addClipSheet() {
+        pause()
+        bottomSheet(t("🎞 Добавить видео", "🎞 Add a video")) { dismiss ->
+            muted(t("Клип с телефона станет куском основной дорожки: его можно резать, ускорять, красить и переставлять как остальные.",
+                "A clip from the phone becomes a piece of the main track: cut, speed up, colour and reorder it like the others."))
+            button(t("В конец ролика", "At the end"), primary = true) {
+                dismiss()
+                pickClip(true)
+            }
+            button(t("У курсора · ", "At the playhead · ") + StudioEdit.clock(curMs), style = BtnStyle.TONAL) {
+                dismiss()
+                pickClip(false)
+            }
+        }
+    }
+
+    private fun pickClip(atEnd: Boolean) {
+        clipAtEnd = atEnd
+        pickAt = curMs
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"), REQ_CLIP)
+    }
+
+    /** A clip from the phone: copied into the project, its whole length put into the track. */
+    private fun importClip(uri: Uri) {
+        val p = project ?: return
+        val atEnd = clipAtEnd
+        val at = pickAt
+        val d = dir
+        val cr = applicationContext.contentResolver
+        toast(t("Копирую видео…", "Copying the video…"))
+        Lumen.async({
+            val name = "img/c${System.currentTimeMillis()}.mp4"
+            val f = File(d, name).apply { parentFile?.mkdirs() }
+            (cr.openInputStream(uri) ?: error(t("Файл не открывается", "The file cannot be opened"))).use { i -> f.outputStream().use { i.copyTo(it) } }
+            val pr = runCatching { StudioEditRender.probe(f) }.getOrElse {
+                f.delete()
+                throw it
+            }
+            name to pr
+        }, { e -> if (!isDestroyed) err(e) }) { (file, pr) ->
+            if (project?.id != p.id) return@async
+            sideSizes[file] = pr.w to pr.h
+            val (list, j) = EditTrack.insert(clips, at, VClip("n", 0, max(EditTrack.MIN_MS + 1, pr.durMs), src = file), atEnd)
+            commitClips(list, j)
+            project?.let { loadThumbs(it, file) }
+            val st = EditTrack.starts(clips).getOrNull(j) ?: 0L
+            seekTo(st)
+            timeline?.setPlayhead(st)
+            toast(t("Видео добавлено: кусок ${j + 1}", "Video added: piece ${j + 1}"))
         }
     }
 

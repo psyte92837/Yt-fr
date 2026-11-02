@@ -37,15 +37,17 @@ data class VClip(
     val warm: Float = 0f,
     /** Transition into this piece from the one before it ([EditColor.TRANSITIONS]); on the first piece — from the start. */
     val trans: String = "",
-    val transMs: Long = EditColor.DEFAULT_TRANS_MS
+    val transMs: Long = EditColor.DEFAULT_TRANS_MS,
+    /** The video this piece is cut from: "" = the base video of the project, else a file inside the project folder. */
+    val src: String = ""
 ) {
     val isHold: Boolean get() = holdMs > 0
     val outMs: Long get() = if (holdMs > 0) holdMs else max(1L, ((toMs - fromMs) / speed.toDouble()).roundToLong())
     val hasColor: Boolean get() = (filter.isNotEmpty() && filterK > 0f) || bright != 0f || contrast != 0f || sat != 0f || warm != 0f
     /** Nothing changed in this piece (its place and length aside). */
-    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty()
+    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty() && src.isEmpty()
     /** Its sound is as recorded. */
-    val soundPlain: Boolean get() = speed == 1f && volume == 1f && holdMs == 0L
+    val soundPlain: Boolean get() = speed == 1f && volume == 1f && holdMs == 0L && src.isEmpty()
 }
 
 /**
@@ -221,8 +223,36 @@ object EditTrack {
         sat = c.sat.coerceIn(-1f, 1f),
         warm = c.warm.coerceIn(-1f, 1f),
         trans = c.trans.takeIf { it in EditColor.TRANSITIONS } ?: "",
-        transMs = c.transMs.coerceIn(100L, 3000L)
+        transMs = c.transMs.coerceIn(100L, 3000L),
+        src = safeSrc(c.src)
     )
+
+    /** A file name inside the project folder, or "" (no absolute paths, no way out of the folder). */
+    fun safeSrc(s: String): String = s.trim().takeIf { it.isNotEmpty() && !it.startsWith("/") && ".." !in it && '\\' !in it } ?: ""
+
+    /** The distinct videos of the track, the base one ("") first. */
+    fun sources(clips: List<VClip>): List<String> = (listOf("") + clips.map { it.src }).distinct()
+
+    /** The track ends where it should for [add]: at [outMs] (cutting the piece there in two) or at the end; returns the track and the new piece. */
+    fun insert(clips: List<VClip>, outMs: Long, add: VClip, atEnd: Boolean): Pair<List<VClip>, Int> {
+        if (clips.isEmpty()) return listOf(clean(add)) to 0
+        val list = clips.toMutableList()
+        if (atEnd) {
+            list.add(clean(add.copy(id = newId(clips))))
+            return list to list.lastIndex
+        }
+        val pos = locate(clips, outMs)
+        val c = clips[pos.index]
+        val n = clean(add.copy(id = newId(clips, 1)))
+        return when {
+            pos.offMs < MIN_MS -> list.apply { add(pos.index, n) } to pos.index
+            c.outMs - pos.offMs < MIN_MS || outMs >= total(clips) -> list.apply { add(pos.index + 1, n) } to pos.index + 1
+            else -> {
+                val (cut, right) = split(clips, outMs) ?: return list.apply { add(pos.index + 1, n) } to pos.index + 1
+                cut.toMutableList().apply { add(right, n) } to right
+            }
+        }
+    }
 
     /**
      * Output time [outMs] of the old track [old] on the new track [new]: the same moment of the video stays under
@@ -235,7 +265,7 @@ object EditTrack {
         val c = old[pos.index]
         val off = if (end) pos.offMs + 1 else pos.offMs
         val src = if (end && !c.isHold) min(c.toMs, c.fromMs + (off * c.speed.toDouble()).roundToLong()) else pos.srcMs
-        fun inside(n: VClip) = !n.isHold && if (end) src > n.fromMs && src <= n.toMs else src >= n.fromMs && src < n.toMs
+        fun inside(n: VClip) = !n.isHold && n.src == c.src && if (end) src > n.fromMs && src <= n.toMs else src >= n.fromMs && src < n.toMs
         val ns = starts(new)
         val same = new.indexOfFirst { it.id == c.id }
         if (same >= 0) {
@@ -278,7 +308,8 @@ object EditTrack {
         val out = ArrayList<SWord>()
         val st = starts(clips)
         clips.forEachIndexed { i, c ->
-            if (c.isHold) return@forEachIndexed
+            // the voice belongs to the base video; pieces of other videos have none
+            if (c.isHold || c.src.isNotEmpty()) return@forEachIndexed
             val end = st[i] + c.outMs
             for (w in src) {
                 if (w.startMs < c.fromMs || w.startMs >= c.toMs) continue
@@ -318,6 +349,7 @@ object EditTrack {
                     if (c.sat != 0f) put("sat", c.sat.toDouble())
                     if (c.warm != 0f) put("warm", c.warm.toDouble())
                     if (c.trans.isNotEmpty()) put("trans", c.trans).put("transMs", c.transMs)
+                    if (c.src.isNotEmpty()) put("src", c.src)
                 })
         }
     }
@@ -331,7 +363,7 @@ object EditTrack {
         fun f(k: String, d: Double = 0.0) = o.optDouble(k, d).toFloat().takeIf { !it.isNaN() } ?: d.toFloat()
         clean(VClip(id, from, to, f("speed", 1.0), f("volume", 1.0), o.optBoolean("mirror"), f("zoom", 1.0), o.optLong("hold"),
             o.optString("filter"), f("filterK", 1.0), f("bright"), f("contrast"), f("sat"), f("warm"),
-            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS)))
+            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS), o.optString("src")))
     }
 }
 

@@ -134,7 +134,11 @@ object KMap {
             withComments.map { v -> commentsNode(inp, "map/comments/v:" + key(v.id), v, v.title) }
         }
         if (inp.recs.isNotEmpty()) out += KNode("map/recs", t("Рекомендации YouTube", "YouTube recommendations"),
-            t("узлов: ", "nodes: ") + inp.recs.size) {
+            t("узлов: ", "nodes: ") + inp.recs.size,
+            info = t("Метод: «Следующее» YouTube без входа в аккаунт (неперсонализированный слой видео→видео), первая страница ~20 карточек; " +
+                "не видно персональных рекомендаций, времени просмотра и CTR.",
+                "Method: YouTube “Up next” without signing in (non-personalised video→video layer), first page ~20 cards; " +
+                    "personal recommendations, watch time and CTR are not visible.")) {
             inp.recs.map { r ->
                 KNode("map/recs/r:" + key(r.id), r.title.ifBlank { r.id }, r.channel + " · ×" + r.hits + " · " + Fmt.num(r.views),
                     info = r.title + " — " + r.channel + " (hits " + r.hits + ", depth " + r.depth +

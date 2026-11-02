@@ -31,11 +31,12 @@ data class AuditConfig(
     var strategy: String = "random",
     var topK: Int = 5, // how many top recommendations the simulated viewer looks at
     var excludeShorts: Boolean = false,
-    var budget: Int = 300
+    var budget: Int = 300,
+    var fresh: Boolean = false // read every page anew (no cache): shows YouTube's own randomness between walks
 ) {
     fun toJson(): JSONObject = JSONObject().put("seeds", seeds).put("seedCount", seedCount).put("customSeeds", customSeeds)
         .put("walks", walks).put("steps", steps).put("strategy", strategy).put("topK", topK)
-        .put("excludeShorts", excludeShorts).put("budget", budget)
+        .put("excludeShorts", excludeShorts).put("budget", budget).put("fresh", fresh)
 
     /** Upper bound of YouTube requests (one watch page per step; repeated pages are cached). */
     fun estimate(seedCount: Int): Int = minOf(budget, seedCount * effectiveWalks() * steps)
@@ -49,7 +50,8 @@ data class AuditConfig(
         fun from(o: JSONObject) = AuditConfig(
             seeds = o.optString("seeds", "marked"), seedCount = o.optInt("seedCount", 3), customSeeds = o.optString("customSeeds"),
             walks = o.optInt("walks", 3), steps = o.optInt("steps", 10), strategy = o.optString("strategy", "random"),
-            topK = o.optInt("topK", 5), excludeShorts = o.optBoolean("excludeShorts"), budget = o.optInt("budget", 300)
+            topK = o.optInt("topK", 5), excludeShorts = o.optBoolean("excludeShorts"), budget = o.optInt("budget", 300),
+            fresh = o.optBoolean("fresh")
         )
 
         fun load(pid: String): AuditConfig = try {
@@ -398,19 +400,45 @@ object AuditMath {
     }
 
     /** Markdown report (export and AI input). */
-    fun markdown(run: AuditRun, r: AuditReport, title: String): String {
+    /** 90% bootstrap intervals over walks: on-topic share at the last step, popularity lift, HHI, half-life. */
+    fun intervals(run: AuditRun, iterations: Int = 200): Map<String, Pair<Double, Double>> {
+        val walks = run.walks.filter { it.steps.isNotEmpty() }
+        if (walks.size < 3) return emptyMap()
+        val stats = HashMap<String, ArrayList<Double>>()
+        val rnd = Random(run.at)
+        repeat(iterations) {
+            val sample = run.copy(walks = MutableList(walks.size) { walks[rnd.nextInt(walks.size)] })
+            val r = report(sample)
+            fun add(k: String, v: Double) { if (!v.isNaN() && !v.isInfinite()) stats.getOrPut(k) { ArrayList() }.add(v) }
+            add("last_on", r.perStep.lastOrNull()?.onTopic ?: Double.NaN)
+            add("lift", r.popularityLift)
+            add("hhi", r.hhi)
+            add("halflife", (r.halfLife ?: (r.steps + 1)).toDouble())
+        }
+        return stats.mapValues { (_, v) -> v.sort(); AlgoCore.quantile(v, 0.05) to AlgoCore.quantile(v, 0.95) }
+    }
+
+    fun markdown(run: AuditRun, r: AuditReport, title: String, ci: Map<String, Pair<Double, Double>> = emptyMap()): String {
+        fun range(k: String, f: (Double) -> String) = ci[k]?.let { " (" + f(it.first) + "–" + f(it.second) + ")" } ?: ""
         val sb = StringBuilder()
         sb.append("# ").append(t("Аудит алгоритма YouTube", "YouTube algorithm audit")).append(": ").append(title).append("\n\n")
         sb.append(Fmt.dateTime(run.at)).append(" · ").append(AuditConfig.strategyName(run.cfg.strategy))
             .append(" · top-").append(run.cfg.topK).append(" · ").append(t("прогулок", "walks")).append(' ').append(r.walks)
             .append(" · ").append(t("запросов", "requests")).append(' ').append(run.requests)
+        if (run.cfg.fresh) sb.append(" · ").append(t("без кеша", "no cache"))
         if (run.cancelled) sb.append(" · ").append(t("остановлен", "stopped"))
-        sb.append("\n\n## ").append(t("Выводы", "Findings")).append("\n")
+        sb.append("\n\n").append(t("Метод: чёрный ящик (sock-puppet) без аккаунта, неперсонализированная выдача «Следующее». ",
+            "Method: black-box (sock-puppet) without an account, non-personalised “Up next”. "))
+            .append(t("Схожесть — доля слов названия из словаря темы. В скобках — 90% интервал (бутстрэп по прогулкам).",
+                "Similarity is the share of title words from the topic vocabulary. In brackets: 90% interval (bootstrap over walks).")).append('\n')
+        sb.append("\n## ").append(t("Выводы", "Findings")).append("\n")
         r.findings.forEach { sb.append("- ").append(it).append('\n') }
         sb.append("\n## ").append(t("Метрики", "Metrics")).append("\n")
-        sb.append("- ").append(t("Полураспад темы: ", "Topic half-life: ")).append(r.halfLife?.let { t("шаг $it", "step $it") } ?: t("не достигнут", "not reached")).append('\n')
-        sb.append("- ").append(t("Рост популярности: ×", "Popularity lift: ×")).append(fmt1(r.popularityLift)).append('\n')
-        sb.append("- ").append(t("Каналов: ", "Channels: ")).append(r.channelsDistinct).append(", HHI ").append(fmt2(r.hhi))
+        sb.append("- ").append(t("Полураспад темы: ", "Topic half-life: ")).append(r.halfLife?.let { t("шаг $it", "step $it") } ?: t("не достигнут", "not reached"))
+            .append(range("halflife") { it.toInt().toString() }).append('\n')
+        r.perStep.lastOrNull()?.let { sb.append("- ").append(t("По теме на последнем шаге: ", "On topic at the last step: ")).append(pct(it.onTopic)).append(range("last_on") { pct(it) }).append('\n') }
+        sb.append("- ").append(t("Рост популярности: ×", "Popularity lift: ×")).append(fmt1(r.popularityLift)).append(range("lift") { fmt1(it) }).append('\n')
+        sb.append("- ").append(t("Каналов: ", "Channels: ")).append(r.channelsDistinct).append(", HHI ").append(fmt2(r.hhi)).append(range("hhi") { fmt2(it) })
             .append(", ").append(t("энтропия ", "entropy ")).append(fmt2(r.entropy)).append('\n')
         sb.append("- ").append(t("Сходимость прогулок: ", "Walk convergence: ")).append(fmt2(r.convergence)).append('\n')
         sb.append("- ").append(t("Средняя позиция выбора: ", "Mean chosen position: ")).append(fmt1(r.rankMean + 1)).append('\n')
@@ -434,9 +462,6 @@ object AuditMath {
             w.steps.forEachIndexed { j, s -> sb.append("   ${j + 1}. [#${s.rank + 1}] ${s.item.title} — ${s.item.channel}\n") }
             if (w.end != "done") sb.append("   — ").append(w.end).append('\n')
         }
-        sb.append("\n").append(t("Метод: чёрный ящик (sock-puppet) без аккаунта, неперсонализированная выдача «Следующее». ",
-            "Method: black-box (sock-puppet) without an account, non-personalised “Up next”. "))
-            .append(t("Схожесть — доля слов названия из словаря темы.", "Similarity is the share of title words from the topic vocabulary.")).append('\n')
         return sb.toString()
     }
 
@@ -460,7 +485,7 @@ object AuditMath {
             var prev = w.seed.id
             w.steps.forEachIndexed { i, s ->
                 node(s.item, i + 1, false)
-                g.addEdge(prev, s.item.id, s.rank)
+                g.addEdge(prev, s.item.id, s.rank, "audit", at = run.at)
                 prev = s.item.id
             }
         }
@@ -484,34 +509,18 @@ object AuditEngine {
         }
     }
 
-    private fun item(it: StreamInfoItem): AuditItem? {
-        val id = YtQuery.videoIdFromUrl(it.url) ?: return null
-        return AuditItem(
-            id, it.name ?: "", it.uploaderName ?: "", it.uploaderUrl ?: "", it.viewCount,
-            it.uploadDate?.instant?.toEpochMilli() ?: -1L,
-            it.isShortFormContent || it.url.contains("/shorts/") || it.duration in 1..60,
-            it.thumbnails.maxByOrNull { img -> img.width }?.url ?: ""
-        )
-    }
+    private fun item(it: WnItem) = AuditItem(it.id, it.title, it.channel, it.channelUrl, it.views, it.uploadMs, it.isShort, it.thumb)
 
-    /** Opens the watch page of [cur], refreshes its metadata and returns "Up next". */
-    private fun related(cur: AuditItem): List<AuditItem> {
-        val d = Settings.requestDelayMs
-        if (d > 0) Thread.sleep(d.toLong())
-        val ex = yt.getStreamExtractor(cur.url)
-        ex.fetchPage()
-        fun <T> safe(f: () -> T): T? = try {
-            f()
-        } catch (e: Exception) {
-            null
-        }
-        safe { ex.name }?.takeIf { it.isNotBlank() }?.let { cur.title = it }
-        safe { ex.uploaderName }?.takeIf { it.isNotBlank() }?.let { cur.channel = it }
-        safe { ex.uploaderUrl }?.let { cur.channelUrl = it }
-        safe { ex.viewCount }?.takeIf { it >= 0 }?.let { cur.views = it }
-        safe { ex.uploadDate?.instant?.toEpochMilli() }?.let { cur.uploadMs = it }
-        if (cur.thumb.isEmpty()) safe { ex.thumbnails.maxByOrNull { it.width }?.url }?.let { cur.thumb = it }
-        return (safe { ex.relatedItems?.items } ?: emptyList()).filterIsInstance<StreamInfoItem>().mapNotNull(::item)
+    /** Reads the watch page of [cur] (cache unless [fresh]), refreshes its metadata; returns "Up next" and whether YouTube was asked. */
+    private fun related(cur: AuditItem, gl: String, fresh: Boolean): Pair<List<AuditItem>, Boolean> {
+        val page = WatchNext.get(cur.id, gl, fresh)
+        page.title.takeIf { it.isNotBlank() }?.let { cur.title = it }
+        page.channel.takeIf { it.isNotBlank() }?.let { cur.channel = it }
+        page.channelUrl.takeIf { it.isNotBlank() }?.let { cur.channelUrl = it }
+        page.views.takeIf { it >= 0 }?.let { cur.views = it }
+        page.uploadMs.takeIf { it > 0 }?.let { cur.uploadMs = it }
+        if (cur.thumb.isEmpty() && page.thumb.isNotBlank()) cur.thumb = page.thumb
+        return page.items.map(::item) to !page.cached
     }
 
     fun run(pid: String, cancel: AtomicBoolean, progress: (String) -> Unit): String {
@@ -543,9 +552,10 @@ object AuditEngine {
                     }
                     progress(t("Прогулка ${run.walks.size}/$total · шаг $step/${cfg.steps} · запросов ${run.requests}\n",
                         "Walk ${run.walks.size}/$total · step $step/${cfg.steps} · requests ${run.requests}\n") + cur.title.ifBlank { cur.id })
-                    val rel = cache[cur.id] ?: try {
-                        run.requests++
-                        related(cur).also {
+                    val rel = (if (cfg.fresh) null else cache[cur.id]) ?: try {
+                        val (items, asked) = related(cur, p.filters.country, cfg.fresh)
+                        if (asked) run.requests++
+                        items.also {
                             cache[cur.id] = it
                             if (step == 1) meta[cur.id] = cur.copy()
                         }
@@ -583,9 +593,14 @@ object AuditEngine {
     /** Optional AI interpretation of a finished run (through Llm.complete, task "audit"). */
     fun aiVerdict(p: Project, run: AuditRun): String {
         val prov = Provider.active() ?: throw IllegalStateException(t("AI не настроен", "AI is not configured"))
-        val md = AuditMath.markdown(run, AuditMath.report(run), p.name).take(14_000)
-        val prompt = Prompts.get("audit").replace("{phrase}", p.phrase).replace("{domain}", p.domain.ifBlank { "-" })
-            .replace("{lang}", if (Settings.lang == "en") "English" else "русский").replace("{data}", md)
-        return Llm.complete(prov, prov.smartModel.ifBlank { prov.fastModel }, Prompts.SYSTEM, prompt, maxTokens = 2500, task = "audit", pid = p.id).text
+        // method and metrics come first, the walks last: a cut at the limit drops walks, never the method
+        val md = AuditMath.markdown(run, AuditMath.report(run), p.name, AuditMath.intervals(run)).take(14_000)
+        val prompt = Prompts.fill(
+            "algo_audit", AlgoText.topicVars(p) + mapOf(
+                "method" to AlgoMethod.audit(run, p.filters.country), "strategy" to AuditConfig.strategyName(run.cfg.strategy),
+                "walks" to run.walks.size.toString(), "steps" to run.cfg.steps.toString(), "data" to md
+            )
+        )
+        return Llm.complete(prov, prov.smartModel.ifBlank { prov.fastModel }, ALGO_SYSTEM, prompt, maxTokens = 2500, task = "algo_audit", pid = p.id).text
     }
 }

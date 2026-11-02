@@ -274,6 +274,9 @@ object ChannelExplorer {
         }
         val project = Store.project(pid)
         val topicOn = cfg.topic && project != null
+        val gl = project?.filters?.country ?: ""
+        g.gl = gl
+        val labels = HashMap<String, String>()
         // off-topic channels do not count against the limit and are removed at the end
         fun size() = g.nodes.values.count { it.relevant != 0 }
         fun limit() = cancel.get() || requests.get() >= cfg.budget || size() >= cfg.maxChannels
@@ -291,8 +294,16 @@ object ChannelExplorer {
         fun judge(batch: List<Pair<RecNode, ChannelData>>) {
             val todo = batch.filter { it.first.relevant == -1 && !it.first.seed }
             if (!topicOn || todo.isEmpty()) return
-            val verdict = TopicFilter.judgeChannels(project!!, todo.map { it.first.id to it.second }) { progress(it) }
-            todo.forEach { (n, _) -> n.relevant = if (verdict[n.id] == true) 1 else 0 }
+            val verdict = TopicFilter.judgeChannelsGraded(project!!, todo.map { it.first.id to it.second }) { progress(it) }
+            todo.forEach { (n, _) ->
+                val v = verdict[n.id]
+                n.relevant = if (v?.on == true) 1 else 0
+                if (v != null) {
+                    n.tier = v.tier
+                    n.label = v.label
+                    if (v.label.isNotBlank()) labels[n.id] = v.label
+                }
+            }
         }
         for (s in seeds.distinctBy { ChannelStore.key(it) }) node(s, "", 0, "").apply { seed = true; depth = 0; relevant = 1 }
         val beam = maxOf(1, ceil(cfg.maxChannels.toDouble() / maxOf(1, cfg.depth)).toInt())
@@ -320,14 +331,12 @@ object ChannelExplorer {
                 for (v in c.recent.filter { !it.isShort }.sortedByDescending { it.views }.take(cfg.videosPerChannel)) {
                     if (cancel.get() || requests.get() >= cfg.budget) break
                     try {
-                        Par.gate()
-                        val ex = yt.getStreamExtractor(v.url)
-                        ex.fetchPage()
-                        requests.incrementAndGet()
-                        ex.relatedItems?.items?.filterIsInstance<StreamInfoItem>()?.take(cfg.perVideo)?.forEach { it ->
-                            val u = it.uploaderUrl ?: return@forEach
+                        val page = WatchNext.get(v.id, gl)
+                        if (!page.cached) requests.incrementAndGet()
+                        page.items.take(cfg.perVideo).forEach { it ->
+                            val u = it.channelUrl.ifBlank { return@forEach }
                             if (ChannelStore.key(u) == n.id) return@forEach
-                            counts[u] = (it.uploaderName ?: counts[u]?.first ?: "") to ((counts[u]?.second ?: 0) + 1)
+                            counts[u] = (it.channel.ifBlank { counts[u]?.first ?: "" }) to ((counts[u]?.second ?: 0) + 1)
                         }
                     } catch (e: Exception) {
                         L.w("chgraph", "related of ${v.id}: ${e.message}")
@@ -345,9 +354,7 @@ object ChannelExplorer {
                     val k = ChannelStore.key(u)
                     if (!g.nodes.containsKey(k) && g.nodes.size >= cfg.maxChannels * (if (topicOn) 3 else 1)) break
                     val child = node(u, p.first, level + 1, n.id)
-                    if (g.addEdge(n.id, child.id, rank)) {
-                        child.weight += p.second - 1.0 / (rank + 1) // weight = how many links between the channels
-                    }
+                    g.addEdge(n.id, child.id, rank, "ch", w = p.second.toDouble()) // w = how many links between the channels
                     rank++
                 }
             }
@@ -370,7 +377,21 @@ object ChannelExplorer {
             g.nodes.values.filter { it.relevant != 0 && !it.seed }.sortedByDescending { it.weight }.drop(maxOf(0, cfg.maxChannels - g.nodes.values.count { it.seed }))
                 .forEach { it.relevant = 0 }
         }
+        g.recompute()
+        if (topicOn) { // off-topic channels linked from kept ones are where the topic's viewers leak: keep them as exits
+            val kept = g.nodes.values.filter { it.relevant != 0 || it.seed }.map { it.id }.toSet()
+            val links = HashMap<String, Double>()
+            g.edges.filter { it.from in kept && it.to !in kept }.forEach { links[it.to] = (links[it.to] ?: 0.0) + it.w }
+            val fresh = links.entries.sortedByDescending { it.value }.take(40).mapNotNull { (id, w) ->
+                g.nodes[id]?.let { RecExit(id, it.title, it.url, labels[id] ?: it.label, w) }
+            }
+            val byId = LinkedHashMap<String, RecExit>()
+            (fresh + g.exits).forEach { byId.putIfAbsent(it.id, it) }
+            g.exits.clear()
+            g.exits.addAll(byId.values.sortedByDescending { it.links }.take(60))
+        }
         val dropped = if (topicOn) TopicFilter.prune(g) else 0
+        g.recompute()
         g.computePageRank()
         g.requests += requests.get()
         g.updatedAt = System.currentTimeMillis()

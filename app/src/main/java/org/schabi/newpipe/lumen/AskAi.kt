@@ -29,7 +29,8 @@ object AskAi {
         "collect" -> t("Пользователь на вкладке «Сбор»: сбор описаний, комментариев и субтитров.", "The user is on the Collect tab: gathering descriptions, comments and transcripts.")
         "channels" -> t("Пользователь на вкладке «Каналы»: каналы, их вклад и связи.", "The user is on the Channels tab: channels, their share and links.")
         "analytics" -> t("Пользователь на вкладке «Анализ»: тренды, топ каналов и видео, частые слова.", "The user is on the Analytics tab: trends, top channels and videos, frequent words.")
-        "recs" -> t("Пользователь на вкладке «Рекомендации»: граф рекомендаций YouTube, дрейф от темы.", "The user is on the Recommendations tab: the YouTube recommendation graph and topic drift.")
+        "recs" -> t("Пользователь во вкладке «Алгоритм»: граф «Следующего» YouTube без аккаунта (не персональные рекомендации), ниши, потоки каналов, утечка с темы. Отвечай в этих рамках и ссылайся на [id] из данных.",
+            "The user is on the Algorithm tab: YouTube's logged-out “Up next” graph (not personal recommendations), niches, channel flows, topic leak. Answer within these limits and cite [id] from the data.")
         "audience" -> t("Пользователь на вкладке «Аудитория»: боли, вопросы, запросы и возражения зрителей.", "The user is on the Audience tab: viewers' pains, questions, requests and objections.")
         "seo" -> t("Пользователь на вкладке SEO: идеи тем, ключевые слова, что снимать.", "The user is on the SEO tab: topic ideas, keywords, what to film.")
         "ai" -> t("Пользователь на вкладке AI: сводки, кластеры, тональность.", "The user is on the AI tab: summaries, clusters, sentiment.")
@@ -43,7 +44,7 @@ object AskAi {
     /** Short input hint for the bar, so it is clear the chat knows where the user is. */
     fun hint(tab: String): String = when (tab) {
         CommentDigest.TAB -> t("Спросить AI о комментариях…", "Ask AI about the comments…")
-        "recs" -> t("Спросить AI о рекомендациях…", "Ask AI about recommendations…")
+        "recs" -> t("Спросить AI об алгоритме…", "Ask AI about the algorithm…")
         "audience" -> t("Спросить AI об аудитории…", "Ask AI about the audience…")
         "seo" -> t("Спросить AI о SEO…", "Ask AI about SEO…")
         "channels" -> t("Спросить AI о каналах…", "Ask AI about channels…")

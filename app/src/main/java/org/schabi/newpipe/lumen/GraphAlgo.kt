@@ -236,7 +236,10 @@ object GraphStats {
             mutual = mutual.sortedByDescending { (a, b) -> nodes[a].pr + nodes[b].pr }, reach = reach,
             topPr = notSeed.sortedByDescending { nodes[it].pr }.take(top),
             topHits = notSeed.filter { inDeg[it] > 0 }.sortedWith(compareByDescending<Int> { inDeg[it] }.thenByDescending { nodes[it].pr }).take(top),
-            topHubs = nodes.indices.filter { outDeg[it] > 0 }.sortedWith(compareByDescending<Int> { outDeg[it] }.thenByDescending { nodes[it].pr }).take(top),
+            // out-degree is fixed by the crawl (every opened page gives the same number of cards): hubs by HITS instead
+            topHubs = AlgoCore.hits(n, clean.map { (a, b) -> IEdge(a, b) }).second.let { hub ->
+                nodes.indices.filter { outDeg[it] > 0 }.sortedWith(compareByDescending<Int> { hub[it] }.thenByDescending { nodes[it].pr }).take(top)
+            },
             prShareTop10 = share, groups = groups
         )
     }
@@ -276,8 +279,8 @@ object GraphStats {
             out += "🎯" to line
         }
         s.topPr.firstOrNull()?.let { i ->
-            var line = t("Центр графа — «${name(nodes[i])}»: на него ведут ${s.inDeg[i]} ${Plural.ru(s.inDeg[i], "связь", "связи", "связей")}, у него самый высокий PageRank. Сюда YouTube приводит зрителя чаще всего.",
-                "The centre of the graph is “${name(nodes[i])}”: ${s.inDeg[i]} ${Plural.en(s.inDeg[i], "link points", "links point")} to it and it has the highest PageRank. This is where YouTube sends viewers most.")
+            var line = t("Центр графа — «${name(nodes[i])}»: на него ведут ${s.inDeg[i]} ${Plural.ru(s.inDeg[i], "связь", "связи", "связей")}, у него самый высокий PageRank. В этой выборке «Следующего» без аккаунта YouTube чаще всего ставит рядом с темой именно его.",
+                "The centre of the graph is “${name(nodes[i])}”: ${s.inDeg[i]} ${Plural.en(s.inDeg[i], "link points", "links point")} to it and it has the highest PageRank. In this logged-out “Up next” sample YouTube places it next to the topic most often.")
             val h = s.topHits.firstOrNull()
             if (h != null && h != i && s.inDeg[h] > s.inDeg[i]) {
                 line += " " + t("Больше всего прямых рекомендаций у «${name(nodes[h])}» (${s.inDeg[h]}).", "The most direct recommendations go to “${name(nodes[h])}” (${s.inDeg[h]}).")
@@ -285,8 +288,8 @@ object GraphStats {
             out += "⭐" to line
         }
         s.topHubs.firstOrNull()?.let { i ->
-            out += "📡" to t("Главный «раздатчик» — «${name(nodes[i])}»: от него расходится ${s.outDeg[i]} ${Plural.ru(s.outDeg[i], "связь", "связи", "связей")} к другим узлам.",
-                "The main “hub” is “${name(nodes[i])}”: ${s.outDeg[i]} ${Plural.en(s.outDeg[i], "link leads", "links lead")} from it to other nodes.")
+            out += "📡" to t("Главный хаб — «${name(nodes[i])}»: его «Следующее» ведёт к самым рекомендуемым видео графа (${s.outDeg[i]} ${Plural.ru(s.outDeg[i], "связь", "связи", "связей")}).",
+                "The main hub is “${name(nodes[i])}”: its “Up next” leads to the most recommended videos of the graph (${s.outDeg[i]} ${Plural.en(s.outDeg[i], "link", "links")}).")
         }
         if (s.n >= 10 && s.prShareTop10 > 0) {
             val k = maxOf(1, s.n / 10)
@@ -295,15 +298,15 @@ object GraphStats {
                 t("Внимание сосредоточено: $k самых сильных узлов (10%) собирают $p% PageRank. Попасть в рекомендации рядом с ними — самый короткий путь к аудитории.",
                     "Attention is concentrated: the strongest $k nodes (10%) hold $p% of PageRank. Getting recommended next to them is the shortest way to the audience.")
             } else {
-                t("Внимание распределено ровно: 10% самых сильных узлов собирают лишь $p% PageRank — явного лидера нет, ниша открыта.",
-                    "Attention is spread evenly: the strongest 10% of nodes hold only $p% of PageRank — no clear leader, the niche is open.")
+                t("Внимание распределено ровно: 10% самых сильных узлов собирают лишь $p% PageRank — явного лидера нет (открытость ниши для новых каналов смотрите во вкладке «Алгоритм»).",
+                    "Attention is spread evenly: the strongest 10% of nodes hold only $p% of PageRank — no clear leader (see the Algorithm tab for how open the niche is to new channels).")
             }
         }
         out += "🧩" to if (s.components <= 1) {
             t("Все узлы связаны в одну сеть — это цельная ниша.", "All nodes form one network — a coherent niche.")
         } else {
-            t("Граф распадается на ${s.components} ${Plural.ru(s.components, "группу", "группы", "групп")}; крупнейшая — ${s.largest} ${Plural.ru(s.largest, "узел", "узла", "узлов")} (${pct(s.largest, s.n)}%). Отдельные группы — соседние, слабо связанные ниши.",
-                "The graph splits into ${s.components} groups; the largest has ${s.largest} ${Plural.en(s.largest, "node", "nodes")} (${pct(s.largest, s.n)}%). Separate groups are neighbouring, loosely linked niches.") +
+            t("Граф распадается на ${s.components} ${Plural.ru(s.components, "группу", "группы", "групп")}; крупнейшая — ${s.largest} ${Plural.ru(s.largest, "узел", "узла", "узлов")} (${pct(s.largest, s.n)}%). Несвязанные группы обычно выросли из разных стартовых видео; ниши внутри графа ищет вкладка «Алгоритм».",
+                "The graph splits into ${s.components} groups; the largest has ${s.largest} ${Plural.en(s.largest, "node", "nodes")} (${pct(s.largest, s.n)}%). Unlinked groups usually grew from different seeds; the Algorithm tab finds niches inside the graph.") +
                 if (s.isolated > 0) t(" Без связей: ${s.isolated}.", " Without links: ${s.isolated}.") else ""
         }
         out += "🔁" to if (s.mutual.isNotEmpty()) {
@@ -329,9 +332,11 @@ object GraphStats {
             }
         }
         if (s.seeds > 0 && s.reach < s.n) {
-            out += "🛤" to t("Из стартовых узлов по стрелкам достижимо ${s.reach} из ${s.n} (${pct(s.reach, s.n)}%); остальные связаны только обратными ссылками.",
-                "Following the arrows from the seeds reaches ${s.reach} of ${s.n} (${pct(s.reach, s.n)}%); the rest are linked only backwards.")
+            out += "🛤" to t("Из стартовых узлов по стрелкам достижимо ${s.reach} из ${s.n} (${pct(s.reach, s.n)}%); остальные пришли из прошлых прогонов или с других стартовых видео.",
+                "Following the arrows from the seeds reaches ${s.reach} of ${s.n} (${pct(s.reach, s.n)}%); the rest came from earlier runs or other seeds.")
         }
+        out += "ℹ️" to t("Метод: «Следующее» YouTube без входа в аккаунт — неперсонализированный слой, первая страница (~20 карточек). Персональные рекомендации, время просмотра и CTR здесь не видны.",
+            "Method: YouTube “Up next” without signing in — the non-personalised layer, first page (~20 cards). Personal recommendations, watch time and CTR are not visible here.")
         return out
     }
 }

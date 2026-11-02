@@ -263,10 +263,11 @@ object AiTasks {
 
     /** Extra data block for the tab the user asks from; empty when the project corpus alone is enough. */
     private fun tabData(p: Project, videos: List<Video>, tab: String): String = when (tab) {
-        "recs" -> RecGraph.load(p.id).let { g ->
-            val top = RecEngine.ranked(g, "hits").take(25).joinToString("\n") { "- ${it.title} | ${it.channel} | hits=${it.hits} depth=${it.depth} rel=${it.relevant}" }
-            val drift = RecEngine.drift(g).joinToString("; ") { "d${it.depth}: ${it.onTopic}/${it.nodes} on topic" }
-            if (g.nodes.isEmpty()) "" else "Recommendation graph: ${g.nodes.size} nodes.\nDrift: $drift\nMost recommended:\n$top"
+        "recs" -> try {
+            val r = AlgoAnalysis.get(p.id)
+            if (r.nodes.isEmpty()) "" else AlgoData.report(r, short = true).text
+        } catch (e: Exception) {
+            ""
         }
         "audience", "seo" -> Seo.insights(p.id).take(80).joinToString("\n") { "- [${it.optString("type")}] ${it.optString("statement")}" }
             .let { if (it.isBlank()) "" else "Audience insights:\n$it" }

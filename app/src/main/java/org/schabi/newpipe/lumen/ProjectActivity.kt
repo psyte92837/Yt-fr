@@ -125,7 +125,7 @@ class ProjectActivity : LumenBase() {
 
     private val tabNames get() = mapOf(
         "overview" to t("Обзор", "Overview"), "videos" to t("Видео", "Videos"), "collect" to t("Сбор", "Collect"),
-        "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"), "recs" to t("Рекомендации", "Recommendations"),
+        "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"), "recs" to t("Алгоритм", "Algorithm"),
         "audience" to t("Аудитория", "Audience"), "seo" to "SEO", "ai" to "AI",
         "export" to t("Экспорт", "Export"), "schemes" to t("Схемы", "Diagrams"), "settings" to t("Настройки", "Settings")
     )

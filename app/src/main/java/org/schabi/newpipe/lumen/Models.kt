@@ -156,14 +156,16 @@ data class RecConfig(
     var maxPerChannel: Int = 0,
     var useProjectFilters: Boolean = false,
     var blocked: String = "",
-    var keepGraph: Boolean = true
+    var keepGraph: Boolean = true,
+    var strategy: String = "mixed", // top | mixed | rwr: how the snowball samples videos to open
+    var refreshDays: Int = 7 // re-read pages older than this when the graph is kept (0 = never)
 ) {
     fun toJson(): JSONObject = JSONObject().put("mode", mode).put("seeds", seeds).put("seedCount", seedCount)
         .put("customSeeds", customSeeds).put("depth", depth).put("fanout", fanout).put("budget", budget)
         .put("maxNodes", maxNodes).put("relevance", relevance).put("keywords", keywords)
         .put("expandOffTopic", expandOffTopic).put("excludeShorts", excludeShorts).put("minViews", minViews)
         .put("maxPerChannel", maxPerChannel).put("useProjectFilters", useProjectFilters).put("blocked", blocked)
-        .put("keepGraph", keepGraph)
+        .put("keepGraph", keepGraph).put("strategy", strategy).put("refreshDays", refreshDays)
 
     companion object {
         fun from(o: JSONObject?) = RecConfig().apply {
@@ -185,6 +187,8 @@ data class RecConfig(
             useProjectFilters = o.optBoolean("useProjectFilters", false)
             blocked = o.optString("blocked", "")
             keepGraph = o.optBoolean("keepGraph", true)
+            strategy = o.optString("strategy", strategy)
+            refreshDays = o.optInt("refreshDays", refreshDays)
         }
     }
 }

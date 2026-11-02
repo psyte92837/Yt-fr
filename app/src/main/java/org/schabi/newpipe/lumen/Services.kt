@@ -464,6 +464,12 @@ object Monitoring {
             Notify.post(ctx, jobId(pid), title, body, pid)
         }
         if (added > 0) AutoBackup.maybe(ctx)
+        try { // Algorithm tab: what changed in the graph core, radar of the author's videos
+            if (p.monitor.recDrip > 0) AlgoWatch.afterDrip(ctx, pid)
+            AlgoRadar.monitor(ctx, pid)
+        } catch (e: Exception) {
+            L.w("algo", "monitor: ${e.message}")
+        }
         return added
     }
 }

@@ -34,7 +34,9 @@ object GraphReport {
         val colorBy: String,
         val onlyOnTopic: Boolean,
         val updatedAt: Long,
-        val requests: Int
+        val requests: Int,
+        /** Algorithm tab analysis of the video graph (niches, leak, flows), when available. */
+        val algo: AlgoResult? = null
     )
 
     /** The graph as shown on screen: optionally only on-topic nodes (seeds always stay). */
@@ -59,7 +61,8 @@ object GraphReport {
         val (list, e, r) = subgraph(g, onlyOnTopic)
         val (x, y) = layout?.takeIf { it.first.size == list.size } ?: GraphAlgo.layout(list.size, e)
         val p = Store.project(pid)
-        return Input(p?.name ?: "Lumen", p?.phrase ?: "", file == RecGraph.CHANNELS_FILE, list, e, r, x, y, colorBy, onlyOnTopic, g.updatedAt, g.requests)
+        val algo = if (file == RecGraph.FILE && g.nodes.isNotEmpty()) try { AlgoAnalysis.get(pid) } catch (ex: Exception) { null } else null
+        return Input(p?.name ?: "Lumen", p?.phrase ?: "", file == RecGraph.CHANNELS_FILE, list, e, r, x, y, colorBy, onlyOnTopic, g.updatedAt, g.requests, algo)
     }
 
     fun write(inp: Input, pdf: Boolean, out: OutputStream) =
@@ -206,6 +209,18 @@ object GraphReport {
         if (story.isNotEmpty()) {
             out += ReportKit.Section(t("Что происходит", "What is going on"), t("Выводы посчитаны по структуре графа.", "Findings computed from the graph structure."))
             story.forEach { (icon, text) -> out += ReportKit.Insight(icon, text) }
+        }
+        inp.algo?.let { a ->
+            fun pc(d: Double) = if (d.isNaN()) "—" else "${Math.round(d * 100)}%"
+            out += ReportKit.Section(t("Алгоритм: утечка, ниши, потоки", "Algorithm: leak, niches, flows"), AlgoMethod.graph(a.g))
+            if (a.leak.judged > 0) out += ReportKit.Insight("🎯", t("Утечка с темы за шаг: ${pc(a.leak.rate)} (90%: ${pc(a.leak.lo)}–${pc(a.leak.hi)}) — такая доля рекомендаций рядом с тематическими видео уводит от темы.",
+                "Topic leak per hop: ${pc(a.leak.rate)} (90%: ${pc(a.leak.lo)}–${pc(a.leak.hi)}) — this share of recommendations next to on-topic videos leads off topic."))
+            out += ReportKit.Insight("🔀", t("Удержание на своём канале: ${pc(a.retention)}; к свежим видео ведут ${pc(a.fresh)} рекомендаций, к каналам вне топ-10 — ${pc(a.tail)}.",
+                "Same-channel retention: ${pc(a.retention)}; ${pc(a.fresh)} of recommendations lead to fresh videos, ${pc(a.tail)} to channels outside the top 10."))
+            if (a.niches.isNotEmpty()) out += ReportKit.Ranking(a.niches.map { ni ->
+                ReportKit.Ranking.Row("${ni.key} · ${ni.label}", t("по теме ", "on topic ") + pc(ni.onShare) + " · " + ni.terms.take(4).joinToString(", "), ni.members.size.toDouble(), "${ni.members.size}")
+            })
+            if (a.exits.isNotEmpty()) out += ReportKit.Insight("↗", t("Куда уводит: ", "Where it leads: ") + a.exits.take(8).joinToString(", ") { "${it.first} ×${it.second}" })
         }
         if (s.depthCounts.size > 1) {
             out += ReportKit.Section(t("Рост по шагам", "Growth by step"), t("Сколько узлов найдено на каждом шаге обхода.", "How many nodes were found at each step."))

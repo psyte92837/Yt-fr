@@ -24,7 +24,7 @@ import kotlin.math.sqrt
 object GraphColors {
     private fun hsv(h: Float, s: Float = 0.55f, v: Float = 0.9f) = Color.HSVToColor(floatArrayOf(h, s, v))
 
-    fun of(nodes: List<RecNode>, colorBy: String, ok: Int, off: Int, warn: Int): Pair<IntArray, List<Pair<Int, String>>> {
+    fun of(nodes: List<RecNode>, colorBy: String, ok: Int, off: Int, warn: Int, nicheNames: Map<Int, String> = emptyMap()): Pair<IntArray, List<Pair<Int, String>>> {
         val n = nodes.size
         val colors = IntArray(n)
         val leg = mutableListOf<Pair<Int, String>>()
@@ -40,6 +40,14 @@ object GraphColors {
                 leg += ok to t("по теме", "on topic")
                 leg += off to t("не по теме", "off topic")
                 leg += warn to t("не проверено", "unknown")
+            }
+            "niche" -> {
+                val ids = nodes.map { it.niche }.filter { it >= 0 }.distinct().sorted()
+                val map = HashMap<Int, Int>()
+                ids.forEachIndexed { i, c -> map[c] = hsv((i * 137.5f) % 360f, 0.6f, 0.88f) }
+                for (i in 0 until n) colors[i] = map[nodes[i].niche] ?: off
+                ids.take(10).forEach { leg += (map[it] ?: 0) to (nicheNames[it] ?: "g${it + 1}").take(18) }
+                leg += off to t("прочее", "other")
             }
             "channel" -> {
                 val top = nodes.groupingBy { it.channel }.eachCount().entries.sortedByDescending { it.value }.take(8).map { it.key }
@@ -83,6 +91,8 @@ class GraphView(ctx: Context) : View(ctx) {
             invalidate()
         }
     var onTap: (RecNode) -> Unit = {}
+    /** Niche number → name (from the Algorithm tab analysis). */
+    var nicheNames: Map<Int, String> = emptyMap()
     var legend: List<Pair<Int, String>> = emptyList()
         private set
 
@@ -105,8 +115,8 @@ class GraphView(ctx: Context) : View(ctx) {
         edges = e
         px = x
         py = y
-        val maxHits = max(1, list.maxOfOrNull { it.hits } ?: 1)
-        radius = FloatArray(list.size) { i -> (4f + 10f * sqrt(list[i].hits.toFloat() / maxHits)) * d }
+        val maxW = list.maxOfOrNull { it.weight }?.takeIf { it > 0 } ?: 1.0
+        radius = FloatArray(list.size) { i -> (4f + 10f * sqrt((list[i].weight / maxW).toFloat())) * d }
         val top = list.indices.sortedByDescending { list[it].pr }.take(12).toSet()
         labelled = BooleanArray(list.size) { it in top || list[it].seed }
         recolor()
@@ -114,7 +124,7 @@ class GraphView(ctx: Context) : View(ctx) {
     }
 
     private fun recolor() {
-        val (c, leg) = GraphColors.of(nodes, colorBy, Palette.OK, Palette.OUTLINE, Palette.WARN)
+        val (c, leg) = GraphColors.of(nodes, colorBy, Palette.OK, Palette.OUTLINE, Palette.WARN, nicheNames)
         colors = c
         legend = leg
     }
@@ -251,10 +261,20 @@ class GraphActivity : LumenBase() {
         view = GraphView(this)
         view.onTap = { showNode(it) }
         build()
+        if (!channels) {
+            // niches and closeness to the seeds come from the Algorithm tab analysis
+            Lumen.async({ AlgoAnalysis.get(pid) }, ::err) { r ->
+                graph = r.g
+                view.nicheNames = r.niches.associate { it.index to it.label }
+                layoutCache.clear()
+                build()
+            }
+        }
     }
 
     private fun build() {
-        val chips = listOf("depth" to t("Глубина", "Depth"), "relevance" to t("Релевантность", "Relevance"), "channel" to t("Каналы", "Channels"))
+        val chips = listOf("depth" to t("Глубина", "Depth"), "relevance" to t("Релевантность", "Relevance"), "channel" to t("Каналы", "Channels")) +
+            (if (channels) emptyList() else listOf("niche" to t("Ниши", "Niches")))
         val header = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val viewLabel = t("Вид: ", "View: ") + chips.first { it.first == colorBy }.second +
             (if (onlyOnTopic) " · " + t("по теме", "on topic") else "") + " ▾"
@@ -294,8 +314,8 @@ class GraphActivity : LumenBase() {
             layoutBar.visibility = View.GONE
             val p = Store.project(pid)
             current = GraphReport.Input(p?.name ?: "Lumen", p?.phrase ?: "", channels, list, e, ranks, x, y, colorBy, onlyOnTopic, graph.updatedAt, graph.requests)
-            legend.text = t("Узлов ${list.size} · связей ${e.size} · размер = как часто рекомендуют. ",
-                "Nodes ${list.size} · edges ${e.size} · size = how often recommended. ") +
+            legend.text = t("Узлов ${list.size} · связей ${e.size} · размер = как часто и как высоко рекомендуют. ",
+                "Nodes ${list.size} · edges ${e.size} · size = how often and how high recommended. ") +
                 view.legend.joinToString("   ") { "● " + it.second }
             val sb = android.text.SpannableStringBuilder(legend.text)
             var pos = sb.indexOf("●")
@@ -411,7 +431,18 @@ class GraphActivity : LumenBase() {
                     else -> "?"
                 }
             )
+            if (n.label.isNotBlank()) append(" (").append(n.label).append(")")
+            if (n.score >= 0) append(t(" · близость к теме ", " · closeness to the topic ")).append(Math.round(n.score * 100)).append('%')
+            append(t("\nБлизость к стартовым (PPR): ", "\nCloseness to the seeds (PPR): ")).append(String.format("%.2f", n.ppr * 1000)).append('‰')
             if (n.seed) append(t("\nСтартовое видео", "\nSeed video"))
+            if (!n.seed) {
+                val (ids, edges) = graph.indexed()
+                val ix = ids.withIndex().associate { it.value to it.index }
+                val seeds = graph.nodes.values.filter { it.seed }.mapNotNull { ix[it.id] }
+                val path = ix[n.id]?.let { AlgoCore.path(ids.size, edges, seeds, it) }.orEmpty()
+                if (path.size > 1) append(t("\n\nКак YouTube пришёл сюда: ", "\n\nHow YouTube got here: "))
+                    .append(path.joinToString(" → ") { "«" + (graph.nodes[ids[it]]?.title ?: "").take(30) + "»" })
+            }
             if (parents.isNotEmpty()) append(t("\n\nОткуда: ", "\n\nFrom: ")).append(parents.take(5).joinToString("; ") { it.title.take(40) })
             if (children.isNotEmpty()) append(t("\nВедёт к: ", "\nLeads to: ")).append(children.take(5).joinToString("; ") { it.title.take(40) })
         }

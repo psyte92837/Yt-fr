@@ -418,12 +418,9 @@ class SettingsActivity : LumenBase() {
             "clusters" to t("Кластеры", "Clusters"),
             "sentiment" to t("Тональность комментариев", "Comment sentiment"),
             "chat" to t("Чат с проектом", "Project chat"),
-            "relevance" to t("Фильтр релевантности рекомендаций", "Recommendation relevance filter"),
-            "relevance_channels" to t("Фильтр каналов по теме", "Channel topic filter"),
-            "topic" to t("Подтверждение темы (домена)", "Topic (domain) confirmation"),
+            "relevance" to t("Мониторинг · фильтр новых видео по теме", "Monitoring · topic filter of new videos"),
             "watch_translate" to t("Мониторинг · перевод темы на другие языки", "Monitoring · topic translation"),
             "watch_digest" to t("Мониторинг · сводка новых видео", "Monitoring · digest of new videos"),
-            "audit" to t("Аудит алгоритма: вывод", "Algorithm audit: verdict"),
             "p1_insights" to t("P1 · Извлечение аудитории", "P1 · Audience extraction"),
             "p2_clusters" to t("P2 · Кластеризация", "P2 · Clustering"),
             "p3_qualify" to t("P3 · SEO-квалификация темы", "P3 · SEO topic qualification"),
@@ -443,7 +440,7 @@ class SettingsActivity : LumenBase() {
             KMap.PATH to t("Карта знаний · путь обучения", "Knowledge map · learning path"),
             "ideas_queries" to t("Идеи для бизнеса · подбор запросов", "Business ideas · queries"),
             "ideas_digest" to t("Идеи для бизнеса · сводка", "Business ideas · digest"),
-        )
+        ) + algoPromptLabels()
         for ((k, label) in names) {
             val card = c.card {
                 add(text(ctx, label, Type.TITLE_M, bold = true), 0)

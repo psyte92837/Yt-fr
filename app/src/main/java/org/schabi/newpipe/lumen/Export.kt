@@ -82,7 +82,7 @@ object Export {
     private fun xml(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
         .filter { it == '\t' || it == '\n' || it >= ' ' }
 
-    /** GEXF 1.3 for Gephi: node attributes depth, hits, pagerank, relevance, channel, views. */
+    /** GEXF 1.3 for Gephi: node attributes (depth, hits, pagerank, closeness to the seeds, relevance, niche…), edge kind and position. */
     fun gexf(pid: String): String {
         val g = RecGraph.load(pid)
         val sb = StringBuilder()
@@ -90,37 +90,40 @@ object Export {
         sb.append("<meta><creator>Lumen</creator><description>YouTube recommendation graph</description></meta>\n")
         sb.append("<graph defaultedgetype=\"directed\">\n<attributes class=\"node\">\n")
         listOf("depth" to "integer", "hits" to "integer", "pagerank" to "double", "relevant" to "integer",
-            "channel" to "string", "views" to "long", "seed" to "boolean", "url" to "string").forEachIndexed { i, (n, ty) ->
+            "channel" to "string", "views" to "long", "seed" to "boolean", "url" to "string",
+            "ppr" to "double", "score" to "double", "tier" to "integer", "label" to "string", "niche" to "integer").forEachIndexed { i, (n, ty) ->
             sb.append("<attribute id=\"$i\" title=\"$n\" type=\"$ty\"/>\n")
         }
-        sb.append("</attributes>\n<nodes>\n")
+        sb.append("</attributes>\n<attributes class=\"edge\">\n<attribute id=\"0\" title=\"kind\" type=\"string\"/>\n<attribute id=\"1\" title=\"position\" type=\"integer\"/>\n<attribute id=\"2\" title=\"seen\" type=\"integer\"/>\n</attributes>\n<nodes>\n")
         for (n in g.nodes.values) {
             sb.append("<node id=\"${xml(n.id)}\" label=\"${xml(n.title.ifBlank { n.id })}\"><attvalues>")
-            listOf(n.depth, n.hits, n.pr, n.relevant, xml(n.channel), n.views, n.seed, xml(n.url)).forEachIndexed { i, v ->
+            listOf(n.depth, n.hits, n.pr, n.relevant, xml(n.channel), n.views, n.seed, xml(n.url), n.ppr, n.score, n.tier, xml(n.label), n.niche).forEachIndexed { i, v ->
                 sb.append("<attvalue for=\"$i\" value=\"$v\"/>")
             }
             sb.append("</attvalues></node>\n")
         }
         sb.append("</nodes>\n<edges>\n")
         g.edges.forEachIndexed { i, e ->
-            sb.append("<edge id=\"$i\" source=\"${xml(e.from)}\" target=\"${xml(e.to)}\" weight=\"${1.0 / (e.rank + 1)}\"/>\n")
+            sb.append("<edge id=\"$i\" source=\"${xml(e.from)}\" target=\"${xml(e.to)}\" weight=\"${e.strength}\"><attvalues>")
+            sb.append("<attvalue for=\"0\" value=\"${xml(e.kind)}\"/><attvalue for=\"1\" value=\"${e.rank + 1}\"/><attvalue for=\"2\" value=\"${e.seen}\"/></attvalues></edge>\n")
         }
         sb.append("</edges>\n</graph>\n</gexf>\n")
         return sb.toString()
     }
 
     fun recsNodes(pid: String): String {
-        val sb = StringBuilder(Csv.row("id", "title", "channel", "url", "depth", "hits", "pagerank", "relevant", "seed", "views", "duration_sec", "upload_date"))
+        val sb = StringBuilder(Csv.row("id", "title", "channel", "url", "depth", "hits", "pagerank", "relevant", "seed", "views", "duration_sec", "upload_date",
+            "ppr", "text_score", "ai_tier", "ai_label", "niche"))
         RecGraph.load(pid).nodes.values.forEach { n ->
             sb.append(Csv.row(n.id, n.title, n.channel, n.url, n.depth, n.hits, n.pr, n.relevant, n.seed, n.views, n.duration,
-                if (n.uploadMs > 0) Fmt.isoDay(n.uploadMs) else n.uploadText))
+                if (n.uploadMs > 0) Fmt.isoDay(n.uploadMs) else n.uploadText, n.ppr, n.score, n.tier, n.label, n.niche))
         }
         return sb.toString()
     }
 
     fun recsEdges(pid: String): String {
-        val sb = StringBuilder(Csv.row("source", "target", "position"))
-        RecGraph.load(pid).edges.forEach { sb.append(Csv.row(it.from, it.to, it.rank + 1)) }
+        val sb = StringBuilder(Csv.row("source", "target", "position", "kind", "weight", "seen", "first_seen", "last_seen"))
+        RecGraph.load(pid).edges.forEach { sb.append(Csv.row(it.from, it.to, it.rank + 1, it.kind, it.w, it.seen, Fmt.isoDay(it.first), Fmt.isoDay(it.last))) }
         return sb.toString()
     }
 

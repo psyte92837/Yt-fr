@@ -39,38 +39,7 @@ fun ProjectActivity.recsTab(c: Col) {
     val save = { Store.save(project) }
     val g = RecGraph.load(project.id)
 
-    c.card {
-        if (g.nodes.isEmpty()) {
-            p(t("Граф пока пуст. Настройте обход ниже и нажмите «Запустить».", "The graph is empty. Configure below and tap Run."))
-            muted(t("Lumen откроет каждое стартовое видео, возьмёт колонку «Следующее» YouTube и пойдёт дальше по похожим — без аккаунта и ключей.",
-                "Lumen opens each seed video, takes YouTube's “Up next” column and follows similar videos — no account or keys."))
-        } else {
-            add(text(ctx, t("Узлов ${g.nodes.size} · связей ${g.edges.size}", "Nodes ${g.nodes.size} · edges ${g.edges.size}"), Type.TITLE_M, bold = true), 0)
-            muted(t("Последний обход: ", "Last run: ") + Fmt.dateTime(g.updatedAt) + " · " + g.mode + " · " + t("запросов всего: ", "total requests: ") + g.requests)
-            add(rowOf(ctx,
-                btn(ctx, t("Открыть граф", "Open graph"), primary = true) {
-                    startActivity(Intent(ctx, GraphActivity::class.java).putExtra("pid", project.id))
-                },
-                btn(ctx, t("Сбросить", "Reset"), style = BtnStyle.OUTLINED) {
-                    val old = RecGraph.load(project.id)
-                    undoable(t("Граф рекомендаций сброшен (видео проекта не тронуты)", "Recommendation graph reset (project videos untouched)"), apply = {
-                        RecGraph.clear(project.id)
-                        render()
-                    }, revert = {
-                        RecGraph.save(project.id, old)
-                        render()
-                    })
-                }
-            ), 8)
-        }
-    }
-
-    c.card {
-        add(text(ctx, t("🧪 Аудит алгоритма", "🧪 Algorithm audit"), Type.TITLE_M, bold = true), 0)
-        muted(t("Виртуальный зритель много раз идёт по «Следующему»: как быстро уходит тема, к каким каналам и видео сходится алгоритм.",
-            "A virtual viewer follows “Up next” many times: how fast the topic fades, which channels and videos the algorithm converges to."))
-        button(t("Открыть аудит", "Open audit"), style = BtnStyle.TONAL) { AuditActivity.open(ctx, project.id) }
-    }
+    algoHeader(c, g)
 
     // ---------------- settings: open for a new graph, folded once there are results to read
     val paramsOpen = state("recParams", g.nodes.isEmpty()) as Boolean
@@ -157,6 +126,35 @@ fun ProjectActivity.recsTab(c: Col) {
             cfg.keepGraph = it
             save()
         }
+        if (cfg.mode == "snowball") {
+            c.spinner(
+                t("Какие видео открывать", "Which videos to open"),
+                listOf(
+                    "mixed" to t("Смешанно: половина самых рекомендуемых, половина случайно", "Mixed: half most recommended, half random"),
+                    "top" to t("Самые рекомендуемые (быстро к ядру)", "Most recommended (fast to the core)"),
+                    "rwr" to t("Случайные блуждания с возвратом к стартовым", "Random walks with restart")
+                ),
+                cfg.strategy
+            ) {
+                cfg.strategy = it
+                save()
+            }
+            c.muted(t("«Смешанно» видит и периферию, поэтому дрейф и ниши честнее; «самые рекомендуемые» быстрее находят ядро, но завышают его.",
+                "“Mixed” also sees the periphery, so drift and niches are fairer; “most recommended” finds the core faster but overstates it."))
+        }
+        if (cfg.keepGraph) {
+            c.spinner(t("Перечитывать страницы старше", "Re-read pages older than"), listOf(0 to t("никогда", "never"), 3 to t("3 дн", "3 d"), 7 to t("7 дн", "7 d"), 14 to t("14 дн", "14 d"), 30 to t("30 дн", "30 d")), cfg.refreshDays) {
+                cfg.refreshDays = it
+                save()
+            }
+        }
+        c.spinner(t("Кеш страниц YouTube", "YouTube page cache"), listOf(0 to t("выкл", "off"), 6 to t("6 ч", "6 h"), 24 to t("24 ч", "24 h"), 72 to t("3 дн", "3 d")), WatchNext.cacheHours) {
+            WatchNext.cacheHours = it
+        }
+        val (files, bytes) = WatchNext.stats()
+        c.muted(t("Повторный обход в пределах кеша не тратит запросы. Сейчас в кеше: $files стр., ${bytes / 1024} КБ. Регион обхода — как в фильтрах проекта: ",
+            "A repeated crawl within the cache costs no requests. Cached now: $files pages, ${bytes / 1024} KB. Crawl region = project filters: ") +
+            AlgoMethod.region(project.filters.country) + ".")
 
         c.h2(t("Фильтр по теме", "Topic filter"))
         c.spinner(
@@ -211,16 +209,21 @@ fun ProjectActivity.recsTab(c: Col) {
         })
     }
 
-    if (g.nodes.isEmpty()) return
+    if (g.nodes.isEmpty()) {
+        algoAuditCard(c)
+        return
+    }
+    val res = algoResult(g)
 
     // ---------------- results
 
     c.h2(t("Что рекомендует YouTube", "What YouTube recommends"))
-    val sort = state("recSort", "hits") as String
+    algoLeakCard(c, g, res)
+    val sort = state("recSort", "ppr") as String
     val onlyTopic = state("recOnlyTopic", false) as Boolean
     val notInProject = state("recNotIn", true) as Boolean
     c.chips(listOf(
-        "hits" to t("чаще рекомендуют", "most recommended"), "pr" to "PageRank",
+        "ppr" to t("близко к моим", "close to mine"), "hits" to t("чаще рекомендуют", "most recommended"), "pr" to "PageRank",
         "views" to t("просмотры", "views"), "depth" to t("глубже всего", "deepest")
     ).map { (k, l) ->
         chip(this, l, sort == k) {
@@ -269,9 +272,10 @@ fun ProjectActivity.recsTab(c: Col) {
         .map { (ch, l) -> ch to l.sumOf { it.hits }.toDouble() }.sortedByDescending { it.second }.take(10)
     c.add(BarChartView(this).apply { horizontal = chans }, 8)
     c.muted(t("Длина полосы — сколько раз видео канала встречались в рекомендациях.", "Bar length = how many times the channel's videos were recommended."))
+    algoSections(c, g, res)
 }
 
-private fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
+fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
     val row = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -297,13 +301,14 @@ private fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
         maxLines = 2
         ellipsize = android.text.TextUtils.TruncateAt.END
     })
+    val mark = AlgoLabels.load(project.id)[n.id]?.v
     val topic = when (n.relevant) {
         1 -> "✓"
-        0 -> "✗"
+        0 -> if (n.adjacent) "↗" + n.label.take(16) else "✗"
         else -> "?"
-    }
+    } + (if (mark != null) " · 👤" + (if (mark == 1) "✓" else "✗") else "")
     info.addView(text(this, n.channel, 12f, color = Palette.MUTED).apply { isSingleLine = true })
-    info.addView(text(this, "×${n.hits} · PR ${String.format("%.1f", n.pr * 1000)} · ${t("шаг", "step")} ${n.depth} · $topic · ${Fmt.num(n.views)}",
+    info.addView(text(this, "×${n.hits} · PPR ${String.format("%.1f", n.ppr * 1000)} · ${t("шаг", "step")} ${n.depth} · $topic · ${Fmt.num(n.views)}",
         12f, color = if (n.relevant == 0) Palette.OUTLINE else Palette.MUTED))
     row.addView(info, LinearLayout.LayoutParams(0, -2, 1f))
     if (n.url.isNotBlank()) {
@@ -311,6 +316,10 @@ private fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
         row.addView(mediaBtn(this, n.url, n.title), LinearLayout.LayoutParams(dp(44), dp(48)))
     }
     row.setOnClickListener { openVideo(n.url) }
+    row.setOnLongClickListener {
+        labelSheet(n)
+        true
+    }
     return row
 }
 

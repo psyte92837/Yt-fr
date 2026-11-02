@@ -124,6 +124,10 @@ class AuditActivity : LumenBase() {
             cfg.topK = it
             save()
         }
+        c.check(t("Без кеша: каждая страница заново (видно случайность YouTube между прогулками)", "No cache: read every page anew (shows YouTube's randomness between walks)"), cfg.fresh) {
+            cfg.fresh = it
+            save()
+        }
         c.check(t("Пропускать Shorts", "Skip Shorts"), cfg.excludeShorts) {
             cfg.excludeShorts = it
             save()
@@ -235,7 +239,7 @@ class AuditActivity : LumenBase() {
         )
         c.row(
             btn(this, t("Поделиться", "Share"), style = BtnStyle.TEXT) {
-                shareText(t("Аудит алгоритма", "Algorithm audit"), AuditMath.markdown(run, r, project.name))
+                shareText(t("Аудит алгоритма", "Algorithm audit"), AuditMath.markdown(run, r, project.name, AuditMath.intervals(run)))
             },
             btn(this, t("Удалить", "Delete"), style = BtnStyle.TEXT) {
                 confirm(t("Удалить прогон?", "Delete the run?"), Fmt.dateTime(run.at)) {

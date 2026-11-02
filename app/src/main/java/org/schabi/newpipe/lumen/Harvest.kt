@@ -296,34 +296,18 @@ object Harvest {
         if (d > 0) Thread.sleep(d.toLong())
     }
 
-    private fun item(it: StreamInfoItem, depth: Int): HarvestItem? {
-        val id = YtQuery.videoIdFromUrl(it.url) ?: return null
-        return HarvestItem(
-            id = id, url = "https://www.youtube.com/watch?v=$id", title = it.name ?: "", channel = it.uploaderName ?: "",
-            channelUrl = it.uploaderUrl ?: "", views = it.viewCount, duration = it.duration,
-            uploadMs = it.uploadDate?.instant?.toEpochMilli() ?: -1L, uploadText = it.textualUploadDate ?: "",
-            thumb = it.thumbnails.maxByOrNull { img -> img.width }?.url ?: "",
-            isShort = it.isShortFormContent || it.url.contains("/shorts/") || it.duration in 1..60, depth = depth
-        )
-    }
+    private fun item(it: WnItem, depth: Int) = HarvestItem(
+        id = it.id, url = it.url, title = it.title, channel = it.channel, channelUrl = it.channelUrl, views = it.views,
+        duration = it.duration, uploadMs = it.uploadMs, uploadText = it.uploadText, thumb = it.thumb, isShort = it.isShort, depth = depth
+    )
 
-    private class Page(val title: String, val channel: String, val channelUrl: String, val subs: Long, val related: List<StreamInfoItem>)
+    private class Page(val title: String, val channel: String, val channelUrl: String, val subs: Long, val related: List<WnItem>, val asked: Boolean)
 
-    /** Watch page of a video: cheap getters only, no stream deciphering. */
+    /** Watch page of a video through [WatchNext] (cache, region-free); [Page.asked] = YouTube was requested. */
     private fun page(url: String): Page {
-        pause()
-        val ex = yt.getStreamExtractor(url)
-        ex.fetchPage()
-        fun <T> safe(f: () -> T): T? = try {
-            f()
-        } catch (e: Exception) {
-            null
-        }
-        return Page(
-            safe { ex.name } ?: "", safe { ex.uploaderName } ?: "", safe { ex.uploaderUrl } ?: "",
-            safe { ex.uploaderSubscriberCount } ?: -1L,
-            safe { ex.relatedItems?.items }?.filterIsInstance<StreamInfoItem>() ?: emptyList()
-        )
+        val id = YtQuery.videoIdFromUrl(url) ?: throw IllegalArgumentException("not a video: $url")
+        val p = WatchNext.get(id)
+        return Page(p.title, p.channel, p.channelUrl, p.subs, p.items, !p.cached)
     }
 
     /** Creates the project + harvest.json; the service then runs [run]. */
@@ -445,7 +429,7 @@ object Harvest {
             progress(t("Найдено ${st.items.size}/${s.target} · проверено ${st.checked} · запросов ${st.requests}/$budget\n",
                 "Found ${st.items.size}/${s.target} · checked ${st.checked} · requests ${st.requests}/$budget\n") + n.title.ifBlank { n.url })
             val pg = try {
-                page(n.url).also { st.requests++ }
+                page(n.url).also { if (it.asked) st.requests++ }
             } catch (e: Exception) {
                 st.requests++
                 L.w("harvest", "page ${n.id}: ${e.message}")
@@ -459,7 +443,7 @@ object Harvest {
             }
             for (ri in pg.related) {
                 if (full() || cancel.get()) break
-                val h = item(ri, n.depth + 1) ?: continue
+                val h = item(ri, n.depth + 1)
                 if (!seen.add(h.id)) continue
                 st.checked++
                 rest.add(h)

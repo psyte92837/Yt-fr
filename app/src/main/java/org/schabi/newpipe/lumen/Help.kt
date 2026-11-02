@@ -121,7 +121,8 @@ object Help {
                 "Everything about one topic. Bottom bar: Overview, Data (videos, collect, channels), Analysis (analytics, recommendations, audience, SEO), AI, More (export, diagrams, settings)."),
             listOf(
                 t("Сбор: запустите поиск и загрузку субтитров и комментариев. Долгие задачи идут в фоне с уведомлением.", "Collect: run the search and subtitle/comment download. Long tasks run in the background with a notification."),
-                t("Анализ: топ каналов и видео, динамика, кластеры; Рекомендации: граф «снежный ком», цепочка, Mix.", "Analysis: top channels and videos, trends, clusters; Recommendations: snowball graph, chain, Mix."),
+                t("Анализ: топ каналов и видео, динамика, кластеры; Алгоритм: граф «Следующего» (снежный ком, блуждания, цепочка, Mix), утечка с темы, ниши, потоки каналов, мой канал, возможности, динамика, аудит, прогноз и радар ролика.",
+                    "Analysis: top channels and videos, trends, clusters; Algorithm: the Up next graph (snowball, walks, chain, Mix), topic leak, niches, channel flows, my channel, opportunities, dynamics, audit, forecast and video radar."),
                 t("Аудитория: боли, вопросы и запросы из комментариев; SEO: конвейер P1–P7 с проверкой цитат.", "Audience: pains, questions and requests from comments; SEO: P1–P7 pipeline with quote checks."),
                 t("AI: сводки, отчёт, чат по данным проекта.", "AI: summaries, report, chat over the project data."),
                 t("Ещё → Экспорт: CSV, JSON, Markdown, PDF, GEXF.", "More → Export: CSV, JSON, Markdown, PDF, GEXF.")

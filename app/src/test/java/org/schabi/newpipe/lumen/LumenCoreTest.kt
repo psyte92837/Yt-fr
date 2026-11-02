@@ -89,7 +89,8 @@ class RecGraphTest {
         assertFalse(g.addEdge("a", "a", 0))
         assertEquals(4, g.edges.size)
         assertEquals(3, g.nodes["b"]!!.hits)
-        assertEquals(1.0 / 2 + 1.0 + 1.0 / 3, g.nodes["b"]!!.weight, 1e-9)
+        // weight = position weights of the links: place 1 → 0.63, place 0 → 1, place 2 → 0.5
+        assertEquals(AlgoCore.posWeight(1) + 1.0 + 0.5, g.nodes["b"]!!.weight, 1e-9)
         assertEquals(listOf("s", "a", "c"), g.parents("b").map { it.id })
         assertEquals(listOf("a", "b"), g.children("s").map { it.id })
     }
@@ -114,6 +115,64 @@ class RecGraphTest {
         assertEquals(listOf(0, 1), d.map { it.depth })
         assertEquals(3, d[1].nodes)
         assertEquals(1, d[1].onTopic)
+    }
+
+    @Test
+    fun repeatedObservationUpdatesTheEdge() {
+        val g = graph()
+        val later = System.currentTimeMillis() + 60_000L
+        assertFalse(g.addEdge("s", "a", 4, at = later))
+        val e = g.edge("s", "a")!!
+        assertEquals(2, e.seen)
+        assertEquals(4, e.rank)
+        assertEquals(later, e.last)
+        assertEquals(1, g.nodes["a"]!!.hits)
+        // derived counts follow the edges after removing a node
+        g.nodes.remove("c")
+        g.recompute()
+        assertEquals(2, g.nodes["b"]!!.hits)
+    }
+
+    @Test
+    fun schemaTwoRoundTripAndSchemaOneCompatibility() {
+        val g = graph()
+        g.exits.add(RecExit("x", "X", "u", "финансы", 3.0))
+        g.addEdge("a", "c", 0, "mix")
+        val back = RecGraph.parse(g.toJson().toString())
+        assertEquals(g.edges.size, back.edges.size)
+        assertEquals("mix", back.edge("a", "c")!!.kind)
+        assertEquals("финансы", back.exits.first().label)
+        assertEquals(g.nodes["b"]!!.hits, back.nodes["b"]!!.hits)
+        // schema 1: [from, to, rank] edges, stored weights are kept as they were
+        val old = "{\"nodes\":[{\"id\":\"s\",\"seed\":true},{\"id\":\"a\",\"hits\":7,\"weight\":2.5}],\"edges\":[[\"s\",\"a\",0]],\"mode\":\"channels\"}"
+        val o = RecGraph.parse(old)
+        assertEquals("ch", o.edges.first().kind)
+        assertEquals(7, o.nodes["a"]!!.hits)
+        assertEquals(2.5, o.nodes["a"]!!.weight, 1e-9)
+    }
+
+    @Test
+    fun personalisedPageRankAndSnapshot() {
+        val g = graph()
+        g.computePageRank()
+        assertEquals(1.0, g.nodes.values.sumOf { it.ppr }, 1e-6)
+        assertTrue(g.nodes["b"]!!.ppr > g.nodes["c"]!!.ppr) // c is not reachable from the seed
+        val snap = RecGraph.snapshotOf(g, 1L)
+        val back = RecSnap.from(snap.toJson())
+        assertEquals(snap.top.map { it.id }, back.top.map { it.id })
+        assertTrue("s>a" in back.edges)
+        assertEquals("b", back.top.first().id)
+    }
+
+    @Test
+    fun mixedStrategyKeepsTopHalf() {
+        val list = (0 until 10).map { RecNode("n$it", hits = 10 - it) }
+        val top = RecEngine.pick(list, 4, "top", java.util.Random(1))
+        assertEquals(listOf("n0", "n1", "n2", "n3"), top.map { it.id })
+        val mixed = RecEngine.pick(list, 4, "mixed", java.util.Random(1))
+        assertEquals(4, mixed.size)
+        assertEquals(listOf("n0", "n1"), mixed.take(2).map { it.id })
+        assertTrue(mixed.drop(2).all { it.id !in setOf("n0", "n1") })
     }
 
     @Test

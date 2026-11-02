@@ -96,4 +96,31 @@ class UpdatesTest {
         assertEquals("broken", YtProbe.verdict(listOf(r(false, ExtractorHealth.Kind.BOT), r(false, ExtractorHealth.Kind.BROKEN))))
         assertTrue(YtProbe.report(listOf(r(false, ExtractorHealth.Kind.BROKEN))).startsWith("✗ x"))
     }
+
+    private fun withChanges(vararg c: Pair<String, String>) = UpdateLogic.parse(
+        """{"build": 5, "apk": "https://x/a.apk", "notes": "last", "commit": "aaa",
+        "changes": [""" + c.joinToString(",") { """{"c": "${it.first}", "s": "${it.second}", "d": "2026-11-02T10:00:00+00:00"}""" } + "]}"
+    )!!
+
+    @Test
+    fun whatsNewStopsAtRunningCommit() {
+        val u = withChanges("c3c3c3c3c3" to "Third", "b2b2b2b2b2" to "Merge branch x", "a1a1a1a1a1" to "Second", "0f0f0f0f0f" to "First")
+        assertEquals(4, u.changes.size)
+        val w = UpdateLogic.whatsNew(u, "a1a1a1a1a1ffff")
+        assertTrue(w.complete)
+        assertEquals(listOf("Third"), w.items.map { it.subject })
+        assertTrue(UpdateLogic.whatsNewText(w).startsWith("• Third  · 2026-11-02"))
+        assertEquals(u.changes.size, UpdateLogic.parse(u.toJson())!!.changes.size)
+    }
+
+    @Test
+    fun whatsNewUnknownCommitShowsAllAndFallsBackToNotes() {
+        val u = withChanges("c3c3c3c3c3" to "Third", "d4d4d4d4d4" to "Update code graph [skip ci]", "a1a1a1a1a1" to "Second")
+        val w = UpdateLogic.whatsNew(u, "")
+        assertFalse(w.complete)
+        assertEquals(listOf("Third", "Second"), w.items.map { it.subject })
+        assertEquals(1, UpdateLogic.whatsNew(u, "", max = 1).hidden)
+        val old = UpdateLogic.parse(feed)!!
+        assertEquals(listOf("Extractor: bump"), UpdateLogic.whatsNew(old, "123").items.map { it.subject })
+    }
 }

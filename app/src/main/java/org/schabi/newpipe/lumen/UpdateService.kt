@@ -124,7 +124,7 @@ object Updates {
         val title = if (broken) t("Исправление для YouTube готово", "A YouTube fix is ready") else t("Доступно обновление Lumen", "Lumen update available")
         val body = t("Сборка ${info.build}", "Build ${info.build}") + (if (info.extractor != currentExtractor && info.extractor.isNotBlank())
             t(", новый NewPipeExtractor ", ", new NewPipeExtractor ") + UpdateLogic.extractorLabel(info.extractor) else "") +
-            (if (info.notes.isNotBlank()) "\n" + info.notes.take(300) else "")
+            UpdateLogic.whatsNewText(UpdateLogic.whatsNew(info, currentCommit, 6)).let { if (it.isBlank()) "" else "\n" + it.take(500) }
         val open = Nav.pending(ctx, 7305, Intent(ctx, SettingsActivity::class.java).putExtra("update", true))
         val n = Notify.builder(ctx, CH_UPDATE).setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(title).setContentText(body)

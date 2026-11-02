@@ -32,6 +32,8 @@ class SettingsActivity : LumenBase() {
         if (intent.getBooleanExtra("update", false)) section = 3
         direct = section >= 0
         render()
+        // "⬇ Update" from the update sheet: start the download right away
+        if (intent.getBooleanExtra("install", false) && savedInstanceState == null) Updates.available?.let { installUpdate(it) }
     }
 
     override fun navigateUp() {
@@ -736,7 +738,12 @@ class SettingsActivity : LumenBase() {
                 add(text(ctx, t("Доступна сборка ${u.build}", "Build ${u.build} available"), Type.TITLE_M, bold = true), 0)
                 val ex = if (u.extractor.isNotBlank() && u.extractor != Updates.currentExtractor)
                     t("Новый NewPipeExtractor: ", "New NewPipeExtractor: ") + UpdateLogic.extractorLabel(u.extractor) + "\n" else ""
-                muted(ex + (if (u.notes.isNotBlank()) u.notes.take(800) + "\n" else "") + u.date.take(10) + " " + UpdateLogic.mb(u.size))
+                val w = UpdateLogic.whatsNew(u, Updates.currentCommit, 25)
+                muted(ex + u.date.take(10) + " " + UpdateLogic.mb(u.size))
+                if (w.items.isNotEmpty()) {
+                    add(text(ctx, t("Что нового", "What's new"), Type.BODY, bold = true), 8)
+                    add(text(ctx, UpdateLogic.whatsNewText(w), 13f), 2)
+                }
                 button(t("Скачать и установить", "Download and install"), primary = true) { installUpdate(u) }
                 button(t("Открыть страницу сборки ↗", "Open the build page ↗"), style = BtnStyle.TEXT) { openUrl(UpdateLogic.PAGE) }
             }

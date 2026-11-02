@@ -18,6 +18,8 @@ jobs:
       contents: write # publish the rolling "lumen-latest" release from main
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 80 # commit list for "what's new" in update.json
 
       - uses: gradle/actions/wrapper-validation@v6
 
@@ -55,6 +57,8 @@ jobs:
           export SIZE="$(stat -c%s "$apk")"
           export EXTRACTOR="$(python3 tools/extractor_update.py current)"
           export NOTES="$(git log -1 --format=%s)"
+          # last commits, newest first: the app shows those newer than the build it runs
+          export CHANGES="$(git log --no-merges -n 60 --format='%H%x1f%s%x1f%cI' || true)"
           python3 - > dist/update.json <<'PY'
           import json, os
           e = os.environ
@@ -63,6 +67,8 @@ jobs:
               "application_id": "org.lumen.analyzer.debug",
               "apk": "https://github.com/%s/releases/download/lumen-latest/%s" % (e["GITHUB_REPOSITORY"], e["APK_NAME"]),
               "sha256": e["SHA256"], "size": int(e["SIZE"]), "notes": e["NOTES"][:500],
+              "changes": [dict(zip(("c", "s", "d"), (l.split("\x1f") + ["", "", ""])[:3]))
+                          for l in e.get("CHANGES", "").splitlines() if l.count("\x1f") >= 1],
               "date": __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime())}, ensure_ascii=False))
           PY
           cat dist/update.json

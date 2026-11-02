@@ -4,6 +4,7 @@
  */
 package org.schabi.newpipe.lumen
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -21,12 +22,21 @@ class UpdateInfo(
     val sha256: String,
     val size: Long,
     val notes: String,
-    val date: String
+    val date: String,
+    val changes: List<UpdateChange> = emptyList()
 ) {
     fun toJson(): String = JSONObject().put("build", build).put("commit", commit).put("extractor", extractor)
         .put("application_id", appId).put("apk", apk).put("sha256", sha256).put("size", size)
-        .put("notes", notes).put("date", date).toString()
+        .put("notes", notes).put("date", date)
+        .put("changes", JSONArray().apply { changes.forEach { put(JSONObject().put("c", it.sha).put("s", it.subject).put("d", it.date)) } })
+        .toString()
 }
+
+/** One commit of the published build, newest first in update.json. */
+class UpdateChange(val sha: String, val subject: String, val date: String)
+
+/** What is new compared with the running build; [complete] = the running commit was found in the list. */
+class WhatsNew(val items: List<UpdateChange>, val complete: Boolean, val hidden: Int)
 
 object UpdateLogic {
     const val REPO = "psyte92837/yt-fr"
@@ -48,7 +58,14 @@ object UpdateLogic {
             sha256 = o.optString("sha256").lowercase(),
             size = o.optLong("size", 0),
             notes = o.optString("notes"),
-            date = o.optString("date")
+            date = o.optString("date"),
+            changes = o.optJSONArray("changes")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    val c = a.optJSONObject(i) ?: return@mapNotNull null
+                    val subj = c.optString("s").trim()
+                    if (subj.isEmpty()) null else UpdateChange(c.optString("c").lowercase(), subj, c.optString("d"))
+                }
+            } ?: emptyList()
         ) else null
     } catch (e: Exception) {
         null
@@ -57,6 +74,35 @@ object UpdateLogic {
     /** An update is offered only for the same app id (debug and release are different apps) and a higher build. */
     fun isNewer(currentBuild: Int, currentAppId: String, info: UpdateInfo?): Boolean =
         info != null && (info.appId.isEmpty() || info.appId == currentAppId) && info.build > currentBuild
+
+    /** Commit subjects that say nothing to a user (merges, CI noise). */
+    fun noise(subject: String): Boolean {
+        val s = subject.lowercase()
+        return s.startsWith("merge ") || s.startsWith("revert \"revert") || s.contains("[skip ci]") ||
+            s.startsWith("wip") || s == "update" || s.startsWith("ci:") || s.startsWith("chore(ci)")
+    }
+
+    /**
+     * Commits of [info] newer than the running [currentCommit] (stops at it).
+     * Unknown running commit (local build or too old) → the whole list, complete = false.
+     * Falls back to [UpdateInfo.notes] when the feed has no list (older CI).
+     */
+    fun whatsNew(info: UpdateInfo, currentCommit: String, max: Int = 40): WhatsNew {
+        if (info.changes.isEmpty()) {
+            val n = info.notes.trim()
+            return WhatsNew(if (n.isEmpty()) emptyList() else listOf(UpdateChange(info.commit, n, info.date)), false, 0)
+        }
+        val cur = currentCommit.trim().lowercase()
+        val idx = if (cur.length >= 7) info.changes.indexOfFirst { it.sha.isNotEmpty() && (it.sha.startsWith(cur) || cur.startsWith(it.sha)) } else -1
+        val raw = if (idx >= 0) info.changes.take(idx) else info.changes
+        val useful = raw.filterNot { noise(it.subject) }
+        return WhatsNew(useful.take(max), idx >= 0, maxOf(0, useful.size - max))
+    }
+
+    /** Plain text for a card or a notification: "• subject (date)". */
+    fun whatsNewText(w: WhatsNew): String = w.items.joinToString("\n") { c ->
+        "• " + c.subject + (if (c.date.length >= 10) "  · " + c.date.take(10) else "")
+    } + (if (w.hidden > 0) "\n… +" + w.hidden else "")
 
     fun shortSha(s: String): String = if (Regex("[0-9a-fA-F]{12,40}").matches(s)) s.take(10) else s
 

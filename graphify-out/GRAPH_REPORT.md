@@ -426,7 +426,7 @@
 - `KnowledgeMapTest.kt` (17): KnowledgeMapTest:15, KnowledgeMapTest.kt:1, .ids():48, .emptyProjectHasOnlyTopic():146, .aspectsCoverTheProject():50, .audienceGroupsByType():113
 - `LangGameTest.kt` (13): LangGameTest:9, LangGameTest.kt:1, .scriptAndTagsFromAnswer():99, .compactFitsLimit():92, .titleShapesAndAddress():53, .briefCarriesProtocolTaskAndData():81
 - `LiveYouTubeTest.kt` (5): LiveYouTubeTest.kt:1, .youtubeWorksThroughExtractor():45, JvmDownloader:25, LiveYouTubeTest:24, .execute():26
-- `LumenCoreTest.kt` (53): LumenCoreTest.kt:1, RecGraphTest:74, .graph():75, .modelsRoundTrip():496, video():16, LlmParseTest:241
+- `LumenCoreTest.kt` (53): LumenCoreTest.kt:1, RecGraphTest:74, .graph():75, .modelsRoundTrip():497, video():16, LlmParseTest:242
 - `MediaTest.kt` (5): MediaTest:11, .menuOrderAndKeys():33, MediaTest.kt:1, .playableNormalisesVideoLinks():14, .playableRejectsNonVideos():23
 - `NavTest.kt` (12): NavTest:6, .kId():13, .deeperScreenIsReorderedKeepingTheOthers():21, .exactInstanceWinsOverSameKey():31, .otherProjectIsPushedNotSwapped():26, .screenOnTopJustComesForward():16
 - `OutgoingTest.kt` (11): OutgoingTest:11, .blockWithAllLinesOffDisappears():42, .carriesChoiceToRetry():55, .changedBlockStartsOn():67, .decide():82, .dropsBlocksAndLines():35

@@ -131,4 +131,20 @@ class UxLogicTest {
         assertNull(PrefsIo.parse("{\"protocol\":\"other\"}"))
         assertNull(PrefsIo.parse("not json"))
     }
+
+    @Test
+    fun scrollStaysOnRerenderAndPerTab() {
+        val m = ScrollMemo()
+        // first render: top
+        assertEquals(0, m.target(null, "P|a", 0))
+        // tap on a button: same page, same place
+        assertEquals(500, m.target("P|a", "P|a", 500))
+        // another tab starts at the top, coming back restores the first one
+        assertEquals(0, m.target("P|a", "P|b", 700))
+        assertEquals(700, m.target("P|b", "P|a", 120))
+        assertEquals(120, m.target("P|a", "P|b", 700))
+        // explicit keep follows the current position even across keys
+        assertEquals(300, m.target("P|b", "Q", 300, keep = true))
+        assertEquals(0, m.target(null, "X", -5))
+    }
 }

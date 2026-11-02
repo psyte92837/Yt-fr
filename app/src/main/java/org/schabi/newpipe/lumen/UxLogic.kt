@@ -240,3 +240,22 @@ object PrefsIo {
         return out
     }
 }
+
+/**
+ * Scroll position across re-renders of a screen. Screens rebuild their whole page on most taps; the page keeps
+ * its place when it is the same view (title + selected tabs), and each tab comes back where it was left.
+ */
+class ScrollMemo(private val max: Int = 32) {
+    private val ys = LinkedHashMap<String, Int>()
+
+    /** Where the new page should scroll to: [curY] is the position of the page being replaced ([prevKey]). */
+    fun target(prevKey: String?, newKey: String, curY: Int, keep: Boolean = false): Int {
+        if (prevKey != null) {
+            ys.remove(prevKey)
+            ys[prevKey] = maxOf(0, curY)
+            while (ys.size > max) ys.remove(ys.keys.first())
+        }
+        if (keep) return maxOf(0, curY)
+        return ys[newKey] ?: 0
+    }
+}

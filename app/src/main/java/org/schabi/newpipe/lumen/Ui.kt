@@ -1040,6 +1040,39 @@ abstract class LumenBase : Activity() {
     }
 
     private var pageScroll: ScrollView? = null
+    private var pageKey: String? = null
+    private val scrollMemo = ScrollMemo()
+
+    /** Texts of the selected tabs / nav items inside [v]: part of the page key. */
+    private fun selectedLabels(v: View?): String {
+        val out = StringBuilder()
+        fun walk(x: View) {
+            if (x is TextView && x.isSelected) out.append(x.text).append(';')
+            if (x is ViewGroup) for (i in 0 until x.childCount) walk(x.getChildAt(i))
+        }
+        v?.let { walk(it) }
+        return out.toString()
+    }
+
+    /**
+     * Scrolls [sv] to [y] once laid out; content that grows a moment later (loaded rows) is followed for up to 1.5 s,
+     * unless the user touches the page first.
+     */
+    private fun restoreScroll(sv: ScrollView, y: Int, ownTouch: Boolean) {
+        val until = System.currentTimeMillis() + 1500
+        var done = false
+        val child = sv.getChildAt(0)
+        val listener = object : View.OnLayoutChangeListener {
+            override fun onLayoutChange(v: View, l: Int, tp: Int, r: Int, b: Int, ol: Int, ot: Int, orr: Int, ob: Int) {
+                if (done || System.currentTimeMillis() > until) { done = true; v.removeOnLayoutChangeListener(this); return }
+                sv.scrollTo(0, y)
+                if (sv.scrollY >= y) { done = true; v.removeOnLayoutChangeListener(this) }
+            }
+        }
+        child?.addOnLayoutChangeListener(listener)
+        if (ownTouch) sv.setOnTouchListener { _, _ -> if (!done) { done = true; child?.removeOnLayoutChangeListener(listener) }; false }
+        sv.post { if (!done) sv.scrollTo(0, y) }
+    }
     private var pageFooter: View? = null
 
     // ---------- snackbar, undo, remembered fields (UX_AUDIT stage 1) ----------
@@ -1290,13 +1323,16 @@ abstract class LumenBase : Activity() {
         }
         column.addView(appBar(title, back, actions))
         header?.let { column.addView(it) }
-        val prevY = if (keepScroll) pageScroll?.scrollY ?: 0 else 0
+        // same view (title + selected tabs) keeps its place after a tap; each tab remembers its own
+        val key = title + "|" + selectedLabels(header) + "|" + selectedLabels(footer)
+        val prevY = scrollMemo.target(pageKey, key, pageScroll?.scrollY ?: 0, keepScroll)
+        pageKey = key
         val body = if (!scroll || content is ScrollView) content else ScrollView(this).apply {
             isFillViewport = true
             addView(content)
         }
         pageScroll = body as? ScrollView
-        if (prevY > 0) pageScroll?.let { sv -> sv.post { sv.scrollTo(0, prevY) } }
+        if (prevY > 0) pageScroll?.let { restoreScroll(it, prevY, ownTouch = body !== content) }
         column.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         footer?.let { column.addView(it) }
         pageFooter = footer

@@ -310,10 +310,10 @@ object EditMotion {
             val win = (i == 0) == aWins
             val col = if (win) th.accent else th.ink
             val al = a * p.coerceIn(0f, 1f)
-            out += MPrim.Label(txt(th, r.label.ifEmpty { if (i == 0) "A" else "B" }), cx, h * 0.2f, fs, th.muted, al, weight = 700, maxW = w * 0.4f)
+            out += MPrim.Label(txt(th, r.label.ifEmpty { if (i == 0) "A" else "B" }), cx, h * 0.2f, fs, th.muted, al, weight = 700, maxW = w * 0.34f)
             val v = if (i == 0) va else vb
             val shown = if (v != null) fmt(v * p.coerceIn(0f, 1f), parseNum(r.value)!!) + unitText(r.unit) else r.value
-            out += MPrim.Label(txt(th, shown), cx, h * 0.48f, h * 0.24f * th.scale, col, al, weight = 900, maxW = w * 0.4f, glow = if (win) th.glow else 0f)
+            out += MPrim.Label(txt(th, shown), cx, h * 0.48f, h * 0.24f * th.scale, col, al, weight = 900, maxW = w * 0.34f, glow = if (win) th.glow else 0f)
             if (v != null) {
                 val bw = w * 0.36f * (abs(v) / mx).toFloat() * p
                 out += MPrim.Box(cx - w * 0.18f, h * 0.7f, cx - w * 0.18f + bw, h * 0.78f, h * 0.04f, if (win) th.accent else th.muted, al)
@@ -321,8 +321,9 @@ object EditMotion {
             if (win && p >= 1f) out += MPrim.Icon("👑", cx, h * 0.88f, fs * 1.1f, al * easeOut(prog(t, times[i] + 0.4, times[i] + 0.8)))
         }
         val vs = easeOut(prog(t, 0.1, 0.5))
-        out += MPrim.Arc(w / 2, h * 0.48f, h * 0.09f, 0f, 360f, h * 0.012f, th.accent2, a * vs)
-        out += MPrim.Label("VS", w / 2, h * 0.48f, h * 0.08f, th.accent2, a * vs, weight = 900)
+        // «VS» stands between the names, the numbers keep their room
+        out += MPrim.Arc(w / 2, h * 0.2f, h * 0.075f, 0f, 360f, h * 0.01f, th.accent2, a * vs)
+        out += MPrim.Label("VS", w / 2, h * 0.2f, h * 0.065f, th.accent2, a * vs, weight = 900)
         return out
     }
 

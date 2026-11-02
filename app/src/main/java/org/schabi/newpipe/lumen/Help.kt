@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "bots", "bot_posts", "settings"
+        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -322,6 +322,30 @@ object Help {
                     "The layer runs in a WebView without internet: pictures and fonts by link do not load, only system fonts, emoji are fine. The protocol text — the \"📄 Protocol\" button."),
                 t("Галочка «Слой в полном разрешении» делает надписи чётче, но рендер медленнее. Если в видео уже есть субтитры из Студии, ИИ получает указание их не перекрывать.",
                     "The \"Layer at full resolution\" tick makes text sharper but the render slower. If the video already has Studio subtitles, the AI is told not to cover them.")
+            )),
+        HelpTopic("insert", t("Редактор: схема или анимация от ИИ", "Editor: AI scheme or animation"),
+            t("Помощник вставки Редактора Студии. Вы говорите смыслом — «сравнение», «число-факт», «шаги» — а Lumen сам решает, рисовать это нативной инфосхемой или анимацией (код ИИ по протоколу lumen.anim, заранее отрисованный в кадры). Сделать может встроенный ИИ или любой чат-ИИ: запрос копируется, ответ Lumen берёт из буфера.",
+                "The insert wizard of the Studio editor. You speak in meaning — \"comparison\", \"number fact\", \"steps\" — and Lumen decides whether to draw it as a native info-scheme or as an animation (AI code by the lumen.anim protocol, rendered into frames in advance). The built-in AI or any chat AI can make it: the request is copied and Lumen takes the answer from the clipboard."),
+            listOf(
+                t("Поставьте курсор в нужный момент (или выделите фразу в «📝 Текст речи») → «＋ Вставить» → «✨ Схема или анимация от ИИ».",
+                    "Put the playhead at the moment (or select a phrase in \"📝 Speech text\") → \"＋ Insert\" → \"✨ AI scheme or animation\"."),
+                t("1 Что: выберите тип по смыслу. «🧪 Примеры» вставляют готовые анимации без ИИ, «📚 Моя библиотека» — сохранённые, «⭐ Мои рецепты» и «↺ Как в прошлый раз» — прежний вид.",
+                    "1 What: pick a type by meaning. \"🧪 Examples\" insert ready animations without AI, \"📚 My library\" — saved ones, \"⭐ My recipes\" and \"↺ Like last time\" — an earlier look."),
+                t("2 Бриф: сверху макет на текущем кадре — место блока, подложка, затемнение, запретные зоны (лицо, субтитры, интерфейс Shorts). Достаточно поля «Что показать»; разделы А–Е раскрываются по желанию, «Авто» решает ИИ или стиль. Предупреждения снизу исправляются одним касанием.",
+                    "2 Brief: on top a mock-up on the current frame — the block's place, plate, dimming and zones to keep free (face, subtitles, Shorts interface). \"What to show\" is enough; sections A–F open on demand, \"Auto\" leaves it to the AI or the style. Warnings below are fixed in one tap."),
+                t("3 Кто сделает: «🤖 Встроенный ИИ» или «⧉ Другой ИИ». Во втором случае на таймлайне сразу появится блок «⏳ ждёт ответ ИИ #метка» — вставьте запрос в Gemini, ChatGPT или Claude, скопируйте ответ и вернитесь: Lumen возьмёт его сам.",
+                    "3 Who makes it: \"🤖 Built-in AI\" or \"⧉ Another AI\". With the second one a \"⏳ awaits AI answer #mark\" block appears on the timeline at once — paste the request into Gemini, ChatGPT or Claude, copy the answer and come back: Lumen takes it itself."),
+                t("4 Проверка: кадры результата поверх видео. Без ИИ меняются прозрачность, подложка, затемнение, место, размер и длина; через ИИ — чипы «Крупнее текст», «Меньше слов», «Медленнее»… и своя правка. «✅ Вставить» — один шаг отмены.",
+                    "4 Check: frames of the result over the video. Without AI you change the opacity, plate, dimming, place, size and length; through the AI — chips \"Bigger text\", \"Fewer words\", \"Slower\"… and your own edit. \"✅ Insert\" is one undo step."),
+                t("Анимация рисуется в кадры прямо на блоке (значок «🎞 N %» на превью), пока экран редактора открыт. После смены длины или размера блока кадры перерисуются сами через полторы секунды; перед экспортом Lumen предложит перерисовать то, что не успело.",
+                    "An animation is rendered into frames right on the block (the \"🎞 N %\" badge on the preview) while the editor is open. After the block's length or size changes the frames are redrawn by themselves in a second and a half; before the export Lumen offers to redraw what is left.")
+            ),
+            listOf(
+                t("У выбранной схемы или анимации на панели: «🤖 Переделать» (та же форма с сохранённым брифом), «🛠 Проверить» (кадры, ошибки кода, правки, прошлые версии), «🌓 Под блоком» (затемнение видео).",
+                    "A selected scheme or animation has on its panel: \"🤖 Redo\" (the same form with the saved brief), \"🛠 Check\" (frames, code errors, edits, previous versions), \"🌓 Under it\" (dimming the video)."),
+                t("«Е. Стиль ролика» запоминает вид, прозрачность и темп для всех новых вставок этого ролика; «⭐ Сохранить как рецепт» — для любых роликов.",
+                    "\"F. Style of the video\" keeps the look, transparency and pace for all new inserts of this video; \"⭐ Save as a recipe\" — for any video."),
+                t("Шаблоны вкладки «🎛 Монтаж» можно поставить на отрезок: «🎛 Шаблон Монтажа» на первом шаге.", "Templates of the \"🎛 Montage\" tab can go on a piece: \"🎛 Montage template\" on the first step.")
             )),
         HelpTopic("bots", t("Мои ТГ боты", "My Telegram bots"),
             t("Telegram-боты, которые пишет ИИ по вашему описанию, а телефон работает их сервером. У раздела своя иконка «Lumen Боты» на рабочем столе. " +

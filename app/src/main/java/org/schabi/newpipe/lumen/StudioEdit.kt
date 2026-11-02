@@ -538,9 +538,24 @@ object StudioEdit {
      * for schemes, until [settle] (when the last node has come in).
      */
     fun overlayKey(shown: List<EBlock>, tMs: Long, settle: (EBlock) -> Long): String = shown.joinToString("|") { b ->
-        val d = animMs(b)
+        val d = max(animMs(b), if (b.dim > 0f) DIM_MS else 0L)
         val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b)) || b.keys.size > 1
-        b.id + "@" + b.hashCode() + if (moving) ":$tMs" else ""
+        // an animation is redrawn only when its frame changes, not on every frame of the video
+        val frame = if (b.kind == EditInsert.KIND && b.file.contains("/r_")) {
+            val local = tMs - b.startMs
+            ":f" + (if (b.loopMs > 0) (local % b.loopMs) else local) * b.fps / 1000
+        } else ""
+        b.id + "@" + b.hashCode() + frame + if (moving) ":$tMs" else ""
+    }
+
+    /** The video under a block darkens and brightens again this long ([EBlock.dim]). */
+    const val DIM_MS = 300L
+
+    /** Share of the dimming of [b] at [tMs]: rises at its start and falls at its end over [DIM_MS]. */
+    fun dimAlpha(b: EBlock, tMs: Long): Float {
+        if (tMs < b.startMs || tMs >= b.endMs) return 0f
+        val d = min(DIM_MS, b.durMs / 2).coerceAtLeast(1)
+        return min(1f, min((tMs - b.startMs).toFloat() / d, (b.endMs - tMs).toFloat() / d)).coerceIn(0f, 1f)
     }
 
     /** Time left of a job [fraction] done after [elapsedMs]; null while too early to tell. */

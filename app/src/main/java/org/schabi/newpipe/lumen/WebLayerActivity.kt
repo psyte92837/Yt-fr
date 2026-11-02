@@ -4,7 +4,6 @@
  */
 package org.schabi.newpipe.lumen
 
-import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -19,22 +18,13 @@ import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONObject
-import java.io.ByteArrayInputStream
 import java.io.File
-import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CancellationException
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 /**
  * Studio tab "🎛 Montage": the hand editor ([StudioEditorActivity]) and the second renderer (lumen.canvas v1,
@@ -58,7 +48,7 @@ class WebLayerActivity : LumenBase() {
         }
     }
 
-    private class LayerError(msg: String) : Exception(msg)
+    private val host by lazy { CanvasHost(this) }
 
     private val dir by lazy { dir(this) }
     private val store by lazy { LayerStore(File(dir, "layers")) }
@@ -82,8 +72,6 @@ class WebLayerActivity : LumenBase() {
     private var result: File? = null
     private var savedAs = ""
     private var statusView: TextView? = null
-    private var web: WebView? = null
-    private var pageReady: (() -> Unit)? = null
 
     private var full: Boolean
         get() = Lumen.prefs.getBoolean("weblayer_full", false)
@@ -112,11 +100,7 @@ class WebLayerActivity : LumenBase() {
 
     override fun onDestroy() {
         cancel = true
-        web?.let { w ->
-            (w.parent as? ViewGroup)?.removeView(w)
-            w.destroy()
-        }
-        web = null
+        host.destroy()
         super.onDestroy()
     }
 
@@ -305,61 +289,10 @@ class WebLayerActivity : LumenBase() {
 
     // ---------- WebView ----------
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun webView(): WebView = web ?: WebView(this).also { w ->
-        w.settings.javaScriptEnabled = true
-        w.settings.blockNetworkLoads = true
-        w.settings.allowFileAccess = false
-        w.settings.allowContentAccess = false
-        w.settings.domStorageEnabled = false
-        w.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-        w.setBackgroundColor(Color.TRANSPARENT)
-        w.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
-
-            // nothing leaves the phone: every request except inline data is answered empty
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                if (request.url.scheme == "data") null else WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-
-            override fun onPageFinished(view: WebView, url: String?) {
-                pageReady?.invoke()
-                pageReady = null
-            }
-        }
-        web = w
-    }
-
-    /** Runs [script] on the main thread; the returned function waits (worker thread) for its result. */
-    private fun jsAsync(script: String): () -> String? {
-        val q = ArrayBlockingQueue<String>(1)
-        runOnUiThread {
-            val w = web
-            if (w == null) q.offer("null") else w.evaluateJavascript(script) { q.offer(it ?: "null") }
-        }
-        return { q.poll(30, TimeUnit.SECONDS) }
-    }
-
-    /** Loads the page with [layerCode] and calls init(data); throws [LayerError] on a broken layer (worker thread). */
-    private fun load(layerCode: String, d: JSONObject) {
-        val latch = CountDownLatch(1)
-        val html = WebLayer.page(layerCode, d.optInt("w"), d.optInt("h"))
-        runOnUiThread {
-            pageReady = { latch.countDown() }
-            webView().loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
-        }
-        if (!latch.await(20, TimeUnit.SECONDS)) throw LayerError(t("страница слоя не загрузилась", "the layer page did not load"))
-        val r = jsAsync("__lumen.init(" + d.toString() + ")")() ?: throw LayerError(t("WebView не ответил", "The WebView gave no answer"))
-        val s = runCatching { org.json.JSONArray("[$r]").getString(0) }.getOrDefault(r)
-        if (s != "OK") throw LayerError(s.removePrefix("ERR:").ifBlank { t("слой не запустился", "the layer did not start") })
-    }
-
+    private fun load(layerCode: String, d: JSONObject) = host.load(layerCode, d)
+    private fun jsAsync(script: String) = host.jsAsync(script)
     private fun call(sec: Double) = "__lumen.frame(" + String.format(java.util.Locale.US, "%.4f", sec) + ")"
-
-    private fun overlay(res: String?): Bitmap? = when (val f = WebLayer.frameOf(res)) {
-        is WebLayer.Frame.Empty -> null
-        is WebLayer.Frame.Error -> throw LayerError(f.message)
-        is WebLayer.Frame.Png -> android.util.Base64.decode(f.base64, android.util.Base64.DEFAULT).let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-    }
+    private fun overlay(res: String?): Bitmap? = host.bitmap(res)
 
     // ---------- preview, comparison, render ----------
 
@@ -403,7 +336,7 @@ class WebLayerActivity : LumenBase() {
             busy = ""
             lastError = e.message ?: e.javaClass.simpleName
             render()
-            if (e !is LayerError) err(e)
+            if (e !is CanvasHost.LayerError) err(e)
         }) { s ->
             busy = ""
             previews = s
@@ -426,7 +359,7 @@ class WebLayerActivity : LumenBase() {
                 status(t("Сравнение: ", "Comparing: ") + l.name)
                 l to try {
                     shots(l.code, times, 200)
-                } catch (e: LayerError) {
+                } catch (e: CanvasHost.LayerError) {
                     emptyList()
                 }
             }
@@ -511,9 +444,9 @@ class WebLayerActivity : LumenBase() {
         }, { e ->
             busy = ""
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            if (e is LayerError) lastError = e.message.orEmpty()
+            if (e is CanvasHost.LayerError) lastError = e.message.orEmpty()
             render()
-            if (e !is LayerError) err(e)
+            if (e !is CanvasHost.LayerError) err(e)
         }) { saved ->
             busy = ""
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -694,11 +627,9 @@ class WebLayerActivity : LumenBase() {
         // 6. render
         if (busy == "preview" || busy == "render" || busy == "compare") {
             c.add(text(this, t("Слой сейчас", "The layer now"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val w = webView()
-            (w.parent as? ViewGroup)?.removeView(w)
             val box = FrameLayout(this).apply { setBackgroundColor(0xFF202024.toInt()) }
             val bw = dp(150)
-            box.addView(w, FrameLayout.LayoutParams(bw, if (vw > 0) bw * vh / vw else bw))
+            host.attach(box, FrameLayout.LayoutParams(bw, if (vw > 0) bw * vh / vw else bw))
             c.add(box, 4)
             statusView = c.add(text(this, when (busy) {
                 "preview" -> t("Превью…", "Preview…")
@@ -707,7 +638,7 @@ class WebLayerActivity : LumenBase() {
             }, 14f), 8) as TextView
             c.button(t("Остановить", "Stop"), style = BtnStyle.OUTLINED) { cancel = true }
         } else {
-            web?.let { w -> (w.parent as? ViewGroup)?.removeView(w) }
+            host.detach()
             if (idle && v != null && code.isNotBlank()) c.button(t("🎬 Рендер с этим монтажом", "🎬 Render with this montage"), primary = true) { renderVideo() }
         }
         result?.takeIf { it.exists() }?.let { f ->

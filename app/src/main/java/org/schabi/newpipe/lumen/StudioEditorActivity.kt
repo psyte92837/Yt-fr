@@ -201,6 +201,48 @@ class StudioEditorActivity : LumenBase() {
 
     private val blocks: List<EBlock> get() = project?.blocks.orEmpty()
     private val dir: File get() = StudioEditStore.dir(applicationContext, project?.id ?: "none")
+
+    // ---------- the insert wizard and animation blocks ----------
+    private val canvasHost by lazy { CanvasHost(this) }
+    private val insertHost: InsertHost by lazy {
+        object : InsertHost {
+            override val ui: LumenBase get() = this@StudioEditorActivity
+            override fun project(): EProject? = this@StudioEditorActivity.project
+            override fun blocks(): List<EBlock> = this@StudioEditorActivity.blocks
+            override fun words(): List<SWord> = this@StudioEditorActivity.words
+            override fun curMs(): Long = this@StudioEditorActivity.curMs
+            override fun outLen(): Long = this@StudioEditorActivity.total
+            override fun dir(): File = this@StudioEditorActivity.dir
+            override fun styleDir(): File = this@StudioEditorActivity.styleDir
+            override fun lang(): String = this@StudioEditorActivity.lang()
+            override fun frame(): Bitmap? = runCatching { texture?.bitmap }.getOrNull()
+            override fun canvas(): CanvasHost = attachCanvas()
+            override fun commit(list: List<EBlock>, sel: String?) {
+                this@StudioEditorActivity.commit(list, sel)
+                stage?.refresh()
+            }
+            override fun deliverTo(pid: String, mutate: (EProject, List<EBlock>, Boolean) -> List<EBlock>) = this@StudioEditorActivity.deliverTo(pid, mutate)
+            override fun setBrand(json: String) {
+                this@StudioEditorActivity.project = this@StudioEditorActivity.project?.copy(brand = json)
+                save()
+            }
+            override fun animChanged(id: String) {
+                animErr.remove(id)
+                scheduleAnim(300)
+            }
+            override fun pause() = this@StudioEditorActivity.pause()
+        }
+    }
+    private val insert by lazy { InsertWizard(insertHost) }
+    /** Errors of the JS of animation blocks (by block id) until they are fixed. */
+    private val animErr = HashMap<String, String>()
+    private var animBusy: String? = null
+    @Volatile private var animCancel = false
+    private var animBadge: TextView? = null
+    /** Export once the animations are rendered (quality), 0 = no. */
+    private var exportAfter = 0
+    private var clipSeen: String? = null
+    private val animCheck = Runnable { renderStale() }
     private val styleDir: File get() = StudioEditStore.styleDir(applicationContext)
     private val clips: List<VClip> get() = project?.let { EditTrack.of(it) } ?: emptyList()
     private val total: Long get() = project?.let { outLen(it) } ?: 1L
@@ -227,12 +269,14 @@ class StudioEditorActivity : LumenBase() {
         window.decorView.removeCallbacks(tick)
         window.decorView.postOnAnimation(tick)
         watch()
+        scheduleAnim(800)
     }
 
     override fun onPause() {
         super.onPause()
         resumed = false
         BgTasks.watchers -= watcher
+        animCancel = true
         pause()
         player2?.pause()
         player3?.pause()
@@ -241,7 +285,24 @@ class StudioEditorActivity : LumenBase() {
 
     override fun onDestroy() {
         stopPlayer()
+        animCancel = true
+        canvasHost.destroy()
+        // frames no block shows any more go away with the screen (the code stays for undo)
+        if (isFinishing) project?.let { p -> runCatching { AnimRender.clean(dir, p.blocks) } }
         super.onDestroy()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // another AI answered: Android lets an app read the clipboard only while it has focus
+        if (!hasFocus || project == null || EditInsert.waiting(blocks).isEmpty()) return
+        val c = runCatching {
+            getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+        }.getOrNull() ?: return
+        if (c == clipSeen || c == Relay.lastTaken || RelayText.isOwnRequest(c)) return
+        val a = EditInsert.detect(c) ?: return
+        clipSeen = c
+        if (insert.deliver(a)) Relay.lastTaken = c
     }
 
     @Deprecated("Deprecated in Java")
@@ -932,7 +993,12 @@ class StudioEditorActivity : LumenBase() {
                 buildList {
                     add(done { select(null) })
                     add(act("✎", t("Изменить", "Edit")) { edit(b) })
-                    if (b.kind != "emoji") add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                    if (b.kind != "emoji" && b.kind != EditInsert.KIND) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                    if (b.kind == "scheme" || b.kind == EditInsert.KIND) {
+                        add(act("🤖", t("Переделать", "Redo")) { insert.redo(b) })
+                        add(act("🛠", t("Проверить", "Check"), on = b.id in animErr) { insert.check(b, animErr[b.id].orEmpty()) })
+                        add(act("🌓", t("Под блоком", "Under it"), on = b.dim > 0f) { dimSheet(b) })
+                    }
                     add(act("🎞", t("Анимация", "Animation")) { animSheet(b) })
                     add(act("⏱", t("Время", "Timing")) { timingSheet(b) })
                     add(act("✂", t("Разделить", "Split")) { split(b) })
@@ -945,7 +1011,6 @@ class StudioEditorActivity : LumenBase() {
                     add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
                     add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
                     add(act("📐", t("Положение", "Position")) { positionSheet(b.id) })
-                    if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
                     if (EditCaptions.isSub(b)) add(act("💬", t("Все субтитры", "All subtitles")) { subsSheet() })
                     add(danger("🗑", t("Удалить", "Delete")) { delete(b.id) })
                 }
@@ -1018,7 +1083,7 @@ class StudioEditorActivity : LumenBase() {
                 line = catName("ai")
                 listOfNotNull(
                     back(),
-                    act("🧩", t("Схема ИИ", "AI scheme")) { aiSchemeSheet(null) },
+                    act("✨", t("Схема или анимация", "Scheme or animation")) { insert.start() },
                     if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
                     act("T", t("Надпись ИИ", "AI caption")) { captionSheet(null) },
                     act("🌐", t("Фото ИИ", "AI photo")) { photoSheet(null) }
@@ -1520,6 +1585,7 @@ class StudioEditorActivity : LumenBase() {
         timeline?.blocks = list
         splitKey = ""
         layoutSplit()
+        scheduleAnim()
     }
 
     private fun save() {
@@ -1924,7 +1990,7 @@ class StudioEditorActivity : LumenBase() {
                 muted(sub)
             }
             if (words.isNotEmpty()) item(t("📝 По тексту речи", "📝 From the speech text"), t("выделите фразу — блок встанет ровно на неё", "select a phrase — the block goes exactly on it")) { textSheet() }
-            item(t("🧩 Инфосхема от ИИ", "🧩 AI info-scheme"), t("по словам этого момента и вашему пожеланию", "from the words of this moment and your wish")) { aiSchemeSheet(null) }
+            item(t("✨ Схема или анимация от ИИ", "✨ AI scheme or animation"), t("помощник: что показать → бриф → встроенный или другой ИИ → проверка", "wizard: what to show → brief → built-in or another AI → check")) { insert.start() }
             if (words.isNotEmpty()) item(t("🤖 Схемы на весь ролик", "🤖 Schemes for the whole video"), t("ИИ сам выберет места и поставит схемы", "the AI picks the places and puts schemes there")) { autoSchemes() }
             item(t("✍️ Схема своим текстом", "✍️ Scheme from your text"), t("строки «эмодзи Подпись — значение», без ИИ", "lines \"emoji Label — value\", no AI")) { textSchemeSheet(null) }
             item(t("🖼 Картинка из галереи", "🖼 Picture from the gallery"), t("фото, скриншот, логотип (PNG с прозрачностью тоже)", "a photo, screenshot or logo (transparent PNG too)")) { pickImage(null) }
@@ -2167,9 +2233,9 @@ class StudioEditorActivity : LumenBase() {
                 if (r == null) info.text = "" else {
                     val (st, du) = StudioEdit.spanOf(words, r, outLen(p))
                     info.text = StudioEdit.clock(st) + " – " + StudioEdit.clock(st + du) + "  ·  " + r.joinToString(" ") { words[it].text }.take(90)
-                    acts.addView(chip(ctx, t("🧩 Схема ИИ", "🧩 AI scheme")) {
+                    acts.addView(chip(ctx, t("✨ Помощник на фразу", "✨ Wizard on the phrase")) {
                         dismiss()
-                        aiSchemeSheet(null, r)
+                        insert.start(r)
                     })
                     acts.addView(chip(ctx, t("T Надпись", "T Caption")) {
                         dismiss()
@@ -2612,6 +2678,7 @@ class StudioEditorActivity : LumenBase() {
 
     private fun edit(b: EBlock) = when (b.kind) {
         "scheme" -> textSchemeSheet(b)
+        EditInsert.KIND -> insert.check(b, animErr[b.id].orEmpty())
         "image" -> imageSheet(b)
         "text" -> captionSheet(b)
         EditSplit.KIND -> splitSheet(b)
@@ -3368,6 +3435,162 @@ class StudioEditorActivity : LumenBase() {
     // ---------- export ----------
 
     /** Quality and a word on how the export works, then the export. */
+    // ---------- animation blocks: frames ----------
+
+    private fun scheduleAnim(delay: Long = 1500) {
+        val v = window?.decorView ?: return
+        v.removeCallbacks(animCheck)
+        v.postDelayed(animCheck, delay)
+    }
+
+    /** The WebView of animations: behind the video frame (it only has to be in the window), and a progress badge on top. */
+    private fun attachCanvas(): CanvasHost {
+        val box = previewBox
+        if (box != null) {
+            val w = canvasHost.view()
+            if (w.parent !== box) {
+                (w.parent as? ViewGroup)?.removeView(w)
+                box.addView(w, 0, FrameLayout.LayoutParams(dp(64), dp(64), Gravity.TOP or Gravity.END))
+            }
+        }
+        return canvasHost
+    }
+
+    private fun badge(s: String?) {
+        val box = previewBox ?: return
+        var b = animBadge
+        if (s == null) {
+            b?.visibility = View.GONE
+            return
+        }
+        if (b == null || b.parent !== box) {
+            (b?.parent as? ViewGroup)?.removeView(b)
+            b = text(this, "", 12f, bold = true, color = 0xFFFFFFFF.toInt()).apply {
+                background = roundBg(0xB3000000.toInt(), 12f, this@StudioEditorActivity)
+                setPadding(dp(10), dp(4), dp(10), dp(4))
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            }
+            box.addView(b, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.START).apply { setMargins(dp(8), dp(8), 0, 0) })
+            animBadge = b
+        }
+        b.text = s
+        b.contentDescription = s
+        b.visibility = View.VISIBLE
+    }
+
+    private fun hex(c: Int) = String.format(Locale.US, "#%06X", c and 0xFFFFFF)
+
+    /** What the frames of [b] are drawn from now, and the key they must have (size, length, words, brief — not the place). */
+    private fun animJob(p: EProject, b: EBlock): Pair<JSONObject, String> {
+        val (fw, fh) = EditCanvas.outSize(p.w, p.h, p.ratio, Lumen.prefs.getInt("studio_edit_side", 1920))
+        val hw = b.w / 2
+        val hh = b.w * b.ratio * fw / fh / 2
+        val br = EditInsert.briefFrom(b.brief) ?: EditBrief()
+        val st = SchemeStyles.find(styleDir, br.style.ifEmpty { SchemeStyles.AUTO })
+        val cx = InsertCtx(fw, fh, FRect(b.x - hw, b.y - hh, b.x + hw, b.y + hh), "", b.startMs, b.durMs, words, br.lang.ifBlank { lang() }, b.ask, "",
+            accent = hex(br.accent ?: st?.accent ?: StudioPrefs.accent), ink = hex(st?.ink ?: 0xFFFFFFFF.toInt()), card = hex(st?.bg ?: 0xFF101318.toInt()), fps = b.fps)
+        val d = EditInsert.animData(cx, br)
+        // moving the block does not redraw it; its size, length, words and brief do
+        val keyData = JSONObject(d.toString()).apply {
+            remove("place")
+            optJSONObject("brief")?.remove("avoid")
+            if (b.loopMs > 0) remove("dur")
+        }.toString()
+        return d to EditInsert.renderKey(d.optInt("w"), d.optInt("h"), b.durMs, b.fps, b.loopMs, keyData)
+    }
+
+    private fun staleAnims(p: EProject): List<EBlock> = p.blocks.filter { b ->
+        b.kind == EditInsert.KIND && b.file.isNotEmpty() && (AnimRender.meta(dir, b) == null || AnimRender.keyOf(b) != animJob(p, b).second)
+    }
+
+    /** Renders the next animation block whose frames do not fit it any more (one at a time, only while the screen is open). */
+    private fun renderStale() {
+        if (animBusy != null || !resumed || isDestroyed) return
+        val p = project ?: return
+        for (b in p.blocks) {
+            if (b.kind != EditInsert.KIND || b.file.isEmpty() || b.id in animErr) continue
+            val (d, key) = animJob(p, b)
+            if (AnimRender.keyOf(b) == key && AnimRender.meta(dir, b) != null) continue
+            val code = AnimRender.code(dir, b) ?: continue
+            renderAnim(p, b, code, d, key)
+            return
+        }
+        badge(null)
+        if (exportAfter > 0) {
+            val side = exportAfter
+            exportAfter = 0
+            export(side)
+        }
+    }
+
+    private fun renderAnim(p: EProject, b: EBlock, code: String, d: JSONObject, key: String) {
+        val rel = AnimRender.renderRel(AnimRender.codeRel(b), key)
+        val out = File(dir, rel)
+        animBusy = b.id
+        animCancel = false
+        val host = attachCanvas()
+        val name = b.text.ifBlank { t("Анимация", "Animation") }
+        badge("🎞 " + name.take(18) + " · 0 %")
+        val pid = p.id
+        Lumen.async({
+            synchronized(host) {
+                AnimRender.run(host, code, d, out, key, b.durMs, b.fps, b.loopMs, { animCancel || isDestroyed }) { i, n ->
+                    if (i % 6 == 0 || i == n) runOnUiThread { if (animBusy == b.id) badge("🎞 " + name.take(18) + " · " + (i * 100 / n) + " %") }
+                }
+            }
+        }, { e ->
+            animBusy = null
+            badge(null)
+            if (e is CanvasHost.LayerError) {
+                animErr[b.id] = e.message.orEmpty()
+                if (!isDestroyed) snack(t("Анимация «", "Animation «") + name.take(24) + t("»: ошибка в коде", "»: an error in the code"), t("🛠 Исправить", "🛠 Fix")) {
+                    StudioEdit.find(blocks, b.id)?.let { insert.check(it, animErr[b.id].orEmpty()) }
+                }
+                tools()
+            } else if (e !is java.util.concurrent.CancellationException && !animCancel) L.w("studio", "anim render: ${e.message}")
+            if (!animCancel) scheduleAnim(1000)
+        }) { _ ->
+            animBusy = null
+            if (!isDestroyed && project?.id == pid) {
+                val code0 = AnimRender.codeRel(b)
+                setBlocks(blocks.map { if (it.id == b.id && AnimRender.codeRel(it) == code0) it.copy(file = rel) else it })
+                save()
+                stage?.refresh()
+            }
+            scheduleAnim(100)
+        }
+    }
+
+    /** Before the export: animations whose frames are for another size or length. */
+    private fun staleSheet(stale: List<EBlock>, side: Int) {
+        val frames = stale.sumOf { EditInsert.frameCount(it.durMs, it.fps, it.loopMs) }
+        val secs = (frames * 35 / 1000).coerceAtLeast(1)
+        bottomSheet(t("🎞 Анимации не перерисованы", "🎞 Animations not redrawn")) { dismiss ->
+            p(t("Кадры ${stale.size} анимаций сделаны под другой размер или длину блока.", "The frames of ${stale.size} animations were made for another size or length of the block."))
+            button(t("Перерисовать (≈$secs с) и экспортировать", "Redraw (≈$secs s) and export"), primary = true) {
+                dismiss()
+                animErr.clear()
+                exportAfter = side
+                renderStale()
+            }
+            button(t("Экспорт как есть (растянуто)", "Export as it is (stretched)"), style = BtnStyle.TEXT) {
+                dismiss()
+                export(side)
+            }
+        }
+    }
+
+    /** «🌓»: the video under a scheme or an animation darkens while it is shown. */
+    private fun dimSheet(b: EBlock) {
+        bottomSheet(t("🌓 Видео под блоком", "🌓 The video under the block")) { _ ->
+            label(this, t("Затемнить видео", "Dim the video"))
+            add(choiceChips(ctx, listOf(0f to "0", 0.2f to "20 %", 0.4f to "40 %", 0.6f to "60 %"), b.dim) { v -> change(b.id) { it.copy(dim = v) } })
+            label(this, t("Где", "Where"))
+            add(choiceChips(ctx, listOf(false to t("Под блоком", "Under the block"), true to t("Весь кадр", "The whole frame")), b.dimAll) { v -> change(b.id) { it.copy(dimAll = v) } })
+            muted(t("Затемнение плавно появляется и уходит вместе с блоком — так текст читается на любом видео.", "The dimming fades in and out with the block — text reads on any video."))
+        }
+    }
+
     private fun exportSheet() {
         val p = project ?: return
         if (BgTasks.has(TASK_EXPORT)) return toast(t("Экспорт уже идёт", "The export is already running"))
@@ -3393,7 +3616,8 @@ class StudioEditorActivity : LumenBase() {
             button(t("⬆ Экспортировать", "⬆ Export"), primary = true) {
                 prefs.edit().putInt("studio_edit_side", side).apply()
                 dismiss()
-                export(side)
+                val stale = staleAnims(p)
+                if (stale.isEmpty()) export(side) else staleSheet(stale, side)
             }
         }
     }

@@ -55,8 +55,42 @@ class StudioEditPainter(
 
     /** Draws every block of [shown] (bottom first) at [tMs]. */
     fun draw(c: Canvas, shown: List<EBlock>, tMs: Long) {
+        // the video darkens under the blocks first, then the blocks are drawn over it
+        for (b in shown) if (b.dim > 0f) runCatching { dim(c, EditKeys.at(b, tMs), tMs) }
         for (b in shown) runCatching { block(c, EditKeys.at(b, tMs), tMs) }.onFailure { L.w("studio", "edit block ${b.kind}: ${it.message}") }
     }
+
+    /** Darkens the video while [b] is shown: the whole frame or a rounded area under the block, fading in and out with it. */
+    private fun dim(c: Canvas, b: EBlock, tMs: Long) {
+        val a = b.dim * StudioEdit.dimAlpha(b, tMs)
+        if (a <= 0.005f) return
+        fill.color = Color.argb((a * 255).toInt().coerceIn(0, 255), 0, 0, 0)
+        if (b.dimAll) {
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), fill)
+            return
+        }
+        val (hw, hh) = StudioEdit.halfSize(b, w.toFloat(), h.toFloat())
+        val m = min(w, h) * 0.04f
+        c.save()
+        c.translate(b.x * w, b.y * h)
+        if (b.rot != 0f) c.rotate(b.rot)
+        c.drawRoundRect(RectF(-hw - m, -hh - m, hw + m, hh + m), m * 1.5f, m * 1.5f, fill)
+        c.restore()
+    }
+
+    /** An animation block: its rendered frame at [tMs] (frames of another length are stretched), else a placeholder. */
+    private fun anim(c: Canvas, b: EBlock, box: RectF, tMs: Long) {
+        val meta = AnimRender.meta(dir, b) ?: return pending(c, box, "🎞",
+            if (b.file.isEmpty()) waitText(b) else t("Анимация рисуется…", "Rendering the animation…"))
+        val rd = File(dir, b.file)
+        val i = EditInsert.frameIndex(tMs - b.startMs, b.durMs, meta) ?: return
+        val bmp = AnimFrames.frame(rd, i, meta)
+        AnimFrames.prefetch(rd, i, meta)
+        if (bmp != null) c.drawBitmap(bmp, null, box, img)
+    }
+
+    private fun waitText(b: EBlock): String =
+        if (b.req.isNotEmpty()) t("Ждёт ответ ИИ #", "Waiting for the AI #") + b.req else t("ИИ рисует…", "The AI is drawing…")
 
     private fun block(c: Canvas, b: EBlock, tMs: Long) {
         // a split screen is a second video, not a picture over the frame
@@ -77,8 +111,7 @@ class StudioEditPainter(
             "image" -> picture(c, b, box)
             "scheme" -> scheme(c, b, box, tMs)
             "text" -> caption(c, b, box)
-            // frames of an animation block are drawn from its rendered frames (stage 2 of the insert wizard)
-            EditInsert.KIND -> Unit
+            EditInsert.KIND -> anim(c, b, box, tMs)
             else -> emoji(c, b.text, box)
         }
         if (layered) c.restore()
@@ -157,7 +190,7 @@ class StudioEditPainter(
     // ---------- schemes ----------
 
     /** A scheme the AI is still drawing: a dashed frame with a note (seen in the editor, never exported). */
-    private fun pending(c: Canvas, box: RectF) {
+    private fun pending(c: Canvas, box: RectF, icon: String, label: String) {
         val m = min(box.width(), box.height())
         fill.color = 0x73000000
         c.drawRoundRect(box, m * 0.06f, m * 0.06f, fill)
@@ -166,10 +199,12 @@ class StudioEditPainter(
         line.pathEffect = android.graphics.DashPathEffect(floatArrayOf(m * 0.04f, m * 0.03f), 0f)
         c.drawRoundRect(box, m * 0.06f, m * 0.06f, line)
         line.pathEffect = null
-        emoji(c, "🧩", RectF(box.centerX() - m * 0.12f, box.centerY() - m * 0.3f, box.centerX() + m * 0.12f, box.centerY() - m * 0.06f))
+        emoji(c, icon, RectF(box.centerX() - m * 0.12f, box.centerY() - m * 0.3f, box.centerX() + m * 0.12f, box.centerY() - m * 0.06f))
         textP.textSize = m * 0.08f
         textP.color = Color.WHITE
-        c.drawText(t("ИИ рисует схему…", "The AI is drawing…"), box.centerX(), box.centerY() + m * 0.12f, textP)
+        val tw = textP.measureText(label)
+        if (tw > box.width() * 0.9f) textP.textSize *= box.width() * 0.9f / tw
+        c.drawText(label, box.centerX(), box.centerY() + m * 0.12f, textP)
     }
 
     private fun style(id: String): SchemeStyle =
@@ -177,25 +212,36 @@ class StudioEditPainter(
             ?: SchemeStyle(SchemeStyles.AUTO, "", card = 0xFFFFFFFF.toInt(), ink = 0xFF14161B.toInt(), muted = 0xFF6B7280.toInt(), accent = accent,
                 line = 0xFFE2E5EC.toInt(), bg = 0xF2F4F6FA.toInt(), fill = "solid", radius = 0.18f, border = 1f, shadow = true)
 
-    private fun painter(id: String): StudioPainter = painters.getOrPut(id) {
-        val st = style(id)
+    private fun painter(id: String, over: BlockLook? = null): StudioPainter = painters.getOrPut(if (over == null) id else id + "|" + over.hashCode()) {
+        val st = EditInsert.overStyle(style(id), over)
         StudioPainter(w, h, StudioPlan(SScript("", emptyList()), emptyList(), emptyList(), emptyList(), 0L, StudioStyle.VIDEO, accent, schemeStyle = st)).apply { live = false }
     }
 
     private fun light(c: Int) = (0.299 * Color.red(c) + 0.587 * Color.green(c) + 0.114 * Color.blue(c)) / 255 > 0.5
 
     private fun scheme(c: Canvas, b: EBlock, box: RectF, tMs: Long) {
-        val s = b.scheme ?: return pending(c, box)
-        val p = painter(b.look)
+        val s = b.scheme ?: return pending(c, box, "🧩", waitText(b))
+        val p = painter(b.look, b.over)
         val st = p.schemeLook()
         // a panel behind the scheme so its text reads on any video: light under dark text, dark under light text
         val m = min(box.width(), box.height())
         val panel = if (light(st.ink)) (st.bg.takeIf { !light(it) } ?: 0xE6101318.toInt()) else 0xF2F4F6FA.toInt()
-        fill.color = panel
-        fill.alpha = (Color.alpha(panel) * Studio.appear(tMs, b.startMs, 250)).toInt()
-        fill.setShadowLayer(m * 0.03f, 0f, m * 0.01f, 0x55000000)
-        c.drawRoundRect(box, m * 0.06f, m * 0.06f, fill)
-        fill.clearShadowLayer()
+        // the look of the block may set the plate: none, its opacity or its kind
+        val o = b.over
+        val alpha = when {
+            o == null -> Color.alpha(panel) / 255f
+            o.bgAlpha >= 0 -> o.bgAlpha / 100f
+            o.fill.isNotEmpty() -> EditInsert.alphaOf(o.fill, -1)
+            else -> Color.alpha(panel) / 255f
+        }
+        if (alpha > 0.01f) {
+            fill.color = panel
+            fill.alpha = (alpha * 255 * Studio.appear(tMs, b.startMs, 250)).toInt().coerceIn(0, 255)
+            fill.setShadowLayer(m * 0.03f, 0f, m * 0.01f, 0x55000000)
+            val r = m * EditInsert.radiusOf(o?.radius.orEmpty(), 0.06f)
+            c.drawRoundRect(box, r, r, fill)
+            fill.clearShadowLayer()
+        }
         val key = "${b.id}:${b.startMs}:${b.durMs}:${s.hashCode()}"
         if (reveal.size > 300) reveal.clear()
         val times = reveal.getOrPut(key) { StudioEdit.schemeTimes(s, words, b) }
@@ -403,7 +449,8 @@ object StudioEditRender {
         cancelled: () -> Boolean, progress: (String) -> Unit
     ) {
         // a scheme still being drawn by the AI is not exported
-        val job = p.copy(blocks = p.blocks.filter { !EditInsert.isPending(it) })
+        // a block still waiting for the AI, or an animation without frames, is not exported
+        val job = p.copy(blocks = p.blocks.filter { !EditInsert.isPending(it) && (it.kind != EditInsert.KIND || AnimRender.meta(dir, it) != null) })
         val started = System.currentTimeMillis()
         val clips = EditTrack.of(p)
         // a cut track: the sound is put together once, for the GPU and (if needed) the CPU way

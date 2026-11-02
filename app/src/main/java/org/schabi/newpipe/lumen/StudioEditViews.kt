@@ -482,6 +482,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         EditSplit.KIND -> 0xFF1565C0.toInt()
         EditMusic.KIND -> 0xFF2E7D32.toInt()
         "text" -> 0xFFB45309.toInt()
+        EditInsert.KIND -> 0xFF8E24AA.toInt()
         else -> 0xFFC2185B.toInt()
     }
 

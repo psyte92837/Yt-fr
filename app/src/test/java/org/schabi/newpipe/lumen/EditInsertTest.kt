@@ -138,14 +138,17 @@ class EditInsertTest {
         val p1 = EBlock("b1", "scheme", 0, 4000, req = "AAAA")
         val p2 = EBlock("b2", "anim", 5000, 4000, req = "BBBB")
         val p3 = EBlock("b3", "anim", 9000, 4000, req = "CCCC")
-        val done = EBlock("b4", "anim", 9000, 4000, file = "anim/x", req = "DDDD")
-        val blocks = listOf(p1, p2, p3, done)
+        val done = EBlock("b4", "anim", 9000, 4000, file = "anim/x")
+        val redo = EBlock("b5", "scheme", 9000, 4000, scheme = SScheme("chain", nodes = listOf(SchNode("a", label = "x"))), req = "EEEE")
+        val blocks = listOf(p1, p2, p3, done, redo)
         assertTrue(EditInsert.isPending(p1))
         assertFalse(EditInsert.isPending(done))
         val anim = InsertAnswer.Anim("function frame(){}", "BBBB", "x", 0)
         assertEquals("b2", EditInsert.match(blocks, anim)?.id)
         assertNull(EditInsert.match(blocks, anim.copy(req = "ZZZZ")))
-        assertNull(EditInsert.match(blocks, anim.copy(req = "DDDD")))
+        assertNull(EditInsert.match(blocks, anim.copy(req = "EEEE")))
+        assertEquals("b5", EditInsert.match(blocks, InsertAnswer.Scheme(SScheme("hub", nodes = emptyList()), "EEEE", "x"))?.id)
+        assertEquals(listOf("b1", "b2", "b3", "b5"), EditInsert.waiting(blocks).map { it.id })
         assertEquals("b3", EditInsert.match(blocks, anim.copy(req = ""))?.id)
         assertEquals("b1", EditInsert.match(blocks, InsertAnswer.Scheme(SScheme("chain", nodes = listOf(SchNode("a", label = "x"))), "", "x"))?.id)
     }
@@ -254,5 +257,92 @@ class EditInsertTest {
         assertEquals(0f, old.dim)
         assertFalse(StudioEdit.blockJson(old).has("fps"))
         assertNotNull(StudioEdit.blockJson(anim).optJSONObject("over"))
+    }
+
+    @Test
+    fun lookOverTheStyle() {
+        val st = SchemeStyle("x", "x", fill = "glass", radius = 0.18f, border = 1f, shadow = true, font = "sans", textScale = 1f)
+        assertEquals(st, EditInsert.overStyle(st, null))
+        val o = EditInsert.overStyle(st, BlockLook(fill = "solid", accent = 0xFFFF0000.toInt(), font = "serif", upper = true, textScale = 1.25f, radius = "none", border = false, shadow = false))
+        assertEquals("solid", o.fill)
+        assertEquals(0xFFFF0000.toInt(), o.accent)
+        assertEquals("serif", o.font)
+        assertTrue(o.upper)
+        assertEquals(1.25f, o.textScale, 1e-6f)
+        assertEquals(0f, o.radius)
+        assertEquals(0f, o.border)
+        assertFalse(o.shadow)
+        assertEquals(st.fill, EditInsert.overStyle(st, BlockLook(font = "nope")).fill)
+        assertEquals("sans", EditInsert.overStyle(st, BlockLook(font = "nope")).font)
+        assertNull(EditInsert.lookOf(EditBrief()))
+        assertEquals(BlockLook(fill = "semi", bgAlpha = 70, textScale = 1.25f), EditInsert.lookOf(EditBrief(bg = "semi", bgAlpha = 70, size = "l")))
+        assertEquals(BlockLook(fill = "semi", bgAlpha = 70), EditInsert.lookFrom(EditInsert.lookJson(BlockLook(fill = "semi", bgAlpha = 70))))
+    }
+
+    @Test
+    fun recipesAndTheStyleOfTheVideo() {
+        val b = EditBrief(type = "compare", what = "кто больше", rows = listOf(BriefRow("A", "1")), title = "Итог", bg = "semi", bgAlpha = 60,
+            accent = 0xFF00FF00.toInt(), pace = "drive", dim = 0.4f, place = "top", lenMs = 6000, face = FRect(0f, 0f, 0.5f, 0.5f))
+        val r = EditInsert.recipeOf(b)
+        assertEquals("", r.what)
+        assertTrue(r.rows.isEmpty())
+        assertEquals("", r.title)
+        assertEquals(0L, r.lenMs)
+        assertNull(r.face)
+        assertEquals("semi", r.bg)
+        assertEquals("top", r.place)
+        val content = EditBrief(type = "list", what = "три шага", rows = listOf(BriefRow("x")), lenMs = 4000)
+        val m = EditInsert.withRecipe(content, r)
+        assertEquals("compare", m.type)
+        assertEquals("три шага", m.what)
+        assertEquals(4000L, m.lenMs)
+        assertEquals("semi", m.bg)
+        val brand = EditInsert.brandOf(b)
+        assertEquals("own", brand.type)
+        assertEquals("", brand.place)
+        assertEquals(0.4f, brand.dim)
+        val withBrand = EditInsert.withBrand(EditBrief(type = "number", what = "w"), brand)
+        assertEquals("number", withBrand.type)
+        assertEquals("drive", withBrand.pace)
+        assertEquals(60, withBrand.bgAlpha)
+        assertEquals(brand, EditInsert.briefFrom(EditInsert.briefJson(brand).toString()))
+        // defaults: the number of the speech for a number fact, the brand over it
+        val d = EditInsert.defaults("number", "Канал набрал 2,5 млн подписчиков", brand, null)
+        assertEquals(listOf(BriefRow("подписчиков", "2,5", "млн")), d.rows)
+        assertEquals("drive", d.pace)
+        assertEquals("Илон Маск", EditInsert.defaults("kinetic", "Илон Маск", null, null).fields["phrase"])
+    }
+
+    @Test
+    fun examplesAndMontageTemplatesAreValidAnimations() {
+        assertEquals(6, AnimExamples.ALL.size)
+        for (e in AnimExamples.ALL) {
+            assertTrue(e.id + ": " + EditInsert.animProblems(e.code), EditInsert.animProblems(e.code).isEmpty())
+            val a = EditInsert.detect(e.code) as InsertAnswer.Anim
+            assertEquals(e.ru, a.name)
+            assertTrue(EditInsert.TYPES.any { it.id == e.type })
+        }
+        val adapted = EditInsert.canvasAdapter(WebLayer.EXAMPLE)
+        assertTrue(adapted.startsWith("// lumen.anim v1"))
+        assertTrue(adapted.contains("d.duration=d.dur"))
+        assertTrue(EditInsert.detect(adapted) is InsertAnswer.Anim)
+        assertTrue(EditInsert.request(ctx(), EditBrief(type = "number"), "anim").contains("ОБРАЗЕЦ КОДА"))
+    }
+
+    @Test
+    fun dimmingAndRedrawKeys() {
+        val b = EBlock("b1", "anim", 1000, 4000, file = "anim/x/r_k", fps = 30, dim = 0.4f)
+        assertEquals(0f, StudioEdit.dimAlpha(b, 999))
+        assertEquals(0.5f, StudioEdit.dimAlpha(b, 1150), 1e-4f)
+        assertEquals(1f, StudioEdit.dimAlpha(b, 3000))
+        assertEquals(0f, StudioEdit.dimAlpha(b, 5000))
+        // the overlay is redrawn when the animation frame changes, not on every video frame
+        val k1 = StudioEdit.overlayKey(listOf(b), 2000, { 0L })
+        val k2 = StudioEdit.overlayKey(listOf(b), 2010, { 0L })
+        val k3 = StudioEdit.overlayKey(listOf(b), 2040, { 0L })
+        assertEquals(k1, k2)
+        assertNotEquals(k1, k3)
+        val loop = b.copy(loopMs = 1000)
+        assertEquals(StudioEdit.overlayKey(listOf(loop), 2000, { 0L }), StudioEdit.overlayKey(listOf(loop), 3000, { 0L }))
     }
 }

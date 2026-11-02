@@ -255,12 +255,17 @@ object EditInsert {
     /** A block waiting for the answer of another AI (or the built-in one): no content yet, a request mark. */
     fun isPending(b: EBlock): Boolean = (b.kind == "scheme" && b.scheme == null) || (b.kind == KIND && b.file.isEmpty())
 
-    /** The pending block an answer belongs to: by its mark; without a mark — the last one of the same kind; a strange mark — none. */
+    /**
+     * The block an answer belongs to: by its mark (a pending block or one being redone keeps the mark of its request);
+     * without a mark — the last pending block of the same kind; a strange mark — none.
+     */
     fun match(blocks: List<EBlock>, a: InsertAnswer): EBlock? {
-        val waiting = blocks.filter { isPending(it) && it.req.isNotEmpty() }
-        if (a.req.isNotEmpty()) return waiting.firstOrNull { it.req == a.req }
-        return waiting.lastOrNull { it.kind == a.kind }
+        if (a.req.isNotEmpty()) return blocks.firstOrNull { it.req == a.req && (it.kind == a.kind || isPending(it)) }
+        return blocks.lastOrNull { isPending(it) && it.req.isNotEmpty() && it.kind == a.kind }
     }
+
+    /** Blocks that wait for an answer of another AI (pending or being redone). */
+    fun waiting(blocks: List<EBlock>): List<EBlock> = blocks.filter { it.req.isNotEmpty() }
 
     // ---------- reading time, font, data from the speech ----------
 
@@ -315,7 +320,9 @@ object EditInsert {
         fun sentenceStart(i: Int) = i == 0 || tok[i - 1] in setOf(".", "!", "?")
         fun nameLike(i: Int): Boolean {
             val s = tok[i]
-            return s[0].isLetter() && s.any { it.isUpperCase() } && s.lowercase() !in STOP && s.length >= 2 && (!sentenceStart(i) || s.length >= 3)
+            if (!s[0].isLetter() || s.none { it.isUpperCase() } || s.lowercase() in STOP || s.length < 2) return false
+            // a capital at the start of a sentence is a name only when it is Latin or has capitals inside (Android, iOS, YouTube)
+            return !sentenceStart(i) || (s.length >= 3 && (s.any { it in 'A'..'Z' || it in 'a'..'z' } || s.drop(1).any { it.isUpperCase() }))
         }
         fun nounLike(i: Int): Boolean = tok[i][0].isLetter() && tok[i].length >= 4 && tok[i].lowercase() !in STOP && tok[i].lowercase() !in UNITS
         var i = 0
@@ -760,6 +767,8 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
         if (anim) {
             append(ANIM_PROTOCOL).append("\n\n")
             append(t("DATA (то, что получит frame в data):\n", "DATA (what frame gets as data):\n")).append(animData(ctx, b).toString()).append("\n\n")
+            append(t("ОБРАЗЕЦ КОДА (как читать data.brief и data.words; сделай своё под бриф, не копируй):\n", "CODE SAMPLE (how to read data.brief and data.words; make your own for the brief, do not copy):\n"))
+            append("```javascript\n").append(AnimExamples.SAMPLE).append("\n```\n\n")
             append(t("ОТВЕТ: один блок ```javascript; первые строки — // $ANIM #${ctx.req} и // name: короткое название (2–4 слова); при повторе — // loop: N; дальше function frame(t, ctx, W, H, data) { … }. Без HTML и пояснений.",
                 "ANSWER: one ```javascript block; first lines — // $ANIM #${ctx.req} and // name: a short name (2–4 words); for a loop — // loop: N; then function frame(t, ctx, W, H, data) { … }. No HTML, no explanations."))
         } else {
@@ -953,7 +962,310 @@ Lumen вызывает frame(t, ctx, W, H, data) для каждого кадр�
             it.optDouble("textScale", 0.0).toFloat().coerceIn(0f, 3f), it.optString("radius"), it.bool3("border"), it.bool3("shadow")).takeIf { l -> !l.isEmpty }
     }
 
+    // ---------- look over the style ----------
+
+    /** Corner radius (fraction of the short side) of a radius name; "" = [default]. */
+    fun radiusOf(r: String, default: Float): Float = when (r) { "none" -> 0f; "s" -> 0.03f; "m" -> 0.06f; "l" -> 0.1f; else -> default }
+
+    /** The scheme style with the block's own look over it: plate, accent, font, case, text size, rounding, border, shadow. */
+    fun overStyle(st: SchemeStyle, o: BlockLook?): SchemeStyle {
+        if (o == null) return st
+        return st.copy(
+            fill = when (o.fill) { "none" -> "none"; "glass", "semi" -> "glass"; "solid", "full" -> "solid"; else -> st.fill },
+            accent = o.accent ?: st.accent,
+            font = o.font.takeIf { it in SchemeStyles.FONTS } ?: st.font,
+            upper = o.upper ?: st.upper,
+            textScale = if (o.textScale > 0f) st.textScale * o.textScale else st.textScale,
+            radius = when (o.radius) { "none" -> 0f; "s" -> 0.08f; "m" -> 0.14f; "l" -> 0.24f; else -> st.radius },
+            border = o.border?.let { if (it) max(1f, st.border) else 0f } ?: st.border,
+            shadow = o.shadow ?: st.shadow
+        )
+    }
+
+    // ---------- defaults, style of the video, recipes ----------
+
+    /** The brief the wizard opens with: type, data from the speech, the face, the style of the video over it. */
+    fun defaults(type: String, speech: String, brand: EditBrief?, face: FRect?): EditBrief {
+        val rows = dataFromSpeech(speech)
+        val ty = type(type)
+        val content = EditBrief(
+            type = ty.id, face = face,
+            rows = when (ty.id) {
+                "number", "progress" -> rows.filter { it.value.isNotEmpty() }.take(1)
+                "quote", "kinetic", "lower", "cta", "pointer" -> emptyList()
+                "compare" -> rows.take(2)
+                else -> rows
+            },
+            fields = when (ty.id) {
+                "kinetic" -> mapOf("phrase" to speech.split(Regex("\\s+")).filter { it.isNotBlank() }.take(8).joinToString(" "))
+                "quote" -> mapOf("text" to speech.trim().take(160))
+                else -> emptyMap()
+            }
+        )
+        return if (brand == null) content else withBrand(content, brand)
+    }
+
+    /** The style of the video ([EProject.brand]): the look, the transparency and the pace of a brief, no content. */
+    fun brandOf(b: EditBrief): EditBrief = EditBrief(
+        style = b.style, accent = b.accent, palette = b.palette, bg = b.bg, bgAlpha = b.bgAlpha, radius = b.radius, border = b.border, shadow = b.shadow,
+        font = b.font, upper = b.upper, size = b.size, donts = b.donts, dont = b.dont, opacity = b.opacity, dim = b.dim, dimAll = b.dimAll, pace = b.pace
+    )
+
+    fun withBrand(b: EditBrief, brand: EditBrief): EditBrief = b.copy(
+        style = brand.style, accent = brand.accent, palette = brand.palette, bg = brand.bg, bgAlpha = brand.bgAlpha, radius = brand.radius,
+        border = brand.border, shadow = brand.shadow, font = brand.font, upper = brand.upper, size = brand.size, donts = brand.donts, dont = brand.dont,
+        opacity = brand.opacity, dim = brand.dim, dimAll = brand.dimAll, pace = brand.pace
+    )
+
+    /** A recipe: the brief without its content (type, look, transparency, motion, place). */
+    fun recipeOf(b: EditBrief): EditBrief = b.copy(what = "", source = "", rows = emptyList(), fields = emptyMap(),
+        title = if (b.title == "-") "-" else "", lenMs = 0, rect = null, face = null, lang = "")
+
+    /** [content] (what to show, data, time, face) with everything else from [recipe]. */
+    fun withRecipe(content: EditBrief, recipe: EditBrief): EditBrief = recipe.copy(
+        what = content.what, source = content.source, rows = content.rows, fields = content.fields,
+        title = if (recipe.title == "-") "-" else content.title, lenMs = content.lenMs, rect = content.rect, face = content.face, lang = content.lang
+    )
+
+    /** A line about a recipe for its card. */
+    fun recipeName(b: EditBrief): String = listOfNotNull(type(b.type).let { it.emoji + " " + it.name }, bgName(b.bg).takeIf { it.isNotEmpty() },
+        when (b.pace) { "calm" -> t("спокойно", "calm"); "drive" -> t("драйв", "drive"); else -> null }, b.place.takeIf { it.isNotEmpty() }?.let { placeName(it) }).joinToString(" · ")
+
+    fun placeName(p: String): String = when (p) {
+        "full" -> t("Полный кадр", "Full frame")
+        "cut" -> t("Перебивка", "Cutaway")
+        "top" -> t("Сверху", "Top")
+        "bottom" -> t("Снизу", "Bottom")
+        "corner" -> t("Угол", "Corner")
+        "custom" -> t("Своё место", "Own place")
+        else -> t("Центр", "Centre")
+    }
+
+    // ---------- Montage templates as an animation ----------
+
+    /**
+     * A lumen.canvas v1 template of the Montage as a lumen.anim block: it gets the block's seconds and size as if they
+     * were the whole video (data.duration = data.dur, no scenes).
+     */
+    fun canvasAdapter(code: String): String = "// $ANIM\n" + code.trim() + "\n;(function(){var _f=frame,_s=(typeof setup==='function')?setup:null;" +
+        "setup=function(d){d.duration=d.dur;d.scenes=d.scenes||[];if(_s)_s(d)};frame=function(t,c,W,H,d){return _f(t,c,W,H,d)}})();\n"
+
     /** The look the brief sets on the block itself (no AI needed: seen on the mock-up at once). */
     fun lookOf(b: EditBrief): BlockLook? = BlockLook(b.bg, b.bgAlpha, b.accent, b.font, b.upper,
         when (b.size) { "s" -> 0.85f; "l" -> 1.25f; else -> 0f }, b.radius, b.border, b.shadow).takeIf { !it.isEmpty }
+}
+
+/** Built-in lumen.anim v1 blocks: they work without AI (data from the brief and the speech) and show the AI how the code looks. */
+object AnimExamples {
+    data class Example(val id: String, val type: String, val ru: String, val en: String, val code: String) {
+        val name: String get() = t(ru, en)
+    }
+
+    private val COUNTER = """
+// lumen.anim v1
+// name: Счётчик числа
+function setup(d) {
+  var b = d.brief || {}, it = (b.items || [])[0] || {}, v = String(it.value || '');
+  d.at = 0.2;
+  if (!v) { var ws = d.words || []; for (var i = 0; i < ws.length; i++) if (/\d/.test(ws[i].w)) { v = ws[i].w.replace(/[^\d.,]/g, ''); d.at = ws[i].s; break; } }
+  d.num = parseFloat(v.replace(',', '.')) || 0;
+  d.dec = (v.split(/[.,]/)[1] || '').length;
+  d.sep = v.indexOf(',') >= 0 ? ',' : '.';
+  d.unit = it.unit || '';
+  d.cap = it.label || b.title || '';
+}
+function fmt(x, d) {
+  var s = x.toFixed(d.dec); if (d.sep === ',') s = s.replace('.', ',');
+  var p = s.split(d.sep); p[0] = p[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' '); return p.join(d.sep);
+}
+function frame(t, ctx, W, H, d) {
+  var A = d.accent || '#FFD60A', dur = d.dur || 3, a = ease.out(prog(t, 0, 0.35)) * (1 - prog(t, dur - 0.35, dur));
+  if (a <= 0) return false;
+  var bg = ((d.brief && d.brief.bgAlpha != null) ? d.brief.bgAlpha : 70) / 100, mf = (d.brief && d.brief.minFont) || 24;
+  ctx.globalAlpha = a;
+  roundRect(ctx, 0, 0, W, H, Math.min(W, H) * 0.12); ctx.fillStyle = 'rgba(16,19,24,' + bg + ')'; ctx.fill();
+  var k = ease.out(prog(t, d.at, d.at + Math.min(1.6, dur * 0.5)));
+  var txt = fmt(d.num * k, d) + (d.unit ? (d.unit === '%' ? '%' : ' ' + d.unit) : '');
+  var size = fitFont(ctx, txt, W * 0.86, H * (d.cap ? 0.45 : 0.6), 900);
+  ctx.fillStyle = A; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '900 ' + size + 'px sans-serif'; ctx.fillText(txt, W / 2, H * (d.cap ? 0.42 : 0.5));
+  if (d.cap) {
+    var cs = fitFont(ctx, d.cap, W * 0.86, Math.max(mf, H * 0.14), 700);
+    ctx.fillStyle = d.ink || '#fff'; ctx.font = '700 ' + cs + 'px sans-serif'; ctx.fillText(d.cap, W / 2, H * 0.78);
+  }
+}
+""".trim()
+
+    private val BARS = """
+// lumen.anim v1
+// name: Растущие столбцы
+function setup(d) {
+  var it = (d.brief && d.brief.items) || [];
+  d.rows = [];
+  for (var i = 0; i < it.length && d.rows.length < 6; i++) {
+    var v = parseFloat(String(it[i].value).replace(',', '.'));
+    if (!isNaN(v)) d.rows.push({ l: it[i].label || '', v: v, s: String(it[i].value) + (it[i].unit ? (it[i].unit === '%' ? '%' : ' ' + it[i].unit) : ''), m: !!it[i].main });
+  }
+  if (!d.rows.length) d.rows = [{ l: 'A', v: 3, s: '3' }, { l: 'B', v: 5, s: '5', m: true }, { l: 'C', v: 2, s: '2' }];
+  d.max = 0; for (var j = 0; j < d.rows.length; j++) d.max = Math.max(d.max, d.rows[j].v);
+}
+function frame(t, ctx, W, H, d) {
+  var A = d.accent || '#FFD60A', dur = d.dur || 4, a = ease.out(prog(t, 0, 0.3)) * (1 - prog(t, dur - 0.3, dur)), n = d.rows.length;
+  if (a <= 0) return false;
+  ctx.globalAlpha = a;
+  roundRect(ctx, 0, 0, W, H, Math.min(W, H) * 0.08); ctx.fillStyle = 'rgba(16,19,24,0.72)'; ctx.fill();
+  var pad = W * 0.08, bw = (W - pad * 2) / n, base = H * 0.8, top = H * 0.16;
+  var fs = Math.max((d.brief && d.brief.minFont) || 20, Math.min(bw * 0.28, H * 0.08));
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (var i = 0; i < n; i++) {
+    var r = d.rows[i], g = ease.back(prog(t, 0.25 + i * 0.18, 0.85 + i * 0.18)), h = Math.max(0, (base - top) * (r.v / (d.max || 1)) * g), x = pad + bw * i;
+    ctx.fillStyle = r.m ? A : 'rgba(255,255,255,0.85)';
+    roundRect(ctx, x + bw * 0.18, base - h, bw * 0.64, h, bw * 0.08); ctx.fill();
+    ctx.fillStyle = d.ink || '#fff';
+    ctx.font = '800 ' + fs + 'px sans-serif'; if (g > 0.6) ctx.fillText(r.s, x + bw / 2, base - h - fs * 0.8);
+    ctx.font = '600 ' + fs * 0.9 + 'px sans-serif'; ctx.fillText(r.l.slice(0, 14), x + bw / 2, base + fs * 0.9);
+  }
+}
+""".trim()
+
+    private val RING = """
+// lumen.anim v1
+// name: Кольцо прогресса
+function setup(d) {
+  var it = ((d.brief && d.brief.items) || [])[0] || {}, v = parseFloat(String(it.value || '').replace(',', '.'));
+  if (isNaN(v)) { var ws = d.words || []; for (var i = 0; i < ws.length; i++) { var m = ws[i].w.match(/\d+([.,]\d+)?/); if (m) { v = parseFloat(m[0].replace(',', '.')); break; } } }
+  d.p = isNaN(v) ? 0.75 : clamp(v > 1 ? v / 100 : v, 0, 1);
+  d.cap = it.label || (d.brief && d.brief.title) || '';
+}
+function frame(t, ctx, W, H, d) {
+  var A = d.accent || '#FFD60A', dur = d.dur || 4, a = ease.out(prog(t, 0, 0.3)) * (1 - prog(t, dur - 0.3, dur));
+  if (a <= 0) return false;
+  ctx.globalAlpha = a;
+  var cx = W / 2, cy = H * (d.cap ? 0.44 : 0.5), r = Math.min(W, H) * (d.cap ? 0.3 : 0.36), lw = r * 0.22;
+  ctx.fillStyle = 'rgba(16,19,24,0.7)'; ctx.beginPath(); ctx.arc(cx, cy, r + lw, 0, Math.PI * 2); ctx.fill();
+  ctx.lineWidth = lw; ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  var k = ease.inOut(prog(t, 0.3, 0.3 + Math.min(1.8, dur * 0.5))) * d.p;
+  ctx.strokeStyle = A; ctx.beginPath(); ctx.arc(cx, cy, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.001, k)); ctx.stroke();
+  ctx.fillStyle = d.ink || '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  var txt = Math.round(k * 100) + '%';
+  ctx.font = '900 ' + fitFont(ctx, txt, r * 1.3, r * 0.55, 900) + 'px sans-serif'; ctx.fillText(txt, cx, cy);
+  if (d.cap) { ctx.font = '700 ' + fitFont(ctx, d.cap, W * 0.9, Math.max((d.brief && d.brief.minFont) || 22, H * 0.09), 700) + 'px sans-serif'; ctx.fillText(d.cap, cx, H * 0.88); }
+}
+""".trim()
+
+    private val CHECKS = """
+// lumen.anim v1
+// name: Список с галочками
+function setup(d) {
+  var it = (d.brief && d.brief.items) || [], ws = d.words || [];
+  d.rows = [];
+  for (var i = 0; i < it.length && d.rows.length < 6; i++) d.rows.push({ l: (it[i].icon ? it[i].icon + ' ' : '') + (it[i].label || it[i].value), s: -1 });
+  if (!d.rows.length) d.rows = [{ l: 'Пункт 1', s: -1 }, { l: 'Пункт 2', s: -1 }, { l: 'Пункт 3', s: -1 }];
+  var step = Math.max(0.4, ((d.dur || 4) - 1.2) / d.rows.length);
+  for (var j = 0; j < d.rows.length; j++) {
+    var key = String(d.rows[j].l).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').slice(0, 5);
+    for (var k = 0; k < ws.length && key.length >= 3; k++) if (ws[k].w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').indexOf(key) === 0) { d.rows[j].s = ws[k].s; break; }
+    if (d.rows[j].s < 0) d.rows[j].s = 0.3 + j * step;
+  }
+}
+function frame(t, ctx, W, H, d) {
+  var A = d.accent || '#FFD60A', dur = d.dur || 4, n = d.rows.length, a = ease.out(prog(t, 0, 0.3)) * (1 - prog(t, dur - 0.3, dur));
+  if (a <= 0) return false;
+  ctx.globalAlpha = a;
+  roundRect(ctx, 0, 0, W, H, Math.min(W, H) * 0.08); ctx.fillStyle = 'rgba(16,19,24,0.74)'; ctx.fill();
+  var rh = H / (n + 0.6), fs = Math.max((d.brief && d.brief.minFont) || 22, rh * 0.42), x0 = W * 0.08;
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  for (var i = 0; i < n; i++) {
+    var r = d.rows[i], p = clamp(ease.back(prog(t, r.s, r.s + 0.35)), 0, 1.2), y = rh * (i + 0.8);
+    if (p <= 0) continue;
+    ctx.save(); ctx.globalAlpha = a * clamp(p, 0, 1); ctx.translate((1 - clamp(p, 0, 1)) * W * 0.1, 0);
+    ctx.fillStyle = A; ctx.beginPath(); ctx.arc(x0 + fs * 0.5, y, fs * 0.55, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#111'; ctx.lineWidth = fs * 0.14; ctx.lineCap = 'round'; ctx.beginPath();
+    ctx.moveTo(x0 + fs * 0.25, y); ctx.lineTo(x0 + fs * 0.45, y + fs * 0.2); ctx.lineTo(x0 + fs * 0.78, y - fs * 0.2); ctx.stroke();
+    ctx.fillStyle = d.ink || '#fff';
+    var s = fitFont(ctx, r.l, W - x0 * 2 - fs * 1.6, fs, 700); ctx.font = '700 ' + s + 'px sans-serif';
+    ctx.fillText(r.l, x0 + fs * 1.6, y); ctx.restore();
+  }
+}
+""".trim()
+
+    private val POINTER = """
+// lumen.anim v1
+// name: Стрелка-указатель
+function frame(t, ctx, W, H, d) {
+  var A = d.accent || '#FFD60A', dur = d.dur || 3, u = Math.min(W, H), out = 1 - prog(t, dur - 0.3, dur);
+  if (out <= 0) return false;
+  var cx = W * 0.5, cy = H * 0.55, p = ease.out(prog(t, 0.1, 0.6)), q = clamp(ease.back(prog(t, 0.5, 0.9)), 0, 1.2);
+  ctx.globalAlpha = out;
+  ctx.strokeStyle = A; ctx.lineWidth = u * 0.025; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.arc(cx, cy, u * 0.18 * (0.6 + 0.4 * q), -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0.001, p)); ctx.stroke();
+  var cap = (d.brief && d.brief.title) || ((((d.brief && d.brief.items) || [])[0] || {}).label) || '';
+  var fs = Math.max((d.brief && d.brief.minFont) || 22, u * 0.07), bx = W * 0.05, by = H * 0.05, bh = fs * 1.5;
+  var sx = bx + fs, sy = by + bh + fs * 0.4, ex = cx - u * 0.2, ey = cy - u * 0.2, k = ease.inOut(prog(t, 0.3, 0.8));
+  ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(lerp(sx, ex, k), lerp(sy, ey, k)); ctx.stroke();
+  if (k > 0.95) {
+    var ang = Math.atan2(ey - sy, ex - sx), hl = u * 0.06;
+    ctx.beginPath(); ctx.moveTo(ex, ey); ctx.lineTo(ex - hl * Math.cos(ang - 0.5), ey - hl * Math.sin(ang - 0.5));
+    ctx.moveTo(ex, ey); ctx.lineTo(ex - hl * Math.cos(ang + 0.5), ey - hl * Math.sin(ang + 0.5)); ctx.stroke();
+  }
+  if (cap && q > 0) {
+    ctx.font = '800 ' + fs + 'px sans-serif'; var tw = Math.min(W * 0.9, ctx.measureText(cap).width + fs);
+    ctx.globalAlpha = out * clamp(q, 0, 1); roundRect(ctx, bx, by, tw, bh, fs * 0.3); ctx.fillStyle = A; ctx.fill();
+    ctx.fillStyle = '#111'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left'; ctx.fillText(cap, bx + fs * 0.5, by + bh / 2, tw - fs);
+  }
+}
+""".trim()
+
+    private val KINETIC = """
+// lumen.anim v1
+// name: Кинетический титр
+function setup(d) {
+  var ws = d.words || [], b = d.brief || {};
+  var src = ws.length ? ws : String(b.title || d.title || 'КЛЮЧЕВАЯ ФРАЗА').split(/\s+/).map(function (w, i) { return { w: w, s: 0.2 + i * 0.35 }; });
+  d.ws = [];
+  // a sign without letters (%, —) sticks to the word before it
+  for (var j = 0; j < src.length; j++) {
+    if (!/[\p{L}\p{N}]/u.test(src[j].w) && d.ws.length) d.ws[d.ws.length - 1].w += src[j].w;
+    else if (/[\p{L}\p{N}]/u.test(src[j].w)) d.ws.push({ w: src[j].w, s: src[j].s });
+  }
+  if (d.ws.length > 8) d.ws = d.ws.slice(0, 8);
+  var best = 0; for (var i = 1; i < d.ws.length; i++) if (d.ws[i].w.length > d.ws[best].w.length) best = i; d.best = best;
+}
+function frame(t, ctx, W, H, d) {
+  var A = d.accent || '#FFD60A', dur = d.dur || 3, out = 1 - prog(t, dur - 0.3, dur), n = d.ws.length;
+  if (out <= 0 || !n || t < d.ws[0].s - 0.05) return false;
+  var per = n > 4 ? 3 : 2, lines = Math.ceil(n / per), lh = H / (lines + 0.5), fs = Math.min(lh * 0.62, W * 0.16);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (var l = 0; l < lines; l++) {
+    var row = d.ws.slice(l * per, l * per + per), txt = row.map(function (x) { return x.w.toUpperCase(); }).join(' ');
+    var size = fitFont(ctx, txt, W * 0.92, fs, 900); ctx.font = '900 ' + size + 'px sans-serif';
+    var x = (W - ctx.measureText(txt).width) / 2, y = lh * (l + 0.75), gap = ctx.measureText(' ').width;
+    for (var i = 0; i < row.length; i++) {
+      var k = l * per + i, wd = row[i].w.toUpperCase(), ww = ctx.measureText(wd).width, p = ease.back(prog(t, row[i].s, row[i].s + 0.25));
+      if (p > 0) {
+        var sc = 0.6 + 0.4 * Math.min(p, 1.15);
+        ctx.save(); ctx.globalAlpha = out * clamp(p, 0, 1); ctx.translate(x + ww / 2, y); ctx.scale(sc, sc);
+        ctx.lineWidth = size * 0.12; ctx.strokeStyle = 'rgba(0,0,0,0.85)'; ctx.lineJoin = 'round'; ctx.strokeText(wd, 0, 0);
+        ctx.fillStyle = k === d.best ? A : (d.ink || '#fff'); ctx.fillText(wd, 0, 0); ctx.restore();
+      }
+      x += ww + gap;
+    }
+  }
+}
+""".trim()
+
+    val ALL = listOf(
+        Example("counter", "number", "Счётчик числа", "Number counter", COUNTER),
+        Example("bars", "chart", "Растущие столбцы", "Growing bars", BARS),
+        Example("ring", "progress", "Кольцо прогресса", "Progress ring", RING),
+        Example("checks", "list", "Список с галочками", "Checklist", CHECKS),
+        Example("pointer", "pointer", "Стрелка-указатель", "Pointer arrow", POINTER),
+        Example("kinetic", "kinetic", "Кинетический титр", "Kinetic title", KINETIC)
+    )
+
+    /** The sample put into the request: how a block reads data.brief and data.words. */
+    val SAMPLE: String get() = COUNTER
+
+    fun forType(type: String): Example? = ALL.firstOrNull { it.type == type }
 }

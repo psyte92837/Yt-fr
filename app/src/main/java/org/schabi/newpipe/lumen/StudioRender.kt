@@ -2744,6 +2744,28 @@ class StudioRecorder(private val onLevel: (Float, Long) -> Unit) {
     }
 }
 
+/** When to stop asking the phone's recogniser and go to the AI transcription (or beats) at once. Pure, tested. */
+object RecogGiveUp {
+    /** Errors that mean the online recogniser cannot do this language or this app at all. */
+    private val HARD = setOf(9, 12, 13) // INSUFFICIENT_PERMISSIONS, LANGUAGE_NOT_SUPPORTED, LANGUAGE_UNAVAILABLE
+    /** Silence-like results: not a failure of the recogniser. */
+    private val SILENT = setOf(6, 7) // SPEECH_TIMEOUT, NO_MATCH
+
+    /** Next count of failures in a row (silence resets nothing, a text resets to 0). */
+    fun fails(prev: Int, gotText: Boolean, error: Int): Int = when {
+        gotText -> 0
+        error in SILENT -> prev
+        else -> prev + 1
+    }
+
+    /**
+     * True: stop the rest of the pieces. Online "language unavailable" (13) for the first piece, or 3 failures in a row
+     * online with nothing recognised yet — the AI transcription does the whole take better than 30 failing pieces.
+     */
+    fun stop(local: Boolean, error: Int, failsInRow: Int, recognised: Int): Boolean =
+        !local && ((error in HARD && recognised == 0) || (failsInRow >= 3 && recognised == 0))
+}
+
 /**
  * Speech recognition of a recorded take, piece by piece (Android 13+: the recogniser reads audio from a pipe).
  * Prefers the on-device recogniser. All callbacks come on the main thread.
@@ -2771,6 +2793,7 @@ object StudioRecognizer {
         // "language unavailable" after that, the online recogniser is used instead of downloading again
         var downloadTried = !StudioSpeechPack.mayDownload(Lumen.prefs.getLong(StudioSpeechPack.key(lang), 0), System.currentTimeMillis())
         var tag = lang
+        var failsInRow = 0
         fun langIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, tag)
@@ -2815,6 +2838,13 @@ object StudioRecognizer {
                 val retryOnline = local && text.isNullOrBlank() && error != SpeechRecognizer.ERROR_NO_MATCH &&
                     error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT && SpeechRecognizer.isRecognitionAvailable(ctx)
                 if (retryOnline) onDevice = false
+                failsInRow = RecogGiveUp.fails(failsInRow, !text.isNullOrBlank(), error)
+                if (!retryOnline && RecogGiveUp.stop(local, error, failsInRow, results.size)) {
+                    L.w("studio", "recogniser gives up after piece ${i + 1} (error $error, $failsInRow in a row): AI transcription or beats")
+                    status(t("Распознавание телефоном недоступно — дальше расшифровка через AI или по ритму", "The phone cannot recognise this — AI transcription or beats next"))
+                    main.post { done(results) }
+                    return
+                }
                 main.post { if (retryOnline) next(i, retry = true) else next(i + 1) }
             }
             sr.setRecognitionListener(object : RecognitionListener {

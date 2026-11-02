@@ -310,6 +310,108 @@ object StudioMix {
     }
 
     /**
+     * Piece lengths scaled so the storyboard lasts [targetMs] (e.g. the voice-over): every piece stays within
+     * [MIN_PIECE_MS] and its clip ([clipMs] by clip id), what one piece cannot take goes to the others. When the
+     * clips are too short for the target the storyboard gets as close as it can (see [loopTo]).
+     */
+    fun scaleTo(items: List<MixItem>, targetMs: Long, clipMs: Map<String, Long>): List<MixItem> {
+        if (items.isEmpty() || targetMs <= 0) return items
+        val cap = items.map { (clipMs[it.clipId] ?: it.fromMs + it.lenMs).coerceAtLeast(MIN_PIECE_MS) }
+        val lens = items.map { it.lenMs.toDouble() }.toMutableList()
+        val fixed = BooleanArray(items.size)
+        repeat(6) {
+            val free = items.indices.filter { !fixed[it] }
+            if (free.isEmpty()) return@repeat
+            val need = targetMs - items.indices.filter { fixed[it] }.sumOf { lens[it] }
+            val have = free.sumOf { lens[it] }
+            if (have <= 0) return@repeat
+            val k = need / have
+            var clamped = false
+            for (i in free) {
+                val v = lens[i] * k
+                val c = v.coerceIn(MIN_PIECE_MS.toDouble(), cap[i].toDouble())
+                if (c != v) {
+                    fixed[i] = true
+                    clamped = true
+                }
+                lens[i] = c
+            }
+            if (!clamped) return@repeat
+        }
+        val out = items.mapIndexed { i, it -> withLen(it, kotlin.math.round(lens[i]).toLong(), cap[i]) }.toMutableList()
+        // rounding: the last piece with room takes the difference of a few ms
+        val diff = targetMs - totalMs(out)
+        if (diff != 0L) {
+            val j = out.indices.lastOrNull { val n = out[it].lenMs + diff; n >= MIN_PIECE_MS && n <= cap[it] }
+            if (j != null) out[j] = withLen(out[j], out[j].lenMs + diff, cap[j])
+        }
+        return out
+    }
+
+    /**
+     * The storyboard made exactly [targetMs] long without changing pieces: cut at the end when longer, continued
+     * by copies of its pieces from the start when shorter (no same clip at the joint when it can be avoided).
+     */
+    fun loopTo(items: List<MixItem>, targetMs: Long): List<MixItem> {
+        if (items.isEmpty() || targetMs <= 0) return items
+        if (totalMs(items) >= targetMs) return trimTo(items, targetMs)
+        val out = items.toMutableList()
+        var k = 0
+        var guard = 0
+        while (totalMs(out) < targetMs && guard++ < 10_000) {
+            var next = items[k % items.size]
+            if (next.clipId == out.last().clipId && items.size > 1) next = items[++k % items.size]
+            out += next.copy(marked = false, locked = false, scheme = null)
+            k++
+        }
+        return unique(trimTo(out, targetMs))
+    }
+
+    /**
+     * Seams between pieces moved to the nearest word start of the voice-over (within [maxShiftMs]), so the picture
+     * changes on a word. The length of the storyboard stays; a seam stays where a piece would leave its bounds.
+     */
+    fun snapToWords(items: List<MixItem>, words: List<SWord>, clipMs: Map<String, Long>, maxShiftMs: Long = 400): List<MixItem> {
+        if (items.size < 2 || words.isEmpty()) return items
+        val starts = words.map { it.startMs }.sorted()
+        val seams = LongArray(items.size + 1)
+        for (i in items.indices) seams[i + 1] = seams[i] + items[i].lenMs
+        val out = seams.copyOf()
+        for (j in 1 until items.size) {
+            val near = starts.minByOrNull { kotlin.math.abs(it - seams[j]) } ?: continue
+            if (kotlin.math.abs(near - seams[j]) > maxShiftMs) continue
+            val a = near - out[j - 1]
+            val b = seams[j + 1] - near
+            val capA = clipMs[items[j - 1].clipId] ?: continue
+            val capB = clipMs[items[j].clipId] ?: continue
+            if (a >= MIN_PIECE_MS && b >= MIN_PIECE_MS && a <= capA && b <= capB) out[j] = near
+        }
+        return items.mapIndexed { i, it ->
+            val len = out[i + 1] - out[i]
+            if (len == it.lenMs) it else withLen(it, len, clipMs[it.clipId] ?: (it.fromMs + len))
+        }
+    }
+
+    /** How many seams are on a word start (±[tolMs]). */
+    fun seamsOnWords(items: List<MixItem>, words: List<SWord>, tolMs: Long = 60): Int {
+        var at = 0L
+        return items.dropLast(1).count { item ->
+            at += item.lenMs
+            words.any { kotlin.math.abs(it.startMs - at) <= tolMs }
+        }
+    }
+
+    /** Length of a 16-bit PCM WAV from its header and file size; 0 when it is not one. */
+    fun wavMs(header: ByteArray, fileBytes: Long): Long {
+        if (header.size < 44 || String(header, 0, 4) != "RIFF") return 0
+        val b = java.nio.ByteBuffer.wrap(header).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val channels = b.getShort(22).toInt().coerceAtLeast(1)
+        val rate = b.getInt(24)
+        if (rate <= 0) return 0
+        return (fileBytes - 44).coerceAtLeast(0) / (2L * channels) * 1000 / rate
+    }
+
+    /**
      * Start of a random new piece of [lenMs] in a video of [durMs] (whole 100 ms), away from [oldMs] when the video
      * is long enough; 0 when the video is not longer than the piece.
      */

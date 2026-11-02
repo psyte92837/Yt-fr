@@ -43,11 +43,14 @@ class StudioMixActivity : LumenBase() {
     companion object {
         private const val TASK = "studiomix:"
         private const val REQ_MIC = 7431
+        private const val REQ_SAVE = 7432
         private const val FILE_PREFIX = "Lumen_Mix_"
         private val thumbs = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
             override fun sizeOf(key: String, value: Bitmap) = value.byteCount
         }
         private val thumbPool = Executors.newSingleThreadExecutor()
+        /** Video and voice-over lengths closer than this count as equal. */
+        private const val FIT_TOL_MS = 300L
 
         fun open(ctx: Context) = ctx.startActivity(Intent(ctx, StudioMixActivity::class.java))
 
@@ -138,6 +141,8 @@ class StudioMixActivity : LumenBase() {
     private var status: Pair<TextView, ProgressBar>? = null
     private var renderBar: Pair<TextView, ProgressBar>? = null
     private var boardInfo: TextView? = null
+    /** The built video waiting for a place picked by the user ("Save a copy"). */
+    private var pendingCopy: File? = null
     /** Open the recording as soon as the video being built is ready. */
     private var recordAfter = false
     private var recorder: StudioRecorder? = null
@@ -515,6 +520,13 @@ class StudioMixActivity : LumenBase() {
             style = BtnStyle.TEXT) { dismiss(); randomMoments(tickedClips) }
         add(text(ctx, t("Длина ролика", "Video length"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         val total = StudioMix.totalMs(items)
+        val voice = voiceMs()
+        if (voice > 0 && kotlin.math.abs(voice - total) > FIT_TOL_MS) {
+            button(t("🎙 Подогнать под озвучку (${StudioCuts.stamp(voice)})", "🎙 Fit to the voice-over (${StudioCuts.stamp(voice)})"), style = BtnStyle.TONAL) {
+                dismiss()
+                fitVoice(true)
+            }
+        }
         val opts = listOf(10, 15, 20, 30, 45, 60, 90, 120).map { it * 1000L }.filter { it < total }
         if (opts.isEmpty()) muted(t("Ролик уже короче 10 с (${StudioCuts.stamp(total)}).", "The video is already shorter than 10 s (${StudioCuts.stamp(total)})."))
         else {
@@ -609,7 +621,7 @@ class StudioMixActivity : LumenBase() {
     private fun updateInfo() {
         val on = items.count { it.marked }
         val pins = items.count { it.locked }
-        val voice = if (voiceFile.exists()) (voiceFile.length() - 44).coerceAtLeast(0) / 2 * 1000 / 44_100 else 0L
+        val voice = voiceMs()
         boardInfo?.text = t("Кадров: ${items.size} · ${StudioCuts.stamp(StudioMix.totalMs(items))}", "Frames: ${items.size} · ${StudioCuts.stamp(StudioMix.totalMs(items))}") +
             (if (on > 0) t(" · отмечено: $on", " · ticked: $on") else "") +
             (if (pins > 0) " · 📌 $pins" else "") +
@@ -1122,8 +1134,9 @@ class StudioMixActivity : LumenBase() {
         add(text(ctx, t("4. Видео", "4. Video"), Type.TITLE_M, bold = true), 0)
         val voice = voiceFile.exists()
         if (voice) {
-            val ms = (voiceFile.length() - 44).coerceAtLeast(0) / 2 * 1000 / 44_100
+            val ms = voiceMs()
             add(text(ctx, t("🎙 Своя озвучка ", "🎙 Own voice-over ") + StudioCuts.stamp(ms), 14f, bold = true), 8)
+            if (busy.isEmpty() && !rendering()) fitVoiceBlock(this, ms)
             if (busy.isEmpty() && !rendering()) row(
                 btn(ctx, t("🎙 Перезаписать", "🎙 Record again"), style = BtnStyle.TEXT) { startVoice() },
                 btn(ctx, t("✕ Убрать", "✕ Remove"), style = BtnStyle.TEXT) {
@@ -1148,8 +1161,15 @@ class StudioMixActivity : LumenBase() {
             button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) { StudioService.cancel(this@StudioMixActivity) }
         }
         if (busy.isNotEmpty() || rendering()) return@card
-        button(t("🎬 Получить видео-микс", "🎬 Get the video mix"), primary = true) { build(false) }
-        if (!voice) button(t("🎙 Начать озвучку", "🎙 Start the voice-over"), style = BtnStyle.TONAL) { startVoice() }
+        muted(t("Видео сохраняется на телефон: Галерея → Фильмы/Lumen. Озвучка не обязательна — можно собрать одну картинку.",
+            "The video is saved on the phone: Gallery → Movies/Lumen. A voice-over is optional — the picture alone can be built."))
+        if (voice) {
+            button(t("🎬 Собрать видео с озвучкой", "🎬 Build the video with the voice-over"), primary = true) { build(false) }
+            button(t("🎬 Собрать без озвучки (только картинка)", "🎬 Build without the voice-over (picture only)"), style = BtnStyle.TEXT) { build(false, mute = true) }
+        } else {
+            button(t("🎬 Собрать и сохранить видео", "🎬 Build and save the video"), primary = true) { build(false) }
+            button(t("🎙 Начать озвучку", "🎙 Start the voice-over"), style = BtnStyle.TONAL) { startVoice() }
+        }
         spinner(t("Язык озвучки, субтитров и схем", "Language of the voice-over, subtitles and schemes"),
             Studio.VOICE_LANGS.map { it to Studio.langName(it) }, lang()) { StudioPrefs.voiceLang = it }
         check(t("Только на отмеченных элементах", "Only on ticked elements"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
@@ -1171,13 +1191,15 @@ class StudioMixActivity : LumenBase() {
         }
         val video = lastVideo()
         if (video != null) {
-            add(text(ctx, "✅ " + t("Видео сохранено: ", "Video saved: ") + Prefs.savedAs.ifBlank { video.name }, 14f, bold = true), 12)
+            add(text(ctx, "✅ " + t("Сохранено в галерею: ", "Saved to the gallery: ") + Prefs.savedAs.ifBlank { video.name } +
+                if (Prefs.videoVoice) t(" · с озвучкой", " · with the voice-over") else t(" · без озвучки", " · without a voice-over"), 14f, bold = true), 12)
             if (Prefs.videoSig != StudioMix.signature(items, Prefs.format)) muted(t("Раскадровка менялась после сборки — соберите видео заново.",
                 "The storyboard changed after the build — build the video again."))
             row(
                 btn(ctx, t("▶ Открыть", "▶ Open"), style = BtnStyle.TONAL) { openVideo(video) },
                 btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TEXT) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") }
             )
+            button(t("💾 Сохранить копию в папку…", "💾 Save a copy to a folder…"), style = BtnStyle.TEXT) { saveCopy(video) }
             button(t("✏️ Редактор: схемы, картинки, надписи", "✏️ Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
                 StudioEditorActivity.open(this@StudioMixActivity, video, words)
             }
@@ -1186,6 +1208,84 @@ class StudioMixActivity : LumenBase() {
     }
 
     private fun rendering() = StudioJob.running && Prefs.pending.isNotEmpty()
+
+    /** Length of the recorded voice-over from its WAV header; 0 when there is none. */
+    private fun voiceMs(): Long = runCatching {
+        if (!voiceFile.exists()) return 0
+        val h = ByteArray(44)
+        voiceFile.inputStream().use { if (it.read(h) < 44) return 0 }
+        StudioMix.wavMs(h, voiceFile.length())
+    }.getOrDefault(0)
+
+    private fun clipCaps(): Map<String, Long> = readyClips().associate { it.id to it.lenMs }
+
+    /**
+     * Fitting the storyboard to the voice-over: shown when their lengths differ (pieces stretched or squeezed, or
+     * cut / continued by repeats) and, with recognised words, seams moved onto words.
+     */
+    private fun fitVoiceBlock(c: Col, voice: Long) = with(c) {
+        if (items.isEmpty() || voice <= 0) return@with
+        val total = StudioMix.totalMs(items)
+        val diff = voice - total
+        if (kotlin.math.abs(diff) > FIT_TOL_MS) {
+            add(text(ctx, t("⚠ Ролик ", "⚠ Video ") + StudioCuts.stamp(total) + t(", озвучка ", ", voice-over ") + StudioCuts.stamp(voice), 14f, bold = true,
+                color = Palette.ACCENT), 8)
+            muted(if (diff < 0) t("Ролик длиннее: в конце будет картинка без голоса. Подогнать под озвучку:", "The video is longer: the end has no voice. Fit to the voice-over:")
+            else t("Озвучка длиннее: её конец обрежется. Подогнать под озвучку:", "The voice-over is longer: its end is cut. Fit to the voice-over:"))
+            row(
+                btn(ctx, if (diff < 0) t("⇔ Сжать куски", "⇔ Squeeze pieces") else t("⇔ Растянуть куски", "⇔ Stretch pieces"), style = BtnStyle.TONAL) { fitVoice(true) },
+                btn(ctx, if (diff < 0) t("✂ Обрезать конец", "✂ Cut the end") else t("＋ Дополнить повтором", "＋ Continue by repeats"), style = BtnStyle.TEXT) { fitVoice(false) }
+            )
+        } else muted(t("✓ Длина ролика совпадает с озвучкой", "✓ The video length matches the voice-over"))
+        if (items.size > 1) {
+            val on = if (words.isEmpty()) -1 else StudioMix.seamsOnWords(items, words)
+            button(t("🎯 Склейки на словах", "🎯 Cuts on words") + if (on >= 0) " ($on/${items.size - 1})" else "", style = BtnStyle.TEXT) {
+                if (words.isEmpty()) toast(t("Нужна расшифровка речи: нажмите «💬 Добавить субтитры»", "The speech must be recognised: tap \"💬 Add subtitles\""))
+                else {
+                    val next = StudioMix.snapToWords(items, words, clipCaps())
+                    if (next == items) toast(t("Ближе к словам склейки не сдвинуть", "The cuts cannot get closer to words"))
+                    else change(next, t("Склеек на словах: ${StudioMix.seamsOnWords(next, words)}", "Cuts on words: ${StudioMix.seamsOnWords(next, words)}"))
+                }
+            }
+        }
+    }
+
+    /** The storyboard made as long as the voice-over: pieces scaled ([scale]) or cut / continued by repeats. */
+    private fun fitVoice(scale: Boolean) {
+        val voice = voiceMs()
+        if (voice <= 0 || items.isEmpty()) return
+        var next = if (scale) StudioMix.scaleTo(items, voice, clipCaps()) else StudioMix.loopTo(items, voice)
+        // clips too short to stretch that far: the rest is continued by repeats
+        if (scale && StudioMix.totalMs(next) < voice - FIT_TOL_MS) next = StudioMix.loopTo(next, voice)
+        if (words.isNotEmpty()) next = StudioMix.snapToWords(next, words, clipCaps())
+        change(next, t("Ролик подогнан под озвучку: ", "Video fitted to the voice-over: ") + StudioCuts.stamp(StudioMix.totalMs(next)))
+    }
+
+    /** A copy of the built video where the user picks (Downloads, a card, a cloud folder). */
+    private fun saveCopy(f: File) {
+        pendingCopy = f
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/mp4")
+                .putExtra(Intent.EXTRA_TITLE, f.name), REQ_SAVE)
+        } catch (e: Exception) {
+            err(e)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_SAVE) return
+        val src = pendingCopy
+        pendingCopy = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null || src == null) return
+        Lumen.async({
+            contentResolver.openOutputStream(uri)?.use { out -> src.inputStream().use { it.copyTo(out) } } ?: error(t("Файл не открылся для записи", "The file cannot be opened for writing"))
+        }, { e -> err(e) }) { toast(t("Копия сохранена", "Copy saved")) }
+    }
 
     /** The plan of the video: every element is a clip scene; schemes and subtitles where they were added. */
     private fun plan(): StudioPlan {
@@ -1212,7 +1312,7 @@ class StudioMixActivity : LumenBase() {
     }
 
     /** Builds the video in the background service; it is saved to the gallery when done. */
-    private fun build(forRecording: Boolean) {
+    private fun build(forRecording: Boolean, mute: Boolean = false) {
         if (StudioJob.running) {
             toast(t("Уже собирается другое видео Студии", "Another Studio video is being built"))
             return
@@ -1220,7 +1320,7 @@ class StudioMixActivity : LumenBase() {
         val ready = readyClips()
         if (items.isEmpty() || ready.isEmpty()) return
         val plan = plan()
-        val voice = (if (forRecording) null else readVoice())
+        val voice = (if (forRecording || mute) null else readVoice())
             ?: StudioAudio.Pcm(ShortArray((plan.totalMs * 44_100 / 1000).toInt() + 1), 44_100)
         val (w, h) = aspect().size(StudioPrefs.quality)
         val day = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
@@ -1229,7 +1329,7 @@ class StudioMixActivity : LumenBase() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
         }
-        Prefs.pending = (if (voiceFile.exists() && !forRecording) "v" else "-") + StudioMix.signature(items, Prefs.format)
+        Prefs.pending = (if (voiceFile.exists() && !forRecording && !mute) "v" else "-") + StudioMix.signature(items, Prefs.format)
         recordAfter = forRecording
         StudioService.start(this, StudioJob.Request(plan, voice, ReportKit.shareFile(this, name), name, w, h, bg, null, 0f, false, sfx = false))
         render()
@@ -1356,7 +1456,9 @@ class StudioMixActivity : LumenBase() {
             done = true
             close()
             render()
-            toast(t("Озвучка записана. Нажмите «Получить видео-микс»", "Voice-over recorded. Tap \"Get the video mix\""))
+            val diff = voiceMs() - StudioMix.totalMs(items)
+            toast(if (kotlin.math.abs(diff) > FIT_TOL_MS) t("Озвучка записана. Длина ролика другая — подгоните его в «4. Видео»", "Voice-over recorded. The video length differs — fit it in \"4. Video\"")
+            else t("Озвучка записана. Нажмите «Собрать видео с озвучкой»", "Voice-over recorded. Tap \"Build the video with the voice-over\""))
         }
 
         bottomSheet(t("🎙 Озвучка поверх микса", "🎙 Voice-over over the mix"), onDismiss = { if (!done) finishTake(false) }) { dismiss ->

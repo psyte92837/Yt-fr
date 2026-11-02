@@ -282,4 +282,37 @@ class StudioMixTest {
         val cuts = mapOf("c1" to ClipCut(MixCut.RANDOM, 1_500), "c2" to ClipCut(MixCut.MARKS, 0, listOf(1_000, 3_000)), "c3" to ClipCut())
         assertEquals(cuts - "c3", StudioMix.cutsFromJson(StudioMix.cutsJson(cuts)))
     }
+
+    @Test
+    fun fitsTheVoiceOver() {
+        val items = listOf(MixItem("a", 0, 2_000), MixItem("b", 0, 2_000), MixItem("a", 2_000, 2_000))
+        val caps = mapOf("a" to 10_000L, "b" to 3_000L)
+        val longer = StudioMix.scaleTo(items, 9_000, caps)
+        assertEquals(9_000L, StudioMix.totalMs(longer))
+        // b cannot be longer than its clip, the others take the rest
+        assertEquals(3_000L, longer[1].lenMs)
+        assertTrue(longer.all { it.fromMs + it.lenMs <= caps.getValue(it.clipId) })
+        val shorter = StudioMix.scaleTo(items, 3_000, caps)
+        assertEquals(3_000L, StudioMix.totalMs(shorter))
+        assertEquals(items.map { it.clipId }, shorter.map { it.clipId })
+        val looped = StudioMix.loopTo(items, 10_000)
+        assertEquals(10_000L, StudioMix.totalMs(looped))
+        assertEquals(looped.size, looped.map { it.key }.toSet().size)
+        assertEquals(0, StudioMix.repeats(looped.take(4)))
+        assertEquals(4_000L, StudioMix.totalMs(StudioMix.loopTo(items, 4_000)))
+        val h = byteArrayOf(*"RIFF".toByteArray(), 0, 0, 0, 0, *ByteArray(14), 1, 0, 0x44, 0xAC.toByte(), 0, 0, *ByteArray(16))
+        assertEquals(1_000L, StudioMix.wavMs(h, 44 + 88_200))
+    }
+
+    @Test
+    fun seamsMoveToWords() {
+        val items = listOf(MixItem("a", 0, 2_000), MixItem("b", 0, 2_000), MixItem("a", 3_000, 2_000))
+        val caps = mapOf("a" to 10_000L, "b" to 10_000L)
+        val words = listOf(SWord("раз", 0, 300), SWord("два", 2_250, 2_500), SWord("три", 3_900, 4_200), SWord("далеко", 5_000, 5_300))
+        val s = StudioMix.snapToWords(items, words, caps)
+        assertEquals(listOf(2_250L, 1_650L, 2_100L), s.map { it.lenMs })
+        assertEquals(6_000L, StudioMix.totalMs(s))
+        assertEquals(2, StudioMix.seamsOnWords(s, words))
+        assertEquals(0, StudioMix.seamsOnWords(items, words))
+    }
 }

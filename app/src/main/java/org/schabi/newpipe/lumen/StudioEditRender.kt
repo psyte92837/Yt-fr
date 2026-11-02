@@ -668,6 +668,85 @@ object StudioEditRender {
         }
     }
 
+    /**
+     * Piece [fromMs]..[toMs] of [src] played backwards, as a new silent MP4 [out] (long side at most [maxSide]):
+     * every frame of the piece taken from the end to the start. Worker thread; returns the length in ms.
+     */
+    fun reverse(src: File, fromMs: Long, toMs: Long, out: File, maxSide: Int, cancelled: () -> Boolean, progress: (String) -> Unit): Long {
+        val pr = probe(src)
+        val (w, h) = StudioEdit.outSize(pr.w, pr.h, maxSide)
+        val fps = pr.fps
+        val n = max(1, ((toMs - fromMs) * fps / 1000).toInt())
+        out.parentFile?.mkdirs()
+        val enc = MediaCodec.createEncoderByType(MIME)
+        enc.configure(videoFormat(w, h, fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        enc.start()
+        val muxer = MediaMuxer(out.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val sink = VideoSink(enc, muxer, NoAudio)
+        val r = MediaMetadataRetriever()
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG)
+        val pix = IntArray(w * h)
+        val y = ByteArray(w * h)
+        val u = ByteArray(w * h / 4)
+        val v = ByteArray(w * h / 4)
+        val size = w * h * 3 / 2
+        var ok = false
+        try {
+            r.setDataSource(src.absolutePath)
+            for (i in 0 until n) {
+                if (cancelled()) throw CancellationException()
+                val tUs = max(fromMs * 1000, toMs * 1000 - ((i + 0.5) * 1_000_000 / fps).toLong())
+                val fr = r.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                if (fr != null) {
+                    // some phones give the frame as stored, not turned upright: turn it when its shape is the other one
+                    val upright = (fr.width >= fr.height) == (w >= h)
+                    canvas.drawColor(Color.BLACK)
+                    canvas.save()
+                    if (!upright && pr.rotation != 0) canvas.rotate(pr.rotation.toFloat(), w / 2f, h / 2f)
+                    val (dw, dh) = if (!upright && pr.rotation != 0) h to w else w to h
+                    canvas.drawBitmap(fr, null, RectF((w - dw) / 2f, (h - dh) / 2f, (w + dw) / 2f, (h + dh) / 2f), paint)
+                    canvas.restore()
+                    fr.recycle()
+                    bmp.getPixels(pix, 0, w, 0, 0, w, h)
+                    Studio.argbToYuv420(pix, w, h, y, u, v)
+                }
+                var idx: Int
+                while (true) {
+                    idx = enc.dequeueInputBuffer(TIMEOUT)
+                    if (idx >= 0) break
+                    sink.drain(false)
+                    if (cancelled()) throw CancellationException()
+                }
+                val image = enc.getInputImage(idx)
+                if (image != null) StudioVideo.writeImage(image, w, h, y, u, v) else StudioVideo.writeNv12(enc.getInputBuffer(idx)!!, w, h, y, u, v)
+                enc.queueInputBuffer(idx, 0, size, Studio.frameTimeUs(i, fps), 0)
+                sink.drain(false)
+                if (i % 10 == 0 || i == n - 1) progress(t("Реверс: кадры ${i + 1}/$n", "Reverse: frames ${i + 1}/$n"))
+            }
+            while (true) {
+                val idx = enc.dequeueInputBuffer(TIMEOUT)
+                if (idx >= 0) {
+                    enc.queueInputBuffer(idx, 0, 0, Studio.frameTimeUs(n, fps), MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    break
+                }
+                sink.drain(false)
+            }
+            sink.drain(true)
+            ok = true
+        } finally {
+            runCatching { r.release() }
+            bmp.recycle()
+            runCatching { enc.stop() }
+            enc.release()
+            if (sink.started) runCatching { muxer.stop() }
+            runCatching { muxer.release() }
+            if (!ok) out.delete()
+        }
+        return n * 1000L / fps
+    }
+
     internal const val MIME = MediaFormat.MIMETYPE_VIDEO_AVC
     internal const val TIMEOUT = 10_000L
 

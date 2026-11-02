@@ -67,6 +67,7 @@ class StudioEditorActivity : LumenBase() {
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
         private const val TASK_AI = TASK + "ai"
+        private const val TASK_REV = TASK + "reverse"
 
         /** Words of the voice handed over with the video until its project is made. */
         @Volatile private var handoff: Pair<String, List<SWord>>? = null
@@ -796,7 +797,7 @@ class StudioEditorActivity : LumenBase() {
     private fun watch() {
         val row = statusRow ?: return
         val ex = BgTasks.find(TASK_EXPORT)
-        val task = ex ?: BgTasks.find(TASK_AI)
+        val task = ex ?: BgTasks.find(TASK_AI) ?: BgTasks.find(TASK_REV)
         if (task == null) {
             // speech recognition runs on the main thread's callbacks, not as a background task
             if (recogMsg != null) {
@@ -965,6 +966,7 @@ class StudioEditorActivity : LumenBase() {
                     add(danger("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
                     add(act("⧉", t("Дубль", "Duplicate")) { clipDuplicate(ci) })
                     if (!c.isHold) add(act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() })
+                    if (!c.isHold) add(act("⏪", t("Реверс", "Reverse")) { reverseClip(ci) })
                     add(act("⟳", t("Повернуть", "Rotate"), on = c.rot != 0) { clipUpdate(ci) { it.copy(rot = (it.rot + 90) % 360) } })
                     add(act("⇋", t("Зеркало", "Mirror"), on = c.mirror) { clipUpdate(ci) { it.copy(mirror = !it.mirror) } })
                     add(act("🔍", t("Масштаб", "Zoom"), on = c.zoom > 1f) { zoomSheet(ci) })
@@ -1669,6 +1671,31 @@ class StudioEditorActivity : LumenBase() {
         val list = (if (start) EditTrack.trimStart(clips, i, curMs) else EditTrack.trimEnd(clips, i, curMs))
             ?: return toast(t("Поставьте курсор внутрь выбранного куска", "Put the playhead inside the selected piece"))
         commitClips(list, i)
+    }
+
+    /** Piece [i] backwards: a reversed copy of it is made once (silent), and the piece plays that copy. */
+    private fun reverseClip(i: Int) {
+        val c = clips.getOrNull(i) ?: return
+        if (c.isHold) return
+        if (BgTasks.has(TASK_REV)) return toast(t("Реверс уже идёт", "A reverse is already running"))
+        if (c.toMs - c.fromMs > 60_000) return toast(t("Реверс — для кусков до минуты: сначала разрежьте (✂)", "Reverse works on pieces up to a minute: split first (✂)"))
+        val p = project ?: return
+        pause()
+        val d = dir
+        val srcF = srcFile(c.src)
+        val name = "img/rev${System.currentTimeMillis()}.mp4"
+        BgTasks.run(this, TASK_REV, t("Редактор: реверс куска", "Editor: reversing a piece"), BgTasks.reopen(this), { task ->
+            val len = StudioEditRender.reverse(srcF, c.fromMs, c.toMs, File(d, name), 1280, { task.cancelled }) { m -> BgTasks.progress(TASK_REV, m) }
+            len to StudioEditRender.probe(File(d, name))
+        }, { e -> if (!isDestroyed) err(e) }) { (len, pr) ->
+            if (project?.id != p.id) return@run
+            val j = clips.indexOfFirst { it.id == c.id }.takeIf { it >= 0 } ?: return@run
+            sideSizes[name] = pr.w to pr.h
+            commitClips(EditTrack.update(clips, j) { it.copy(src = name, fromMs = 0, toMs = max(EditTrack.MIN_MS + 1, min(len, pr.durMs)), volume = 0f) }, j)
+            project?.let { loadThumbs(it, name) }
+            toast(t("⏪ Кусок задом наперёд (без звука)", "⏪ The piece plays backwards (silent)"))
+        }
+        watch()
     }
 
     private fun clipUpdate(i: Int, f: (VClip) -> VClip) {

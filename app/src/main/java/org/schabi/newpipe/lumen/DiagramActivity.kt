@@ -124,11 +124,14 @@ class DiagramActivity : LumenBase() {
                 connectDialog(id)
             }
             button(t("Удалить блок", "Delete block"), style = BtnStyle.TEXT) {
-                gone = true
-                d.remove(id)
                 dismiss()
-                view.selected = null
-                persist()
+                confirm(t("Удалить блок?", "Delete the block?"), t("Вложенные блоки и связи тоже удалятся.", "Nested blocks and links are deleted too."),
+                    t("Удалить", "Delete")) {
+                    gone = true
+                    d.remove(id)
+                    view.selected = null
+                    persist()
+                }
             }
         }
     }

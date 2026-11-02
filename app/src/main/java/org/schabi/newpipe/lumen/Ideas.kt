@@ -300,7 +300,7 @@ object Ideas {
             Lumen.prefs.edit().putString(PREF_LIST, IdeasLogic.configsJson(configs().filter { it.id != id }).toString()).apply()
             file(id).delete()
         }
-        if (withProject && c.projectId.isNotEmpty()) Store.delete(c.projectId)
+        if (withProject && c.projectId.isNotEmpty()) Store.trash(c.projectId)
     }
 
     /**

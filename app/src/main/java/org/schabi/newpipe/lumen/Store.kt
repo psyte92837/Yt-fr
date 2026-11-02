@@ -60,6 +60,44 @@ object Store {
         File(projectsDir, id).deleteRecursively()
     }
 
+    // ---- trash: deleted projects wait TrashLogic.KEEP_DAYS days ----
+    private val trashDir get() = File(root, "trash").also { it.mkdirs() }
+
+    /** Moves the project to the trash (undoable); false if it is not there. */
+    fun trash(id: String): Boolean = synchronized(lock) {
+        val src = File(projectsDir, id)
+        if (!src.exists()) return false
+        val dst = File(trashDir, id)
+        dst.deleteRecursively()
+        val ok = src.renameTo(dst) || (src.copyRecursively(dst, overwrite = true) && src.deleteRecursively())
+        if (ok) File(dst, ".deleted_at").writeText(System.currentTimeMillis().toString())
+        ok
+    }
+
+    /** Brings a trashed project back. */
+    fun restore(id: String): Boolean = synchronized(lock) {
+        val src = File(trashDir, id)
+        if (!src.exists()) return false
+        File(src, ".deleted_at").delete()
+        val dst = File(projectsDir, id)
+        if (dst.exists()) return false
+        src.renameTo(dst) || (src.copyRecursively(dst, overwrite = true) && src.deleteRecursively())
+    }
+
+    /** Trashed projects with the time they were deleted, newest first. */
+    fun trashed(): List<Pair<Project, Long>> = synchronized(lock) {
+        trashDir.listFiles()?.mapNotNull { d ->
+            val p = runCatching { Project.from(JSONObject(File(d, "project.json").readText())) }.getOrNull() ?: return@mapNotNull null
+            p to (runCatching { File(d, ".deleted_at").readText().trim().toLong() }.getOrNull() ?: d.lastModified())
+        }?.sortedByDescending { it.second } ?: emptyList()
+    }
+
+    fun purge(id: String) = synchronized(lock) { File(trashDir, id).deleteRecursively() }
+
+    /** Removes for good what waited long enough; returns how many. */
+    fun purgeExpired(now: Long = System.currentTimeMillis()): Int =
+        trashed().count { (p, at) -> TrashLogic.expired(at, now) && purge(p.id) }
+
     fun duplicate(id: String): Project? = synchronized(lock) {
         val src = project(id) ?: return null
         val copy = Project.from(src.toJson()).copy(id = newId(), createdAt = System.currentTimeMillis())

@@ -124,7 +124,10 @@ class TtsActivity : LumenBase() {
         c.row(
             btn(this, t("📎 Файл", "📎 File"), style = BtnStyle.TONAL) { pickFile() },
             btn(this, t("📋 Вставить", "📋 Paste"), style = BtnStyle.TONAL) { paste() },
-            btn(this, t("Очистить", "Clear"), style = BtnStyle.TEXT) { input.setText("") }
+            btn(this, t("Очистить", "Clear"), style = BtnStyle.TEXT) {
+                val old = input.text.toString()
+                if (old.isNotEmpty()) undoable(t("Текст очищен", "Text cleared"), apply = { input.setText("") }, revert = { input.setText(old) })
+            }
         )
         info = c.muted("")
         c.muted(t("TXT, MD, FB2, EPUB, DOCX, HTML, SRT/VTT. Кодировка определяется сама.", "TXT, MD, FB2, EPUB, DOCX, HTML, SRT/VTT. Encoding is detected automatically."))

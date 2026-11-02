@@ -104,6 +104,7 @@ class LumenActivity : LumenBase() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Notify.channels(this)
+        Shortcuts.publish(this)
         if (!Settings.wizardDone) {
             startActivity(Intent(this, WizardActivity::class.java))
         }
@@ -123,6 +124,7 @@ class LumenActivity : LumenBase() {
 
     override fun onResume() {
         super.onResume()
+        runCatching { Store.purgeExpired() }.onFailure { L.w("trash", "purge: ${it.message}") }
         render()
         AutoBackup.maybe(this)
         // monitoring jobs made before "Wi-Fi only" was removed still wait for Wi-Fi: schedule them again once
@@ -183,7 +185,11 @@ class LumenActivity : LumenBase() {
         if (!showArchived) ideasCard(c)
         if (!showArchived) botsCard(c)
         val all = Store.projects()
-        val list = all.filter { it.archived == showArchived }
+        val pins = ProjectOrder.parsePins(Lumen.prefs.getString("home_pins", null))
+        val byId = all.associateBy { it.id }
+        val list = ProjectOrder.sort(all.filter { it.archived == showArchived }
+            .map { ProjectOrder.Row(it.id, it.name.ifBlank { it.phrase }, it.createdAt, it.lastRunAt, it.videoCount) },
+            Lumen.prefs.getString("home_sort", "recent") ?: "recent", pins).mapNotNull { byId[it.id] }
         c.h2(if (showArchived) t("Архив", "Archive") + " (${list.size})" else t("Проекты", "Projects") + " (${list.size})")
         if (list.isEmpty()) {
             if (showArchived) c.muted(t("В архиве пусто.", "The archive is empty."))
@@ -202,7 +208,7 @@ class LumenActivity : LumenBase() {
         }
         for (p in list) {
             val card = c.card {
-                val title = text(ctx, p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true).apply {
+                val title = text(ctx, (if (p.id in pins) "📌 " else "") + p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
@@ -236,7 +242,7 @@ class LumenActivity : LumenBase() {
         val archived = all.count { it.archived }
         page(
             "Lumen", c.root, back = false,
-            actions = listOf("⋮" to { homeMenu(archived) }),
+            actions = listOf("🔍" to { SearchActivity.open(this) }, "⋮" to { homeMenu(archived) }),
             fab = t("＋  Новый проект", "＋  New project") to { startActivity(Intent(this, NewProjectActivity::class.java)) },
             footer = bottomNav(this, listOf(
                 Ic.HOME to t("Проекты", "Projects"), Ic.WEB to t("Браузер", "Browser"),
@@ -329,6 +335,10 @@ class LumenActivity : LumenBase() {
                 render()
             })
         }
+        items.add(t("Сортировка: ", "Sort: ") + sortName(Lumen.prefs.getString("home_sort", "recent") ?: "recent") to { sortDialog() })
+        val trashed = runCatching { Store.trashed().size }.getOrDefault(0)
+        if (trashed > 0) items.add(t("🗑 Корзина ($trashed)", "🗑 Trash ($trashed)") to { trashSheet() })
+        items.add(t("🔍 Поиск по приложению", "🔍 Search the app") to { SearchActivity.open(this) })
         items.add(t("Восстановить из резервной копии…", "Restore from a backup…") to {
             @Suppress("DEPRECATION")
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
@@ -343,11 +353,89 @@ class LumenActivity : LumenBase() {
         AlertDialog.Builder(this).setTitle("Lumen").setItems(items.map { it.first }.toTypedArray()) { _, i -> items[i].second() }.show()
     }
 
+    private fun sortName(mode: String) = when (mode) {
+        "created" -> t("по дате создания", "by creation date")
+        "name" -> t("по названию", "by name")
+        "size" -> t("по числу видео", "by video count")
+        else -> t("недавние", "recent")
+    }
+
+    private fun sortDialog() {
+        val cur = Lumen.prefs.getString("home_sort", "recent") ?: "recent"
+        val modes = ProjectOrder.MODES
+        AlertDialog.Builder(this).setTitle(t("Сортировка проектов", "Sort projects"))
+            .setSingleChoiceItems(modes.map { sortName(it) }.toTypedArray(), modes.indexOf(cur).coerceAtLeast(0)) { d, i ->
+                Lumen.prefs.edit().putString("home_sort", modes[i]).apply()
+                d.dismiss()
+                render()
+            }.setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    private fun togglePin(id: String) {
+        val pins = ProjectOrder.parsePins(Lumen.prefs.getString("home_pins", null))
+        val next = if (id in pins) pins - id else pins + id
+        Lumen.prefs.edit().putString("home_pins", ProjectOrder.pins(next)).apply()
+        render()
+    }
+
+    /** Deleted projects: restore or remove for good; everything older than a week goes by itself. */
+    private fun trashSheet() {
+        bottomSheet(t("Корзина", "Trash")) { dismiss ->
+            val list = Store.trashed()
+            val now = System.currentTimeMillis()
+            muted(t("Удалённые проекты хранятся ${TrashLogic.KEEP_DAYS} дней, потом стираются сами.",
+                "Deleted projects are kept for ${TrashLogic.KEEP_DAYS} days, then erased by themselves."))
+            if (list.isEmpty()) muted(t("Корзина пуста.", "The trash is empty."))
+            list.forEach { (p, at) ->
+                card {
+                    add(text(ctx, p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true), 0)
+                    muted(t("Удалён: ", "Deleted: ") + Fmt.dateTime(at) + " · " + t("осталось дней: ", "days left: ") + TrashLogic.daysLeft(at, now))
+                    row(btn(ctx, t("Восстановить", "Restore"), style = BtnStyle.TONAL) {
+                        if (Store.restore(p.id)) {
+                            Store.project(p.id)?.let { Monitoring.apply(this@LumenActivity, it) }
+                            toast(t("Проект восстановлен", "Project restored"))
+                        }
+                        dismiss()
+                        render()
+                    }, btn(ctx, t("Стереть", "Erase"), style = BtnStyle.TEXT) {
+                        confirm(t("Стереть навсегда?", "Erase for good?"), p.name, t("Удалить", "Delete")) {
+                            Store.purge(p.id)
+                            dismiss()
+                            render()
+                        }
+                    })
+                }
+            }
+            if (list.size > 1) button(t("Очистить корзину", "Empty the trash"), style = BtnStyle.TEXT) {
+                confirm(t("Очистить корзину?", "Empty the trash?"), t("Проектов: ${list.size}. Это нельзя отменить.", "Projects: ${list.size}. This cannot be undone."),
+                    t("Очистить", "Clear")) {
+                    list.forEach { Store.purge(it.first.id) }
+                    dismiss()
+                    render()
+                }
+            }
+        }
+    }
+
+    /** Deletes [p] into the trash with "Undo". */
+    private fun trashProject(p: Project) {
+        undoable(t("Проект «${p.name.take(30)}» в корзине", "Project \"${p.name.take(30)}\" moved to trash"), apply = {
+            Monitoring.cancel(this, p.id)
+            Store.trash(p.id)
+            render()
+        }, revert = {
+            if (Store.restore(p.id)) Store.project(p.id)?.let { Monitoring.apply(this, it) }
+            render()
+        })
+    }
+
     private fun projectMenu(p: Project) {
+        val pinned = p.id in ProjectOrder.parsePins(Lumen.prefs.getString("home_pins", null))
         val items = arrayOf(
             t("Открыть", "Open"), t("🗺 Карта знаний", "🗺 Knowledge map"), t("Дублировать", "Duplicate"),
             if (p.archived) t("Вернуть из архива", "Unarchive") else t("В архив", "Archive"),
-            t("Удалить", "Delete")
+            t("Удалить", "Delete"),
+            if (pinned) t("Открепить", "Unpin") else t("📌 Закрепить сверху", "📌 Pin to top")
         )
         AlertDialog.Builder(this).setTitle(p.name).setItems(items) { _, which ->
             when (which) {
@@ -358,16 +446,21 @@ class LumenActivity : LumenBase() {
                     render()
                 }
                 3 -> {
-                    p.archived = !p.archived
-                    Store.save(p)
-                    Monitoring.apply(this, p)
-                    render()
+                    val was = p.archived
+                    undoable(if (was) t("Проект возвращён из архива", "Project unarchived") else t("Проект в архиве", "Project archived"), apply = {
+                        p.archived = !was
+                        Store.save(p)
+                        Monitoring.apply(this, p)
+                        render()
+                    }, revert = {
+                        p.archived = was
+                        Store.save(p)
+                        Monitoring.apply(this, p)
+                        render()
+                    })
                 }
-                4 -> confirm(t("Удалить проект?", "Delete project?"), p.name, t("Удалить", "Delete")) {
-                    Monitoring.cancel(this, p.id)
-                    Store.delete(p.id)
-                    render()
-                }
+                4 -> trashProject(p)
+                5 -> togglePin(p.id)
             }
         }.show()
     }

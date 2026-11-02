@@ -24,6 +24,7 @@ class SettingsActivity : LumenBase() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent.getBooleanExtra("general", false)) section = 0
         if (intent.getBooleanExtra("ai", false)) section = 1
         if (intent.getBooleanExtra("logs", false)) section = 2
         if (intent.getBooleanExtra("quick", false)) section = 3
@@ -130,9 +131,10 @@ class SettingsActivity : LumenBase() {
         }
         c.button(t("Журнал всех ответов AI", "Journal of all AI answers"), style = BtnStyle.OUTLINED) { AiJournalActivity.open(this) }
         c.button(t("Сбросить статистику", "Reset statistics"), style = BtnStyle.TEXT) {
-            AlertDialog.Builder(this).setMessage(t("Удалить всю статистику использования?", "Delete all usage statistics?"))
-                .setPositiveButton(t("Удалить", "Delete")) { _, _ -> AiStats.clear(); render() }
-                .setNegativeButton(t("Отмена", "Cancel"), null).show()
+            confirm(t("Удалить всю статистику использования?", "Delete all usage statistics?"), "", t("Удалить", "Delete")) {
+                AiStats.clear()
+                render()
+            }
         }
     }
 
@@ -430,8 +432,17 @@ class SettingsActivity : LumenBase() {
             }
         }
         c.button(t("Сбросить все промпты", "Reset all prompts"), style = BtnStyle.TEXT) {
-            Prompts.defaults.keys.forEach { Prompts.set(it, "") }
-            render()
+            confirm(t("Сбросить все промпты?", "Reset all prompts?"),
+                t("Ваши правки промптов заменятся стандартными.", "Your prompt edits are replaced with the defaults."), t("Сбросить", "Reset")) {
+                val old = Prompts.defaults.keys.associateWith { Prompts.get(it) }
+                undoable(t("Промпты сброшены", "Prompts reset"), apply = {
+                    Prompts.defaults.keys.forEach { Prompts.set(it, "") }
+                    render()
+                }, revert = {
+                    old.forEach { (k, v) -> Prompts.set(k, v) }
+                    render()
+                })
+            }
         }
     }
 

@@ -963,10 +963,17 @@ class StudioActivity : LumenBase() {
             btn(this, t("Удалить", "Delete"), style = BtnStyle.TEXT) {
                 player?.release()
                 player = null
-                takeFile.delete()
-                if (StudioPrefs.voiceMode == "video") sourceFile.delete()
-                resetAnalysis()
-                render()
+                // the take is moved aside first: "Undo" in the snackbar brings it back
+                val files = listOfNotNull(takeFile, sourceFile.takeIf { StudioPrefs.voiceMode == "video" }).filter { it.exists() }
+                val aside = files.map { java.io.File(it.path + ".undo") }
+                undoable(t("Запись удалена", "Take deleted"), apply = {
+                    files.zip(aside).forEach { (f, b) -> b.delete(); if (!f.renameTo(b)) f.delete() }
+                    resetAnalysis()
+                    render()
+                }, revert = {
+                    files.zip(aside).forEach { (f, b) -> if (b.exists()) b.renameTo(f) }
+                    render()
+                }, commit = { aside.forEach { it.delete() } })
             }
         )
     }
@@ -2288,7 +2295,7 @@ class StudioActivity : LumenBase() {
         val go = { runWrite(topic, extra) {} }
         if (scriptEdit.text.isNotBlank()) confirm(t("Заменить сценарий?", "Replace the script?"),
             t("AI напишет новый сценарий по теме; текущий текст будет учтён как черновик.", "AI will write a new script; the current text is used as a draft."),
-            t("Написать", "Write"), go) else go()
+            t("Написать", "Write"), onOk = go) else go()
     }
 
     /** AI writes the script on [topic] (with the author's [extra] wishes); [then] runs after it is in the editor. */

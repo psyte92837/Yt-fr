@@ -50,7 +50,8 @@ object HelpMap {
         "SettingsActivity" to "settings",
         "FreeAiActivity" to "settings",
         "TasksActivity" to "settings",
-        "HelpActivity" to "about"
+        "HelpActivity" to "about",
+        "SearchActivity" to "home"
     )
 
     /** All screens that have their own entry (used by the test). */

@@ -253,7 +253,11 @@ fun Context.isNight(): Boolean = if (LumenEnv.ready && Palette.gradientDark != n
     else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 }
 
-fun Context.toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+/** Short message: an M3 snackbar on a visible Lumen screen (no sheet open), otherwise a system toast. */
+fun Context.toast(s: String) {
+    val a = this as? LumenBase
+    if (a != null && a.canSnack()) a.snack(s) else Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+}
 
 fun Context.openUrl(url: String) {
     try {
@@ -309,6 +313,7 @@ fun glyphIcon(glyph: String): Ic? = when (glyph) {
     "🔊" -> Ic.SPEAKER
     "?" -> Ic.HELP
     "🎬" -> Ic.MOVIE
+    "🔍", "🔎" -> Ic.SEARCH
     else -> null
 }
 
@@ -323,13 +328,14 @@ fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
     Ic.OPEN -> t("Открыть в браузере", "Open in browser")
     Ic.FIT -> t("Вписать в экран", "Fit to screen")
     Ic.COPY -> t("Копировать", "Copy")
-    Ic.DELETE -> t("Очистить", "Clear")
+    Ic.DELETE -> t("Удалить", "Delete")
     Ic.JOURNAL -> t("Ответы AI", "AI answers")
     Ic.WEB -> t("Браузер", "Browser")
     Ic.SPEAKER -> t("Озвучить текст", "Read text aloud")
     Ic.HELP -> t("Справка", "Help")
     Ic.MOVIE -> "Lumen Studio"
-    Ic.HOME, Ic.LIST, Ic.CHART, Ic.SPARK, Ic.SEARCH -> glyph
+    Ic.SEARCH -> t("Поиск", "Search")
+    Ic.HOME, Ic.LIST, Ic.CHART, Ic.SPARK -> glyph
     null -> if (glyph == "🗺") t("Карта знаний", "Knowledge map") else glyph
 }
 
@@ -499,7 +505,9 @@ fun iconBtn(ctx: Context, glyph: String, color: Int = Palette.ON_SURFACE, onClic
         text(ctx, glyph, 22f, color = color).apply { gravity = Gravity.CENTER }
     }
     return v.apply {
-        contentDescription = glyphLabel(glyph)
+        contentDescription = glyphLabel(glyph).let { l -> if (l == glyph) A11yText.label(glyph) ?: l else l }
+        minimumWidth = ctx.dp(48)
+        minimumHeight = ctx.dp(48)
         background = ripple(ctx, roundBg(0x00000000, 24f, ctx), Palette.ON_SURFACE)
         setOnClickListener { onClick() }
     }
@@ -538,8 +546,11 @@ fun btn(ctx: Context, s: String, primary: Boolean = false, style: BtnStyle? = nu
     val inset = android.graphics.drawable.InsetDrawable(shape, 0, ctx.dp(4), 0, ctx.dp(4))
     background = ripple(ctx, inset, fg)
     setTextColor(fg)
-    val p = ctx.dp(24)
+    val p = ctx.dp(if (A11yText.glyphOnly(s)) 12 else 24)
     setPadding(p, 0, p, 0)
+    minWidth = ctx.dp(48)
+    minimumWidth = ctx.dp(48)
+    A11yText.label(s)?.let { contentDescription = it }
     setOnClickListener { onClick() }
 }
 
@@ -610,6 +621,12 @@ fun chip(ctx: Context, s: String, selected: Boolean = false, onClick: (() -> Uni
     setTextColor(if (selected) Palette.ON_SOFT else Palette.MUTED)
     val shape = if (selected) roundBg(Palette.ACCENT_SOFT, 8f, ctx) else roundBg(0x00000000, 8f, ctx, Palette.OUTLINE)
     background = if (onClick != null) ripple(ctx, shape, Palette.ON_SURFACE) else shape
+    isSelected = selected
+    A11yText.label(s)?.let { contentDescription = it }
+    if (onClick != null) {
+        minHeight = ctx.dp(40)
+        if (Build.VERSION.SDK_INT >= 30) stateDescription = if (selected) t("выбрано", "selected") else null
+    }
     onClick?.let { cb -> setOnClickListener { cb() } }
 }
 
@@ -729,10 +746,12 @@ fun segBar(ctx: Context, labels: List<String>, selected: Int, onSelect: (Int) ->
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(ctx.dp(4), 0, ctx.dp(4), 0)
             background = ripple(ctx, roundBg(if (on) Palette.ACCENT_SOFT else 0x00000000, 20f, ctx), Palette.ON_SURFACE)
-            contentDescription = s
+            contentDescription = A11yText.label(s) ?: s
+            isSelected = on
+            if (Build.VERSION.SDK_INT >= 30) stateDescription = if (on) t("выбрано", "selected") else null
             setOnClickListener { if (!on) onSelect(i) }
         }
-        row.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(40), 1f))
+        row.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(48), 1f))
     }
     return row
 }
@@ -758,6 +777,8 @@ fun bottomNav(ctx: Context, items: List<Pair<Ic, String>>, selected: Int, onSele
             gravity = Gravity.CENTER_HORIZONTAL
             minimumHeight = ctx.dp(56)
             contentDescription = label
+            isSelected = on
+            if (Build.VERSION.SDK_INT >= 30) stateDescription = if (on) t("открыто", "current") else null
             addView(pill, LinearLayout.LayoutParams(ctx.dp(64), ctx.dp(32)))
             addView(text(ctx, label, 12f, bold = on, color = color).apply { maxLines = 1 })
             setOnClickListener { onSelect(i) }
@@ -782,8 +803,8 @@ class Col(val ctx: Context, padding: Int = 16) {
         return v
     }
 
-    fun title(s: String) = add(text(ctx, s, Type.HEADLINE), 4)
-    fun h2(s: String) = add(text(ctx, s, Type.TITLE_M, bold = true), 24)
+    fun title(s: String) = add(text(ctx, s, Type.HEADLINE).apply { heading() }, 4)
+    fun h2(s: String) = add(text(ctx, s, Type.TITLE_M, bold = true).apply { heading() }, 24)
     fun p(s: String, size: Float = Type.BODY, color: Int? = null) = add(text(ctx, s, size, color = color ?: Palette.ON_SURFACE))
     fun muted(s: String) = add(text(ctx, s, 13f, color = Palette.MUTED), 4)
 
@@ -797,8 +818,8 @@ class Col(val ctx: Context, padding: Int = 16) {
     }
     fun button(s: String, primary: Boolean = false, style: BtnStyle? = null, onClick: () -> Unit) = add(btn(ctx, s, primary, style, onClick), 4)
     fun check(s: String, value: Boolean, onChange: (Boolean) -> Unit) = add(chk(ctx, s, value, onChange), 0)
-    fun edit(hint: String, value: String = "", multiline: Boolean = false, number: Boolean = false) =
-        add(edt(ctx, hint, value, multiline, number))
+    fun edit(hint: String, value: String = "", multiline: Boolean = false, number: Boolean = false, onEnter: ((String) -> Unit)? = null) =
+        add(edt(ctx, hint, value, multiline, number).also { e -> if (onEnter != null && !multiline) e.onEnter(search = false, act = onEnter) })
 
     /** Up to 7 short options show as chips (one tap); long or numeric lists stay a dropdown. */
     fun <T> spinner(label: String, options: List<Pair<T, String>>, selected: T, onSelect: (T) -> Unit): View {
@@ -937,10 +958,32 @@ fun Activity.scrollPage(col: Col): ScrollView = ScrollView(this).apply {
     addView(col.root)
 }
 
-fun Activity.confirm(title: String, message: String, ok: String = "OK", onOk: () -> Unit) {
-    AlertDialog.Builder(this).setTitle(title).setMessage(message)
+fun Activity.confirm(title: String, message: String, ok: String = "OK", danger: Boolean = false, onOk: () -> Unit) {
+    val d = AlertDialog.Builder(this).setTitle(title).setMessage(message.ifBlank { null })
         .setPositiveButton(ok) { _, _ -> onOk() }
         .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    // destructive: the confirming verb in the error colour (M3)
+    if (danger || ok == t("Удалить", "Delete") || ok == t("Очистить", "Clear") || ok == t("Сбросить", "Reset")) {
+        d.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(Palette.BAD)
+    }
+}
+
+/** Marks a text as a heading for TalkBack (jump by headings). */
+fun TextView.heading() {
+    if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+}
+
+/** Keyboard action: Enter runs [act] with the text (search or done), the keyboard hides. */
+fun EditText.onEnter(search: Boolean = true, act: (String) -> Unit) {
+    imeOptions = if (search) android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH else android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+    setOnEditorActionListener { v, actionId, ev ->
+        val enter = ev != null && ev.keyCode == android.view.KeyEvent.KEYCODE_ENTER && ev.action == android.view.KeyEvent.ACTION_DOWN
+        if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE || enter) {
+            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)?.hideSoftInputFromWindow(v.windowToken, 0)
+            act(text.toString())
+            true
+        } else false
+    }
 }
 
 fun Activity.prompt(title: String, hint: String, value: String = "", multiline: Boolean = false, onOk: (String) -> Unit) {
@@ -997,6 +1040,184 @@ abstract class LumenBase : Activity() {
     }
 
     private var pageScroll: ScrollView? = null
+    private var pageFooter: View? = null
+
+    // ---------- snackbar, undo, remembered fields (UX_AUDIT stage 1) ----------
+
+    private val undoSlot = UndoSlot()
+    private var snackView: View? = null
+    private var snackText = ""
+    private var snackAt = 0L
+    private var openSheets = 0
+    private val snackHide = Runnable { hideSnack(timeout = true) }
+    private var snackTimeout: (() -> Unit)? = null
+
+    /** A snackbar can show: the screen is up and no bottom sheet covers its bottom edge. */
+    fun canSnack(): Boolean = !isFinishing && !isDestroyed && openSheets == 0 && window?.decorView?.isAttachedToWindow == true &&
+        android.os.Looper.myLooper() == android.os.Looper.getMainLooper()
+
+    /**
+     * M3 snackbar over the bottom of the screen (above the navigation bar and footer): a message and an optional action.
+     * One at a time; 4 s, or 8 s with an action. [onTimeout] runs when it goes away without the action.
+     */
+    fun snack(msg: String, action: String? = null, onTimeout: (() -> Unit)? = null, onAction: (() -> Unit)? = null) {
+        if (!canSnack()) {
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            onTimeout?.invoke()
+            return
+        }
+        hideSnack(timeout = true)
+        val content = findViewById<ViewGroup>(android.R.id.content) ?: return
+        val inverse = if (isNight()) 0xFFE6E0E9.toInt() else 0xFF322F35.toInt()
+        val onInverse = if (isNight()) 0xFF322F35.toInt() else 0xFFF5EFF7.toInt()
+        val actionColor = if (isNight()) 0xFF6750A4.toInt() else 0xFFD0BCFF.toInt()
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(48)
+            background = roundBg(inverse, 4f, this@LumenBase)
+            elevation = dp(6).toFloat()
+            setPadding(dp(16), dp(4), dp(8), dp(4))
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        bar.addView(text(this, msg, 14f, color = onInverse).apply {
+            maxLines = 3
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, dp(10), dp(8), dp(10))
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (action != null && onAction != null) {
+            bar.addView(text(this, action, 14f, bold = true, color = actionColor).apply {
+                gravity = Gravity.CENTER
+                minHeight = dp(48)
+                minWidth = dp(48)
+                setPadding(dp(12), 0, dp(12), 0)
+                background = ripple(this@LumenBase, roundBg(0x00000000, 20f, this@LumenBase), onInverse)
+                setOnClickListener {
+                    snackTimeout = null
+                    hideSnack(timeout = false)
+                    onAction()
+                }
+            })
+        }
+        // tap on the message or a sideways swipe dismisses it
+        var downX = 0f
+        bar.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> downX = e.rawX
+                android.view.MotionEvent.ACTION_MOVE -> v.translationX = e.rawX - downX
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> {
+                    if (kotlin.math.abs(v.translationX) > v.width / 3 || kotlin.math.abs(e.rawX - downX) < dp(8)) hideSnack(timeout = true)
+                    else v.animate().translationX(0f).setDuration(150).start()
+                }
+            }
+            true
+        }
+        @Suppress("DEPRECATION")
+        val navInset = window.decorView.rootWindowInsets?.systemWindowInsetBottom ?: 0
+        val footerH = pageFooter?.takeIf { it.isShown }?.height ?: 0
+        val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
+        lp.setMargins(dp(12), 0, dp(12), dp(12) + navInset + footerH)
+        content.addView(bar, lp)
+        bar.alpha = 0f
+        bar.translationY = dp(16).toFloat()
+        bar.animate().alpha(1f).translationY(0f).setDuration(180).start()
+        snackView = bar
+        snackText = msg
+        snackAt = System.currentTimeMillis()
+        snackTimeout = onTimeout
+        bar.postDelayed(snackHide, if (action != null) 8000L else 4000L)
+    }
+
+    private fun hideSnack(timeout: Boolean) {
+        val v = snackView ?: return
+        snackView = null
+        v.removeCallbacks(snackHide)
+        (v.parent as? ViewGroup)?.removeView(v)
+        val cb = snackTimeout
+        snackTimeout = null
+        if (timeout) cb?.invoke()
+    }
+
+    /**
+     * An action applied at once with "Undo" in a snackbar. [revert] puts things back; [commit] makes it final
+     * (snackbar gone, another undoable action, or the screen left).
+     */
+    fun undoable(message: String, apply: () -> Unit, revert: () -> Unit, commit: () -> Unit = {}) {
+        apply()
+        val id = undoSlot.push(message, revert, commit)
+        snack(message, t("Отменить", "Undo"), onTimeout = { undoSlot.commit(id) }) {
+            if (undoSlot.undo(id)) announce(t("Отменено", "Undone"))
+        }
+    }
+
+    /** Spoken by TalkBack without moving focus. */
+    fun announce(s: String) = window?.decorView?.announceForAccessibility(s)
+
+    override fun onPause() {
+        // a message shown just before leaving the screen would be lost: hand it to the system toast
+        if (snackView != null && System.currentTimeMillis() - snackAt < 1500) Toast.makeText(this, snackText, Toast.LENGTH_LONG).show()
+        visible = maxOf(0, visible - 1)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        undoSlot.commit()
+        super.onStop()
+    }
+
+    override fun finish() {
+        if (snackView != null && System.currentTimeMillis() - snackAt < 1500) Toast.makeText(this, snackText, Toast.LENGTH_LONG).show()
+        hideSnack(timeout = true)
+        undoSlot.commit()
+        super.finish()
+    }
+
+    /** All text fields of the screen, in layout order. */
+    private fun fields(v: View?, out: MutableList<EditText>) {
+        when (v) {
+            is EditText -> out.add(v)
+            is ViewGroup -> for (i in 0 until v.childCount) fields(v.getChildAt(i), out)
+        }
+    }
+
+    private fun EditText.isPassword(): Boolean {
+        val c = inputType and InputType.TYPE_MASK_VARIATION
+        return c == InputType.TYPE_TEXT_VARIATION_PASSWORD || c == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD ||
+            c == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD || c == InputType.TYPE_NUMBER_VARIATION_PASSWORD
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        runCatching {
+            val list = ArrayList<EditText>()
+            fields(findViewById(android.R.id.content), list)
+            val kept = FieldMemo.keep(list.filter { !FieldMemo.sensitive(it.hint?.toString().orEmpty(), it.isPassword()) }
+                .map { (it.hint?.toString().orEmpty()) to it.text.toString() })
+            outState.putStringArrayList("lumen.f.h", ArrayList(kept.map { it.first }))
+            outState.putStringArrayList("lumen.f.v", ArrayList(kept.map { it.second }))
+            outState.putInt("lumen.scroll", pageScroll?.scrollY ?: 0)
+        }
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        val hs = savedInstanceState.getStringArrayList("lumen.f.h") ?: return
+        val vs = savedInstanceState.getStringArrayList("lumen.f.v") ?: return
+        val y = savedInstanceState.getInt("lumen.scroll", 0)
+        // after the first render (screens build their views in onCreate / onResume)
+        window.decorView.post {
+            runCatching {
+                val list = ArrayList<EditText>()
+                fields(findViewById(android.R.id.content), list)
+                val back = FieldMemo.match(hs.zip(vs), list.map { it.hint?.toString().orEmpty() })
+                list.forEachIndexed { i, e ->
+                    val v = back[i] ?: return@forEachIndexed
+                    if (v.isNotEmpty() && v != e.text.toString() && !e.isPassword()) e.setText(v)
+                }
+                if (y > 0) pageScroll?.scrollTo(0, y)
+            }
+        }
+    }
 
     /** Receiver of the next dictation result (see [listen] in AskAi.kt). */
     var voiceCallback: ((String) -> Unit)? = null
@@ -1078,6 +1299,7 @@ abstract class LumenBase : Activity() {
         if (prevY > 0) pageScroll?.let { sv -> sv.post { sv.scrollTo(0, prevY) } }
         column.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         footer?.let { column.addView(it) }
+        pageFooter = footer
         val frame = FrameLayout(this).apply { background = Palette.background() }
         frame.addView(column)
         if (fab != null) {
@@ -1121,7 +1343,11 @@ abstract class LumenBase : Activity() {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         }
-        dialog.setOnDismissListener { onDismiss() }
+        dialog.setOnDismissListener {
+            openSheets = maxOf(0, openSheets - 1)
+            onDismiss()
+        }
+        openSheets++
         dialog.show()
     }
 
@@ -1150,11 +1376,6 @@ abstract class LumenBase : Activity() {
         super.onResume()
         visible++
         L.d("ui", "open ${javaClass.simpleName}")
-    }
-
-    override fun onPause() {
-        visible = maxOf(0, visible - 1)
-        super.onPause()
     }
 
     companion object {

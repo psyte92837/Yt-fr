@@ -163,8 +163,10 @@ class BotPostsTab(private val a: LumenBase, private val botId: String, private v
                     PostCore.stripTags(h.text).take(120) + if (!h.ok || h.info.isNotBlank()) "\n" + h.info else "")
             }
             if (d.history.isNotEmpty()) button(t("Очистить историю", "Clear history"), style = BtnStyle.TEXT) {
-                BotPosts.update(botId) { it.history.clear() }
-                rerender()
+                a.confirm(t("Очистить историю постов?", "Clear the post history?"), "", t("Очистить", "Clear")) {
+                    BotPosts.update(botId) { it.history.clear() }
+                    rerender()
+                }
             }
         }
         return c

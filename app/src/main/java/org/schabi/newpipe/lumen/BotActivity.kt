@@ -893,11 +893,15 @@ class BotActivity : LumenBase() {
         } else {
             c.muted(t("Владелец: id ", "Owner: id ") + b.ownerChat)
             c.button(t("Сбросить владельца", "Reset the owner"), style = BtnStyle.TEXT) {
-                Bots.update(botId) {
-                    it.ownerChat = 0
-                    it.ownerPin = BotInfo.newPin()
+                confirm(t("Сбросить владельца?", "Reset the owner?"),
+                    t("Бот забудет чат владельца. Чтобы снова стать владельцем, отправьте боту новый PIN.",
+                        "The bot forgets the owner's chat. To become the owner again, send the bot the new PIN."), t("Сбросить", "Reset")) {
+                    Bots.update(botId) {
+                        it.ownerChat = 0
+                        it.ownerPin = BotInfo.newPin()
+                    }
+                    render()
                 }
-                render()
             }
         }
 

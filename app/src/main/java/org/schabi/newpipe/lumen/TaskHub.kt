@@ -277,7 +277,12 @@ class TasksActivity : LumenBase() {
                 if (e.error.isNotBlank()) "\n" + e.error.take(200) else "")
         }
         page(t("Задачи", "Tasks"), c.root, keepScroll = true,
-            actions = if (h.isEmpty()) emptyList() else listOf("🗑" to { BgTasks.clearHistory(); render() }))
+            actions = if (h.isEmpty()) emptyList() else listOf("🗑" to {
+                confirm(t("Очистить историю задач?", "Clear the task history?"), "", t("Очистить", "Clear")) {
+                    BgTasks.clearHistory()
+                    render()
+                }
+            }))
     }
 
     companion object {

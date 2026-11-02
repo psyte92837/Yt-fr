@@ -1317,9 +1317,12 @@ class ProjectActivity : LumenBase() {
             finish()
         }
         c.button(t("Удалить проект", "Delete project"), style = BtnStyle.TEXT) {
-            confirm(t("Удалить проект?", "Delete project?"), t("Все собранные данные будут удалены.", "All collected data will be deleted."), t("Удалить", "Delete")) {
+            confirm(t("Удалить проект?", "Delete project?"), t("Проект попадёт в корзину на главной: ${TrashLogic.KEEP_DAYS} дней его можно восстановить.",
+                "The project goes to the trash on the home screen: it can be restored for ${TrashLogic.KEEP_DAYS} days."), t("Удалить", "Delete")) {
                 Monitoring.cancel(this, project.id)
-                Store.delete(project.id)
+                Store.trash(project.id)
+                android.widget.Toast.makeText(this, t("Проект в корзине (главная → ⋮ → Корзина)", "Project in the trash (home → ⋮ → Trash)"),
+                    android.widget.Toast.LENGTH_LONG).show()
                 finish()
             }
         }

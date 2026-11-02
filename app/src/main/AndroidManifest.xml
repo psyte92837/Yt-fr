@@ -64,6 +64,7 @@
         <!-- ===== Lumen: topic analysis module (launcher) ===== -->
         <activity
             android:name=".lumen.LumenActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/LumenTheme">
@@ -77,6 +78,7 @@
         <!-- ===== Lumen: "My Telegram bots" — own launcher icon, AI-written bots served by the phone ===== -->
         <activity
             android:name=".lumen.BotsActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:icon="@mipmap/lumen_bots"
             android:roundIcon="@mipmap/lumen_bots"
@@ -91,6 +93,7 @@
         </activity>
         <activity
             android:name=".lumen.BotNewActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:taskAffinity="${applicationId}.bots"
             android:theme="@style/LumenTheme"
@@ -124,44 +127,53 @@
         </receiver>
         <activity
             android:name=".lumen.WizardActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <activity
             android:name=".lumen.NewProjectActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.ProjectActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.VideoActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <activity
             android:name=".lumen.SettingsActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.KnowledgeMapActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.GraphActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <activity
             android:name=".lumen.DiagramActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <!-- Share a YouTube link → instant analysis -->
         <activity
             android:name=".lumen.LinkActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:label="Lumen: анализ"
             android:excludeFromRecents="true"
@@ -187,15 +199,18 @@
         <!-- Focused collection from Share: each result opens as its own task in Recents -->
         <activity
             android:name=".lumen.HarvestActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:documentLaunchMode="intoExisting"
             android:theme="@style/LumenTheme" />
         <activity
             android:name=".lumen.ChannelActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <activity
             android:name=".lumen.AiJournalActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <activity
@@ -232,6 +247,7 @@
             android:foregroundServiceType="dataSync" />
         <activity
             android:name=".lumen.TasksActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <receiver
@@ -239,6 +255,7 @@
             android:exported="false" />
         <activity
             android:name=".lumen.HelpActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
         <!-- ===== Lumen: JS layer — the second renderer (lumen.canvas, WebView without network) ===== -->
@@ -251,6 +268,7 @@
         <!-- ===== Lumen: "Another AI by hand" — request out, answer back by clipboard or Share ===== -->
         <activity
             android:name=".lumen.RelayActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:label="Lumen: ответ ИИ"
             android:launchMode="singleTop"
@@ -265,6 +283,7 @@
         </activity>
         <activity
             android:name=".lumen.SendReviewActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:launchMode="singleTop"
             android:excludeFromRecents="true"
@@ -272,6 +291,7 @@
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.TopicActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
@@ -308,6 +328,7 @@
             android:exported="false" />
         <activity
             android:name=".lumen.TtsActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:label="@string/lumen_tts_share"
             android:theme="@style/LumenTheme"
@@ -328,6 +349,7 @@
         <!-- text from other apps (Share and the selection menu): read aloud now, or save an MP3 in the background -->
         <activity
             android:name=".lumen.TtsShareListen"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:label="@string/lumen_tts_listen"
             android:excludeFromRecents="true"
@@ -345,6 +367,7 @@
         </activity>
         <activity
             android:name=".lumen.TtsShareSave"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="true"
             android:label="@string/lumen_tts_save"
             android:excludeFromRecents="true"
@@ -369,28 +392,40 @@
         </activity>
         <activity
             android:name=".lumen.AuditActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.MediaActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:excludeFromRecents="true"
             android:exported="false"
             android:taskAffinity=""
             android:theme="@style/RouterActivityThemeDark" />
         <activity
             android:name=".lumen.IdeasActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.LangGameActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <!-- ===== Lumen: free AI manager (catalog from FreeLLMAPI, failover between free tiers) ===== -->
+        <!-- ===== Lumen: search across projects, videos, help, settings and screens ===== -->
+        <activity
+            android:name=".lumen.SearchActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".lumen.FreeAiActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />

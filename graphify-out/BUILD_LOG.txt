@@ -64,30 +64,30 @@ Commands:
     --context C             explicit edge-context filter (repeatable)
     --seed X                start at node X (id, label or file path; repeatable)
 [graphify extract] scanning /home/runner/work/_temp/src
-[graphify extract] found 196 code, 0 docs, 0 papers, 0 images
-[graphify extract] AST extraction on 196 code files...
-  AST cache: 0/196 files served from cache (0%); 196 to extract
-  AST extraction: 100/196 uncached files (51%) [4 workers]
-  AST extraction: 196/196 uncached files (100%) [4 workers]
-  warning: 6 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMap.kt (error region at line 51, 24 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMapActivity.kt (error region at line 19, 4 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/StudioRender.kt (error region at line 1, 123 symbol(s) extracted) (+1 more)
-[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 5732 nodes, 20077 edges, 170 communities
+[graphify extract] found 199 code, 0 docs, 0 papers, 0 images
+[graphify extract] AST extraction on 199 code files...
+  AST cache: 0/199 files served from cache (0%); 199 to extract
+  AST extraction: 100/199 uncached files (50%) [4 workers]
+  AST extraction: 199/199 uncached files (100%) [4 workers]
+  warning: 7 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/CustomReport.kt (error region at line 1, 1 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMap.kt (error region at line 51, 24 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/KnowledgeMapActivity.kt (error region at line 19, 4 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/SearchActivity.kt (error region at line 17, 10 symbol(s) extracted) (+2 more)
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 5810 nodes, 20362 edges, 163 communities
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
 Loading existing graph...
-Graph: 5732 nodes, 20077 edges
+Graph: 5810 nodes, 20362 edges
 Re-clustering...
-Done - 170 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+Done - 163 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-graph_map: 170 communities named, 196 files mapped
+graph_map: 163 communities named, 199 files mapped
 map exit=0
-total 10596
-drwxr-xr-x 3 runner runner     4096 Nov  2 08:30 .
-drwxr-xr-x 4 runner runner     4096 Nov  2 08:30 ..
--rw-r--r-- 1 runner runner   475888 Nov  2 08:30 .graphify_analysis.json
--rw-r--r-- 1 runner runner       27 Nov  2 08:30 .graphify_root
--rw-r--r-- 1 runner runner     6743 Nov  2 08:30 BUILD_LOG.txt
--rw-r--r-- 1 runner runner    58392 Nov  2 08:30 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner     4096 Nov  2 08:30 cache
--rw-r--r-- 1 runner runner 10232415 Nov  2 08:30 graph.json
--rw-r--r-- 1 runner runner    47530 Nov  2 08:30 manifest.json
+total 10736
+drwxr-xr-x 3 runner runner     4096 Nov  2 09:41 .
+drwxr-xr-x 4 runner runner     4096 Nov  2 09:41 ..
+-rw-r--r-- 1 runner runner   481812 Nov  2 09:41 .graphify_analysis.json
+-rw-r--r-- 1 runner runner       27 Nov  2 09:41 .graphify_root
+-rw-r--r-- 1 runner runner     6745 Nov  2 09:41 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner    58564 Nov  2 09:41 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner     4096 Nov  2 09:41 cache
+-rw-r--r-- 1 runner runner 10373113 Nov  2 09:41 graph.json
+-rw-r--r-- 1 runner runner    48254 Nov  2 09:41 manifest.json

@@ -301,3 +301,47 @@ object EditMusic {
     /** Sounds that change the export. */
     fun mixes(blocks: List<EBlock>): Boolean = blocks.any { isSound(it) && (it.volume > 0f || it.mainVolume != 1f) }
 }
+
+/**
+ * Auto subtitles (like "Auto captions" in CapCut): the words of the voice grouped into short captions — a few words,
+ * not across a long pause or the end of a sentence, not longer than a few seconds. They become ordinary caption
+ * blocks marked with [TAG], so all of them can be restyled or removed at once. Pure, no Android.
+ */
+object EditCaptions {
+    const val TAG = "subs"
+    /** Words in one caption: one word (TikTok style), a short line, a long line. */
+    val SIZES = listOf(1, 3, 6)
+    /** Height of the caption centre in the frame: low, middle, high. */
+    val PLACES = listOf(0.8f, 0.5f, 0.2f)
+
+    data class Cue(val text: String, val startMs: Long, val endMs: Long)
+
+    fun isSub(b: EBlock): Boolean = b.kind == "text" && b.ask == TAG
+
+    private fun endsSentence(w: String) = w.trimEnd().lastOrNull()?.let { it in ".!?…" } == true
+
+    /** Captions of at most [maxWords] words and [maxMs]; a pause over [gapMs] or a sentence end starts a new one. */
+    fun cues(words: List<SWord>, maxWords: Int, maxMs: Long = 3000, gapMs: Long = 700, minMs: Long = 400): List<Cue> {
+        val n = maxWords.coerceAtLeast(1)
+        val groups = ArrayList<List<SWord>>()
+        var cur = ArrayList<SWord>()
+        for (w in words.filter { it.text.isNotBlank() }.sortedBy { it.startMs }) {
+            val last = cur.lastOrNull()
+            val cut = last != null && (cur.size >= n || w.startMs - last.endMs > gapMs || w.endMs - cur.first().startMs > maxMs || endsSentence(last.text))
+            if (cut) {
+                groups += cur
+                cur = ArrayList()
+            }
+            cur += w
+        }
+        if (cur.isNotEmpty()) groups += cur
+        val out = ArrayList<Cue>()
+        groups.forEachIndexed { i, g ->
+            val start = g.first().startMs
+            val next = groups.getOrNull(i + 1)?.first()?.startMs ?: Long.MAX_VALUE
+            val end = max(g.last().endMs, start + minMs).coerceAtMost(next).coerceAtLeast(start + 1)
+            out += Cue(g.joinToString(" ") { it.text.trim() }, start, end)
+        }
+        return out
+    }
+}

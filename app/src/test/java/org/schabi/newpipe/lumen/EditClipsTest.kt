@@ -77,3 +77,32 @@ class EditClipsTest {
         assertTrue(EditTrack.from(org.json.JSONArray("[{\"id\":\"c\",\"from\":0,\"to\":5,\"src\":\"/etc/passwd\"}]"))[0].src.isEmpty())
     }
 }
+
+class EditCaptionsTest {
+    private fun w(t: String, s: Long, e: Long) = SWord(t, s, e)
+
+    @Test
+    fun wordsAreGroupedBySizePauseAndSentence() {
+        val words = listOf(w("Привет", 0, 300), w("всем.", 350, 700), w("Сегодня", 800, 1100), w("мы", 1150, 1250),
+            w("разберём", 1300, 1700), w("монтаж", 1750, 2100), w("потом", 4000, 4300))
+        val c = EditCaptions.cues(words, 3)
+        assertEquals(listOf("Привет всем.", "Сегодня мы разберём", "монтаж", "потом"), c.map { it.text })
+        assertEquals(0L, c[0].startMs)
+        // never runs into the next caption
+        for (i in 0 until c.size - 1) assertTrue(c[i].endMs <= c[i + 1].startMs)
+        assertEquals(7, EditCaptions.cues(words, 1).size)
+    }
+
+    @Test
+    fun shortWordsStillShowLongEnough() {
+        val c = EditCaptions.cues(listOf(w("да", 1000, 1050)), 3)
+        assertEquals(1400L, c.single().endMs)
+        assertTrue(EditCaptions.cues(emptyList(), 3).isEmpty())
+    }
+
+    @Test
+    fun subtitlesAreMarkedCaptions() {
+        assertTrue(EditCaptions.isSub(EBlock("b1", "text", 0, 500, text = "x", ask = EditCaptions.TAG)))
+        assertFalse(EditCaptions.isSub(EBlock("b2", "text", 0, 500, text = "x")))
+    }
+}

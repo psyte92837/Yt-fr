@@ -780,6 +780,14 @@ class StudioEditorActivity : LumenBase() {
         val ex = BgTasks.find(TASK_EXPORT)
         val task = ex ?: BgTasks.find(TASK_AI)
         if (task == null) {
+            // speech recognition runs on the main thread's callbacks, not as a background task
+            if (recogMsg != null) {
+                row.visibility = View.VISIBLE
+                statusText?.text = "💬 " + recogMsg
+                statusBar?.showProgress(recogMsg.orEmpty())
+                statusStop?.setOnClickListener { recogStop = true }
+                return
+            }
             row.visibility = View.GONE
             return
         }
@@ -916,6 +924,7 @@ class StudioEditorActivity : LumenBase() {
                     add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
                     add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
                     if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
+                    if (EditCaptions.isSub(b)) add(act("💬", t("Все субтитры", "All subtitles")) { subsSheet() })
                     add(danger("🗑", t("Удалить", "Delete")) { delete(b.id) })
                 }
             }
@@ -966,6 +975,7 @@ class StudioEditorActivity : LumenBase() {
                 listOfNotNull(
                     back(),
                     act("T", t("Надпись", "Caption")) { captionSheet(null) },
+                    act("💬", t("Автосубтитры", "Auto captions")) { subsSheet() },
                     act("✍️", t("Схема текстом", "Text scheme")) { textSchemeSheet(null) },
                     if (words.isNotEmpty()) act("📝", t("Текст речи", "Speech text")) { textSheet() } else null
                 )
@@ -1754,6 +1764,7 @@ class StudioEditorActivity : LumenBase() {
             item(t("🌐 Фото по запросу", "🌐 Photo search"), t("бесплатные фото Openverse; запрос может подобрать ИИ", "free Openverse photos; the AI can suggest the query")) { photoSheet(null) }
             item(t("T Надпись", "T Caption"), t("свой текст или варианты от ИИ", "your text or AI suggestions")) { captionSheet(null) }
             item(t("😀 Эмодзи", "😀 Emoji"), t("крупный значок поверх кадра", "a big icon over the frame")) { emojiSheet(null) }
+            item(t("💬 Автосубтитры", "💬 Auto subtitles"), t("речь → подписи по словам, стиль на все сразу", "speech → captions by the words, one style for all")) { subsSheet() }
             item(t("🎞 Ещё видео в ролик", "🎞 Another video into the track"), t("клип с телефона: в конец или у курсора, как в CapCut", "a clip from the phone: at the end or at the playhead, like CapCut")) { addClipSheet() }
             item(t("🎵 Музыка", "🎵 Music"), t("трек с телефона с этого места; громкость и затухание", "a track from the phone from here; volume and fades")) { pickAudio(null) }
             item(t("⊟ Второе видео рядом", "⊟ A second video beside"), t("разделённый экран: реакция, сравнение", "split screen: a reaction, a comparison")) { pickSplit(null) }
@@ -2747,6 +2758,112 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private var clipAtEnd = true
+    /** Speech recognition for subtitles: its progress line (null = not running) and the stop flag. */
+    private var recogMsg: String? = null
+    private var recogStop = false
+
+    /** Auto subtitles: the voice as captions of a few words, in one style, all at once (one step of undo). */
+    private fun subsSheet() {
+        val p = project ?: return
+        pause()
+        val prefs = Lumen.prefs
+        var size = prefs.getInt("studio_subs_words", 3).takeIf { it in EditCaptions.SIZES } ?: 3
+        var look = prefs.getString("studio_subs_look", "plate").takeIf { it in StudioEdit.TEXT_LOOKS } ?: "plate"
+        var place = prefs.getInt("studio_subs_place", 0).coerceIn(0, EditCaptions.PLACES.lastIndex)
+        var anim = prefs.getString("studio_subs_anim", "pop").takeIf { it in StudioEdit.ANIMS } ?: "pop"
+        val has = blocks.count { EditCaptions.isSub(it) }
+        bottomSheet(t("💬 Автосубтитры", "💬 Auto subtitles")) { dismiss ->
+            muted(if (words.isEmpty()) t("Речь ролика ещё не распознана: распознаю на телефоне (Android 13+), затем поставлю субтитры.",
+                "The speech is not recognised yet: it is recognised on the phone (Android 13+), then the subtitles are put in.")
+            else t("Речь уже есть (${words.size} слов): субтитры встанут точно по словам. Каждый — обычная надпись, её можно править.",
+                "The speech is there (${words.size} words): subtitles follow the words exactly. Each one is an ordinary caption you can edit."))
+            label(this, t("Слов в строке", "Words per caption"))
+            add(choiceChips(ctx, listOf(1 to t("1 — крупно, как в TikTok", "1 — big, TikTok style"), 3 to t("до 3", "up to 3"), 6 to t("до 6", "up to 6")), size) { size = it })
+            label(this, t("Стиль", "Style"))
+            add(choiceChips(ctx, StudioEdit.TEXT_LOOKS.map { it to lookName(it) }, look) { look = it })
+            label(this, t("Где", "Where"))
+            add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("По центру", "Middle"), 2 to t("Вверху", "Top")), place) { place = it })
+            label(this, t("Появление", "Entrance"))
+            add(choiceChips(ctx, listOf("pop" to animName("pop"), "fade" to animName("fade"), "none" to animName("none")), anim) { anim = it })
+            button(if (has > 0) t("Пересоздать субтитры", "Re-make the subtitles") else t("Создать субтитры", "Make subtitles"), primary = true) {
+                prefs.edit().putInt("studio_subs_words", size).putString("studio_subs_look", look).putInt("studio_subs_place", place)
+                    .putString("studio_subs_anim", anim).apply()
+                dismiss()
+                val go = { makeSubs(size, look, EditCaptions.PLACES[place], anim) }
+                if (words.isEmpty()) recognizeSpeech(p, go) else go()
+            }
+            if (has > 0) button(t("Убрать субтитры ($has)", "Remove the subtitles ($has)"), style = BtnStyle.TEXT) {
+                dismiss()
+                commit(blocks.filterNot { EditCaptions.isSub(it) }, null)
+                toast(t("Субтитры убраны", "Subtitles removed"))
+            }
+            if (words.isNotEmpty()) button(t("🎙 Распознать речь заново", "🎙 Recognise the speech again"), style = BtnStyle.TEXT) {
+                dismiss()
+                recognizeSpeech(p) { toast(t("Речь обновлена: создайте субтитры", "Speech updated: make the subtitles")) }
+            }
+        }
+    }
+
+    private fun makeSubs(size: Int, look: String, y: Float, anim: String) {
+        val p = project ?: return
+        val cues = EditCaptions.cues(words, size)
+        if (cues.isEmpty()) return toast(t("В ролике не нашлось слов", "No words in the video"))
+        val (fw, fh) = EditCanvas.frame(p)
+        val portrait = fh >= fw
+        val list = blocks.filterNot { EditCaptions.isSub(it) }.toMutableList()
+        var next = (list.mapNotNull { it.id.removePrefix("b").toIntOrNull() }.maxOrNull() ?: 0) + 1
+        for (c in cues) {
+            val text = if (size == 1) c.text.uppercase() else c.text
+            val ratio = StudioEdit.textRatio(text)
+            val w = StudioEdit.fitWidth(StudioEdit.defaultWidth("text", portrait), ratio, fw, fh)
+            list += StudioEdit.clampTime(EBlock("b" + next++, "text", c.startMs, max(StudioEdit.MIN_MS, c.endMs - c.startMs), x = 0.5f, y = y, w = w,
+                ratio = ratio, animIn = anim, animOut = "none", look = look, text = text, ask = EditCaptions.TAG), total)
+        }
+        commit(list, null)
+        stage?.refresh()
+        toast(t("Субтитров: ${cues.size}", "Subtitles: ${cues.size}"))
+    }
+
+    /** The voice of the base video recognised on the phone: words saved with the project, then [then]. */
+    private fun recognizeSpeech(p: EProject, then: () -> Unit) {
+        if (!StudioRecognizer.available(this)) return toast(t("Распознавание речи нужно Android 13+ с сервисом распознавания", "Speech recognition needs Android 13+ with a recognition service"))
+        if (recogMsg != null) return toast(t("Распознавание уже идёт", "Recognition is already running"))
+        val base = File(dir, StudioEditStore.BASE)
+        val wordsFile = File(dir, StudioEditStore.WORDS)
+        recogStop = false
+        recogMsg = t("Читаю звук…", "Reading the sound…")
+        watch()
+        fun end(msg: String?) {
+            recogMsg = null
+            if (isDestroyed) return
+            watch()
+            msg?.let { toast(it) }
+        }
+        Lumen.async({ StudioAudio.decode(base) }, { e -> end(e.message ?: t("Звук не читается", "The sound cannot be read")) }) { pcm ->
+            val speech = Studio.speechSpans(pcm.data, pcm.rate)
+            if (speech.isEmpty()) return@async end(t("В ролике не слышно речи", "No speech is heard in the video"))
+            StudioRecognizer.recognize(this, pcm.data, pcm.rate, Studio.groupSpans(speech), Studio.recogLang(lang()),
+                { i, n ->
+                    recogMsg = t("Распознавание речи $i/$n", "Recognising speech $i/$n")
+                    watch()
+                }, { recogStop || isDestroyed },
+                { msg ->
+                    recogMsg = msg
+                    watch()
+                }) { res ->
+                if (recogStop) return@recognize end(t("Распознавание остановлено", "Recognition stopped"))
+                val w = Studio.alignPieces(res, speech)
+                if (w.isEmpty()) return@recognize end(t("Речь не распозналась", "The speech was not recognised"))
+                runCatching { wordsFile.writeText(StudioMix.wordsJson(w)) }
+                end(null)
+                if (project?.id != p.id) return@recognize
+                srcWords = w
+                words = EditTrack.words(w, clips, p.durMs)
+                timeline?.words = words
+                then()
+            }
+        }
+    }
 
     /** Another video into the main track: at the end or at the playhead (the piece there is cut in two). */
     private fun addClipSheet() {

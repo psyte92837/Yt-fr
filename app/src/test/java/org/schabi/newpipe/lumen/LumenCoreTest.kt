@@ -92,7 +92,8 @@ class RecGraphTest {
         // weight = position weights of the links: place 1 → 0.63, place 0 → 1, place 2 → 0.5
         assertEquals(AlgoCore.posWeight(1) + 1.0 + 0.5, g.nodes["b"]!!.weight, 1e-9)
         assertEquals(listOf("s", "a", "c"), g.parents("b").map { it.id })
-        assertEquals(listOf("a", "b"), g.children("s").map { it.id })
+        // the repeated s→a seen at place 3 keeps the latest place, so b (place 1) comes first
+        assertEquals(listOf("b", "a"), g.children("s").map { it.id })
     }
 
     @Test

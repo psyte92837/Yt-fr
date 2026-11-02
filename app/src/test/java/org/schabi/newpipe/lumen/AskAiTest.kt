@@ -31,7 +31,7 @@ class AskAiTest {
     fun framedAddsTabFocusOnlyForKnownTabs() {
         assertEquals("Вопрос", AskAi.framed("unknown", "Вопрос"))
         assertEquals(true, AskAi.framed("seo", "Вопрос").endsWith("\nВопрос"))
-        assertEquals(true, AskAi.framed("recs", "Вопрос").contains("Рекомендации"))
+        assertEquals(true, AskAi.framed("recs", "Вопрос").contains("Алгоритм"))
     }
 
     @Test

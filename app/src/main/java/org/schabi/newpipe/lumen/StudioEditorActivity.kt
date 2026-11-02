@@ -137,6 +137,7 @@ class StudioEditorActivity : LumenBase() {
     private var srcList: List<String> = listOf("")
     private val thumbMap = HashMap<String, List<Pair<Long, Bitmap>>>()
     private var fadeView: View? = null
+    private var blurView: android.widget.ImageView? = null
     private var previewBox: FrameLayout? = null
     private var topBarView: View? = null
     private var ratioChip: TextView? = null
@@ -474,6 +475,14 @@ class StudioEditorActivity : LumenBase() {
             visibility = View.GONE
             isClickable = false
         }
+        // the blurred background of a fitted video (format "blur"), behind it
+        val bv = android.widget.ImageView(this).apply {
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+            colorFilter = android.graphics.PorterDuffColorFilter(0x40000000, android.graphics.PorterDuff.Mode.SRC_ATOP)
+        }
+        frame.addView(bv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        blurView = bv
         frame.addView(mb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(sb, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         frame.addView(st, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -946,6 +955,7 @@ class StudioEditorActivity : LumenBase() {
                     add(danger("🗑", t("Удалить", "Delete")) { clipDelete(ci) })
                     add(act("⧉", t("Дубль", "Duplicate")) { clipDuplicate(ci) })
                     if (!c.isHold) add(act("❄", t("Стоп-кадр", "Freeze")) { clipFreeze() })
+                    add(act("⟳", t("Повернуть", "Rotate"), on = c.rot != 0) { clipUpdate(ci) { it.copy(rot = (it.rot + 90) % 360) } })
                     add(act("⇋", t("Зеркало", "Mirror"), on = c.mirror) { clipUpdate(ci) { it.copy(mirror = !it.mirror) } })
                     add(act("🔍", t("Масштаб", "Zoom"), on = c.zoom > 1f) { zoomSheet(ci) })
                     add(act("◀", t("Раньше", "Earlier")) { clipMove(ci, -1) })
@@ -953,7 +963,7 @@ class StudioEditorActivity : LumenBase() {
                     add(act("⇤", t("Обрезать начало", "Trim start")) { clipTrim(ci, true) })
                     add(act("⇥", t("Обрезать конец", "Trim end")) { clipTrim(ci, false) })
                     if (!c.looksPlain || c.isHold) add(act("↺", t("Сбросить", "Reset")) {
-                        clipUpdate(ci) { VClip(it.id, it.fromMs, it.toMs, volume = if (it.isHold) 0f else 1f, holdMs = it.holdMs, trans = it.trans, transMs = it.transMs) }
+                        clipUpdate(ci) { VClip(it.id, it.fromMs, it.toMs, volume = if (it.isHold) 0f else 1f, holdMs = it.holdMs, trans = it.trans, transMs = it.transMs, src = it.src) }
                     })
                 }
             }
@@ -1086,6 +1096,7 @@ class StudioEditorActivity : LumenBase() {
         texture?.let { tv ->
             tv.scaleX = if (c.mirror) -c.zoom else c.zoom
             tv.scaleY = c.zoom
+            tv.rotation = c.rot.toFloat()
         }
         previewColor(c)
         // a piece of another video may have another shape
@@ -1194,9 +1205,11 @@ class StudioEditorActivity : LumenBase() {
         if (fw <= 0f || fh <= 0f) return
         val p = project ?: return
         val sp = EditSplit.active(blocks, curMs)
-        val src = clips.getOrNull(curClip)?.src ?: ""
-        val (vw0, vh0) = srcSize(src)
-        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}|$src"
+        val cc = clips.getOrNull(curClip)
+        val src = cc?.src ?: ""
+        val rot = cc?.rot ?: 0
+        val (vw0, vh0) = srcSize(src).let { (a, b) -> EditCanvas.turned(a, b, rot) }
+        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}|$src|$rot|${p.blur}|${if (p.blur) curClip else 0}"
         if (key != splitKey) {
             splitKey = key
             if (sp == null) {
@@ -1211,12 +1224,13 @@ class StudioEditorActivity : LumenBase() {
                 }
                 if (p.fill) {
                     mb.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    at(tv, r)
+                    placeTurned(tv, r, 0f, 0f, rot)
                 } else {
                     at(mb, r)
-                    tv.layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                    placeTurned(tv, r, r.l, r.t, rot)
                 }
                 sb.visibility = View.GONE
+                showBlur(cc, !p.fill && p.blur)
             } else {
                 val (mh, sh) = EditSplit.halves(sp.look)
                 fun fit(box: View, inner: View, half: FRect, vw: Float, vh: Float) {
@@ -1227,12 +1241,9 @@ class StudioEditorActivity : LumenBase() {
                     }
                     // the video covers its half, centred; the rest is cut off by the half
                     val c = EditSplit.cover(vw, vh, half, fw, fh)
-                    inner.layoutParams = FrameLayout.LayoutParams(c.w.toInt(), c.h.toInt()).apply {
-                        gravity = Gravity.TOP or Gravity.START
-                        leftMargin = (c.l - half.l * fw).toInt()
-                        topMargin = (c.t - half.t * fh).toInt()
-                    }
+                    placeTurned(inner, c, half.l * fw, half.t * fh, if (inner === tv) rot else 0)
                 }
+                showBlur(null, false)
                 fit(mb, tv, mh, vw0.toFloat(), vh0.toFloat())
                 val (vw, vh) = sideSize(sp.file)
                 fit(sb, tv2, sh, vw.toFloat(), vh.toFloat())
@@ -1240,6 +1251,36 @@ class StudioEditorActivity : LumenBase() {
             }
         }
         syncSide(sp)
+    }
+
+    /** [v] showing a video turned by [rot] so that it fills [rect] (pixels of the frame, minus the parent's offset). */
+    private fun placeTurned(v: View, rect: FRect, dx: Float, dy: Float, rot: Int) {
+        val odd = (rot / 90) % 2 != 0
+        val w = if (odd) rect.h else rect.w
+        val h = if (odd) rect.w else rect.h
+        val cx = (rect.l + rect.r) / 2 - dx
+        val cy = (rect.t + rect.b) / 2 - dy
+        v.layoutParams = FrameLayout.LayoutParams(max(1, w.roundToInt()), max(1, h.roundToInt())).apply {
+            gravity = Gravity.TOP or Gravity.START
+            leftMargin = (cx - w / 2).roundToInt()
+            topMargin = (cy - h / 2).roundToInt()
+        }
+        v.rotation = rot.toFloat()
+    }
+
+    /** A blurred, enlarged frame of the piece behind a fitted video (the "blur" background of the format). */
+    private fun showBlur(c: VClip?, on: Boolean) {
+        val iv = blurView ?: return
+        val bmp = if (on && c != null) thumbOf(c) else null
+        if (bmp == null) {
+            iv.visibility = View.GONE
+            return
+        }
+        val small = Bitmap.createScaledBitmap(bmp, 16, max(1, 16 * bmp.height / max(1, bmp.width)), true)
+        iv.setImageBitmap(small)
+        iv.rotation = c?.rot?.toFloat() ?: 0f
+        if (Build.VERSION.SDK_INT >= 31) iv.setRenderEffect(android.graphics.RenderEffect.createBlurEffect(40f, 40f, android.graphics.Shader.TileMode.CLAMP))
+        iv.visibility = View.VISIBLE
     }
 
     private fun syncSide(sp: EBlock?) {
@@ -1368,6 +1409,10 @@ class StudioEditorActivity : LumenBase() {
                 timeline?.thumbs = list
             }
             timeline?.srcThumbs = HashMap(thumbMap)
+            if (project?.blur == true) {
+                splitKey = ""
+                layoutSplit()
+            }
         }
         Lumen.async({
             val r = MediaMetadataRetriever()
@@ -1400,7 +1445,8 @@ class StudioEditorActivity : LumenBase() {
 
     private fun snapshot(): String = JSONObject().put("b", StudioEdit.blocksJson(blocks))
         .put("c", EditTrack.json(project?.clips.orEmpty()))
-        .put("r", project?.ratio.orEmpty()).put("f", project?.fill == true).put("bg", project?.bg ?: 0xFF000000.toInt()).toString()
+        .put("r", project?.ratio.orEmpty()).put("f", project?.fill == true).put("bg", project?.bg ?: 0xFF000000.toInt())
+        .put("bl", project?.blur == true).toString()
 
     private fun setBlocks(list: List<EBlock>) {
         val p = project ?: return
@@ -1475,7 +1521,8 @@ class StudioEditorActivity : LumenBase() {
         val list = StudioEdit.blocksFrom(o?.optJSONArray("b") ?: runCatching { JSONArray(s) }.getOrNull())
         setTrack(EditTrack.from(o?.optJSONArray("c")).ifEmpty { EditTrack.initial(p.durMs) }, list)
         if (o != null && o.has("r")) project?.let { cur ->
-            val n = cur.copy(ratio = o.optString("r").takeIf { it in EditCanvas.RATIOS } ?: "", fill = o.optBoolean("f"), bg = o.optInt("bg", cur.bg) or 0xFF000000.toInt())
+            val n = cur.copy(ratio = o.optString("r").takeIf { it in EditCanvas.RATIOS } ?: "", fill = o.optBoolean("f"), bg = o.optInt("bg", cur.bg) or 0xFF000000.toInt(),
+                blur = o.optBoolean("bl"))
             if (n != cur) {
                 project = n
                 applyCanvas()
@@ -2697,6 +2744,7 @@ class StudioEditorActivity : LumenBase() {
             label(this, t("Видео в кадре", "Video in the frame"))
             add(choiceChips(ctx, listOf(false to t("Вписать целиком", "Fit whole"), true to t("Заполнить кадр", "Fill the frame")), p.fill) { v -> setCanvas { it.copy(fill = v) } })
             label(this, t("Фон", "Background"))
+            check(t("Размытое видео вместо цвета", "Blurred video instead of a colour"), p.blur) { on -> setCanvas { it.copy(blur = on) } }
             val sw = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
             val dots = ArrayList<Pair<Int, View>>()
             fun mark(sel: Int) = dots.forEach { (col, v) -> v.background = roundBg(col, 18f, ctx, if (col == sel) Palette.ACCENT else Palette.OUTLINE) }

@@ -106,3 +106,37 @@ class EditCaptionsTest {
         assertFalse(EditCaptions.isSub(EBlock("b2", "text", 0, 500, text = "x")))
     }
 }
+
+class EditTurnTest {
+    @Test
+    fun aTurnedPieceSwapsItsSides() {
+        assertEquals(1920 to 1080, EditCanvas.turned(1080, 1920, 90))
+        assertEquals(1080 to 1920, EditCanvas.turned(1080, 1920, 180))
+        assertEquals(1920 to 1080, EditCanvas.turned(1080, 1920, 270))
+    }
+
+    @Test
+    fun theQuadTurnsClockwise() {
+        val plain = EditCanvas.quad(false, 1f, 0)
+        assertEquals(listOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f), plain.toList())
+        // the top-left corner of the picture (texture 0,1) goes to the top-right
+        val q = EditCanvas.quad(false, 1f, 90)
+        assertEquals(1f, q[4], 0f)
+        assertEquals(1f, q[5], 0f)
+        // four turns: back where it was
+        assertEquals(plain.toList(), EditCanvas.quad(false, 1f, 360).toList())
+        // mirrored: the left edge on the right
+        assertEquals(1f, EditCanvas.quad(true, 1f, 0)[0], 0f)
+        assertEquals(2f, EditCanvas.quad(false, 2f, 0)[2], 0f)
+    }
+
+    @Test
+    fun turnAndBlurSurviveJson() {
+        val c = VClip("c1", 0, 1000, rot = 270)
+        assertEquals(listOf(c), EditTrack.from(EditTrack.json(listOf(c))))
+        assertEquals(90, EditTrack.clean(c.copy(rot = 450)).rot)
+        assertFalse(c.looksPlain)
+        val p = EProject("e", "s", 1080, 1920, 1000, ratio = "16:9", blur = true)
+        assertTrue(StudioEdit.fromJson(StudioEdit.toJson(p).toString())!!.blur)
+    }
+}

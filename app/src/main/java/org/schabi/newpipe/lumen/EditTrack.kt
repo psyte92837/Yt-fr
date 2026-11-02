@@ -39,13 +39,15 @@ data class VClip(
     val trans: String = "",
     val transMs: Long = EditColor.DEFAULT_TRANS_MS,
     /** The video this piece is cut from: "" = the base video of the project, else a file inside the project folder. */
-    val src: String = ""
+    val src: String = "",
+    /** Turned clockwise by 0, 90, 180 or 270 degrees. */
+    val rot: Int = 0
 ) {
     val isHold: Boolean get() = holdMs > 0
     val outMs: Long get() = if (holdMs > 0) holdMs else max(1L, ((toMs - fromMs) / speed.toDouble()).roundToLong())
     val hasColor: Boolean get() = (filter.isNotEmpty() && filterK > 0f) || bright != 0f || contrast != 0f || sat != 0f || warm != 0f
     /** Nothing changed in this piece (its place and length aside). */
-    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty() && src.isEmpty()
+    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty() && src.isEmpty() && rot == 0
     /** Its sound is as recorded. */
     val soundPlain: Boolean get() = speed == 1f && volume == 1f && holdMs == 0L && src.isEmpty()
 }
@@ -224,7 +226,8 @@ object EditTrack {
         warm = c.warm.coerceIn(-1f, 1f),
         trans = c.trans.takeIf { it in EditColor.TRANSITIONS } ?: "",
         transMs = c.transMs.coerceIn(100L, 3000L),
-        src = safeSrc(c.src)
+        src = safeSrc(c.src),
+        rot = ((c.rot / 90 * 90) % 360 + 360) % 360
     )
 
     /** A file name inside the project folder, or "" (no absolute paths, no way out of the folder). */
@@ -336,6 +339,7 @@ object EditTrack {
         if (c.mirror) append("⇋ ")
         if (c.zoom > 1.001f) append("🔍 ")
         if (c.hasColor) append("🎨 ")
+        if (c.rot != 0) append("⟳ ")
     }.trim()
 
     fun json(clips: List<VClip>): JSONArray = JSONArray().apply {
@@ -350,6 +354,7 @@ object EditTrack {
                     if (c.warm != 0f) put("warm", c.warm.toDouble())
                     if (c.trans.isNotEmpty()) put("trans", c.trans).put("transMs", c.transMs)
                     if (c.src.isNotEmpty()) put("src", c.src)
+                    if (c.rot != 0) put("rot", c.rot)
                 })
         }
     }
@@ -363,7 +368,7 @@ object EditTrack {
         fun f(k: String, d: Double = 0.0) = o.optDouble(k, d).toFloat().takeIf { !it.isNaN() } ?: d.toFloat()
         clean(VClip(id, from, to, f("speed", 1.0), f("volume", 1.0), o.optBoolean("mirror"), f("zoom", 1.0), o.optLong("hold"),
             o.optString("filter"), f("filterK", 1.0), f("bright"), f("contrast"), f("sat"), f("warm"),
-            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS), o.optString("src")))
+            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS), o.optString("src"), o.optInt("rot")))
     }
 }
 

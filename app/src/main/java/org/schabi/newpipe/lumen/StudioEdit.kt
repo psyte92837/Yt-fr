@@ -67,7 +67,9 @@ data class EProject(
     val ratio: String = "",
     /** The video covers the frame (edges cut off) instead of fitting into it on [bg]. */
     val fill: Boolean = false,
-    val bg: Int = 0xFF000000.toInt()
+    val bg: Int = 0xFF000000.toInt(),
+    /** The background of a fitted video is the video itself, enlarged and blurred (instead of [bg]). */
+    val blur: Boolean = false
 )
 
 /** Look of a block at a moment of its in / out animation: opacity, scale and shift (fractions of the frame). */
@@ -630,7 +632,7 @@ object StudioEdit {
         .put("blocks", blocksJson(p.blocks))
         .apply {
             if (p.clips.isNotEmpty()) put("clips", EditTrack.json(p.clips))
-            if (p.ratio.isNotEmpty()) put("ratio", p.ratio).put("fill", p.fill).put("bg", p.bg)
+            if (p.ratio.isNotEmpty()) put("ratio", p.ratio).put("fill", p.fill).put("bg", p.bg).put("blur", p.blur)
         }
 
     fun fromJson(s: String): EProject? = runCatching {
@@ -641,7 +643,7 @@ object StudioEdit {
         if (w <= 0 || h <= 0) return null
         EProject(o.getString("id"), o.optString("source"), w, h, o.optLong("dur"), blocksFrom(o.optJSONArray("blocks")), o.optLong("created"), o.optString("exported"),
             EditTrack.from(o.optJSONArray("clips")), o.optString("ratio").takeIf { it in EditCanvas.RATIOS } ?: "", o.optBoolean("fill"),
-            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt())
+            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt(), o.optBoolean("blur"))
     }.getOrNull()
 }
 

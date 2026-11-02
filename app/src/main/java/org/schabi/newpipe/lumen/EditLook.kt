@@ -266,6 +266,29 @@ object EditCanvas {
         return FRect((fw - w) / 2, (fh - h) / 2, (fw + w) / 2, (fh + h) / 2)
     }
 
+    /** The size a [w]×[h] video shows at when turned by [rot] degrees. */
+    fun turned(w: Int, h: Int, rot: Int): Pair<Int, Int> = if ((rot / 90) % 2 != 0) h to w else w to h
+
+    /**
+     * The corners of the video quad for OpenGL (x, y of bottom-left, bottom-right, top-left, top-right, matching
+     * texture corners (0,0) (1,0) (0,1) (1,1)): mirrored, enlarged by [zoom] and turned clockwise by [rot].
+     */
+    fun quad(mirror: Boolean, zoom: Float, rot: Int): FloatArray {
+        val sx = if (mirror) -zoom else zoom
+        val q = floatArrayOf(-sx, -zoom, sx, -zoom, -sx, zoom, sx, zoom)
+        val turns = ((rot / 90) % 4 + 4) % 4
+        repeat(turns) {
+            for (i in 0 until 4) {
+                val x = q[i * 2]
+                val y = q[i * 2 + 1]
+                // clockwise: (x, y) -> (y, -x)
+                q[i * 2] = y
+                q[i * 2 + 1] = -x
+            }
+        }
+        return q
+    }
+
     /** The project's frame differs from its video: the export draws the video into a rectangle on the background. */
     fun reshaped(p: EProject): Boolean = aspect(p.ratio) != null && frame(p) != (p.w to p.h)
 }

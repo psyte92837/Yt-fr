@@ -450,9 +450,12 @@ object StudioEditRender {
         var vRect = rectOf(pr.w, pr.h)
         var vw = decodeSize(vRect).first
         var vh = decodeSize(vRect).second
-        var curSrc = ""
+        // the video and turn decoded now ("src|rot"), its turned size and place
+        var curSrc = "|0"
         var curW = pr.w.toFloat()
         var curH = pr.h.toFloat()
+        var blurRect = EditCanvas.videoRect(curW, curH, w.toFloat(), h.toFloat(), true)
+        val sizes = HashMap<String, Pair<Int, Int>>()
         out.parentFile?.mkdirs()
         val enc = MediaCodec.createEncoderByType(MIME)
         enc.configure(videoFormat(w, h, fps, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
@@ -498,25 +501,35 @@ object StudioEditRender {
                 val srcUs = if (plain) pts else if (clip.isHold) clip.fromMs * 1000
                 else clip.fromMs * 1000 + ((pts - starts[pos.index] * 1000) * clip.speed.toDouble()).toLong()
                 val file = if (clip.src.isEmpty()) base else File(dir, clip.src)
-                if (clip.src != curSrc) {
-                    // a piece of another video of the project: its own decoder, size and place on the canvas
-                    curSrc = clip.src
-                    val sp0 = if (clip.src.isEmpty()) pr else probe(file)
-                    curW = sp0.w.toFloat()
-                    curH = sp0.h.toFloat()
-                    vRect = rectOf(sp0.w, sp0.h)
-                    val (nw, nh) = decodeSize(vRect)
-                    if (nw != vw || nh != vh) {
-                        vw = nw
-                        vh = nh
-                        frame = IntArray(vw * vh) { 0xFF000000.toInt() }
-                        tinted = IntArray(vw * vh)
-                        vidBmp.recycle()
-                        vidBmp = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+                val key = clip.src + "|" + clip.rot
+                if (key != curSrc) {
+                    // a piece of another video of the project (or turned): its own decoder, size and place on the canvas
+                    val sameFile = curSrc.substringBeforeLast('|') == clip.src
+                    curSrc = key
+                    val sp0 = sizes.getOrPut(clip.src) { if (clip.src.isEmpty()) pr.w to pr.h else probe(file).let { it.w to it.h } }
+                    val (tw0, th0) = EditCanvas.turned(sp0.first, sp0.second, clip.rot)
+                    curW = tw0.toFloat()
+                    curH = th0.toFloat()
+                    vRect = rectOf(tw0, th0)
+                    blurRect = EditCanvas.videoRect(curW, curH, w.toFloat(), h.toFloat(), true)
+                    // frames are decoded upright: a quarter turn swaps the sides of the decoded picture
+                    val (dw, dh) = decodeSize(vRect)
+                    val odd = (clip.rot / 90) % 2 != 0
+                    val nw = if (odd) dh else dw
+                    val nh = if (odd) dw else dh
+                    if (!sameFile || nw != vw || nh != vh) {
+                        if (nw != vw || nh != vh) {
+                            vw = nw
+                            vh = nh
+                            frame = IntArray(vw * vh) { 0xFF000000.toInt() }
+                            tinted = IntArray(vw * vh)
+                            vidBmp.recycle()
+                            vidBmp = Bitmap.createBitmap(vw, vh, Bitmap.Config.ARGB_8888)
+                        }
+                        src?.let { runCatching { it.close() } }
+                        src = null
+                        lastSrc = Long.MIN_VALUE
                     }
-                    src?.let { runCatching { it.close() } }
-                    src = null
-                    lastSrc = Long.MIN_VALUE
                 }
                 var dec: StudioFrames = src ?: StudioFrames(file, vw, vh)
                 src = dec
@@ -542,14 +555,30 @@ object StudioEditRender {
                 vidBmp.setPixels(pix, 0, vw, 0, 0, vw, vh)
                 canvas.drawColor(p.bg or 0xFF000000.toInt())
                 val sp = EditSplit.active(splits, tMs)
-                if (sp == null) {
+                /** The picture [b] of the piece into [r] (turned size), cut by [clip0]: turned, mirrored, enlarged around its middle. */
+                fun drawVideo(b: Bitmap, r: FRect, clip0: FRect, paint: Paint, look: Boolean) {
                     canvas.save()
-                    canvas.clipRect(vRect.l, vRect.t, vRect.r, vRect.b)
-                    // a mirrored or zoomed piece: the frame turned / enlarged around the middle of the video
-                    if (clip.mirror || clip.zoom > 1.001f) canvas.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, (vRect.l + vRect.r) / 2, (vRect.t + vRect.b) / 2)
-                    dst.set(vRect.l, vRect.t, vRect.r, vRect.b)
-                    canvas.drawBitmap(vidBmp, null, dst, vidPaint)
+                    canvas.clipRect(clip0.l, clip0.t, clip0.r, clip0.b)
+                    val cx = (r.l + r.r) / 2
+                    val cy = (r.t + r.b) / 2
+                    if (clip.rot != 0) canvas.rotate(clip.rot.toFloat(), cx, cy)
+                    if (look && (clip.mirror || clip.zoom > 1.001f)) canvas.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, cx, cy)
+                    val odd = (clip.rot / 90) % 2 != 0
+                    val hw = (if (odd) r.h else r.w) / 2
+                    val hh = (if (odd) r.w else r.h) / 2
+                    dst.set(cx - hw, cy - hh, cx + hw, cy + hh)
+                    canvas.drawBitmap(b, null, dst, paint)
                     canvas.restore()
+                }
+                if (sp == null) {
+                    if (p.blur && !p.fill) {
+                        // the background: the same frame tiny, stretched over the whole canvas (soft), darkened
+                        val tiny = Bitmap.createScaledBitmap(vidBmp, 24, max(1, 24 * vh / vw), true)
+                        drawVideo(tiny, blurRect, FRect(0f, 0f, w.toFloat(), h.toFloat()), vidPaint, false)
+                        tiny.recycle()
+                        canvas.drawColor(0x40000000)
+                    }
+                    drawVideo(vidBmp, vRect, vRect, vidPaint, true)
                 } else {
                     val (mh, sh) = EditSplit.halves(sp.look)
                     val sx0 = (sh.l * w).roundToInt()
@@ -568,12 +597,7 @@ object StudioEditRender {
                     side?.advance(EditSplit.srcAt(sp, tMs) * 1000, sidePix, true)
                     // the main video covers its half, centred (the rest of it is cut off)
                     val mc = EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat())
-                    canvas.save()
-                    canvas.clipRect(mh.l * w, mh.t * h, mh.r * w, mh.b * h)
-                    if (clip.mirror || clip.zoom > 1.001f) canvas.scale(if (clip.mirror) -clip.zoom else clip.zoom, clip.zoom, (mc.l + mc.r) / 2, (mc.t + mc.b) / 2)
-                    dst.set(mc.l, mc.t, mc.r, mc.b)
-                    canvas.drawBitmap(vidBmp, null, dst, vidPaint)
-                    canvas.restore()
+                    drawVideo(vidBmp, mc, FRect(mh.l * w, mh.t * h, mh.r * w, mh.b * h), vidPaint, true)
                     val sb = sideBmp
                     if (sb != null && sidePix.size == sw * shh && sw > 0 && shh > 0) {
                         sb.setPixels(sidePix, 0, sw, 0, 0, sw, shh)
@@ -785,6 +809,24 @@ private object StudioEditGl {
         }
     """.trimIndent()
 
+    // the video enlarged and blurred behind itself (the "blur" background of the format): a ring of samples, darkened
+    private val FS_BLUR = """
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        varying vec2 vUv;
+        uniform samplerExternalOES uS;
+        uniform float uR;
+        void main() {
+            vec3 c = texture2D(uS, vUv).rgb;
+            for (int i = 0; i < 12; i++) {
+                float a = float(i) * 0.5236;
+                vec2 d = vec2(cos(a), sin(a)) * uR;
+                c += texture2D(uS, vUv + d).rgb + texture2D(uS, vUv + d * 0.5).rgb;
+            }
+            gl_FragColor = vec4(c / 25.0 * 0.75, 1.0);
+        }
+    """.trimIndent()
+
     // a plain colour over the frame (transitions)
     private val FS_FILL = """
         precision mediump float;
@@ -984,6 +1026,11 @@ private object StudioEditGl {
         var curW = pr.w.toFloat()
         var curH = pr.h.toFloat()
         var curDur = pr.durMs
+        var srcW = pr.w
+        var srcH = pr.h
+        // the blurred background: the video covering the frame, behind the fitted one
+        var blurRect = vRect
+        var blurPos: java.nio.FloatBuffer? = null
         val bgR = ((p.bg shr 16) and 0xFF) / 255f
         val bgG = ((p.bg shr 8) and 0xFF) / 255f
         val bgB = (p.bg and 0xFF) / 255f
@@ -1061,6 +1108,7 @@ private object StudioEditGl {
             val progOes = program(FS_OES)
             val prog2d = program(FS_2D)
             val progFill = program(FS_FILL)
+            val progBlur = program(FS_BLUR)
             val tex = IntArray(2)
             android.opengl.GLES20.glGenTextures(2, tex, 0)
             val oes = tex[0]
@@ -1103,6 +1151,7 @@ private object StudioEditGl {
             var colO = ZERO3
             fun draw(prog: Int, target: Int, id: Int, mat: FloatArray, at: java.nio.FloatBuffer = pos, cm: FloatArray = ID3, co: FloatArray = ZERO3) {
                 android.opengl.GLES20.glUseProgram(prog)
+                if (prog == progBlur) android.opengl.GLES20.glUniform1f(android.opengl.GLES20.glGetUniformLocation(prog, "uR"), 0.04f)
                 if (prog == progOes) {
                     android.opengl.GLES20.glUniformMatrix3fv(android.opengl.GLES20.glGetUniformLocation(prog, "uC"), 1, false, cm, 0)
                     android.opengl.GLES20.glUniform3fv(android.opengl.GLES20.glGetUniformLocation(prog, "uO"), 1, co, 0)
@@ -1154,6 +1203,10 @@ private object StudioEditGl {
                 val sp = EditSplit.active(splits, tMs)
                 fun viewport(r: FRect) = android.opengl.GLES20.glViewport(r.l.roundToInt(), (h - r.b).roundToInt(), r.w.roundToInt(), r.h.roundToInt())
                 if (sp == null) {
+                    if (p.blur && !p.fill) blurPos?.let { bp ->
+                        viewport(blurRect)
+                        draw(progBlur, OES, oes, texM, bp)
+                    }
                     viewport(vRect)
                     draw(progOes, OES, oes, texM, vidPos, colM, colO)
                     android.opengl.GLES20.glViewport(0, 0, w, h)
@@ -1234,10 +1287,16 @@ private object StudioEditGl {
                     nd.start()
                     curSrc = c.src
                     curDur = sp.durMs
-                    curW = sp.w.toFloat()
-                    curH = sp.h.toFloat()
-                    vRect = EditCanvas.videoRect(curW, curH, w.toFloat(), h.toFloat(), p.fill)
+                    srcW = sp.w
+                    srcH = sp.h
                 }
+                // the shape of this piece on the canvas: its video, turned
+                val (tw0, th0) = EditCanvas.turned(srcW, srcH, c.rot)
+                curW = tw0.toFloat()
+                curH = th0.toFloat()
+                vRect = EditCanvas.videoRect(curW, curH, w.toFloat(), h.toFloat(), p.fill)
+                blurRect = EditCanvas.videoRect(curW, curH, w.toFloat(), h.toFloat(), true)
+                blurPos = floats(*EditCanvas.quad(false, 1f, c.rot))
                 val segStart = starts[k] * 1000
                 val segEnd = segStart + c.outMs * 1000
                 val fromUs = if (plain) 0L else c.fromMs * 1000
@@ -1246,8 +1305,7 @@ private object StudioEditGl {
                     c.isHold -> fromUs + stepUs
                     else -> c.toMs * 1000
                 }
-                val sx = if (c.mirror) -c.zoom else c.zoom
-                vidPos = if (sx == 1f && c.zoom == 1f) pos else floats(-sx, -c.zoom, sx, -c.zoom, -sx, c.zoom, sx, c.zoom)
+                vidPos = if (!c.mirror && c.zoom == 1f && c.rot == 0) pos else floats(*EditCanvas.quad(c.mirror, c.zoom, c.rot))
                 val cm = EditColor.matrix(c)?.let { EditColor.gl(it) }
                 colM = cm?.first ?: ID3
                 colO = cm?.second ?: ZERO3

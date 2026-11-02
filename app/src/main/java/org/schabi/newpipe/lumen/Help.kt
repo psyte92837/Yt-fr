@@ -124,7 +124,8 @@ object Help {
                 t("Анализ: топ каналов и видео, динамика, кластеры; Алгоритм: граф «Следующего» (снежный ком, блуждания, цепочка, Mix), утечка с темы, ниши, потоки каналов, мой канал, возможности, динамика, аудит, прогноз и радар ролика.",
                     "Analysis: top channels and videos, trends, clusters; Algorithm: the Up next graph (snowball, walks, chain, Mix), topic leak, niches, channel flows, my channel, opportunities, dynamics, audit, forecast and video radar."),
                 t("Аудитория: боли, вопросы и запросы из комментариев; SEO: конвейер P1–P7 с проверкой цитат.", "Audience: pains, questions and requests from comments; SEO: P1–P7 pipeline with quote checks."),
-                t("AI: сводки, отчёт, чат по данным проекта.", "AI: summaries, report, chat over the project data."),
+                t("AI: сводки, отчёт, чат по данным проекта; Предсказания: сообщества «Следующее», двери, что отличает рекомендуемые, оценка черновика, проверка ролика после публикации.",
+                    "AI: summaries, report, chat over the project data; Predictions: Up next communities, doors, what recommended videos have, a draft score, a post-publish check."),
                 t("Ещё → Экспорт: CSV, JSON, Markdown, PDF, GEXF.", "More → Export: CSV, JSON, Markdown, PDF, GEXF.")
             ),
             listOf(t("Мониторинг в настройках проекта сам проверяет новые видео по расписанию.", "Monitoring in project settings checks for new videos on a schedule."),

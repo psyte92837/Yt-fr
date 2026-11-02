@@ -478,6 +478,19 @@ class MonitorJob : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         Lumen.init(this)
         val pid = params.extras.getString("id") ?: return false
+        if (params.extras.getString("kind") == "predict") {
+            Thread {
+                var retry = false
+                try {
+                    PredictTrack.runJob(this, pid)
+                } catch (e: Exception) {
+                    L.e("predict", "project $pid check failed, will retry", e)
+                    retry = true
+                }
+                jobFinished(params, retry)
+            }.start()
+            return true
+        }
         Thread {
             var retry = false
             try {

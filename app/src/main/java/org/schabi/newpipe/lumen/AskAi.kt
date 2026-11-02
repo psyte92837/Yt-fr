@@ -34,6 +34,8 @@ object AskAi {
         "audience" -> t("Пользователь на вкладке «Аудитория»: боли, вопросы, запросы и возражения зрителей.", "The user is on the Audience tab: viewers' pains, questions, requests and objections.")
         "seo" -> t("Пользователь на вкладке SEO: идеи тем, ключевые слова, что снимать.", "The user is on the SEO tab: topic ideas, keywords, what to film.")
         "ai" -> t("Пользователь на вкладке AI: сводки, кластеры, тональность.", "The user is on the AI tab: summaries, clusters, sentiment.")
+        "predict" -> t("Пользователь на вкладке «Предсказания»: сообщества графа «Следующее», открытость новичкам, двери, профиль рекомендуемых, модель, оценка черновика и проверка ролика после публикации. Различай данные и гипотезы, не обещай попадания.",
+            "The user is on the Predictions tab: communities of the Up next graph, openness to newcomers, doors, the profile of recommended videos, the model, the draft score and the post-publish check. Separate data from hypotheses, never promise placement.")
         "export" -> t("Пользователь на вкладке «Экспорт»: выгрузка данных и отчётов.", "The user is on the Export tab: exporting data and reports.")
         "schemes" -> t("Пользователь на вкладке «Схемы»: диаграммы по проекту.", "The user is on the Diagrams tab: project diagrams.")
         CommentDigest.TAB -> t("Пользователь спрашивает о комментариях к видео: отвечай по сводке и самим комментариям, приводи цитаты с id.", "The user asks about the video's comments: answer from the digest and the comments themselves, quote with ids.")
@@ -45,6 +47,7 @@ object AskAi {
     fun hint(tab: String): String = when (tab) {
         CommentDigest.TAB -> t("Спросить AI о комментариях…", "Ask AI about the comments…")
         "recs" -> t("Спросить AI об алгоритме…", "Ask AI about the algorithm…")
+        "predict" -> t("Спросить AI о предсказаниях…", "Ask AI about predictions…")
         "audience" -> t("Спросить AI об аудитории…", "Ask AI about the audience…")
         "seo" -> t("Спросить AI о SEO…", "Ask AI about SEO…")
         "channels" -> t("Спросить AI о каналах…", "Ask AI about channels…")

@@ -269,6 +269,7 @@ object AiTasks {
         } catch (e: Exception) {
             ""
         }
+        "predict" -> PredictData.brief(p.id)
         "audience", "seo" -> Seo.insights(p.id).take(80).joinToString("\n") { "- [${it.optString("type")}] ${it.optString("statement")}" }
             .let { if (it.isBlank()) "" else "Audience insights:\n$it" }
         CommentDigest.TAB -> CommentDigest.chatContext(p.id)

@@ -41,6 +41,16 @@ fun ProjectActivity.recsTab(c: Col) {
 
     algoHeader(c, g)
 
+    if (g.nodes.isNotEmpty()) c.card {
+        add(text(ctx, t("🔮 Предсказания", "🔮 Predictions"), Type.TITLE_M, bold = true), 0)
+        muted(t("Куда целиться в «Следующее»: сообщества, открытость, двери, что отличает рекомендуемые; оценка черновика и проверка ролика после публикации.",
+            "Where to aim in “Up next”: communities, openness, doors, what recommended videos have; a draft score and a post-publish check."))
+        button(t("Открыть предсказания", "Open predictions"), style = BtnStyle.TONAL) {
+            tab = "predict"
+            render()
+        }
+    }
+
     // ---------------- settings: open for a new graph, folded once there are results to read
     val paramsOpen = state("recParams", g.nodes.isEmpty()) as Boolean
     c.section(t("Параметры обхода", "Walk settings"), t("режим, фильтр по теме, ограничения", "mode, topic filter, limits"), paramsOpen, {

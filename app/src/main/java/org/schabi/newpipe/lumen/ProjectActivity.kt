@@ -126,7 +126,7 @@ class ProjectActivity : LumenBase() {
     private val tabNames get() = mapOf(
         "overview" to t("Обзор", "Overview"), "videos" to t("Видео", "Videos"), "collect" to t("Сбор", "Collect"),
         "channels" to t("Каналы", "Channels"), "analytics" to t("Анализ", "Analytics"), "recs" to t("Алгоритм", "Algorithm"),
-        "audience" to t("Аудитория", "Audience"), "seo" to "SEO", "ai" to "AI",
+        "audience" to t("Аудитория", "Audience"), "seo" to "SEO", "ai" to "AI", "predict" to t("Предсказания", "Predictions"),
         "export" to t("Экспорт", "Export"), "schemes" to t("Схемы", "Diagrams"), "settings" to t("Настройки", "Settings")
     )
 
@@ -135,7 +135,7 @@ class ProjectActivity : LumenBase() {
         if (project.source.isNotBlank()) NavGroup(Ic.HOME, t("Обзор", "Overview"), listOf("overview")) else null,
         NavGroup(Ic.LIST, t("Данные", "Data"), listOf("videos", "collect", "channels")),
         NavGroup(Ic.CHART, t("Анализ", "Analysis"), listOf("analytics", "recs", "audience", "seo")),
-        NavGroup(Ic.SPARK, "AI", listOf("ai")),
+        NavGroup(Ic.SPARK, "AI", listOf("ai", "predict")),
         NavGroup(Ic.MORE, t("Ещё", "More"), listOf("export", "schemes", "settings"))
     )
     private val groupTab = HashMap<Int, String>()
@@ -167,6 +167,7 @@ class ProjectActivity : LumenBase() {
             "audience" -> audienceTab(c)
             "seo" -> seoTab(c)
             "ai" -> aiTab(c)
+            "predict" -> predictTab(c)
             "export" -> exportTab(c)
             "schemes" -> schemesTab(c)
             else -> settingsTab(c)

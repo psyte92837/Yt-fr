@@ -355,6 +355,10 @@ object StudioDirector {
     /** Credits of the photos used, one per line, without repeats. */
     fun credits(s: SScript): String = s.scenes.map { it.credit }.filter { it.isNotBlank() }.distinct().joinToString("\n")
 
+    /** One text of the authors for the video description: the music line, then the B-roll lines; empty when none. */
+    fun authors(music: String, broll: String): String =
+        listOf(music, broll).map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+
     /** Short line about a plan: "zooms 4 · stickers 2 · sounds 6". */
     fun summary(s: SScript): Triple<Int, Int, Int> {
         val cues = s.scenes.flatMap { it.cues }

@@ -610,14 +610,13 @@ class StudioActivity : LumenBase() {
         else -> listOf({ c, n -> scriptCard(c, n) }, { c, n -> voiceCard(c, n) }, { c, n -> analyseCard(c, n) }, { c, n -> videoCard(c, n) })
     }
 
-    /** The Mix, the AI layer and the Editor are their own screens: entry chips with "↗" at the bottom, after the steps. */
+    /** The Mix and the Editor are their own screens: entry chips with "↗" at the bottom, after the steps (the AI layer opens from a finished video). */
     private fun otherTools(c: Col) {
         // the Mix, the Montage (hand editor + JS layers by the protocol) and the Editor are their own screens:
         // entry buttons with "↗", not tabs, so it is clear they open another screen (Back returns here)
         c.add(text(this, t("Другие инструменты", "Other tools"), Type.LABEL, bold = true, color = Palette.MUTED), 20)
         c.add(chipScroller(this, listOf(
             chip(this, t("🔀 Микс ↗", "🔀 Mix ↗")) { StudioMixActivity.open(this) }.apply { contentDescription = t("Открыть Микс", "Open Mix") },
-            chip(this, t("🎛 Слой ИИ ↗", "🎛 AI layer ↗")) { openMontage() }.apply { contentDescription = t("Открыть анимированный слой ИИ", "Open the AI layer") },
             chip(this, t("✏️ Редактор ↗", "✏️ Editor ↗")) { StudioEditorActivity.open(this) }.apply { contentDescription = t("Открыть редактор", "Open the editor") }
         )), 4)
     }
@@ -1145,7 +1144,6 @@ class StudioActivity : LumenBase() {
                         " (" + StudioBroll.stockSources().size + "/3)", style = BtnStyle.TEXT) { stockKeys() }
                 }
             }
-            lastTokens?.let { (i, o) -> muted(t("Последний вызов ИИ: $i → $o токенов", "Last AI call: $i → $o tokens")) }
             progress("broll", t("Поиск B-roll…", "Finding B-roll…"))
             val (zooms, pops, sounds) = StudioDirector.summary(sc)
             val figures = sc.scenes.sumOf { it.shapes.size }
@@ -1159,7 +1157,6 @@ class StudioActivity : LumenBase() {
             progress("schemes", t("ИИ составляет инфосхемы…", "AI composes info-schemes…"))
             if (busy.isEmpty()) button(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes") +
                 sc.scenes.count { it.scheme != null }.let { if (it > 0) " ($it)" else "" }, style = BtnStyle.TEXT) { schemesSheet() }
-            if (got > 0) button(t("⧉ Источники B-roll для описания", "⧉ B-roll credits for the description"), style = BtnStyle.TEXT) { copyText(StudioDirector.credits(sc)) }
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
@@ -1350,26 +1347,25 @@ class StudioActivity : LumenBase() {
             muted(t("Сборка идёт в фоне: экран можно закрыть, прогресс — в уведомлении.", "Building in the background: you can close the screen, progress is in the notification."))
             button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) { StudioService.cancel(this@StudioActivity) }
         } else if (busy.isEmpty()) {
-            button(t("🎬 Сохранить видео", "🎬 Save the video"), primary = true) { renderVideo() }
+            val made = lastVideo?.exists() == true
+            if (made) button(t("🎬 Сохранить заново", "🎬 Save again"), style = BtnStyle.TONAL) { renderVideo() }
+            else button(t("🎬 Сохранить видео", "🎬 Save the video"), primary = true) { renderVideo() }
         }
         lastVideo?.takeIf { it.exists() }?.let { f ->
             p("✅ " + t("Готово: ", "Done: ") + savedAs.ifBlank { f.name })
-            if (StudioPrefs.musicCredit.isNotBlank() && musicFile.exists()) button(t("⧉ Подпись музыки для описания", "⧉ Music credit for the description"), style = BtnStyle.TEXT) { copyCredit() }
+            // the result first: open or share; then finishing it in the Editor; one text of the authors for the description
             row(
-                btn(ctx, t("▶ Открыть", "▶ Open"), style = BtnStyle.TONAL) { openFile(f) },
-                btn(ctx, t("Поделиться", "Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioActivity, f, false, f.name, "video/mp4") }
+                btn(ctx, t("▶ Открыть", "▶ Open"), primary = true) { openFile(f) },
+                btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioActivity, f, false, f.name, "video/mp4") }
             )
-            button(t("✏️ Открыть редактор: схемы, картинки, надписи", "✏️ Open the editor: schemes, pictures, captions"), primary = true) {
+            button(t("✏️ Доработать в Редакторе: схемы, картинки, надписи", "✏️ Finish in the Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
                 StudioEditorActivity.open(this@StudioActivity, f, plan.words)
             }
+            val authors = StudioDirector.authors(if (musicFile.exists()) StudioPrefs.musicCredit else "", script?.let { StudioDirector.credits(it) }.orEmpty())
+            if (authors.isNotEmpty()) button(t("⧉ Текст для описания: авторы музыки и кадров", "⧉ Text for the description: authors of the music and shots"),
+                style = BtnStyle.TEXT) { copyText(authors) }
             button(t("🎛 Анимированный слой ИИ поверх ролика", "🎛 An animated AI layer over the video"), style = BtnStyle.TEXT) { openLayer(f, plan.layers.subs) }
         }
-    }
-
-    /** The Montage tab: with the finished video of this task (and its speech) when there is one. */
-    private fun openMontage() {
-        val f = lastVideo?.takeIf { it.exists() }
-        if (f != null && words.isNotEmpty()) openLayer(f, StudioLayers.of(StudioPrefs.layers).subs) else WebLayerActivity.open(this, null, false)
     }
 
     /** The second renderer: the finished video with its speech and scenes goes to the Montage tab (lumen.canvas). */

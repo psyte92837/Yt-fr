@@ -135,6 +135,9 @@ class StudioMixActivity : LumenBase() {
     /** Clips ticked in the list (for the range and removal). */
     private val clipMarks = LinkedHashSet<String>()
 
+    /** Build with the recorded voice-over (on) or the picture only (off); asked only when there is a voice-over. */
+    private var withVoice = true
+
     /** Running work of this screen: "dl", "schemes", "subs" or "". */
     private var busy = ""
     @Volatile private var cancel = false
@@ -437,7 +440,7 @@ class StudioMixActivity : LumenBase() {
         val own = readyClips().filter { cuts[it.id]?.isDefault == false }.map { it.id }
         if (own.isNotEmpty()) muted(t("Своя нарезка у клипов: ", "Own cutting of clips: ") + own.joinToString(", "))
         if (busy.isNotEmpty()) return@card
-        if (items.isEmpty()) button(t("🔀 Смешать", "🔀 Mix"), primary = true) { shuffle() }
+        if (items.isEmpty()) button(t("✂ Нарезать", "✂ Cut"), primary = true) { shuffle() }
         else {
             val missing = StudioMix.missing(items, readyClips().map { it.id })
             if (missing.isNotEmpty()) button(t("＋ Куски клипов, которых нет в раскадровке: ", "＋ Pieces of clips missing on the storyboard: ") + missing.joinToString(", "),
@@ -485,18 +488,14 @@ class StudioMixActivity : LumenBase() {
     }
 
     /** All the ways to shuffle and to cut again, explained; the quick "🔀 Shuffle" is on the card. */
-    private fun shuffleSheet() = bottomSheet(t("🔀 Перемешать и нарезать", "🔀 Shuffle and cut")) { dismiss ->
+    // only what the cards have not: a random shuffle is on the storyboard, even/random cutting in step 2,
+    // shuffling the ticked ones on their panel, fitting to the voice-over in step 4
+    private fun shuffleSheet() = bottomSheet(t("⋯ Варианты: порядок, нарезка, длина", "⋯ Options: order, cutting, length")) { dismiss ->
         val pinned = items.count { it.locked }
-        val ticked = items.count { it.marked }
         if (pinned > 0) muted(t("📌 Закреплённые куски ($pinned) остаются на своих местах.", "📌 Pinned pieces ($pinned) stay in their places."))
-        add(text(ctx, t("Те же куски — новый порядок", "Same pieces — new order"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        button(t("🔀 Случайно, без повторов подряд", "🔀 Random, no repeats in a row"), style = BtnStyle.TONAL) { dismiss(); reorder(MixOrder.SHUFFLE) }
-        button(t("▤ По порядку: клип за клипом", "▤ In order: clip after clip"), style = BtnStyle.TEXT) { dismiss(); reorder(MixOrder.ORDER) }
+        add(text(ctx, t("Те же куски — другой порядок", "Same pieces — another order"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        button(t("▤ По порядку: клип за клипом", "▤ In order: clip after clip"), style = BtnStyle.TONAL) { dismiss(); reorder(MixOrder.ORDER) }
         button(t("🔁 По кругу: c1, c2, c3, c1…", "🔁 In turn: c1, c2, c3, c1…"), style = BtnStyle.TEXT) { dismiss(); reorder(MixOrder.ROUND) }
-        if (ticked >= 2) button(t("🔀 Только отмеченные ($ticked) между собой", "🔀 Only the ticked ($ticked) among themselves"), style = BtnStyle.TEXT) {
-            dismiss()
-            change(StudioMix.shuffleMarked(items, System.nanoTime()), t("Отмеченные перемешаны", "Ticked ones shuffled"))
-        }
         add(text(ctx, t("Новые куски из скачанных отрезков", "New pieces from the downloaded parts"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         muted(t("Клипы режутся заново. Отметки, закрепления и схемы сбрасываются — ↶ вернёт.", "The clips are cut again. Ticks, pins and schemes are reset — ↶ brings them back."))
         button(t("🎲 Нарезать в новых случайных местах", "🎲 Cut at new random places"), style = BtnStyle.TONAL) {
@@ -506,7 +505,6 @@ class StudioMixActivity : LumenBase() {
             Prefs.seed = System.nanoTime()
             recut(t("Новые случайные куски", "New random pieces"))
         }
-        if (Prefs.mode == MixCut.RANDOM) button(t("▦ Нарезать ровно, подряд", "▦ Cut evenly, in a row"), style = BtnStyle.TEXT) { dismiss(); setMode(MixCut.EVEN) }
         add(text(ctx, t("Новые моменты из видео", "New moments of the videos"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         muted(t("Для каждого видео берётся новый случайный отрезок той же длины и скачивается заново (нужен интернет). Куски этих клипов нарежутся заново.",
             "Every video gets a new random part of the same length, downloaded again (needs internet). The pieces of those clips are cut again."))
@@ -520,13 +518,7 @@ class StudioMixActivity : LumenBase() {
             style = BtnStyle.TEXT) { dismiss(); randomMoments(tickedClips) }
         add(text(ctx, t("Длина ролика", "Video length"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         val total = StudioMix.totalMs(items)
-        val voice = voiceMs()
-        if (voice > 0 && kotlin.math.abs(voice - total) > FIT_TOL_MS) {
-            button(t("🎙 Подогнать под озвучку (${StudioCuts.stamp(voice)})", "🎙 Fit to the voice-over (${StudioCuts.stamp(voice)})"), style = BtnStyle.TONAL) {
-                dismiss()
-                fitVoice(true)
-            }
-        }
+        if (voiceFile.exists()) muted(t("Подогнать под озвучку — в шаге «4. Озвучка и сборка».", "Fitting to the voice-over is in step \"4. Voice-over and saving\"."))
         val opts = listOf(10, 15, 20, 30, 45, 60, 90, 120).map { it * 1000L }.filter { it < total }
         if (opts.isEmpty()) muted(t("Ролик уже короче 10 с (${StudioCuts.stamp(total)}).", "The video is already shorter than 10 s (${StudioCuts.stamp(total)})."))
         else {
@@ -1184,25 +1176,29 @@ class StudioMixActivity : LumenBase() {
         }
         muted(t("Видео сохраняется на телефон: Галерея → Фильмы/Lumen. Озвучка не обязательна — можно сохранить одну картинку.",
             "The video is saved on the phone: Gallery → Movies/Lumen. A voice-over is optional — the picture alone can be saved."))
-        if (voice) {
-            button(t("🎬 Сохранить видео с озвучкой", "🎬 Save the video with the voice-over"), primary = true) { build(false) }
-            button(t("🎬 Сохранить без озвучки (только картинка)", "🎬 Save without the voice-over (picture only)"), style = BtnStyle.TEXT) { build(false, mute = true) }
-        } else button(t("🎬 Сохранить видео", "🎬 Save the video"), primary = true) { build(false) }
         val video = lastVideo()
+        val fresh = video != null && Prefs.videoSig == StudioMix.signature(items, Prefs.format)
+        if (voice) check(t("🎙 Со своей озвучкой (иначе только картинка)", "🎙 With my voice-over (otherwise the picture only)"), withVoice) {
+            withVoice = it
+            render()
+        }
+        if (fresh) button(t("🎬 Сохранить заново", "🎬 Save again"), style = BtnStyle.TONAL) { build(false, mute = voice && !withVoice) }
+        else button(t("🎬 Сохранить видео", "🎬 Save the video"), primary = true) { build(false, mute = voice && !withVoice) }
         if (video != null) {
             add(text(ctx, "✅ " + t("Сохранено в галерею: ", "Saved to the gallery: ") + Prefs.savedAs.ifBlank { video.name } +
                 if (Prefs.videoVoice) t(" · с озвучкой", " · with the voice-over") else t(" · без озвучки", " · without a voice-over"), 14f, bold = true), 12)
-            if (Prefs.videoSig != StudioMix.signature(items, Prefs.format)) muted(t("Раскадровка менялась после сборки — соберите видео заново.",
-                "The storyboard changed after the build — build the video again."))
+            if (!fresh) muted(t("Раскадровка менялась после сохранения — сохраните видео заново.",
+                "The storyboard changed after saving — save the video again."))
             row(
-                btn(ctx, t("▶ Открыть", "▶ Open"), style = BtnStyle.TONAL) { openVideo(video) },
-                btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TEXT) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") }
+                btn(ctx, t("▶ Открыть", "▶ Open"), primary = fresh) { openVideo(video) },
+                btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") }
             )
-            button(t("💾 Сохранить копию в папку…", "💾 Save a copy to a folder…"), style = BtnStyle.TEXT) { saveCopy(video) }
-            button(t("✏️ Редактор: схемы, картинки, надписи", "✏️ Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
+            button(t("✏️ Доработать в Редакторе: схемы, картинки, надписи", "✏️ Finish in the Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
                 StudioEditorActivity.open(this@StudioMixActivity, video, words)
             }
-            if (Prefs.videoVoice) button(t("🤖 Отправить в ИИ", "🤖 Send to AI"), primary = true) { sendToAi(video) }
+            button(t("💾 Сохранить копию в папку…", "💾 Save a copy to a folder…"), style = BtnStyle.TEXT) { saveCopy(video) }
+            if (Prefs.videoVoice) button(t("🤖 Попросить другой ИИ смонтировать (видео + промпт)", "🤖 Ask another AI to edit it (video + prompt)"),
+                style = BtnStyle.TEXT) { sendToAi(video) }
         }
     }
 

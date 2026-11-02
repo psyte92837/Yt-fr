@@ -317,4 +317,11 @@ class StudioKeysTest {
         assertEquals("Photo: \"Wide\" by Ann (CC BY-SA 2.0) https://f/3", StudioBrollCatalog.credit(hits[2]))
         assertTrue(StudioBrollCatalog.parse("oops").isEmpty())
     }
+
+    @Test
+    fun authorsForDescription() {
+        assertEquals("Music: A\nPhoto: B", StudioDirector.authors(" Music: A ", "Photo: B\n"))
+        assertEquals("Photo: B", StudioDirector.authors("", "Photo: B"))
+        assertEquals("", StudioDirector.authors(" ", ""))
+    }
 }

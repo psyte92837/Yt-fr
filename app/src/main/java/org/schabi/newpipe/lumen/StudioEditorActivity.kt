@@ -772,8 +772,8 @@ class StudioEditorActivity : LumenBase() {
         bottomSheet(t("Как работает редактор", "How the editor works")) { dismiss ->
             p(t("1. Тап по кадру — пауза. Таймлайн прокручивается пальцем, щипок — масштаб; белая линия — курсор.",
                 "1. Tap the frame to pause. Scroll the timeline with a finger, pinch to zoom; the white line is the playhead."))
-            p(t("2. Внизу разделы: ✂ Кусок, 🎵 Аудио, T Текст, 😀 Стикеры, 🖼 Наложение, 🌈 Фильтры, ☀ Настройка, ⇆ Переходы, ▭ Формат, 🧩 ИИ. «‹ Назад» — к разделам.",
-                "2. Sections below: ✂ Piece, 🎵 Audio, T Text, 😀 Stickers, 🖼 Overlay, 🌈 Filters, ☀ Adjust, ⇆ Transitions, ▭ Format, 🧩 AI. \"‹ Back\" returns."))
+            p(t("2. Внизу разделы: ✂ Кусок (фильтры, настройка, переход, скорость…), 🎵 Аудио, T Текст, 😀 Стикеры, 🖼 Наложение, 🖌 Тема, 🧩 ИИ. Формат кадра — сверху. «‹ Назад» — к разделам.",
+                "2. Sections below: ✂ Piece (filters, adjust, transition, speed…), 🎵 Audio, T Text, 😀 Stickers, 🖼 Overlay, 🖌 Theme, 🧩 AI. The frame format is at the top. \"‹ Back\" returns."))
             p(t("3. Тап по кадрам ролика на таймлайне выделяет кусок: разрезать, скорость, громкость, фильтр, переход, удалить; удержание и перетаскивание — переставить. Белый квадрат на шве — переход.",
                 "3. Tap the frames on the timeline to select a piece: split, speed, volume, filter, transition, delete; hold and drag to reorder. The white square at a seam is a transition."))
             p(t("4. Надписи, картинки, схемы и музыка — цветные полоски под кадрами: тяните целиком или за края. На кадре блок двигается пальцем, два пальца — размер и поворот.",
@@ -956,16 +956,9 @@ class StudioEditorActivity : LumenBase() {
     private fun clipHere(): Int = EditTrack.locate(clips, curMs).index
 
     /** The seam nearest to the playhead (1..size-1), or 0 (the start of the video) when there is one piece. */
-    private fun seamHere(): Int {
-        val list = clips
-        if (list.size < 2) return 0
-        val st = EditTrack.starts(list)
-        return (1 until list.size).minByOrNull { kotlin.math.abs(st[it] - curMs) } ?: 1
-    }
-
     /**
-     * The bottom bar: main sections (Edit, Audio, Text, Stickers, Overlay, Filters, Adjust, Transitions, Format, AI,
-     * Layers), a section's tools with ‹ back, the tools of the selected piece of the video or of the selected block.
+     * The bottom bar: main sections (Insert, Piece, Add video, Audio, Text, Stickers, Overlay, Theme, AI, Layers;
+     * the frame format is the chip at the top), a section's tools with ‹ back, the tools of the selected piece of the video or of the selected block.
      */
     private fun tools() {
         val row = toolsRow ?: return
@@ -1128,10 +1121,6 @@ class StudioEditorActivity : LumenBase() {
                 act("T", t("Текст", "Text")) { openCat("text") },
                 act("😀", t("Стикеры", "Stickers")) { emojiSheet(null) },
                 act("🖼", t("Наложение", "Overlay")) { openCat("overlay") },
-                act("🌈", t("Фильтры", "Filters")) { filterSheet(clipHere()) },
-                act("☀", t("Настройка", "Adjust")) { adjustSheet(clipHere()) },
-                act("⇆", t("Переходы", "Transitions")) { transitionSheet(seamHere()) },
-                act("▭", t("Формат", "Format"), on = project?.ratio?.isNotEmpty() == true) { canvasSheet() },
                 act("🖌", t("Тема", "Theme"), on = project?.theme?.isNotEmpty() == true) { themeSheet() },
                 act("🧩", t("ИИ", "AI")) { openCat("ai") },
                 act("☰", t("Слои", "Layers")) { blocksSheet() }

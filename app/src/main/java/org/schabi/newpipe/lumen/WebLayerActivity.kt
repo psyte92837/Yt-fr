@@ -484,21 +484,7 @@ class WebLayerActivity : LumenBase() {
         val v = video
         val idle = busy.isEmpty()
 
-        // 1. the hand editor lives in this tab too
-        c.card {
-            add(text(ctx, t("✏️ Ручной редактор", "✏️ Hand editor"), Type.TITLE_M, bold = true), 0)
-            muted(t("Таймлайн готового ролика: вставляйте инфосхемы, картинки, надписи и эмодзи в любой момент, двигайте и обрезайте блоки.",
-                "Timeline of a finished video: insert info-schemes, pictures, captions and emoji at any moment, move and trim the blocks."))
-            row(
-                btn(ctx, if (v != null) t("Открыть с этим видео", "Open with this video") else t("Открыть", "Open"), style = BtnStyle.TONAL) {
-                    if (v != null) StudioEditorActivity.open(this@WebLayerActivity, v) else StudioEditorActivity.open(this@WebLayerActivity)
-                },
-                btn(ctx, t("Проекты редактора", "Editor projects"), style = BtnStyle.TEXT) { StudioEditorActivity.open(this@WebLayerActivity) }
-            )
-        }
-
-        // 2. the video
-        c.h2(t("🧪 Анимированный слой от ИИ", "🧪 An animated layer from an AI"))
+        // the video (the hand editor is its own screen, opened from the Studio)
         c.muted(t("ИИ пишет код слоя анимации (lumen.canvas), Lumen рисует его поверх видео в WebView без интернета. Каждый ответ ИИ сохраняется шаблоном — пробуйте разные монтажи на одном видео.",
             "AI writes the code of an animation layer (lumen.canvas), Lumen draws it over the video in a WebView without internet. Every AI answer is kept as a template — try different montages on one video."))
         if (v != null) {

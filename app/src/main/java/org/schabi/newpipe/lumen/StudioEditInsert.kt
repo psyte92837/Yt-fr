@@ -1817,7 +1817,7 @@ class InsertWizard(private val h: InsertHost) {
     private fun montageSheet() {
         val layers = LayerStore(File(WebLayerActivity.dir(ui), "layers")).list()
         ui.bottomSheet(t("🎛 Шаблон слоя ИИ на отрезок", "🎛 AI layer template on a piece")) { dismiss ->
-            if (layers.isEmpty()) muted(t("Шаблонов пока нет: они появляются в «🎛 Слой ИИ ↗» внизу Студии.", "No templates yet: they appear in \"🎛 AI layer ↗\" at the bottom of the Studio."))
+            if (layers.isEmpty()) muted(t("Шаблонов пока нет: они появляются на экране «🎛 Слой ИИ» (кнопка под готовым роликом Студии).", "No templates yet: they appear on the \"🎛 AI layer\" screen (a button under a finished Studio video)."))
             else muted(t("Шаблон получит время и слова только этого отрезка, как будто это весь ролик.", "The template gets the time and words of this piece only, as if it were the whole video."))
             for (l in layers) add(btn(ctx, "🎛 " + l.name, style = BtnStyle.TONAL) {
                 dismiss()

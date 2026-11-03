@@ -188,7 +188,11 @@ object Shortcuts {
                 item("search", t("Поиск", "Search"), Ic.SEARCH, Intent(ctx, SearchActivity::class.java)),
                 item("studio", "Studio", Ic.MOVIE, Intent(ctx, StudioActivity::class.java)),
                 item("tts", t("Озвучка", "Read aloud"), Ic.SPEAKER, Intent(ctx, TtsActivity::class.java))
-            ).take(sm.maxShortcutCountPerActivity.coerceAtLeast(1))
+            ).take((sm.maxShortcutCountPerActivity - 1).coerceAtLeast(1)) +
+                // opens in its own process: works even when Lumen freezes on start
+                android.content.pm.ShortcutInfo.Builder(ctx, "crash_log").setShortLabel(t("Лог сбоя", "Crash log"))
+                    .setLongLabel(t("Отправить лог сбоя", "Send crash log")).setIcon(icon(ctx, Ic.BUG))
+                    .setIntent(Intent(ctx, CrashLogActivity::class.java).setAction(Intent.ACTION_VIEW)).build()
             sm.dynamicShortcuts = list
         }.onFailure { L.w("shortcuts", it.message.orEmpty()) }
     }

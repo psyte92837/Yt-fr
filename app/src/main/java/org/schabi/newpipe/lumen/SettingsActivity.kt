@@ -650,6 +650,7 @@ class SettingsActivity : LumenBase() {
     private var errorsOnly = false
 
     private fun logs(c: Col) {
+        c.button(t("🧯 Лог сбоя и зависаний", "🧯 Crash and freeze log"), style = BtnStyle.OUTLINED) { CrashLogActivity.open(this) }
         c.card {
             p(t("Отчёт для разработчика: версия, устройство, настройки без ключей, текущая задача и последние строки лога. Отправьте его в чат — по нему можно найти и исправить ошибку.",
                 "Developer report: version, device, settings without keys, current task and recent log lines. Send it to the chat to get a bug fixed."))

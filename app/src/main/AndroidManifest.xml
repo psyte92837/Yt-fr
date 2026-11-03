@@ -75,6 +75,14 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- ===== Lumen: crash/freeze log in its own process, opens while the app is frozen ===== -->
+        <activity
+            android:name=".lumen.CrashLogActivity"
+            android:exported="false"
+            android:label="Lumen log"
+            android:process=":crashlog"
+            android:taskAffinity="${applicationId}.crashlog"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
         <!-- ===== Lumen: "My Telegram bots" — own launcher icon, AI-written bots served by the phone ===== -->
         <activity
             android:name=".lumen.BotsActivity"

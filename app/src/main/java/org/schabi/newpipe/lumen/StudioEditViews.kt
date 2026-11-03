@@ -503,7 +503,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         "image" -> "🖼 " + t("Картинка", "Picture")
         EditInsert.KIND -> "🎞 " + (if (b.file.isEmpty()) "⏳ " + (if (b.req.isNotEmpty()) t("ждёт ответ ИИ #", "awaits AI answer #") + b.req else t("ИИ рисует…", "AI drawing…"))
         else b.text.ifBlank { t("Анимация", "Animation") })
-        EditSplit.KIND -> "⊟ " + t("Экран надвое", "Split screen")
+        EditSplit.KIND -> if (EditSplit.isPip(b)) "⧉ " + t("Окошко", "Window") else "⊟ " + t("Экран надвое", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") } + if (b.volume <= 0f) " 🔇" else ""
         "text" -> "T " + b.text.replace('\n', ' ')
         EditMotion.KIND -> "⚡ " + b.text.ifBlank { EditMotion.preset(b.look)?.name.orEmpty() }

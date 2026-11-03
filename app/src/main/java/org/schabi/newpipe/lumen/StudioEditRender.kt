@@ -859,7 +859,8 @@ object StudioEditRender {
                     canvas.drawBitmap(b, null, dst, paint)
                     canvas.restore()
                 }
-                if (sp == null) {
+                val pip = sp != null && EditSplit.isPip(sp)
+                if (sp == null || pip) {
                     if (p.blur && !p.fill) {
                         // the background: the same frame tiny, stretched over the whole canvas (soft), darkened
                         val tiny = Bitmap.createScaledBitmap(vidBmp, 24, max(1, 24 * vh / vw), true)
@@ -868,8 +869,9 @@ object StudioEditRender {
                         canvas.drawColor(0x40000000)
                     }
                     drawVideo(vidBmp, vRect, vRect, vidPaint, true)
-                } else {
-                    val (mh, sh) = EditSplit.halves(sp.look)
+                }
+                if (sp != null) {
+                    val (mh, sh) = EditSplit.boxes(sp, w.toFloat(), h.toFloat())
                     val sx0 = (sh.l * w).roundToInt()
                     val sy0 = (sh.t * h).roundToInt()
                     val sw = (sh.r * w).roundToInt() - sx0
@@ -884,9 +886,11 @@ object StudioEditRender {
                             .onFailure { L.w("studio", "split screen: ${it.message}") }.getOrNull()
                     }
                     side?.advance(EditSplit.srcAt(sp, tMs) * 1000, sidePix, true)
-                    // the main video covers its half, centred (the rest of it is cut off)
-                    val mc = EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat())
-                    drawVideo(vidBmp, mc, FRect(mh.l * w, mh.t * h, mh.r * w, mh.b * h), vidPaint, true)
+                    // the main video covers its half, centred (the rest of it is cut off); under a window it is drawn as usual above
+                    if (!pip) {
+                        val mc = EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat())
+                        drawVideo(vidBmp, mc, FRect(mh.l * w, mh.t * h, mh.r * w, mh.b * h), vidPaint, true)
+                    }
                     val sb = sideBmp
                     if (sb != null && sidePix.size == sw * shh && sw > 0 && shh > 0) {
                         sb.setPixels(sidePix, 0, sw, 0, 0, sw, shh)
@@ -1599,7 +1603,8 @@ private object StudioEditGl {
                 val tMs = outUs / 1000
                 val sp = EditSplit.active(splits, tMs)
                 fun viewport(r: FRect) = android.opengl.GLES20.glViewport(r.l.roundToInt(), (h - r.b).roundToInt(), r.w.roundToInt(), r.h.roundToInt())
-                if (sp == null) {
+                val pip = sp != null && EditSplit.isPip(sp)
+                if (sp == null || pip) {
                     if (p.blur && !p.fill) blurPos?.let { bp ->
                         viewport(blurRect)
                         draw(progBlur, OES, oes, texM, bp)
@@ -1607,7 +1612,8 @@ private object StudioEditGl {
                     viewport(vRect)
                     draw(progOes, OES, oes, texM, vidPos, colM, colO)
                     android.opengl.GLES20.glViewport(0, 0, w, h)
-                } else {
+                }
+                if (sp != null) {
                     if (sp.id != trackId) {
                         track?.close()
                         trackId = sp.id
@@ -1616,13 +1622,15 @@ private object StudioEditGl {
                     }
                     val tr = track
                     tr?.advance(EditSplit.srcAt(sp, tMs) * 1000)
-                    val (mh, sh) = EditSplit.halves(sp.look)
+                    val (mh, sh) = EditSplit.boxes(sp, w.toFloat(), h.toFloat())
                     fun scissor(r: FRect) = android.opengl.GLES20.glScissor((r.l * w).roundToInt(), ((1f - r.b) * h).roundToInt(),
                         (r.w * w).roundToInt(), (r.h * h).roundToInt())
                     android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_SCISSOR_TEST)
-                    scissor(mh)
-                    viewport(EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat()))
-                    draw(progOes, OES, oes, texM, vidPos, colM, colO)
+                    if (!pip) {
+                        scissor(mh)
+                        viewport(EditSplit.cover(curW, curH, mh, w.toFloat(), h.toFloat()))
+                        draw(progOes, OES, oes, texM, vidPos, colM, colO)
+                    }
                     if (tr != null && tr.shown) {
                         scissor(sh)
                         viewport(EditSplit.cover(tr.w, tr.h, sh, w.toFloat(), h.toFloat()))

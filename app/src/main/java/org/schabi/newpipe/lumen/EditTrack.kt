@@ -386,6 +386,32 @@ object EditSplit {
     const val KIND = "split"
     /** Main video left / right / top / bottom; the second one takes the other half. */
     val LAYOUTS = listOf("lr", "rl", "tb", "bt")
+    /** Picture in picture: the main video on the whole frame, the second one in the box of the block (moved and scaled like a picture). */
+    const val PIP = "pip"
+
+    fun isPip(b: EBlock): Boolean = b.kind == KIND && b.look == PIP
+
+    /** A new picture-in-picture box: a third of the frame width in the top right corner, the shape of the video. */
+    fun pipStart(fw: Int, fh: Int, vw: Int, vh: Int): Triple<Float, Float, Float> {
+        val w = 0.34f
+        val hFrac = w * fw * (vh.toFloat() / max(1, vw)) / max(1, fh)
+        return Triple(1f - w / 2 - 0.04f, (hFrac / 2 + 0.06f).coerceAtMost(0.5f), w)
+    }
+
+    /**
+     * The main video's and the second one's boxes (fractions of a [fw]×[fh] frame): the halves of the layout, or,
+     * for [PIP], the whole frame and the box of the block (its centre [EBlock.x], [EBlock.y], width [EBlock.w],
+     * height by [EBlock.ratio]), kept inside the frame.
+     */
+    fun boxes(b: EBlock, fw: Float, fh: Float): Pair<FRect, FRect> {
+        if (b.look != PIP) return halves(b.look)
+        val (hw, hh) = StudioEdit.halfSize(b, fw, fh)
+        val l = (b.x * fw - hw) / fw
+        val t = (b.y * fh - hh) / fh
+        val r = (b.x * fw + hw) / fw
+        val bt = (b.y * fh + hh) / fh
+        return FRect(0f, 0f, 1f, 1f) to FRect(l.coerceIn(0f, 1f), t.coerceIn(0f, 1f), r.coerceIn(0f, 1f), bt.coerceIn(0f, 1f))
+    }
 
     fun defaultLayout(w: Int, h: Int): String = if (h > w) "tb" else "lr"
 
@@ -428,6 +454,6 @@ object EditSplit {
     /** Loudness of the main video at [tMs]: its piece's, times the split screen's setting. */
     fun mainVolume(blocks: List<EBlock>, tMs: Long, clipVolume: Float): Float = clipVolume * (active(blocks, tMs)?.mainVolume ?: 1f)
 
-    /** Blocks drawn over the picture (a split screen and sounds are not). */
-    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { it.kind != KIND && it.kind != EditMusic.KIND }
+    /** Blocks on the stage over the picture (a split screen and sounds are not; a picture-in-picture box is, to move it). */
+    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { (it.kind != KIND || it.look == PIP) && it.kind != EditMusic.KIND }
 }

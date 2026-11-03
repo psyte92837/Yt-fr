@@ -990,7 +990,8 @@ class StudioEditorActivity : LumenBase() {
         var line = ""
         val items: List<Act> = when {
             b != null && b.kind == EditSplit.KIND -> {
-                line = "⊟ " + t("Разделённый экран", "Split screen") + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
+                line = (if (EditSplit.isPip(b)) "⧉ " + t("Видео в окошке", "Video in a window") else "⊟ " + t("Разделённый экран", "Split screen")) +
+                    " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
                 listOf(
                     done { select(null) },
                     act("⊟", t("Раскладка", "Layout")) { splitSheet(b) },
@@ -1121,7 +1122,8 @@ class StudioEditorActivity : LumenBase() {
                     back(),
                     act("🖼", t("Картинка", "Picture")) { pickImage(null) },
                     act("🌐", t("Фото из сети", "Web photo")) { photoSheet(null) },
-                    act("⊟", t("Разделить экран", "Split screen")) { pickSplit(null) }
+                    act("⊟", t("Разделить экран", "Split screen")) { pickSplit(null) },
+                    act("⧉", t("Видео в окошке", "Video in a window")) { pickSplit(null, true) }
                 )
             }
             cat == "ai" -> {
@@ -1313,6 +1315,7 @@ class StudioEditorActivity : LumenBase() {
         "rl" -> t("◨ Основное справа", "◨ Main on the right")
         "tb" -> t("⬒ Основное сверху", "⬒ Main on top")
         "bt" -> t("⬓ Основное снизу", "⬓ Main at the bottom")
+        EditSplit.PIP -> t("⧉ Окошко поверх", "⧉ Window on top")
         else -> t("◧ Основное слева", "◧ Main on the left")
     }
 
@@ -1337,10 +1340,11 @@ class StudioEditorActivity : LumenBase() {
         val src = cc?.src ?: ""
         val rot = cc?.rot ?: 0
         val (vw0, vh0) = srcSize(src).let { (a, b) -> EditCanvas.turned(a, b, rot) }
-        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}|$src|$rot|${p.blur}|${if (p.blur) curClip else 0}"
+        val key = (sp?.let { "${it.id}|${it.look}|${it.file}" + if (EditSplit.isPip(it)) "|${it.x}|${it.y}|${it.w}|${it.ratio}" else "" } ?: "-") + "|$fw|$fh|${p.ratio}|${p.fill}|$src|$rot|${p.blur}|${if (p.blur) curClip else 0}"
         if (key != splitKey) {
             splitKey = key
-            if (sp == null) {
+            val pip = sp != null && EditSplit.isPip(sp)
+            if (sp == null || pip) {
                 // the video on the canvas: a rectangle on the background, or covering the frame (format of the project)
                 val r = EditCanvas.videoRect(vw0.toFloat(), vh0.toFloat(), fw, fh, p.fill)
                 fun at(v: View, rect: FRect) {
@@ -1359,8 +1363,20 @@ class StudioEditorActivity : LumenBase() {
                 }
                 sb.visibility = View.GONE
                 showBlur(cc, !p.fill && p.blur)
+                if (sp != null) {
+                    // the window over the frame: the second video covers the box of the block
+                    val box = EditSplit.boxes(sp, fw, fh).second
+                    sb.layoutParams = FrameLayout.LayoutParams(max(1, (box.w * fw).toInt()), max(1, (box.h * fh).toInt())).apply {
+                        gravity = Gravity.TOP or Gravity.START
+                        leftMargin = (box.l * fw).toInt()
+                        topMargin = (box.t * fh).toInt()
+                    }
+                    val (vw, vh) = sideSize(sp.file)
+                    placeTurned(tv2, EditSplit.cover(vw.toFloat(), vh.toFloat(), box, fw, fh), box.l * fw, box.t * fh, 0)
+                    sb.visibility = View.VISIBLE
+                }
             } else {
-                val (mh, sh) = EditSplit.halves(sp.look)
+                val (mh, sh) = EditSplit.boxes(sp, fw, fh)
                 fun fit(box: View, inner: View, half: FRect, vw: Float, vh: Float) {
                     box.layoutParams = FrameLayout.LayoutParams((half.w * fw).toInt(), (half.h * fh).toInt()).apply {
                         gravity = Gravity.TOP or Gravity.START
@@ -2058,6 +2074,7 @@ class StudioEditorActivity : LumenBase() {
             item(t("🎞 Ещё видео в ролик", "🎞 Another video into the track"), t("клип с телефона: в конец или у курсора, как в CapCut", "a clip from the phone: at the end or at the playhead, like CapCut")) { addClipSheet() }
             item(t("🎵 Музыка", "🎵 Music"), t("трек с телефона с этого места; громкость и затухание", "a track from the phone from here; volume and fades")) { pickAudio(null) }
             item(t("⊟ Второе видео рядом", "⊟ A second video beside"), t("разделённый экран: реакция, сравнение", "split screen: a reaction, a comparison")) { pickSplit(null) }
+            item(t("⧉ Видео в окошке поверх", "⧉ A video in a window on top"), t("картинка в картинке: двигается и масштабируется", "picture in picture: moved and scaled")) { pickSplit(null, true) }
         }
     }
 
@@ -2325,7 +2342,7 @@ class StudioEditorActivity : LumenBase() {
         "text" -> "T " + b.text.replace('\n', ' ').take(40)
         EditInsert.KIND -> "🎞 " + (if (b.file.isEmpty()) "⏳ " + t("ждёт ответ ИИ", "awaits AI answer") + (if (b.req.isNotEmpty()) " #" + b.req else "")
         else b.text.ifBlank { t("Анимация", "Animation") })
-        EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
+        EditSplit.KIND -> if (EditSplit.isPip(b)) "⧉ " + t("Видео в окошке", "Video in a window") else "⊟ " + t("Разделённый экран", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") }
         EditMotion.KIND -> "⚡ " + b.text.ifBlank { EditMotion.preset(b.look)?.name ?: t("Анимация", "Animation") }
         EditLottie.KIND -> "🌀 " + b.text.ifBlank { "Lottie" }
@@ -2445,8 +2462,12 @@ class StudioEditorActivity : LumenBase() {
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_IMAGE)
     }
 
-    private fun pickSplit(replace: String?) {
+    /** The next second video becomes a window over the frame (picture in picture) instead of a half. */
+    private var pipNext = false
+
+    private fun pickSplit(replace: String?, pip: Boolean = false) {
         pause()
+        pipNext = pip
         pickFor = replace
         pickAt = curMs
         @Suppress("DEPRECATION")
@@ -2476,7 +2497,8 @@ class StudioEditorActivity : LumenBase() {
             else {
                 val len = min(dur, max(StudioEdit.MIN_MS, outLen(p) - at)).coerceAtLeast(StudioEdit.MIN_MS)
                 addNew(EditSplit.KIND, at, len, 1f) {
-                    it.copy(file = file, look = EditSplit.defaultLayout(p.w, p.h), x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "none")
+                    val b = it.copy(file = file, look = EditSplit.defaultLayout(p.w, p.h), x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "none")
+                    if (pipNext) pipLook(b, EditSplit.PIP) else b
                 }
             }
             splitKey = ""
@@ -2488,10 +2510,11 @@ class StudioEditorActivity : LumenBase() {
         bottomSheet(t("⊟ Разделённый экран", "⊟ Split screen")) { dismiss ->
             muted(t("Основное видео и второе делят кадр пополам, каждое обрезается по своей половине. Звук обоих смешивается — громкость в «🔊 Звук».",
                 "The main and the second video share the frame, each cropped to its half. Both sounds are mixed — loudness in \"🔊 Sound\"."))
-            add(choiceChips(ctx, EditSplit.LAYOUTS.map { it to splitName(it) }, b.look) { v ->
-                change(b.id) { it.copy(look = v) }
+            add(choiceChips(ctx, (EditSplit.LAYOUTS + EditSplit.PIP).map { it to splitName(it) }, b.look) { v ->
+                change(b.id) { pipLook(it, v) }
                 dismiss()
             })
+            if (EditSplit.isPip(b)) muted(t("Окошко двигается и меняет размер на кадре, как картинка.", "The window is moved and resized on the frame like a picture."))
             button(t("⏮ Второе видео с ", "⏮ Second video from ") + StudioEdit.clock(b.srcMs), style = BtnStyle.TONAL) {
                 dismiss()
                 splitFrom(b)
@@ -2501,6 +2524,17 @@ class StudioEditorActivity : LumenBase() {
                 pickSplit(b.id)
             }
         }
+    }
+
+    /** Layout [v] of a split screen; turning into a window gives it a box of the shape of the second video. */
+    private fun pipLook(b: EBlock, v: String): EBlock {
+        val p = project ?: return b.copy(look = v)
+        if (v != EditSplit.PIP) return b.copy(look = v)
+        if (b.look == EditSplit.PIP) return b
+        val (vw, vh) = sideSize(b.file)
+        val (x, y, w) = EditSplit.pipStart(p.w, p.h, vw, vh)
+        val ratio = if (vw > 0 && vh > 0) vh.toFloat() / vw else 9f / 16f
+        return b.copy(look = v, x = x, y = y, w = w, ratio = ratio)
     }
 
     private fun splitSoundSheet(b: EBlock) {

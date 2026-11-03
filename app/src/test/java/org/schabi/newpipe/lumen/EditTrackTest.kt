@@ -193,4 +193,21 @@ class EditTrackTest {
         assertEquals(0.25f, EditSplit.mainVolume(listOf(q), 3_000, 1f), 0.001f)
         assertEquals(0.5f, EditSplit.mainVolume(listOf(q), 8_000, 0.5f), 0.001f)
     }
+
+    @Test
+    fun pictureInPictureBox() {
+        val (x, y, w) = EditSplit.pipStart(1080, 1920, 1920, 1080)
+        val b = EBlock(id = "p", kind = EditSplit.KIND, startMs = 0, durMs = 5_000, x = x, y = y, w = w, ratio = 1080f / 1920f, look = EditSplit.PIP)
+        assertTrue(EditSplit.isPip(b))
+        val (main, side) = EditSplit.boxes(b, 1080f, 1920f)
+        assertEquals(0f, main.l, 0f)
+        assertEquals(1f, main.r, 0f)
+        // the window is inside the frame, in the top right, of the shape of the second video
+        assertTrue(side.l > 0.5f && side.r <= 1f && side.t >= 0f && side.b < 0.5f)
+        assertEquals(1080f / 1920f, side.h * 1920f / (side.w * 1080f), 0.01f)
+        // the window is on the stage (to be moved), a split screen is not
+        assertEquals(listOf("p"), EditSplit.overlays(listOf(b, b.copy(id = "s", look = "lr"))).map { it.id })
+        // other layouts keep their halves
+        assertEquals(EditSplit.halves("tb"), EditSplit.boxes(b.copy(look = "tb"), 1080f, 1920f))
+    }
 }

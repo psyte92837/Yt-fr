@@ -5,6 +5,7 @@
 package org.schabi.newpipe.lumen
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -115,5 +116,63 @@ class StudioMixAssistTest {
             "k", listOf("u"), listOf("c1" to 2000L))
         assertEquals(s, StudioMixAssist.fromJson(StudioMixAssist.toJson(s)))
         assertEquals(StudioMixAssist.State(), StudioMixAssist.fromJson("oops"))
+    }
+
+    @Test
+    fun parsesBatchAnswers() {
+        val urls = listOf("u1", "u2", "u3")
+        // the schema answer: rows of numbers, seconds
+        val a = StudioMixAssist.parseBatch("[[1,2,34,39,1],[3,1,5,9,0],[7,1,1,2,1]]", urls, mapOf("u1" to "One"))
+        assertEquals(2, a.size)
+        assertEquals("u1", a[0].url)
+        assertEquals("One", a[0].title)
+        assertEquals(2, a[0].beat)
+        assertEquals(34_000L, a[0].fromMs)
+        assertEquals(39_000L, a[0].toMs)
+        assertEquals(StudioMixAssist.SIMILAR, a[1].score, 0.0)
+        // without a schema: numbers as strings, an extra bracket at the end (seen live)
+        val b = StudioMixAssist.parseBatch("[[\"v002\",1,10,14,1]]}", urls, emptyMap())
+        assertEquals("u2", b.single().url)
+        // objects of the older prompt
+        val c = StudioMixAssist.parseBatch("""[{"video":3,"beat":1,"from":"0:05","to":"0:09","match":"похоже"}]""", urls, emptyMap())
+        assertEquals("u3", c.single().url)
+        assertEquals(StudioMixAssist.SIMILAR, c.single().score, 0.0)
+        assertTrue(StudioMixAssist.parseBatch("no json", urls, emptyMap()).isEmpty())
+        assertEquals(listOf(listOf("a", "b"), listOf("c")), StudioMixAssist.batches(listOf("a", "b", "b", "c"), 2))
+        assertEquals("1=a, b; 2=c d", StudioMixAssist.needs(listOf(MixBeat(1, "a; b"), MixBeat(2, "c\nd"))))
+    }
+
+    @Test
+    fun boundsFollowTheSettings() {
+        val beats = listOf(MixBeat(1, "a", 0, 3_000), MixBeat(2, "b"))
+        val m = listOf(
+            MixMoment("u", "", 1, 10_000, 20_000, "", StudioMixAssist.EXACT),
+            MixMoment("u", "", 2, 40_000, 40_500, "", StudioMixAssist.SIMILAR),
+            MixMoment("u", "", 2, 50_000, 54_000, "", StudioMixAssist.EXACT)
+        )
+        val dur = mapOf("u" to 60_000L)
+        // default: fitted to the phrase (3 s around the middle), short ones made longer
+        val fit = StudioMixAssist.bound(m, StudioMixAssist.Bounds(), dur, beats)
+        assertEquals(13_500L to 16_500L, fit.first { it.beat == 1 }.let { it.fromMs to it.toMs })
+        assertTrue(fit.all { it.ms >= StudioMixAssist.MIN_MOMENT_MS })
+        // as the AI gave: unchanged, too short dropped
+        val raw = StudioMixAssist.bound(m, StudioMixAssist.Bounds(fit = false), dur, beats)
+        assertEquals(listOf(10_000L to 20_000L, 50_000L to 54_000L), raw.map { it.fromMs to it.toMs })
+        // similar only when a point has no exact one
+        val fb = StudioMixAssist.bound(m, StudioMixAssist.Bounds(similar = StudioMixAssist.Similar.FALLBACK, toPhrase = false), dur, beats)
+        assertTrue(fb.none { it.score < StudioMixAssist.EXACT })
+        // margin, not past the end of the video
+        val pad = StudioMixAssist.bound(listOf(MixMoment("u", "", 2, 57_000, 59_800, "")), StudioMixAssist.Bounds(padMs = 500), dur, beats)
+        assertEquals(60_000L, pad.single().toMs)
+    }
+
+    @Test
+    fun thinkingConfigByModel() {
+        assertEquals("minimal", MediaOpts.thinking("gemini-3.5-flash-lite")!!.getString("thinkingLevel"))
+        assertEquals(0, MediaOpts.thinking("gemini-2.5-flash")!!.getInt("thinkingBudget"))
+        assertNull(MediaOpts.thinking("gemini-2.5-pro"))
+        assertNull(MediaOpts.thinking("gpt-4o"))
+        assertEquals(listOf("a", "b"), MediaOpts.links(" a\n\nb "))
+        assertTrue(MediaOpts.links(null).isEmpty())
     }
 }

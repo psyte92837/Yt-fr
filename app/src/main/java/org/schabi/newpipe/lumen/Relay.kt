@@ -33,7 +33,13 @@ object RelayText {
         ).append("\n\n")
         if (system.isNotBlank()) append(t("=== РОЛЬ ===\n", "=== ROLE ===\n")).append(system.trim()).append("\n\n")
         append(t("=== ЗАДАНИЕ ===\n", "=== TASK ===\n")).append(user.trim()).append("\n\n")
-        if (!fileUri.isNullOrBlank()) append(t("=== ВИДЕО ===\nПосмотри видео: ", "=== VIDEO ===\nWatch the video: ")).append(fileUri).append("\n\n")
+        val links = MediaOpts.links(fileUri)
+        if (links.size == 1) append(t("=== ВИДЕО ===\nПосмотри видео: ", "=== VIDEO ===\nWatch the video: ")).append(links[0]).append("\n\n")
+        else if (links.size > 1) {
+            append(t("=== ВИДЕО ===\nПосмотри видео, номера — по порядку:\n", "=== VIDEOS ===\nWatch the videos, numbers in this order:\n"))
+            links.forEachIndexed { i, u -> append(i + 1).append(" — ").append(u).append('\n') }
+            append('\n')
+        }
         if (image) append(t("=== КАРТИНКА ===\nКартинка приложена к сообщению — посмотри её.\n\n", "=== PICTURE ===\nThe picture is attached to the message — look at it.\n\n"))
         append(t("=== ПОЖЕЛАНИЕ АВТОРА ===\n", "=== AUTHOR'S WISH ===\n"))
         append(wish.trim().ifEmpty { t("(нет — действуй по заданию)", "(none — follow the task)") })

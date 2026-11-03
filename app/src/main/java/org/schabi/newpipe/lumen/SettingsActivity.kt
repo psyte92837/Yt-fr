@@ -431,6 +431,17 @@ class SettingsActivity : LumenBase() {
         dlg.show()
     }
 
+    /** A readable name of a prompt without its own label: its group by the key prefix and the key. */
+    private fun promptLabel(k: String): String = when {
+        k.startsWith("studio_mix") -> t("Микс · ", "Mix · ")
+        k.startsWith("studio_edit") -> t("Редактор · ", "Editor · ")
+        k.startsWith("studio") -> t("Студия · ", "Studio · ")
+        k.startsWith("langgame") -> t("Языковая игра · ", "Language game · ")
+        k.startsWith("predict") -> t("Предсказания · ", "Predictions · ")
+        k.startsWith("bot") -> t("Боты · ", "Bots · ")
+        else -> ""
+    } + k
+
     private fun prompts(c: Col) {
         c.muted(t("Переменные: {phrase} {domain} {lang} {data} {question}. Пустое поле — шаблон по умолчанию.",
             "Variables: {phrase} {domain} {lang} {data} {question}. Empty field = default template."))
@@ -466,7 +477,9 @@ class SettingsActivity : LumenBase() {
             "ideas_digest" to t("Идеи для бизнеса · сводка", "Business ideas · digest"),
             "ideas_translate" to t("Идеи для бизнеса · перевод запросов", "Business ideas · query translation"),
         ) + algoPromptLabels()
-        for ((k, label) in names) {
+        // every other prompt of the app (Studio, Mix, editor, bots…) is here too, under its key
+        val all = names + Prompts.defaults.keys.filter { it !in names }.associateWith { promptLabel(it) }
+        for ((k, label) in all) {
             val card = c.card {
                 add(text(ctx, label, Type.TITLE_M, bold = true), 0)
                 val custom = Lumen.prefs.contains("prompt_$k")

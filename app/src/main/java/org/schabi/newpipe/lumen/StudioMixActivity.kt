@@ -109,6 +109,23 @@ class StudioMixActivity : LumenBase() {
         var targetMs: Long
             get() = p.getLong("studio_mix_target", 0)
             set(v) = p.edit().putLong("studio_mix_target", v).apply()
+        /** Settings of the AI search of moments (⚙ in the assistant): what the app does with the timecodes. */
+        var bounds: StudioMixAssist.Bounds
+            get() = StudioMixAssist.Bounds(
+                fit = p.getBoolean("studio_mix_b_fit", true),
+                minMs = p.getLong("studio_mix_b_min", StudioMixAssist.MIN_MOMENT_MS),
+                maxMs = p.getLong("studio_mix_b_max", StudioCuts.MAX_CLIP_MS),
+                padMs = p.getLong("studio_mix_b_pad", 0),
+                toPhrase = p.getBoolean("studio_mix_b_phrase", true),
+                similar = StudioMixAssist.Similar.of(p.getString("studio_mix_b_similar", null)),
+                batch = p.getInt("studio_mix_b_batch", StudioMixAssist.DEFAULT_BATCH),
+                parallel = p.getInt("studio_mix_b_parallel", 1),
+                fps = p.getFloat("studio_mix_b_fps", StudioMixAssist.DEFAULT_FPS.toFloat()).toDouble(),
+                perVideo = p.getInt("studio_mix_b_per_video", 6))
+            set(b) = p.edit().putBoolean("studio_mix_b_fit", b.fit).putLong("studio_mix_b_min", b.minMs).putLong("studio_mix_b_max", b.maxMs)
+                .putLong("studio_mix_b_pad", b.padMs).putBoolean("studio_mix_b_phrase", b.toPhrase).putString("studio_mix_b_similar", b.similar.id)
+                .putInt("studio_mix_b_batch", b.batch).putInt("studio_mix_b_parallel", b.parallel).putFloat("studio_mix_b_fps", b.fps.toFloat())
+                .putInt("studio_mix_b_per_video", b.perVideo).apply()
         /** What the build that is running shows (taken over when it ends, also by a reopened screen). */
         var pending: String
             get() = p.getString("studio_mix_pending", "") ?: ""
@@ -1697,6 +1714,10 @@ class StudioMixActivity : LumenBase() {
                 check(titles[u].orEmpty().take(70) + if (n > 0) t(" · найдено: $n", " · found: $n") else "", true) { on -> if (on) chosen += u else chosen -= u }
             }
             val linksE = edit(t("Ещё ссылки на YouTube, по одной в строке", "More YouTube links, one per line"), multiline = true)
+            val bs = Prefs.bounds
+            muted(t("Ссылок в запросе: ${bs.batch} · кадр в ${fpsLabel(bs.fps)} · границы: ", "Links per request: ${bs.batch} · a frame every ${fpsLabel(bs.fps)} · bounds: ") +
+                if (bs.fit) t("подгоняет Lumen", "fitted by Lumen") else t("как дал ИИ", "as the AI gave"))
+            button(t("⚙ Настройки поиска", "⚙ Search settings"), style = BtnStyle.TEXT) { boundsSheet() }
             fun state() = assist.copy(brief = briefE.text.toString().trim(), wish = wishE.text.toString().trim(), byVoice = byVoice, perBeat = perBeat)
             button(t("🔎 Найти моменты", "🔎 Find moments"), primary = true) {
                 val s = state()
@@ -1716,9 +1737,10 @@ class StudioMixActivity : LumenBase() {
             if (assist.planKey != StudioMixAssist.planKey(beats)) muted(t("⚠ План изменился после поиска: номера пунктов могут не совпадать — найдите моменты заново.",
                 "⚠ The plan changed after the search: point numbers may not match — find the moments again."))
             add(text(ctx, t("Найденные моменты", "Found moments"), Type.TITLE_M, bold = true), 16)
-            muted(t("Отметьте, что брать. Кусков на пункт — лучшие из отмеченных.", "Tick what to take. Pieces per point — the best of the ticked ones."))
+            muted(t("Отметьте, что брать. ≈ — похожее, не точно то. Кусков на пункт — лучшие из отмеченных.", "Tick what to take. ≈ — similar, not exactly it. Pieces per point — the best of the ticked ones."))
             var moments = assist.moments
-            fun line(m: MixMoment) = "${StudioCuts.stamp(m.fromMs)}–${StudioCuts.stamp(m.toMs)} · ${m.what.ifBlank { "—" }} · ★${(m.score * 10).toInt()}\n" + m.title.take(50)
+            fun line(m: MixMoment) = (if (m.score < StudioMixAssist.EXACT) "≈ " else "") + "${StudioCuts.stamp(m.fromMs)}–${StudioCuts.stamp(m.toMs)}" +
+                (if (m.what.isNotBlank()) " · ${m.what}" else "") + "\n" + m.title.ifBlank { m.url }.take(60)
             fun pick(m: MixMoment, on: Boolean) {
                 moments = moments.map { if (it.key == m.key) it.copy(picked = on) else it }
             }
@@ -1746,47 +1768,106 @@ class StudioMixActivity : LumenBase() {
         }
     }
 
-    /** The AI watches every video of [urls] and names its moments for [beats]; results join the saved ones. */
+    private fun fpsLabel(fps: Double): String = if (fps <= 0) t("1 с", "1 s") else StudioMix.pieceLabel((1000 / fps).toLong())
+
+    /** Settings of the AI search: batches, frames, what the app does with the timecodes ([StudioMixAssist.Bounds]). */
+    private fun boundsSheet() = bottomSheet(t("⚙ Настройки поиска", "⚙ Search settings")) { _ ->
+        var b = Prefs.bounds
+        fun save(n: StudioMixAssist.Bounds) {
+            b = n
+            Prefs.bounds = n
+        }
+        muted(t("Промпт поиска (studio_mix_find) меняется в Настройки → AI → Промпты.", "The search prompt (studio_mix_find) is edited in Settings → AI → Prompts."))
+        add(text(ctx, t("Ссылок в одном запросе", "Links per request"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(1, 3, 5, 10, 15).let { if (b.batch in it) it else it + b.batch }.map { it to it.toString() }, b.batch) { save(b.copy(batch = it)) }, 4)
+        add(text(ctx, t("Запросов одновременно", "Requests at once"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, (1..3).map { it to it.toString() }, b.parallel) { save(b.copy(parallel = it)) }, 4)
+        add(text(ctx, t("Кадр видео для ИИ — каждые", "A video frame for the AI — every"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(1.0, 0.5, 0.25, 0.1).map { it to fpsLabel(it) }, b.fps) { save(b.copy(fps = it)) }, 4)
+        muted(t("Реже кадры — меньше нагрузка и токенов, но короткие планы могут пропасть.", "Fewer frames — less load and tokens, but short shots may be missed."))
+        add(text(ctx, t("Моментов с одного видео, не больше", "Moments of one video, at most"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(2, 4, 6, 12, 20).map { it to it.toString() }, b.perVideo) { save(b.copy(perVideo = it)) }, 4)
+        add(text(ctx, t("Границы моментов", "Bounds of the moments"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(true to t("Подгоняет Lumen", "Fitted by Lumen"), false to t("Как дал ИИ", "As the AI gave")), b.fit) { save(b.copy(fit = it)) }, 4)
+        check(t("Под длину фразы озвучки", "To the length of the voice-over phrase"), b.toPhrase) { save(b.copy(toPhrase = it)) }
+        add(text(ctx, t("Запас с каждой стороны", "Margin on each side"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(0L, 300L, 500L, 1000L).map { it to if (it > 0) StudioMix.pieceLabel(it) else "0" }, b.padMs) { save(b.copy(padMs = it)) }, 4)
+        add(text(ctx, t("Длина момента", "Moment length"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        row(
+            btn(ctx, t("от ", "from ") + StudioMix.pieceLabel(b.minMs), style = BtnStyle.TONAL) {
+                prompt(t("Самый короткий момент, секунд", "Shortest moment, seconds"), "", (b.minMs / 1000.0).toString()) { v ->
+                    StudioMix.parsePiece(v)?.let { save(b.copy(minMs = it, maxMs = maxOf(it, b.maxMs))); toast(t("Сохранено", "Saved")) }
+                }
+            },
+            btn(ctx, t("до ", "to ") + StudioMix.pieceLabel(b.maxMs), style = BtnStyle.TONAL) {
+                prompt(t("Самый длинный момент, секунд", "Longest moment, seconds"), "", (b.maxMs / 1000.0).toString()) { v ->
+                    (v.trim().replace(',', '.').toDoubleOrNull()?.times(1000)?.toLong())?.takeIf { it >= b.minMs }?.let { save(b.copy(maxMs = it)); toast(t("Сохранено", "Saved")) }
+                }
+            }
+        )
+        add(text(ctx, t("Похожие кадры (≈)", "Similar shots (≈)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(StudioMixAssist.Similar.ALL to t("Брать", "Take"), StudioMixAssist.Similar.FALLBACK to t("Если нет точных", "If no exact"),
+            StudioMixAssist.Similar.NONE to t("Не брать", "Skip")), b.similar) { save(b.copy(similar = it)) }, 4)
+        button(t("↺ По умолчанию", "↺ Defaults"), style = BtnStyle.TEXT) {
+            save(StudioMixAssist.Bounds())
+            toast(t("Настройки поиска сброшены", "Search settings reset"))
+        }
+    }
+
+    /**
+     * The AI looks through [urls] in batches (several links in one request, one array of moments for all of them)
+     * and names the moments for [beats]; results join the saved ones. A failed batch is asked again in halves.
+     */
     private fun findMoments(prov: Provider, beats: List<MixBeat>, urls: List<String>, titles: Map<String, String>) {
         busy = "assist"
         cancel = false
         render()
         val key = TASK + "assist"
         val s0 = assist
-        val format = if (aspect() == StudioAspect.PORTRAIT) t("вертикального ролика 9:16 (Shorts)", "a vertical 9:16 video (Shorts)")
-        else t("горизонтального ролика 16:9", "a horizontal 16:9 video")
-        val longest = beats.maxOfOrNull { it.durMs } ?: 0
-        val maxS = ((longest + 999) / 1000).coerceIn(6, StudioCuts.MAX_CLIP_MS / 1000)
-        val durs = clips.groupBy { it.url }.mapValues { (_, l) -> l.maxOf { it.durMs } }
-        BgTasks.run(this, key, t("Микс: помощник смотрит видео", "Mix: the assistant watches videos"), BgTasks.reopen(this), {
-            val found = LinkedHashMap<String, List<MixMoment>>()
-            val errors = mutableListOf<String>()
-            for ((i, u) in urls.withIndex()) {
+        val b = Prefs.bounds
+        val known = clips.groupBy { it.url }.mapValues { (_, l) -> l.maxOf { it.durMs } }
+        val groups = StudioMixAssist.batches(urls, b.batch)
+        val vars = mapOf(
+            "needs" to StudioMixAssist.needs(beats), "k" to b.perVideo.toString(),
+            "wish" to s0.wish.takeIf { it.isNotBlank() }?.let { " $it." }.orEmpty(),
+            // older templates
+            "format" to if (aspect() == StudioAspect.PORTRAIT) "9:16" else "16:9", "beats" to StudioMixAssist.beatsBlock(beats),
+            "min" to (b.minMs / 1000).toString(), "max" to (b.maxMs / 1000).toString(), "count" to b.perVideo.toString(), "lang" to Studio.langName(lang()),
+            "title" to "", "dur" to ""
+        )
+        BgTasks.run(this, key, t("Микс: ИИ ищет кадры", "Mix: the AI looks for shots"), BgTasks.reopen(this), {
+            val found = java.util.concurrent.ConcurrentHashMap<String, List<MixMoment>>()
+            val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val durs = java.util.concurrent.ConcurrentHashMap(known.filterValues { it > 0 })
+            val done = java.util.concurrent.atomic.AtomicInteger()
+            fun ask(g: List<String>, depth: Int) {
                 if (cancel) throw java.util.concurrent.CancellationException()
-                BgTasks.progress(key, t("Видео ${i + 1}/${urls.size}: Gemini смотрит…", "Video ${i + 1}/${urls.size}: Gemini watches…"))
                 try {
-                    val dur = durs[u]?.takeIf { it > 0 } ?: runCatching { StudioCutsLoad.durationMs(u) }.getOrDefault(0L)
-                    val title = titles[u] ?: u
-                    val vars = mapOf(
-                        "format" to format, "title" to title.take(120),
-                        "dur" to if (dur > 0) t(" (длина ${StudioCuts.stamp(dur)})", " (length ${StudioCuts.stamp(dur)})") else "",
-                        "beats" to StudioMixAssist.beatsBlock(beats), "min" to "2", "max" to maxS.toString(),
-                        "count" to StudioMixAssist.PER_VIDEO.toString(), "lang" to Studio.langName(lang()),
-                        "wish" to s0.wish.takeIf { it.isNotBlank() }?.let { t("\nПожелание автора: ", "\nAuthor's wish: ") + it }.orEmpty()
-                    )
-                    val r = Llm.complete(prov, prov.fastModel, "You are a video editor who watches videos and names exact timecodes of shots. Answer with JSON only.",
-                        Prompts.fill("studio_mix_find", vars), json = true, fileUri = u, maxTokens = 4000, task = "studio_mix_find", pid = "studio", lowMedia = true)
-                    val ms = StudioMixAssist.clean(StudioMixAssist.parse(r.text, u, title), dur, beats.size)
-                    if (ms.isEmpty()) errors += "${title.take(50)}: " + t("подходящих кадров не нашлось", "no fitting shots found")
-                    found[u] = ms
+                    val r = Llm.complete(prov, prov.fastModel, "Answer with JSON only.", Prompts.fill("studio_mix_find", vars + ("n" to g.size.toString())),
+                        json = true, fileUri = g.joinToString("\n"), maxTokens = (40 * g.size * b.perVideo).coerceIn(400, 8000),
+                        task = "studio_mix_find", pid = "studio", lowMedia = true, media = MediaOpts(b.fps, StudioMixAssist.BATCH_SCHEMA, true))
+                    val ms = StudioMixAssist.parseBatch(r.text, g, titles)
+                    for (u in g) {
+                        if (durs[u] == null) runCatching { StudioCutsLoad.durationMs(u) }.getOrNull()?.takeIf { it > 0 }?.let { durs[u] = it }
+                        found[u] = StudioMixAssist.bound(ms.filter { it.url == u }, b, durs, beats)
+                        if (found[u].isNullOrEmpty()) errors += "${(titles[u] ?: u).take(50)}: " + t("подходящих кадров не нашлось", "no fitting shots found")
+                    }
+                    val n = done.addAndGet(g.size)
+                    BgTasks.progress(key, t("Видео просмотрено: $n/${urls.size}", "Videos looked through: $n/${urls.size}"))
                 } catch (e: java.util.concurrent.CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    L.w("studio", "mix assist $u: ${e.message}")
-                    errors += "${(titles[u] ?: u).take(50)}: ${e.message ?: e.javaClass.simpleName}"
+                    L.w("studio", "mix assist batch of ${g.size}: ${e.message}")
+                    // a batch too big for the model or a stuck answer: the halves separately
+                    if (g.size > 1 && depth < 4) {
+                        ask(g.subList(0, g.size / 2), depth + 1)
+                        ask(g.subList(g.size / 2, g.size), depth + 1)
+                    } else errors += "${(titles[g[0]] ?: g[0]).take(50)}: ${e.message ?: e.javaClass.simpleName}"
                 }
             }
-            found to errors
+            BgTasks.progress(key, t("Запросов: ${groups.size}, видео: ${urls.size}", "Requests: ${groups.size}, videos: ${urls.size}"))
+            Par.mapAll(groups, b.parallel) { _, g -> ask(g, 0) }
+            HashMap(found) to errors.toList()
         }, { e ->
             busy = ""
             if (isDestroyed) return@run

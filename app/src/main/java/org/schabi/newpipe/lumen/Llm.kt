@@ -143,7 +143,8 @@ object Llm {
     }
 
     /**
-     * Single completion. [fileUri] is used only by Gemini (e.g. a YouTube URL for transcription).
+     * Single completion. [fileUri] is used only by Gemini (e.g. a YouTube URL for transcription); several links,
+     * one per line, go as several videos of one request. [media]: fps, answer schema, no thinking (Gemini only).
      */
     fun complete(
         p: Provider,
@@ -158,7 +159,8 @@ object Llm {
         lowMedia: Boolean = false,
         /** A picture sent with the message (base64 of a JPEG or PNG), for models that see images. */
         image: String? = null,
-        imageMime: String = "image/jpeg"
+        imageMime: String = "image/jpeg",
+        media: MediaOpts? = null
     ): LlmReply {
         val started = System.currentTimeMillis()
         // another AI by hand: the request is copied out and the answer pasted back (no API, no key)
@@ -175,8 +177,8 @@ object Llm {
         val sent = out.user
         val file = out.fileUri
         try {
-            val r = if (p == Provider.FREE) free(model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it }
-            else Par.retrying { completeRaw(endpoint(p), model, system, sent, json, file, maxTokens, lowMedia, image, imageMime) { raw = it } }
+            val r = if (p == Provider.FREE) free(model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, media) { raw = it }
+            else Par.retrying { completeRaw(endpoint(p), model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, media) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file)
             // stopped while waiting for the answer: the answer stays in the journal, the task ends here
@@ -210,7 +212,7 @@ object Llm {
     /** Free AI: the best model with a key, then the next one on a limit, a key error or a failure ([FreeAi.MAX_TRIES] models). */
     private fun free(
         model: String, system: String, user: String, json: Boolean, fileUri: String?, maxTokens: Int, lowMedia: Boolean,
-        image: String?, imageMime: String, onRaw: (String) -> Unit
+        image: String?, imageMime: String, media: MediaOpts?, onRaw: (String) -> Unit
     ): LlmReply {
         FreeAiStore.refreshIfStale()
         val cat = FreeAiStore.catalog()
@@ -223,11 +225,11 @@ object Llm {
             val e = FreeAiStore.endpoint(prov)
             try {
                 val r = try {
-                    completeRaw(e, m.id, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, onRaw)
+                    completeRaw(e, m.id, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, media, onRaw)
                 } catch (x: LlmException) {
                     // some free endpoints reject response_format: once more without it, the parsers still read JSON from text
                     if (json && x.code == 400 && e.kind == ApiKind.OPENAI_COMPAT) {
-                        completeRaw(e.copy(jsonMode = false), m.id, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, onRaw)
+                        completeRaw(e.copy(jsonMode = false), m.id, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, media, onRaw)
                     } else throw x
                 }
                 FreeAiStore.ok(m, r.inTokens + r.outTokens)
@@ -266,6 +268,7 @@ object Llm {
         lowMedia: Boolean,
         image: String?,
         imageMime: String,
+        media: MediaOpts? = null,
         onRaw: (String) -> Unit
     ): LlmReply {
         val headers = authHeaders(p)
@@ -293,8 +296,10 @@ object Llm {
             }
             ApiKind.GEMINI -> {
                 val parts = JSONArray()
-                if (fileUri != null) {
-                    parts.put(JSONObject().put("file_data", JSONObject().put("file_uri", fileUri)))
+                for (u in MediaOpts.links(fileUri)) {
+                    val part = JSONObject().put("file_data", JSONObject().put("file_uri", u))
+                    media?.fps?.takeIf { it > 0 }?.let { part.put("video_metadata", JSONObject().put("fps", it)) }
+                    parts.put(part)
                 }
                 if (image != null) parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", imageMime).put("data", image)))
                 parts.put(JSONObject().put("text", user))
@@ -302,6 +307,8 @@ object Llm {
                 if (json) gen.put("responseMimeType", "application/json")
                 // ~3× fewer tokens per video frame
                 if (lowMedia && fileUri != null) gen.put("mediaResolution", "MEDIA_RESOLUTION_LOW")
+                media?.schema?.let { gen.put("responseSchema", JSONObject(it)) }
+                if (media?.noThinking == true) MediaOpts.thinking(model)?.let { gen.put("thinkingConfig", it) }
                 val body = JSONObject()
                     .put("system_instruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", system))))
                     .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))

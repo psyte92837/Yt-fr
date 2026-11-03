@@ -43,8 +43,6 @@ object StudioMixAssist {
     const val MIN_STEP_MS = 800L
     /** Without a voice-over an element shows its whole moment, but not longer than this. */
     const val STEP_MS = 4_000L
-    /** Moments asked from one video. */
-    const val PER_VIDEO = 12
 
     // ---------- plan ----------
 
@@ -131,24 +129,144 @@ object StudioMixAssist {
         }
     }
 
+    // ---------- batches of links (one request, one array for all the videos) ----------
+
+    /** Answer schema of the batch search: rows of whole numbers [video, need, start s, end s, exact 1/0]. */
+    const val BATCH_SCHEMA = """{"type":"ARRAY","items":{"type":"ARRAY","items":{"type":"INTEGER"}}}"""
+    /** Frames per second of each video by default (a frame in 4 s): ~2× fewer tokens than 1 fps at LOW. */
+    const val DEFAULT_FPS = 0.25
+    const val DEFAULT_BATCH = 10
+
+    /** Links of one request: [size] in each (at least 1). */
+    fun batches(urls: List<String>, size: Int): List<List<String>> = urls.distinct().chunked(size.coerceAtLeast(1))
+
+    /** The needs for the short prompt: "1=dog runs on a beach; 2=night city" (each cut to [max] chars, no ";" inside). */
+    fun needs(beats: List<MixBeat>, max: Int = 90): String =
+        beats.joinToString("; ") { b -> "${b.n}=" + b.text.replace(';', ',').replace('\n', ' ').trim().take(max) }
+
+    private val digits = Regex("""\d+""")
+
+    /** A number of the answer: 3, "3", "v003", "3.0" → 3; null when there is no number. */
+    private fun num(v: Any?): Long? = when (v) {
+        is Number -> v.toLong()
+        null -> null
+        else -> digits.find(v.toString())?.value?.toLongOrNull()
+    }
+
+    /**
+     * Moments of a batch answer for [urls] (video numbers 1..n in this order): rows [video, need, start, end, exact]
+     * (seconds; exact 1 = what was asked, 0 = similar → lower score), or objects {"video","beat","from","to","match"}.
+     * Takes the array even with junk around it or an extra bracket at the end; rows of unknown videos are dropped.
+     */
+    fun parseBatch(answer: String, urls: List<String>, titles: Map<String, String>): List<MixMoment> {
+        val s = RelayText.clean(answer, true)
+        val a = s.indexOf('[')
+        if (a < 0) return if (urls.size == 1) parse(answer, urls[0], titles[urls[0]].orEmpty()) else emptyList()
+        var arr: JSONArray? = null
+        var end = s.lastIndexOf(']')
+        while (arr == null && end > a) {
+            arr = runCatching { JSONArray(s.substring(a, end + 1)) }.getOrNull()
+            end = s.lastIndexOf(']', end - 1)
+        }
+        arr ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i ->
+            val row = arr.opt(i)
+            val (v, beat, from, to, exact) = when (row) {
+                is JSONArray -> {
+                    if (row.length() < 4) return@mapNotNull null
+                    listOf(num(row.opt(0)), num(row.opt(1)), num(row.opt(2))?.times(1000), num(row.opt(3))?.times(1000), num(row.opt(4)) ?: 1L)
+                }
+                is JSONObject -> listOf(
+                    num(row.opt("video")) ?: if (urls.size == 1) 1L else null,
+                    num(row.opt("beat") ?: row.opt("need")),
+                    timeOf(row.opt("from") ?: row.opt("start")), timeOf(row.opt("to") ?: row.opt("end")),
+                    if (row.optString("match").let { it.startsWith("пох") || it.startsWith("sim") } || row.optInt("exact", 1) == 0) 0L else 1L)
+                else -> return@mapNotNull null
+            }
+            val url = urls.getOrNull(((v ?: return@mapNotNull null) - 1).toInt()) ?: return@mapNotNull null
+            val f = from ?: return@mapNotNull null
+            MixMoment(url, titles[url].orEmpty(), (beat ?: 0L).toInt().coerceAtLeast(0), f, to ?: (f + StudioCuts.DEFAULT_CLIP_MS),
+                "", if (exact == 0L) SIMILAR else EXACT)
+        }
+    }
+
+    /** Score of a moment that shows what was asked, and of one that only looks similar ("≈"). */
+    const val EXACT = 1.0
+    const val SIMILAR = 0.6
+
+    /** What to do with "similar" moments. */
+    enum class Similar(val id: String) { ALL("all"), FALLBACK("fallback"), NONE("none");
+        companion object { fun of(id: String?) = entries.firstOrNull { it.id == id } ?: ALL }
+    }
+
+    /**
+     * Settings of the found moments (Settings of the assistant): [fit] — the app fits the bounds (lengths
+     * [minMs]..[maxMs], no overlaps, [padMs] added on both sides) or, off, the timecodes stay as the AI gave them
+     * and only moments outside [minMs]..[maxMs] are dropped; [toPhrase] — a moment of a voice-over line is made as
+     * long as the line (around its middle); [similar] — take "similar" moments.
+     */
+    data class Bounds(
+        val fit: Boolean = true,
+        val minMs: Long = MIN_MOMENT_MS,
+        val maxMs: Long = StudioCuts.MAX_CLIP_MS,
+        val padMs: Long = 0,
+        val toPhrase: Boolean = true,
+        val similar: Similar = Similar.ALL,
+        val batch: Int = DEFAULT_BATCH,
+        val parallel: Int = 1,
+        val fps: Double = DEFAULT_FPS,
+        val perVideo: Int = 6
+    )
+
+    /** [list] after the [b] settings ([durMs]: url → length of the video, 0 = not known). */
+    fun bound(list: List<MixMoment>, b: Bounds, durMs: Map<String, Long>, beats: List<MixBeat>): List<MixMoment> {
+        var out = list.filter { b.similar != Similar.NONE || it.score >= EXACT }
+        if (b.similar == Similar.FALLBACK) {
+            val exact = out.filter { it.score >= EXACT }.map { it.beat }.toSet()
+            out = out.filter { it.score >= EXACT || it.beat !in exact }
+        }
+        if (!b.fit) return out.filter { it.ms in b.minMs..b.maxMs && it.fromMs >= 0 }
+            .sortedWith(compareBy<MixMoment>({ if (it.beat == 0) Int.MAX_VALUE else it.beat }, { -it.score }))
+        val lo = b.minMs.coerceAtLeast(300)
+        val hi = b.maxMs.coerceAtLeast(lo)
+        out = out.map { m ->
+            val d = durMs[m.url] ?: 0
+            var a = (m.fromMs - b.padMs).coerceAtLeast(0)
+            var e = m.toMs + b.padMs
+            val want = beats.firstOrNull { it.n == m.beat }?.durMs?.takeIf { b.toPhrase && it > 0 }
+            if (want != null) {
+                val mid = (a + e) / 2
+                a = (mid - want / 2).coerceAtLeast(0)
+                e = a + want
+            }
+            if (d > 0 && e > d) {
+                a = (a - (e - d)).coerceAtLeast(0)
+                e = d
+            }
+            m.copy(fromMs = a, toMs = e)
+        }
+        return out.groupBy { it.url }.flatMap { (u, l) -> clean(l, durMs[u] ?: 0, beats.size, lo, hi) }
+            .sortedWith(compareBy<MixMoment>({ if (it.beat == 0) Int.MAX_VALUE else it.beat }, { -it.score }))
+    }
+
     /**
      * Valid moments: inside the video ([durMs] 0 = not known), at least [MIN_MOMENT_MS] (made longer when short),
      * at most [StudioCuts.MAX_CLIP_MS], beat outside the plan → 0; of moments of one video that overlap by more
      * than half the shorter one the better one stays. Sorted by beat, then by score.
      */
-    fun clean(list: List<MixMoment>, durMs: Long, beats: Int): List<MixMoment> {
+    fun clean(list: List<MixMoment>, durMs: Long, beats: Int, minMs: Long = MIN_MOMENT_MS, maxMs: Long = StudioCuts.MAX_CLIP_MS): List<MixMoment> {
         val fixed = list.mapNotNull { m ->
             var a = m.fromMs.coerceAtLeast(0)
             var b = m.toMs
             if (durMs > 0 && a >= durMs - 300) return@mapNotNull null
-            if (b <= a) b = a + StudioCuts.DEFAULT_CLIP_MS
-            if (b - a > StudioCuts.MAX_CLIP_MS) b = a + StudioCuts.MAX_CLIP_MS
+            if (b <= a) b = a + StudioCuts.DEFAULT_CLIP_MS.coerceIn(minMs, maxMs)
+            if (b - a > maxMs) b = a + maxMs
             if (durMs > 0) b = b.coerceAtMost(durMs)
-            if (b - a < MIN_MOMENT_MS) {
-                b = a + MIN_MOMENT_MS
+            if (b - a < minMs) {
+                b = a + minMs
                 if (durMs > 0 && b > durMs) {
                     b = durMs
-                    a = (durMs - MIN_MOMENT_MS).coerceAtLeast(0)
+                    a = (durMs - minMs).coerceAtLeast(0)
                 }
             }
             m.copy(fromMs = a, toMs = b, beat = if (m.beat in 1..beats) m.beat else 0)

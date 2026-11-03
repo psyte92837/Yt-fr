@@ -104,10 +104,16 @@ class EditStage(ctx: Context, private val makePainter: (Int, Int) -> StudioEditP
 
     private fun sel(): EBlock? = StudioEdit.find(shown(), selected)?.takeIf { timeMs >= it.startMs && timeMs < it.endMs }
 
+    /** The picture of the video now and where it lies on this view — for blocks that blur the video under them. */
+    var under: (() -> Pair<android.graphics.Bitmap, RectF>?)? = null
+
     override fun onDraw(c: Canvas) {
         val fw = width.toFloat()
         val fh = height.toFloat()
-        painter?.draw(c, StudioEdit.active(shown(), timeMs), timeMs)
+        val active = StudioEdit.active(shown(), timeMs)
+        val u = if (active.any { it.blur > 0f }) runCatching { under?.invoke() }.getOrNull() else null
+        painter?.draw(c, active, timeMs, u?.first, u?.second)
+        u?.first?.recycle()
         if (portrait && moved && (mode == MOVE || mode == SCALE || mode == PINCH || mode == WIDTH)) {
             // YouTube Shorts / Reels: the title and buttons cover the bottom fifth and the right column
             c.drawRect(0f, fh * 0.8f, fw, fh, safeP)

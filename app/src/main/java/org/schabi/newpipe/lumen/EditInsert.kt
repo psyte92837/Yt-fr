@@ -70,6 +70,8 @@ data class EditBrief(
     /** s | m | l. */
     val size: String = "",
     val like: String = "",
+    /** A picture of the wanted look in the project folder (img/ref_*.jpg): the built-in AI sees it, another AI gets it shared. */
+    val ref: String = "",
     /** Chips of «Не делать» ([EditInsert.DONTS]) and the author's own words. */
     val donts: List<String> = emptyList(),
     val dont: String = "",
@@ -77,6 +79,8 @@ data class EditBrief(
     val opacity: Float = 1f,
     val dim: Float = 0f,
     val dimAll: Boolean = false,
+    /** The video blurred under the block (0..1), fading in and out with it. */
+    val blur: Float = 0f,
     // Г. motion and time
     /** 0 = by the phrase / reading time. */
     val lenMs: Long = 0,
@@ -676,6 +680,7 @@ object EditInsert {
                 b.bg == "none" -> out += t("видео под блоком видно как есть — у текста тень или обводка", "the video under the block is as it is — text with a shadow or outline")
                 b.bg == "full" -> out += t("блок закрывает весь кадр — свой фон", "the block covers the whole frame — own background")
             }
+            if (b.blur > 0f && b.bg != "full") out += t("видео под блоком размыто — фон спокойный, мелкие детали не мешают тексту", "the video under the block is blurred — a calm background, no small details behind the text")
         }
         val motion = listOfNotNull(
             when (b.reveal) { "words" -> t("раскрытие на словах речи", "reveal on the spoken words"); "steps" -> t("раскрытие по очереди", "reveal one by one"); "all" -> t("всё сразу", "all at once"); else -> null },
@@ -688,6 +693,8 @@ object EditInsert {
         if (motion.isNotEmpty()) out += t("движение: ", "motion: ") + motion.joinToString("; ")
         if (zonesInBlock.isNotEmpty()) out += t("не закрывать (доли блока): ", "keep free (fractions of the block): ") + zonesInBlock.joinToString("; ") { zoneText(it) }
         if (b.like.isNotBlank()) out += t("похоже на: ", "looks like: ") + b.like.trim()
+        if (b.ref.isNotBlank() && anim) out += t("образец вида — на приложенной картинке: повтори его стиль (цвета, шрифты, формы плашек, движение угадай по виду), содержание бери из брифа",
+            "a sample of the look is on the attached picture: repeat its style (colours, fonts, shapes of the plates, guess the motion from it), take the content from the brief")
         return out
     }
 
@@ -995,6 +1002,8 @@ v1.1 (необязательно, но лучше):
         if (b.opacity != 1f) o.put("opacity", b.opacity.toDouble())
         if (b.dim > 0f) o.put("dim", b.dim.toDouble())
         if (b.dimAll) o.put("dimAll", true)
+        if (b.blur > 0f) o.put("blur", b.blur.toDouble())
+        if (b.ref.isNotEmpty()) o.put("ref", b.ref)
         if (b.lenMs > 0) o.put("len", b.lenMs)
         if (!b.accentMain) o.put("accentMain", false)
         if (b.holdMs >= 0) o.put("hold", b.holdMs)
@@ -1021,6 +1030,7 @@ v1.1 (необязательно, но лучше):
             bg = s("bg"), bgAlpha = o.optInt("bgAlpha", -1).coerceIn(-1, 100), radius = s("radius"), border = o.bool3("border"), shadow = o.bool3("shadow"),
             font = s("font"), upper = o.bool3("upper"), size = s("size"), like = o.optString("like"), donts = donts, dont = o.optString("dont"),
             opacity = o.optDouble("opacity", 1.0).toFloat().coerceIn(0.1f, 1f), dim = o.optDouble("dim", 0.0).toFloat().coerceIn(0f, 0.6f), dimAll = o.optBoolean("dimAll"),
+            blur = o.optDouble("blur", 0.0).toFloat().coerceIn(0f, 1f), ref = o.optString("ref"),
             lenMs = o.optLong("len").coerceIn(0L, 120_000L), animIn = s("in"), animOut = s("out"), reveal = s("reveal"), pace = s("pace"),
             accentMain = o.optBoolean("accentMain", true), holdMs = o.optLong("hold", -1L).coerceIn(-1L, 10_000L), loopS = o.optInt("loop").coerceIn(0, 30), sound = s("sound"),
             place = s("place"), rect = rectOf(o.optJSONArray("rect")), scale = s("scale"), shape = s("shape"),
@@ -1094,18 +1104,18 @@ v1.1 (необязательно, но лучше):
     /** The style of the video ([EProject.brand]): the look, the transparency and the pace of a brief, no content. */
     fun brandOf(b: EditBrief): EditBrief = EditBrief(
         style = b.style, accent = b.accent, palette = b.palette, bg = b.bg, bgAlpha = b.bgAlpha, radius = b.radius, border = b.border, shadow = b.shadow,
-        font = b.font, upper = b.upper, size = b.size, donts = b.donts, dont = b.dont, opacity = b.opacity, dim = b.dim, dimAll = b.dimAll, pace = b.pace
+        font = b.font, upper = b.upper, size = b.size, donts = b.donts, dont = b.dont, opacity = b.opacity, dim = b.dim, dimAll = b.dimAll, blur = b.blur, pace = b.pace
     )
 
     fun withBrand(b: EditBrief, brand: EditBrief): EditBrief = b.copy(
         style = brand.style, accent = brand.accent, palette = brand.palette, bg = brand.bg, bgAlpha = brand.bgAlpha, radius = brand.radius,
         border = brand.border, shadow = brand.shadow, font = brand.font, upper = brand.upper, size = brand.size, donts = brand.donts, dont = brand.dont,
-        opacity = brand.opacity, dim = brand.dim, dimAll = brand.dimAll, pace = brand.pace
+        opacity = brand.opacity, dim = brand.dim, dimAll = brand.dimAll, blur = brand.blur, pace = brand.pace
     )
 
     /** A recipe: the brief without its content (type, look, transparency, motion, place). */
     fun recipeOf(b: EditBrief): EditBrief = b.copy(what = "", source = "", rows = emptyList(), fields = emptyMap(),
-        title = if (b.title == "-") "-" else "", lenMs = 0, rect = null, face = null, lang = "")
+        title = if (b.title == "-") "-" else "", lenMs = 0, rect = null, face = null, lang = "", ref = "")
 
     /** [content] (what to show, data, time, face) with everything else from [recipe]. */
     fun withRecipe(content: EditBrief, recipe: EditBrief): EditBrief = recipe.copy(

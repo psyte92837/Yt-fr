@@ -66,7 +66,9 @@ data class EBlock(
     /** An accent effect over the whole block: pulse, shake, wiggle, bounce ("" = none). */
     val emph: String = "",
     /** Segments of an animation "intro,loop,outro" in ms (lumen.anim v1.1): any length without a new render. */
-    val seg: String = ""
+    val seg: String = "",
+    /** The video blurred under the block while it is shown (0..1), fading with it like [dim]. */
+    val blur: Float = 0f
 ) {
     val endMs: Long get() = startMs + durMs
 }
@@ -597,6 +599,27 @@ object StudioEdit {
     /** The video under a block darkens and brightens again this long ([EBlock.dim]). */
     const val DIM_MS = 300L
 
+    /**
+     * Where the video under [b] is blurred, in pixels of a [w]×[h] frame: the block's box (turned blocks: the box around it)
+     * with a margin, clipped to the frame; null when the block does not blur.
+     */
+    fun blurRect(b: EBlock, w: Float, h: Float): FRect? {
+        if (b.blur <= 0f) return null
+        val (hw, hh) = halfSize(b, w, h)
+        val a = Math.toRadians(b.rot.toDouble())
+        val bx = (abs(hw * cos(a)) + abs(hh * sin(a))).toFloat()
+        val by = (abs(hw * sin(a)) + abs(hh * cos(a))).toFloat()
+        val m = min(w, h) * 0.04f
+        val r = FRect(max(0f, b.x * w - bx - m), max(0f, b.y * h - by - m), min(w, b.x * w + bx + m), min(h, b.y * h + by + m))
+        return if (r.r - r.l < 2f || r.b - r.t < 2f) null else r
+    }
+
+    /**
+     * Width the picture under a blurring block is shrunk to before it is stretched back (the blur), for a picture as wide as
+     * the frame: 90 px (light) … 34 px (strong) — the same look in the preview and the export at any size.
+     */
+    fun blurWidth(blur: Float): Int = (1080f / (12f + 20f * blur.coerceIn(0f, 1f))).toInt()
+
     /** Share of the dimming of [b] at [tMs]: rises at its start and falls at its end over [DIM_MS]. */
     fun dimAlpha(b: EBlock, tMs: Long): Float {
         if (tMs < b.startMs || tMs >= b.endMs) return 0f
@@ -698,6 +721,7 @@ object StudioEdit {
             if (b.theme.isNotEmpty()) put("theme", b.theme)
             if (b.emph.isNotEmpty()) put("emph", b.emph)
             if (b.seg.isNotEmpty()) put("seg", b.seg)
+            if (b.blur > 0f) put("blur", b.blur.toDouble())
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -719,7 +743,7 @@ object StudioEdit {
             o.optInt("fps", EditInsert.DEFAULT_FPS).coerceIn(1, 60), o.optLong("loop").coerceIn(0L, EditInsert.MAX_ANIM_MS), req,
             o.optString("brief"), EditInsert.lookFrom(o.optJSONObject("over")), f("dim", 0f).coerceIn(0f, 0.6f), o.optBoolean("dimAll"),
             o.optJSONArray("history")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }.take(3) }.orEmpty(),
-            o.optString("theme"), o.optString("emph").takeIf { it in EMPHS } ?: "", o.optString("seg")
+            o.optString("theme"), o.optString("emph").takeIf { it in EMPHS } ?: "", o.optString("seg"), f("blur", 0f).coerceIn(0f, 1f)
         )
     }
 

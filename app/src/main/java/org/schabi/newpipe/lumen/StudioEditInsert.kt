@@ -10,6 +10,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -67,6 +68,8 @@ interface InsertHost {
     fun cuts(): List<Long>
     /** A record for the local statistics of the inserts. */
     fun stat(s: InsertStat)
+    /** A picture chosen on the phone (the sample of the look). */
+    fun pickImage(then: (Uri) -> Unit)
 }
 
 /**
@@ -81,6 +84,8 @@ class InsertWizard(private val h: InsertHost) {
         private const val SYSTEM = "You are a designer of info-graphics and motion graphics for videos. Follow the request exactly; answer only in the asked format."
         private val SWATCHES = listOf(0xFFFFD60A, 0xFFFF3B30, 0xFF34C759, 0xFF0A84FF, 0xFFBF5AF2, 0xFFFF9F0A, 0xFF64D2FF, 0xFFFFFFFF).map { it.toInt() }
         private const val PREF_LAST = "edit_insert_last"
+        /** Strengths of «Размыть видео под блоком». */
+        private val BLURS: List<Pair<Float, String>> get() = listOf(0f to t("Нет", "None"), 0.4f to t("Слабо", "Light"), 1f to t("Сильно", "Strong"))
         private const val PREF_RECIPES = "edit_insert_recipes"
         private const val PREF_DRAFT = "edit_insert_draft"
 
@@ -713,6 +718,7 @@ class InsertWizard(private val h: InsertHost) {
             val like = edt(ui, t("например: чистая научпоп-инфографика", "e.g. clean science infographics"), brief.like)
             like.watch { v -> brief = brief.copy(like = v) }
             c.add(like, 2)
+            refRow(c)
             label(c, t("Не делать", "Don't"))
             c.chips(EditInsert.DONTS.map { d ->
                 chip(ui, dontName(d), d in brief.donts) { set { b -> b.copy(donts = if (d in b.donts) b.donts - d else b.donts + d) } }
@@ -818,7 +824,8 @@ class InsertWizard(private val h: InsertHost) {
     private fun alphaSummary(): String = listOfNotNull(
         if (brief.opacity < 0.999f) t("блок ", "block ") + "${(brief.opacity * 100).roundToInt()} %" else null,
         brief.bg.takeIf { it.isNotEmpty() }?.let { bgName(it) },
-        if (brief.dim > 0) t("видео −", "video −") + "${(brief.dim * 100).roundToInt()} %" + (if (brief.dimAll) t(" (весь кадр)", " (whole frame)") else "") else null
+        if (brief.dim > 0) t("видео −", "video −") + "${(brief.dim * 100).roundToInt()} %" + (if (brief.dimAll) t(" (весь кадр)", " (whole frame)") else "") else null,
+        if (brief.blur > 0) t("размытие", "blur") else null
     ).joinToString(" · ").ifEmpty { t("блок непрозрачный, видео как есть", "opaque block, the video as it is") }
 
     private fun sectionAlpha(c: Col) {
@@ -826,7 +833,9 @@ class InsertWizard(private val h: InsertHost) {
         plate(c)
         choice(c, t("Затемнить видео", "Dim the video"), listOf(0f to "0", 0.2f to "20 %", 0.4f to "40 %", 0.6f to "60 %"), brief.dim) { v -> brief = brief.copy(dim = v) }
         if (brief.dim > 0) choice(c, t("Где", "Where"), listOf(false to t("Под блоком", "Under the block"), true to t("Весь кадр", "Whole frame")), brief.dimAll) { v -> brief = brief.copy(dimAll = v) }
-        c.muted(t("Затемнение плавно появляется и уходит вместе с блоком.", "The dimming fades in and out with the block."))
+        choice(c, t("Размыть видео под блоком", "Blur the video under the block"), BLURS, brief.blur) { v -> brief = brief.copy(blur = v) }
+        c.muted(t("Затемнение и размытие плавно появляются и уходят вместе с блоком; размытие убирает мелкие детали за текстом.",
+            "The dimming and the blur fade in and out with the block; the blur hides small details behind the text."))
         readability(c)
     }
 
@@ -927,7 +936,7 @@ class InsertWizard(private val h: InsertHost) {
     private fun applyAll() {
         val look = EditInsert.lookOf(brief)
         val list = h.blocks().map { b ->
-            if (b.kind == "scheme" || b.kind == EditInsert.KIND) b.copy(over = look, dim = brief.dim, dimAll = brief.dimAll, opacity = brief.opacity,
+            if (b.kind == "scheme" || b.kind == EditInsert.KIND) b.copy(over = look, dim = brief.dim, dimAll = brief.dimAll, blur = brief.blur, opacity = brief.opacity,
                 look = if (b.kind == "scheme" && brief.style.isNotEmpty()) brief.style else b.look) else b
         }
         h.commit(list, null)
@@ -968,11 +977,74 @@ class InsertWizard(private val h: InsertHost) {
         val painter = StudioEditPainter(pw, ph, h.dir(), words, StudioPrefs.accent, h.styleDir())
         val frames = (0 until 12).map { i ->
             val (bmp, cv) = base(pw, ph)
-            runCatching { painter.draw(cv, listOf(draft), draft.startMs + (draft.durMs * (i + 0.5) / 12).toLong()) }
+            runCatching { painter.draw(cv, listOf(draft), draft.startMs + (draft.durMs * (i + 0.5) / 12).toLong(), frameBmp) }
             bmp
         }
         painter.close()
         return flipView(frames, pw, ph)
+    }
+
+    /** «🖼 Образец»: a picture of the wanted look — the built-in AI sees it, another AI gets it with «Поделиться». */
+    private fun refRow(c: Col) {
+        val f = refFile()
+        val row = LinearLayout(ui).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        if (f != null) runCatching {
+            val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = 8 }
+            android.graphics.BitmapFactory.decodeFile(f.absolutePath, o)?.let { bmp ->
+                row.addView(ImageView(ui).apply {
+                    setImageBitmap(bmp)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    contentDescription = t("Образец вида", "Sample of the look")
+                }, LinearLayout.LayoutParams(ui.dp(56), ui.dp(56)).apply { marginEnd = ui.dp(8) })
+            }
+        }
+        row.addView(btn(ui, if (f == null) t("🖼 Картинка-образец", "🖼 Sample picture") else t("🖼 Другая", "🖼 Another"), style = BtnStyle.OUTLINED) {
+            h.pickImage { uri -> saveRef(uri) }
+        })
+        if (f != null) row.addView(btn(ui, t("Убрать", "Remove"), style = BtnStyle.TEXT) { set { it.copy(ref = "") } })
+        c.add(row, 4)
+        c.muted(if (f == null) t("Скриншот ролика или дизайна, который нравится: ИИ повторит стиль (встроенный видит картинку, другому её отдаст «Поделиться»).",
+            "A screenshot of a video or design you like: the AI repeats its style (the built-in one sees the picture, another one gets it via «Share»).")
+        else t("Встроенный ИИ получит картинку вместе с запросом; другому ИИ — кнопка «↗ Поделиться запросом» (с картинкой).",
+            "The built-in AI gets the picture with the request; for another AI use «↗ Share the request» (with the picture)."))
+    }
+
+    private fun refFile(): File? = brief.ref.takeIf { it.isNotBlank() }?.let { File(h.dir(), it) }?.takeIf { it.exists() }
+
+    /** The sample picture into the project: at most 1280 px, JPEG. */
+    private fun saveRef(uri: Uri) {
+        val d = h.dir()
+        Lumen.async({
+            val cr = ui.applicationContext.contentResolver
+            val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
+            if (o.outWidth <= 0 || o.outHeight <= 0) error(t("Это не картинка", "This is not a picture"))
+            var sample = 1
+            while (max(o.outWidth, o.outHeight) / (sample * 2) >= 1280) sample *= 2
+            val bmp = cr.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }
+                ?: error(t("Картинка не читается", "The picture cannot be read"))
+            val name = "img/ref_${System.currentTimeMillis()}.jpg"
+            File(d, name).apply { parentFile?.mkdirs() }.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 88, it) }
+            bmp.recycle()
+            name
+        }, { e -> if (!ui.isDestroyed) ui.err(e) }) { name -> set { it.copy(ref = name) } }
+    }
+
+    /** The sample picture as base64 JPEG for the built-in AI (worker thread), null when there is none. */
+    private fun refBase64(): String? = refFile()?.let { f -> runCatching { android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP) }.getOrNull() }
+
+    /** The video blurred under the block on a preview of [pw]×[ph] ([r] — the block, fractions of the frame). */
+    private fun blurShot(cv: Canvas, pw: Int, ph: Int, r: FRect) {
+        val f = frameBmp ?: return
+        if (brief.blur <= 0f) return
+        val small = StudioEditPainter.shrink(f, StudioEdit.blurWidth(brief.blur)) ?: return
+        val m = min(pw, ph) * 0.04f
+        StudioEditPainter.blurInto(cv, small, RectF(0f, 0f, pw.toFloat(), ph.toFloat()), FRect(r.l * pw - m, r.t * ph - m, r.r * pw + m, r.b * ph + m), 1f,
+            Paint(Paint.FILTER_BITMAP_FLAG), Paint())
+        if (small !== f) small.recycle()
     }
 
     /** The trial frames of an animation in their place over the current frame, played. */
@@ -983,6 +1055,7 @@ class InsertWizard(private val h: InsertHost) {
         val r = cx.block
         val frames = fr.map { f ->
             val (bmp, cv) = base(pw, ph)
+            blurShot(cv, pw, ph, r)
             if (brief.dim > 0) {
                 val dp = Paint().apply { color = Color.argb((brief.dim * 255).toInt(), 0, 0, 0) }
                 if (brief.dimAll) cv.drawRect(0f, 0f, pw.toFloat(), ph.toFloat(), dp) else cv.drawRect(r.l * pw, r.t * ph, r.r * pw, r.b * ph, dp)
@@ -1053,6 +1126,7 @@ class InsertWizard(private val h: InsertHost) {
         v.plate = EditInsert.alphaOf(brief.bg, brief.bgAlpha)
         v.dim = brief.dim
         v.dimAll = brief.dimAll
+        v.blur = brief.blur
         v.opacity = brief.opacity
         v.accent = brief.accent ?: StudioPrefs.accent
         v.label = EditInsert.pixels(cx.block, fw, fh).let { (w, hh) -> "$w×$hh" }
@@ -1148,7 +1222,14 @@ class InsertWizard(private val h: InsertHost) {
         )
         c.add(btn(ui, t("↗ Поделиться запросом", "↗ Share the request"), style = BtnStyle.TEXT) {
             copyRequest()
-            ui.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, request), t("Запрос в ИИ", "Request to an AI")))
+            val share = Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_TEXT, request)
+            val ref = refFile()?.takeIf { kind() == EditInsert.KIND }
+            if (ref != null) {
+                // the sample picture goes with the request (the AI apps take a picture and a text together)
+                val uri: Uri = androidx.core.content.FileProvider.getUriForFile(ui, ui.packageName + ".provider", ref)
+                share.setType("image/jpeg").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } else share.setType("text/plain")
+            ui.startActivity(Intent.createChooser(share, t("Запрос в ИИ", "Request to an AI")))
         }, 4)
         label(c, t("📥 Ответ ИИ", "📥 AI answer"))
         val paste = edt(ui, t("вставьте ответ сюда", "paste the answer here"), "", multiline = true)
@@ -1246,8 +1327,11 @@ class InsertWizard(private val h: InsertHost) {
         val many = !fix && variants > 1
         BgTasks.run(ui, TASK, t("Редактор: ИИ делает вставку", "Editor: the AI makes an insert"), BgTasks.reopen(ui), {
             val prov = AiTasks.requireProvider()
+            // the sample picture of the look goes to the models that see pictures (an animation only: Lumen draws a scheme's look)
+            val img = if (k == EditInsert.KIND) refBase64() else null
             fun ask(text: String, task: String): String = Llm.complete(prov, prov.smartModel, SYSTEM, Prompts.fill(task, mapOf("request" to text)),
-                json = k == "scheme" && !many, maxTokens = (if (k == "scheme") 1800 else 9000) * (if (many) 2 else 1), task = task, pid = "studio").text
+                json = k == "scheme" && !many, maxTokens = (if (k == "scheme") 1800 else 9000) * (if (many) 2 else 1), task = task, pid = "studio",
+                image = img).text
             fun fixed(x: InsertAnswer): InsertAnswer = if (x is InsertAnswer.Scheme) x.copy(scheme = StudioScheme.repair(x.scheme, range.takeIf { !it.isEmpty() })) else x
             var raw = ask(prompt, taskKey(fix))
             val all = if (many) AnimV11.detectAll(raw).filter { it.kind == k } else emptyList()
@@ -1396,6 +1480,7 @@ class InsertWizard(private val h: InsertHost) {
         slider(c, t("Прозрачность блока", "Block opacity"), brief.opacity * 100, 10f, 100f, { "${it.roundToInt()} %" }) { v, done -> if (done) set { it.copy(opacity = v / 100f) } }
         choice(c, t("Подложка", "Plate"), listOf("", "none", "glass", "semi", "solid", "full").map { it to bgName(it) }, brief.bg) { v -> brief = brief.copy(bg = v) }
         choice(c, t("Затемнить видео", "Dim the video"), listOf(0f to "0", 0.2f to "20 %", 0.4f to "40 %", 0.6f to "60 %"), brief.dim) { v -> brief = brief.copy(dim = v) }
+        choice(c, t("Размыть видео", "Blur the video"), BLURS, brief.blur) { v -> brief = brief.copy(blur = v) }
         choice(c, t("Место", "Place"), listOf("" to t("Авто", "Auto"), "full" to t("Полный", "Full"), "top" to t("Сверху", "Top"), "center" to t("Центр", "Centre"),
             "bottom" to t("Снизу", "Bottom"), "corner" to t("Угол", "Corner")), if (brief.place == "custom") "custom" else brief.place) { v -> brief = brief.copy(place = v, rect = null) }
         choice(c, t("Размер", "Size"), listOf("" to "M", "s" to "S", "l" to "L", "xl" to "XL"), brief.scale) { v -> brief = brief.copy(scale = v, place = if (brief.place == "custom") "" else brief.place, rect = null) }
@@ -1458,7 +1543,7 @@ class InsertWizard(private val h: InsertHost) {
         if (a is InsertAnswer.Scheme) {
             val draft = blockFor(p, null, a).copy(id = "thumb")
             val painter = StudioEditPainter(pw, ph, h.dir(), words, StudioPrefs.accent, h.styleDir())
-            painter.draw(cv, listOf(draft), draft.startMs + draft.durMs * 9 / 10)
+            painter.draw(cv, listOf(draft), draft.startMs + draft.durMs * 9 / 10, frameBmp)
             painter.close()
         } else {
             val f = trial?.frames?.let { it.getOrNull(it.size / 2) } ?: return@runCatching null
@@ -1500,7 +1585,7 @@ class InsertWizard(private val h: InsertHost) {
             val painter = StudioEditPainter(pw, ph, h.dir(), words, StudioPrefs.accent, h.styleDir())
             for (k in listOf(0.3f, 0.6f, 0.95f)) {
                 val (bmp, cv) = canvasFor()
-                painter.draw(cv, listOf(draft), draft.startMs + (draft.durMs * k).toLong())
+                painter.draw(cv, listOf(draft), draft.startMs + (draft.durMs * k).toLong(), frameBmp)
                 shots += bmp
             }
             painter.close()
@@ -1509,6 +1594,7 @@ class InsertWizard(private val h: InsertHost) {
             val r = cx.block
             for (fr in tr?.frames.orEmpty()) {
                 val (bmp, cv) = canvasFor()
+                blurShot(cv, pw, ph, r)
                 if (brief.dim > 0) {
                     val dp = Paint().apply { color = Color.argb((brief.dim * 255).toInt(), 0, 0, 0) }
                     if (brief.dimAll) cv.drawRect(0f, 0f, pw.toFloat(), ph.toFloat(), dp) else cv.drawRect(r.l * pw, r.t * ph, r.r * pw, r.b * ph, dp)
@@ -1543,7 +1629,7 @@ class InsertWizard(private val h: InsertHost) {
         var b = EBlock(base?.id ?: StudioEdit.nextId(p.blocks), k, cx.startMs, cx.durMs,
             opacity = brief.opacity, animIn = mapIn(brief.animIn, k, "pop"), animOut = mapIn(brief.animOut, k, "fade"),
             look = if (k == "scheme") brief.style else "", ask = wish, req = if (a == null) req else "",
-            brief = EditInsert.briefJson(brief).toString(), over = EditInsert.lookOf(brief), dim = brief.dim, dimAll = brief.dimAll,
+            brief = EditInsert.briefJson(brief).toString(), over = EditInsert.lookOf(brief), dim = brief.dim, dimAll = brief.dimAll, blur = brief.blur,
             history = base?.history.orEmpty())
         b = EditInsert.toBlock(b, cx.block, fw, fh)
         // the theme travels with the block: its frames and its look follow it
@@ -1839,6 +1925,7 @@ class MockView(ctx: Context, private val frame: Bitmap?, private val fw: Int, pr
     var plate = 0.7f
     var dim = 0f
     var dimAll = false
+    var blur = 0f
     var opacity = 1f
     var accent = 0xFFFFD60A.toInt()
     var label = ""
@@ -1856,6 +1943,14 @@ class MockView(ctx: Context, private val frame: Bitmap?, private val fw: Int, pr
         val h = height.toFloat()
         if (frame != null) c.drawBitmap(frame, null, RectF(0f, 0f, w, h), img) else c.drawColor(0xFF202024.toInt())
         val r = RectF(block.l * w, block.t * h, block.r * w, block.b * h)
+        if (blur > 0f && frame != null) {
+            val small = StudioEditPainter.shrink(frame, StudioEdit.blurWidth(blur))
+            if (small != null) {
+                val m = w * 0.03f
+                StudioEditPainter.blurInto(c, small, RectF(0f, 0f, w, h), FRect(r.left - m, r.top - m, r.right + m, r.bottom + m), 1f, img, fill)
+                if (small !== frame) small.recycle()
+            }
+        }
         if (dim > 0f) {
             fill.color = Color.argb((dim * 255).toInt(), 0, 0, 0)
             if (dimAll) c.drawRect(0f, 0f, w, h, fill) else c.drawRoundRect(RectF(r).apply { inset(-w * 0.03f, -w * 0.03f) }, w * 0.04f, w * 0.04f, fill)

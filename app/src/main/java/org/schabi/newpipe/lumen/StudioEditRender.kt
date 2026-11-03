@@ -53,11 +53,61 @@ class StudioEditPainter(
     }
     private val emojiP = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
 
-    /** Draws every block of [shown] (bottom first) at [tMs]. */
-    fun draw(c: Canvas, shown: List<EBlock>, tMs: Long) {
-        // the video darkens under the blocks first, then the blocks are drawn over it
+    /**
+     * Draws every block of [shown] (bottom first) at [tMs]. [under] — the picture of the video now (any size, lying over
+     * [underAt] of the canvas, the whole frame when null): needed only for blocks that blur the video under them.
+     */
+    fun draw(c: Canvas, shown: List<EBlock>, tMs: Long, under: Bitmap? = null, underAt: RectF? = null) {
+        // the video is blurred and darkens under the blocks first, then the blocks are drawn over it
+        if (under != null && shown.any { it.blur > 0f }) {
+            val made = HashMap<Int, Bitmap?>()
+            val at = underAt ?: RectF(0f, 0f, w.toFloat(), h.toFloat())
+            for (b0 in shown) if (b0.blur > 0f) runCatching {
+                val b = EditKeys.at(b0, tMs)
+                val r = StudioEdit.blurRect(b, w.toFloat(), h.toFloat()) ?: return@runCatching
+                val tw = (at.width() / w * StudioEdit.blurWidth(b.blur)).toInt().coerceAtLeast(2)
+                val small = made.getOrPut(tw) { shrink(under, tw) } ?: return@runCatching
+                blurInto(c, small, at, r, StudioEdit.dimAlpha(b, tMs), img, fill)
+            }
+            made.values.forEach { if (it !== under) it?.recycle() }
+        }
         for (b in shown) if (b.dim > 0f) runCatching { dim(c, EditKeys.at(b, tMs), tMs) }
         for (b in shown) runCatching { block(c, EditKeys.at(b, tMs), tMs) }.onFailure { L.w("studio", "edit block ${b.kind}: ${it.message}") }
+    }
+
+    companion object {
+        /** [src] made [tw] px wide in halving steps (no shimmer); stretched back with filtering it is the blur. [src] when not wider. */
+        fun shrink(src: Bitmap, tw0: Int): Bitmap? = runCatching {
+            if (src.width <= tw0) return@runCatching src
+            val tw = max(2, tw0)
+            val th = max(2, (src.height.toLong() * tw / src.width).toInt())
+            var cur = src
+            while (cur.width / 2 >= tw && cur.height / 2 >= th) {
+                val n = Bitmap.createScaledBitmap(cur, cur.width / 2, cur.height / 2, true)
+                if (cur !== src) cur.recycle()
+                cur = n
+            }
+            if (cur.width == tw && cur.height == th) cur
+            else Bitmap.createScaledBitmap(cur, tw, th, true).also { if (cur !== src && it !== cur) cur.recycle() }
+        }.getOrNull()
+
+        /**
+         * The blurred video [small] stretched over [at] but seen only inside [clip] (px of the canvas), at [alpha]; a quarter darker,
+         * like the blur of the GPU export.
+         */
+        fun blurInto(c: Canvas, small: Bitmap, at: RectF, clip: FRect, alpha: Float, img: Paint, fill: Paint) {
+            if (alpha <= 0.01f) return
+            c.save()
+            c.clipRect(clip.l, clip.t, clip.r, clip.b)
+            val a0 = img.alpha
+            img.alpha = (alpha * 255).toInt().coerceIn(0, 255)
+            c.drawBitmap(small, null, at, img)
+            img.alpha = a0
+            fill.clearShadowLayer()
+            fill.color = Color.argb((alpha * 64).toInt().coerceIn(0, 255), 0, 0, 0)
+            c.drawRect(clip.l, clip.t, clip.r, clip.b, fill)
+            c.restore()
+        }
     }
 
     /** Darkens the video while [b] is shown: the whole frame or a rounded area under the block, fading in and out with it. */
@@ -844,7 +894,7 @@ object StudioEditRender {
                     }
                 }
                 val shown = StudioEdit.active(over, tMs)
-                if (shown.isNotEmpty()) painter.draw(canvas, shown, tMs)
+                if (shown.isNotEmpty()) painter.draw(canvas, shown, tMs, bmp)
                 bmp.getPixels(mixed, 0, w, 0, 0, w, h)
                 // a transition at a seam: the whole frame dips to a colour and back
                 EditColor.fadeAt(clips, tMs)?.let { EditColor.blend(mixed, it) }
@@ -1494,9 +1544,11 @@ private object StudioEditGl {
             // colour of the piece being written (3×3 and offsets), identity for none
             var colM = ID3
             var colO = ZERO3
+            // radius of the blur shader: the blurred background, or a block that blurs the video under it
+            var blurRadius = 0.04f
             fun draw(prog: Int, target: Int, id: Int, mat: FloatArray, at: java.nio.FloatBuffer = pos, cm: FloatArray = ID3, co: FloatArray = ZERO3) {
                 android.opengl.GLES20.glUseProgram(prog)
-                if (prog == progBlur) android.opengl.GLES20.glUniform1f(android.opengl.GLES20.glGetUniformLocation(prog, "uR"), 0.04f)
+                if (prog == progBlur) android.opengl.GLES20.glUniform1f(android.opengl.GLES20.glGetUniformLocation(prog, "uR"), blurRadius)
                 if (prog == progOes) {
                     android.opengl.GLES20.glUniformMatrix3fv(android.opengl.GLES20.glGetUniformLocation(prog, "uC"), 1, false, cm, 0)
                     android.opengl.GLES20.glUniform3fv(android.opengl.GLES20.glGetUniformLocation(prog, "uO"), 1, co, 0)
@@ -1578,6 +1630,24 @@ private object StudioEditGl {
                     }
                     android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_SCISSOR_TEST)
                     android.opengl.GLES20.glViewport(0, 0, w, h)
+                }
+                // blocks that blur the video under them: the blur shader again over the video, cut to the box of the block
+                if (sp == null) {
+                    val blurring = StudioEdit.active(over, tMs).filter { it.blur > 0f && StudioEdit.dimAlpha(it, tMs) >= 0.5f }
+                    if (blurring.isNotEmpty()) {
+                        android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_SCISSOR_TEST)
+                        for (b0 in blurring) {
+                            val b = EditKeys.at(b0, tMs)
+                            val r = StudioEdit.blurRect(b, w.toFloat(), h.toFloat()) ?: continue
+                            android.opengl.GLES20.glScissor(r.l.roundToInt(), (h - r.b).roundToInt(), (r.r - r.l).roundToInt(), (r.b - r.t).roundToInt())
+                            viewport(vRect)
+                            blurRadius = 0.012f + 0.028f * b.blur
+                            draw(progBlur, OES, oes, texM, vidPos)
+                        }
+                        blurRadius = 0.04f
+                        android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_SCISSOR_TEST)
+                        android.opengl.GLES20.glViewport(0, 0, w, h)
+                    }
                 }
                 val shown = StudioEdit.active(over, tMs)
                 if (shown.isNotEmpty()) {

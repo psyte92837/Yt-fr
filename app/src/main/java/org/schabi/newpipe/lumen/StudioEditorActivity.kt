@@ -66,6 +66,7 @@ class StudioEditorActivity : LumenBase() {
         private const val REQ_LOTTIE = 7716
         private const val REQ_FONT = 7717
         private const val REQ_THEME_IMG = 7718
+        private const val REQ_REF_IMG = 7719
 
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
@@ -245,12 +246,20 @@ class StudioEditorActivity : LumenBase() {
             override fun stat(s: InsertStat) {
                 InsertStats.add(applicationContext, s)
             }
+            override fun pickImage(then: (Uri) -> Unit) {
+                pickThen = then
+                @Suppress("DEPRECATION")
+                runCatching { startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_REF_IMG) }
+                    .onFailure { toast(t("Нет приложения для выбора картинки", "No app to pick a picture")) }
+            }
         }
     }
     private val themesDir: File get() = File(applicationContext.filesDir, "lumen/studio/themes")
     @Volatile private var videoFps = 30
     private var hints: List<InsertHint> = emptyList()
     private val insert by lazy { InsertWizard(insertHost) }
+    /** Where a picture picked for the wizard goes (its sample of the look). */
+    private var pickThen: ((Uri) -> Unit)? = null
     /** Errors of the JS of animation blocks (by block id) until they are fixed. */
     private val animErr = HashMap<String, String>()
     private var animBusy: String? = null
@@ -544,6 +553,19 @@ class StudioEditorActivity : LumenBase() {
         val frame = FrameLayout(this).apply { setBackgroundColor(p.bg) }
         val tv = TextureView(this)
         val st = EditStage(this) { w, h -> StudioEditPainter(w, h, dir, words, StudioPrefs.accent, styleDir) }
+        // blocks that blur the video: a small copy of the picture of the player, placed where the player lies on the stage
+        st.under = under@{
+            val tv = texture ?: return@under null
+            if (!tv.isAvailable || tv.width < 8 || tv.height < 8) return@under null
+            val bmp = tv.getBitmap(max(8, tv.width / 6), max(8, tv.height / 6)) ?: return@under null
+            val sl = IntArray(2)
+            val tl = IntArray(2)
+            st.getLocationInWindow(sl)
+            tv.getLocationInWindow(tl)
+            val l = (tl[0] - sl[0]).toFloat()
+            val tp = (tl[1] - sl[1]).toFloat()
+            bmp to android.graphics.RectF(l, tp, l + tv.width, tp + tv.height)
+        }
         val mb = FrameLayout(this)
         mb.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         // dissolves on the preview: the last picture of the piece before, fading out over the video
@@ -2519,6 +2541,7 @@ class StudioEditorActivity : LumenBase() {
             REQ_LOTTIE -> importLottie(uri)
             REQ_FONT -> importFont(uri)
             REQ_THEME_IMG -> themeFromImage(uri)
+            REQ_REF_IMG -> pickThen?.invoke(uri).also { pickThen = null }
         }
     }
 

@@ -118,12 +118,14 @@ class StudioMixActivity : LumenBase() {
     private val cutsFile get() = File(dir, "cuts.json")
     private val voiceFile get() = File(dir, "voice.wav")
     private val wordsFile get() = File(dir, "words.json")
+    private val assistFile get() = File(dir, "assist.json")
 
     private var clips: List<SClip> = emptyList()
     private var items: List<MixItem> = emptyList()
     private var words: List<SWord> = emptyList()
     /** Own cutting of clips, by id (see [ClipCut]). */
     private var cuts: Map<String, ClipCut> = emptyMap()
+    private var assist = StudioMixAssist.State()
     /** Storyboard states for ↶ and ↷ (this visit only). */
     private val undoStack = ArrayDeque<List<MixItem>>()
     private val redoStack = ArrayDeque<List<MixItem>>()
@@ -195,6 +197,7 @@ class StudioMixActivity : LumenBase() {
         items = if (mixFile.exists()) StudioMix.keepClips(StudioMix.fromJson(mixFile.readText()), ready) else emptyList()
         words = if (wordsFile.exists() && voiceFile.exists()) StudioMix.wordsFromJson(wordsFile.readText()) else emptyList()
         cuts = if (cutsFile.exists()) StudioMix.cutsFromJson(cutsFile.readText()) else emptyMap()
+        assist = if (assistFile.exists()) StudioMixAssist.fromJson(assistFile.readText()) else StudioMixAssist.State()
         clipMarks.retainAll(clips.map { it.id }.toSet())
     }
 
@@ -395,6 +398,7 @@ class StudioMixActivity : LumenBase() {
             }, 4)
         }
         progress("dl", t("Загрузка клипов…", "Downloading clips…"))
+        progress("assist", t("Помощник смотрит видео…", "The assistant watches the videos…"))
         if (busy.isNotEmpty()) return@card
         val views = mutableListOf<View>(btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findSheet() })
         if (clips.isNotEmpty()) {
@@ -405,6 +409,10 @@ class StudioMixActivity : LumenBase() {
             }
         }
         row(*views.toTypedArray())
+        button(t("🧭 Помощник составителя: кадры по смыслу", "🧭 Composer assistant: shots by meaning"), style = BtnStyle.TONAL) { assistSheet() }
+        if (assist.pending.isNotEmpty() && assist.pending.all { it.first in readyIds() }) {
+            button(t("🧭 Раскадровка по плану помощника", "🧭 Storyboard by the assistant's plan"), style = BtnStyle.TEXT) { applyPlan() }
+        }
         val marked = clips.filter { it.id in clipMarks }
         if (marked.isNotEmpty()) {
             row(
@@ -1596,6 +1604,208 @@ class StudioMixActivity : LumenBase() {
         }
     }
 
+    // ---------- composer assistant ----------
+
+    private fun saveAssist(s: StudioMixAssist.State) {
+        assist = s
+        runCatching { assistFile.writeText(StudioMixAssist.toJson(s)) }.onFailure { L.w("studio", "mix assist: ${it.message}") }
+    }
+
+    /** The plan lines: by the voice-over words (with their times) or by the brief. */
+    private fun assistBeats(s: StudioMixAssist.State = assist): List<MixBeat> =
+        if (s.byVoice && words.isNotEmpty()) StudioMixAssist.beatsFromWords(words) else StudioMixAssist.beats(s.brief)
+
+    /** The storyboard of the waiting plan when its clips are downloaded (null = no plan or nothing ready). */
+    private fun planItems(): List<MixItem>? {
+        if (assist.pending.isEmpty()) return null
+        return StudioMixAssist.storyboard(assist.pending, clipCaps()).takeIf { it.isNotEmpty() }
+    }
+
+    private fun applyPlan() {
+        val list = planItems() ?: return toast(t("Клипы плана ещё не скачаны", "The plan's clips are not downloaded yet"))
+        saveAssist(assist.copy(pending = emptyList()))
+        change(list, t("Раскадровка по плану: ${list.size} кусков", "Storyboard by the plan: ${list.size} pieces"))
+    }
+
+    /** Who can watch a YouTube video by link: Gemini with a key, the free AIs (they send video to Gemini), or another AI by hand. */
+    private fun videoAi(): Provider? = when {
+        Provider.GEMINI.isConfigured -> Provider.GEMINI
+        Provider.active() == Provider.FREE -> Provider.FREE
+        Provider.active() == Provider.MANUAL || Relay.mode != "off" -> Provider.MANUAL
+        else -> null
+    }
+
+    /**
+     * The assistant: the author writes what must be on screen (or takes the voice-over), the AI watches every source
+     * video by link and names the moments that fit each line; the picked moments become clips in the order of the plan.
+     */
+    private fun assistSheet() {
+        if (busy.isNotEmpty()) return
+        bottomSheet(t("🧭 Помощник составителя", "🧭 Composer assistant")) { dismiss ->
+            muted(t("Напишите, что должно быть на экране — по пункту в строке (или возьмите текст озвучки). Gemini посмотрит видео по ссылке и найдёт таймкоды подходящих кадров, а Lumen соберёт из них видеоряд по порядку плана.",
+                "Write what must be on screen — one point per line (or take the voice-over text). Gemini watches the videos by link and finds timecodes of fitting shots, and Lumen builds the video in the order of the plan."))
+            val prov = videoAi()
+            if (prov == null) muted(t("⚠ Нужен ключ Gemini (Настройки → AI): только он смотрит видео YouTube по ссылке. Или включите «Другой ИИ вручную» — запрос со ссылкой можно отправить в приложение Gemini.",
+                "⚠ A Gemini key is needed (Settings → AI): only it watches YouTube videos by link. Or turn on \"Any AI by hand\" — the request with the link can go to the Gemini app."))
+            else if (prov == Provider.MANUAL) muted(t("Ключа Gemini нет: запрос по каждому видео откроется для ручной отправки в Gemini.", "No Gemini key: the request for each video opens to be sent to Gemini by hand."))
+
+            add(text(ctx, t("Что показать", "What to show"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            var byVoice = assist.byVoice && words.isNotEmpty()
+            val briefE = edit(t("1. Утро в горах, туман\n2. Человек варит кофе на костре\n3. Вид с вершины", "1. Morning in the mountains, fog\n2. A man makes coffee on a fire\n3. View from the top"),
+                assist.brief, multiline = true)
+            if (words.isNotEmpty()) {
+                add(choiceChips(ctx, listOf(false to t("📝 По плану", "📝 By the plan"), true to t("🎙 По озвучке", "🎙 By the voice-over")), byVoice) { v ->
+                    byVoice = v
+                    briefE.visibility = if (v) View.GONE else View.VISIBLE
+                }, 4)
+                briefE.visibility = if (byVoice) View.GONE else View.VISIBLE
+                muted(t("По озвучке: фразы речи становятся пунктами, длина кусков — по времени фраз.", "By the voice-over: speech phrases become points, piece lengths follow the phrase times."))
+            }
+            val wishE = edit(t("Пожелание (необязательно): напр. только крупные планы, без людей", "Wish (optional): e.g. close-ups only, no people"), assist.wish)
+            var perBeat = assist.perBeat
+            add(text(ctx, t("Кусков на пункт", "Pieces per point"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            add(choiceChips(ctx, (1..3).map { it to it.toString() }, perBeat) { perBeat = it }, 4)
+
+            add(text(ctx, t("Где искать", "Where to look"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val urls = clips.map { it.url }.distinct()
+            val titles = clips.groupBy { it.url }.mapValues { (_, l) -> l.firstNotNullOfOrNull { it.title.takeIf { t -> t.isNotBlank() } } ?: l.first().url }
+            val chosen = LinkedHashSet(urls)
+            if (urls.isEmpty()) muted(t("Видео пока нет: добавьте их через «🔎 Найти видео» или вставьте ссылки ниже.", "No videos yet: add them with \"🔎 Find videos\" or paste links below."))
+            urls.forEach { u ->
+                val n = assist.moments.count { it.url == u }
+                check(titles[u].orEmpty().take(70) + if (n > 0) t(" · найдено: $n", " · found: $n") else "", true) { on -> if (on) chosen += u else chosen -= u }
+            }
+            val linksE = edit(t("Ещё ссылки на YouTube, по одной в строке", "More YouTube links, one per line"), multiline = true)
+            fun state() = assist.copy(brief = briefE.text.toString().trim(), wish = wishE.text.toString().trim(), byVoice = byVoice, perBeat = perBeat)
+            button(t("🔎 Найти моменты", "🔎 Find moments"), primary = true) {
+                val s = state()
+                val beats = assistBeats(s)
+                if (beats.isEmpty()) return@button toast(t("Напишите, что показать", "Write what to show"))
+                val extra = linksE.text.toString().lines().map { it.trim() }.filter { it.startsWith("http") }
+                val list = (chosen.toList() + extra).distinct()
+                if (list.isEmpty()) return@button toast(t("Выберите видео или вставьте ссылку", "Pick a video or paste a link"))
+                val p = videoAi() ?: return@button toast(t("Нужен ключ Gemini: Настройки → AI", "A Gemini key is needed: Settings → AI"))
+                dismiss()
+                saveAssist(s)
+                findMoments(p, beats, list, titles)
+            }
+
+            val beats = assistBeats()
+            if (assist.moments.isEmpty() || beats.isEmpty()) return@bottomSheet
+            if (assist.planKey != StudioMixAssist.planKey(beats)) muted(t("⚠ План изменился после поиска: номера пунктов могут не совпадать — найдите моменты заново.",
+                "⚠ The plan changed after the search: point numbers may not match — find the moments again."))
+            add(text(ctx, t("Найденные моменты", "Found moments"), Type.TITLE_M, bold = true), 16)
+            muted(t("Отметьте, что брать. Кусков на пункт — лучшие из отмеченных.", "Tick what to take. Pieces per point — the best of the ticked ones."))
+            var moments = assist.moments
+            fun line(m: MixMoment) = "${StudioCuts.stamp(m.fromMs)}–${StudioCuts.stamp(m.toMs)} · ${m.what.ifBlank { "—" }} · ★${(m.score * 10).toInt()}\n" + m.title.take(50)
+            fun pick(m: MixMoment, on: Boolean) {
+                moments = moments.map { if (it.key == m.key) it.copy(picked = on) else it }
+            }
+            for (b in beats) {
+                val ms = moments.filter { it.beat == b.n }
+                add(text(ctx, "${b.n}. ${b.text.take(140)}", Type.BODY, bold = true), 12)
+                if (ms.isEmpty()) muted(t("нет подходящих кадров", "no fitting shots"))
+                ms.forEach { m -> check(line(m), m.picked) { on -> pick(m, on) } }
+            }
+            val loose = moments.filter { it.beat == 0 || beats.none { b -> b.n == it.beat } }
+            if (loose.isNotEmpty()) {
+                add(text(ctx, t("Без пункта", "Without a point"), Type.BODY, bold = true), 12)
+                loose.forEach { m -> check(line(m), m.picked) { on -> pick(m, on) } }
+            }
+            button(t("＋ Собрать видеоряд: в клипы и скачать", "＋ Compose: to clips and download"), primary = true) {
+                saveAssist(state().copy(moments = moments))
+                dismiss()
+                compose()
+            }
+            button(t("🗑 Очистить найденное", "🗑 Clear the found moments"), style = BtnStyle.TEXT) {
+                saveAssist(state().copy(moments = emptyList(), watched = emptyList(), planKey = ""))
+                dismiss()
+                toast(t("Найденное очищено", "Cleared"))
+            }
+        }
+    }
+
+    /** The AI watches every video of [urls] and names its moments for [beats]; results join the saved ones. */
+    private fun findMoments(prov: Provider, beats: List<MixBeat>, urls: List<String>, titles: Map<String, String>) {
+        busy = "assist"
+        cancel = false
+        render()
+        val key = TASK + "assist"
+        val s0 = assist
+        val format = if (aspect() == StudioAspect.PORTRAIT) t("вертикального ролика 9:16 (Shorts)", "a vertical 9:16 video (Shorts)")
+        else t("горизонтального ролика 16:9", "a horizontal 16:9 video")
+        val longest = beats.maxOfOrNull { it.durMs } ?: 0
+        val maxS = ((longest + 999) / 1000).coerceIn(6, StudioCuts.MAX_CLIP_MS / 1000)
+        val durs = clips.groupBy { it.url }.mapValues { (_, l) -> l.maxOf { it.durMs } }
+        BgTasks.run(this, key, t("Микс: помощник смотрит видео", "Mix: the assistant watches videos"), BgTasks.reopen(this), {
+            val found = LinkedHashMap<String, List<MixMoment>>()
+            val errors = mutableListOf<String>()
+            for ((i, u) in urls.withIndex()) {
+                if (cancel) throw java.util.concurrent.CancellationException()
+                BgTasks.progress(key, t("Видео ${i + 1}/${urls.size}: Gemini смотрит…", "Video ${i + 1}/${urls.size}: Gemini watches…"))
+                try {
+                    val dur = durs[u]?.takeIf { it > 0 } ?: runCatching { StudioCutsLoad.durationMs(u) }.getOrDefault(0L)
+                    val title = titles[u] ?: u
+                    val vars = mapOf(
+                        "format" to format, "title" to title.take(120),
+                        "dur" to if (dur > 0) t(" (длина ${StudioCuts.stamp(dur)})", " (length ${StudioCuts.stamp(dur)})") else "",
+                        "beats" to StudioMixAssist.beatsBlock(beats), "min" to "2", "max" to maxS.toString(),
+                        "count" to StudioMixAssist.PER_VIDEO.toString(), "lang" to Studio.langName(lang()),
+                        "wish" to s0.wish.takeIf { it.isNotBlank() }?.let { t("\nПожелание автора: ", "\nAuthor's wish: ") + it }.orEmpty()
+                    )
+                    val r = Llm.complete(prov, prov.fastModel, "You are a video editor who watches videos and names exact timecodes of shots. Answer with JSON only.",
+                        Prompts.fill("studio_mix_find", vars), json = true, fileUri = u, maxTokens = 4000, task = "studio_mix_find", pid = "studio", lowMedia = true)
+                    val ms = StudioMixAssist.clean(StudioMixAssist.parse(r.text, u, title), dur, beats.size)
+                    if (ms.isEmpty()) errors += "${title.take(50)}: " + t("подходящих кадров не нашлось", "no fitting shots found")
+                    found[u] = ms
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    L.w("studio", "mix assist $u: ${e.message}")
+                    errors += "${(titles[u] ?: u).take(50)}: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+            found to errors
+        }, { e ->
+            busy = ""
+            if (isDestroyed) return@run
+            render()
+            err(e)
+        }, { cancel = true }) { (found, errors) ->
+            val now = if (assistFile.exists()) StudioMixAssist.fromJson(assistFile.readText()) else s0
+            val pk = StudioMixAssist.planKey(beats)
+            var moments = if (now.planKey == pk) now.moments else emptyList()
+            for ((u, ms) in found) moments = StudioMixAssist.merge(moments, u, ms)
+            saveAssist(now.copy(moments = moments, planKey = pk, watched = ((if (now.planKey == pk) now.watched else emptyList()) + found.keys).distinct()))
+            busy = ""
+            if (isDestroyed) return@run
+            render()
+            if (errors.isNotEmpty()) showText(t("Не по всем видео", "Not for every video"), errors.joinToString("\n"))
+            val gaps = StudioMixAssist.uncovered(beats, moments)
+            toast(t("Моментов: ${moments.size}", "Moments: ${moments.size}") +
+                if (gaps.isNotEmpty()) t(" · без кадров пункты ${gaps.joinToString(", ") { it.n.toString() }}", " · no shots for points ${gaps.joinToString(", ") { it.n.toString() }}") else "")
+            assistSheet()
+        }
+    }
+
+    /** Picked moments in the plan order become clips (each kept whole), placeholders of the watched videos go, then download. */
+    private fun compose() {
+        val beats = assistBeats()
+        val steps = StudioMixAssist.plan(beats, assist.moments, assist.perBeat)
+        if (steps.isEmpty()) return toast(t("Отметьте хотя бы один момент", "Tick at least one moment"))
+        // a not downloaded clip of a watched video was only a way to find it
+        val watched = assist.moments.map { it.url }.toSet()
+        val keep = clips.filter { !(it.url in watched && it.file.isEmpty() && steps.none { s -> s.moment.url == it.url && StudioCuts.span(s.moment.fromMs, s.moment.toMs) == (it.fromMs to it.toMs) }) }
+        val (list, order) = StudioMixAssist.toClips(keep, steps)
+        if (order.size < steps.size) toast(t("Не больше ${StudioCuts.MAX_CLIPS} клипов: часть моментов не вошла", "At most ${StudioCuts.MAX_CLIPS} clips: some moments did not fit"))
+        clips.filter { it !in keep && it.file.isNotEmpty() }.forEach { File(clipsDir, it.file).delete() }
+        saveClips(list)
+        val ids = order.map { it.first }.toSet()
+        saveCuts(cuts + list.filter { it.id in ids }.associate { it.id to ClipCut(MixCut.EVEN, it.ms) })
+        saveAssist(assist.copy(pending = order))
+        if (clips.any { it !in readyClips() }) download() else applyPlan()
+    }
+
     // ---------- clips ----------
 
     /**
@@ -1961,9 +2171,13 @@ class StudioMixActivity : LumenBase() {
                 done[cl.id]?.takeIf { it.url == cl.url && (cl.id in randomize || it.fromMs == cl.fromMs && it.toMs == cl.toMs) } ?: cl
             })
             busy = ""
-            // the new pieces join the storyboard (one step of ↶)
+            // the new pieces join the storyboard (one step of ↶); clips of the assistant's plan make the storyboard in its order
             var list = items
-            if (list.isNotEmpty()) {
+            val planned = planItems()
+            if (planned != null) {
+                list = planned
+                saveAssist(assist.copy(pending = emptyList()))
+            } else if (list.isNotEmpty()) {
                 val specs = specs().associateBy { it.id }
                 for (id in done.keys) {
                     val spec = specs[id] ?: continue
@@ -1979,6 +2193,8 @@ class StudioMixActivity : LumenBase() {
             val joined = list != items
             if (joined) change(list) else render()
             if (errors.isNotEmpty()) showText(t("Не все клипы скачались", "Some clips failed"), errors.joinToString("\n"))
+            else if (planned != null) toast(t("Раскадровка по плану: ${planned.size} кусков, ${StudioCuts.stamp(StudioMix.totalMs(planned))}",
+                "Storyboard by the plan: ${planned.size} pieces, ${StudioCuts.stamp(StudioMix.totalMs(planned))}"))
             else toast(t("Клипов скачано: ${done.size}", "Clips downloaded: ${done.size}") +
                 if (joined) t(" · их куски добавлены в раскадровку", " · their pieces are on the storyboard") else "")
         }

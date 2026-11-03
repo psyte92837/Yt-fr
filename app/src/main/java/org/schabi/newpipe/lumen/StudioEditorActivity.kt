@@ -67,6 +67,7 @@ class StudioEditorActivity : LumenBase() {
         private const val REQ_FONT = 7717
         private const val REQ_THEME_IMG = 7718
         private const val REQ_REF_IMG = 7719
+        private const val REQ_VOICE_BASE = 7720
 
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
@@ -372,6 +373,63 @@ class StudioEditorActivity : LumenBase() {
         }) { p -> if (!isDestroyed) start(p) }
     }
 
+    /** Format and background of the next project from a voice-over. */
+    private var voicePortrait = true
+    private var voiceBg = EditVoiceBase.BACKGROUNDS[0].first
+
+    /** "🎙 Project from a voice-over": the format and the background, then the audio file. */
+    private fun voiceBaseSheet() = bottomSheet(t("🎙 Проект из озвучки", "🎙 Project from a voice-over")) { dismiss ->
+        muted(t("Выберите аудио с голосом: Lumen сделает спокойный фон ровно по его длине, со звуком озвучки. Дальше как обычно — 💬 автосубтитры, ＋ вставки, картинки и ⧉ видео в окошке поверх.",
+            "Pick an audio with the voice: Lumen makes a calm background exactly as long, with the voice as the sound. Then as usual — 💬 auto captions, ＋ inserts, pictures and ⧉ videos in a window on top."))
+        add(choiceChips(ctx, listOf(true to "📱 9:16", false to "🖥 16:9"), voicePortrait) { voicePortrait = it }, 8)
+        add(choiceChips(ctx, EditVoiceBase.BACKGROUNDS.map { (id, _) ->
+            id to when (id) {
+                "night" -> t("Ночь", "Night")
+                "ink" -> t("Графит", "Ink")
+                "paper" -> t("Бумага", "Paper")
+                "ocean" -> t("Океан", "Ocean")
+                else -> t("Слива", "Plum")
+            }
+        }, voiceBg) { voiceBg = it }, 8)
+        button(t("🎵 Выбрать аудио", "🎵 Pick the audio"), primary = true) {
+            dismiss()
+            @Suppress("DEPRECATION")
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"), REQ_VOICE_BASE)
+        }
+    }
+
+    /** The background video as long as the voice-over of [uri], with it as the sound → a new project. */
+    private fun importVoiceBase(uri: Uri) {
+        loading(t("Делаю фон по длине озвучки…", "Making the background as long as the voice-over…"))
+        val app = applicationContext
+        val portrait = voicePortrait
+        val (top, bottom) = EditVoiceBase.BACKGROUNDS.firstOrNull { it.first == voiceBg }?.second ?: EditVoiceBase.BACKGROUNDS[0].second
+        Lumen.async({
+            val pcm = StudioAudio.decode(app, uri, 60 * 60_000L)
+            val durMs = pcm.ms
+            require(durMs >= 500) { t("В файле нет звука", "The file has no sound") }
+            val audio = StudioAudio.encodeAac(pcm.data, pcm.rate, { false }) { }
+            val (w, h) = EditVoiceBase.size(portrait)
+            val out = File(app.cacheDir, "voice_base_${System.currentTimeMillis()}.mp4")
+            val enc = FrameEncoder(out, w, h, EditVoiceBase.FPS, audio)
+            val px = EditVoiceBase.gradient(w, h, top, bottom)
+            val n = EditVoiceBase.frames(durMs)
+            var ok = false
+            try {
+                for (f in 0 until n) enc.frame(f, px) { false }
+                enc.finish(n)
+                ok = true
+            } finally {
+                enc.close(ok)
+            }
+            try { StudioEditStore.create(app, out, emptyList()) } finally { out.delete() }
+        }, { e ->
+            if (isDestroyed) return@async
+            chooser()
+            err(e)
+        }) { p -> if (!isDestroyed) start(p) }
+    }
+
     private fun pickVideo() {
         @Suppress("DEPRECATION")
         startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"), REQ_VIDEO)
@@ -469,6 +527,7 @@ class StudioEditorActivity : LumenBase() {
             alpha = 0.85f
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
         c.add(hero, 4)
+        c.button(t("🎙 Проект из озвучки: фон по длине голоса", "🎙 Project from a voice-over: a background as long as the voice"), style = BtnStyle.TONAL) { voiceBaseSheet() }
         c.row(btn(this, t("❓ Как пользоваться", "❓ How to use"), style = BtnStyle.TEXT) { HelpActivity.open(this, helpTopic) })
         val df = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         val list = StudioEditStore.list(this)
@@ -2465,7 +2524,36 @@ class StudioEditorActivity : LumenBase() {
     /** The next second video becomes a window over the frame (picture in picture) instead of a half. */
     private var pipNext = false
 
+    /**
+     * Where the second video comes from: the phone, or a clip downloaded in the Mix (found there on YouTube, only
+     * the needed seconds) — so the window and the split screen take what the Mix found.
+     */
     private fun pickSplit(replace: String?, pip: Boolean = false) {
+        val mixDir = File(filesDir, "lumen/studio/mix")
+        val mixClips = File(mixDir, "clips.json").takeIf { it.exists() }?.let { f -> runCatching { StudioCuts.fromJson(f.readText()) }.getOrDefault(emptyList()) }
+            .orEmpty().filter { it.file.isNotEmpty() && File(mixDir, "clips/" + it.file).exists() }
+        if (mixClips.isEmpty()) return pickSplitFile(replace, pip)
+        pause()
+        bottomSheet(if (pip) t("⧉ Видео в окошке", "⧉ Video in a window") else t("⊟ Второе видео", "⊟ Second video")) { dismiss ->
+            button(t("📂 С телефона", "📂 From the phone"), style = BtnStyle.TONAL) {
+                dismiss()
+                pickSplitFile(replace, pip)
+            }
+            add(text(ctx, t("Клипы Микса", "Clips of the Mix"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            muted(t("Найдите видео в «🔀 Микс» (поиск, ИИ-подбор, лента) — скачанные отрезки появятся здесь.",
+                "Find videos in \"🔀 Mix\" (search, AI pick, feed) — the downloaded parts show up here."))
+            for (cl in mixClips.take(40)) button("🔀 ${cl.id} · " + cl.title.ifBlank { cl.note }.ifBlank { cl.url }.take(60) + " · ${StudioEdit.secs(cl.lenMs)}" + t(" с", " s"),
+                style = BtnStyle.TEXT) {
+                dismiss()
+                pickFor = replace
+                pickAt = curMs
+                pipNext = pip
+                importSplit(Uri.fromFile(File(mixDir, "clips/" + cl.file)))
+            }
+        }
+    }
+
+    private fun pickSplitFile(replace: String?, pip: Boolean) {
         pause()
         pipNext = pip
         pickFor = replace
@@ -2569,6 +2657,7 @@ class StudioEditorActivity : LumenBase() {
         when (requestCode) {
             REQ_IMAGE -> importImage(uri)
             REQ_VIDEO -> importVideo(uri)
+            REQ_VOICE_BASE -> importVoiceBase(uri)
             REQ_SPLIT -> importSplit(uri)
             REQ_AUDIO -> importAudio(uri)
             REQ_CLIP -> importClip(uri)

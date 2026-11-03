@@ -22,4 +22,18 @@ class BackupTest {
         // clock moved back (time zone / manual change): don't wait forever
         assertTrue(AutoBackup.due(enabled = true, hasData = true, lastAt = now + h, now = now))
     }
+
+    @Test
+    fun backupSkipsCachesAndStoresMedia() {
+        assertTrue(Store.backupSkip("watchnext/RU_abc.json"))
+        assertTrue(Store.backupSkip("projects/p1/videos.json.tmp"))
+        assertTrue(Store.backupSkip("studio/edit/e1/anim/h1/r_720/0001.webp"))
+        assertFalse(Store.backupSkip("studio/edit/e1/anim/h1/code.js"))
+        assertFalse(Store.backupSkip("projects/p1/project.json"))
+        assertFalse(Store.backupSkip("studio/edit/e1/base.mp4"))
+        assertTrue(Store.backupStored("studio/edit/e1/base.MP4"))
+        assertTrue(Store.backupStored("studio/mix/clips/a.webm"))
+        assertFalse(Store.backupStored("projects/p1/videos.json"))
+        assertFalse(Store.backupStored("studio/voice.wav"))
+    }
 }

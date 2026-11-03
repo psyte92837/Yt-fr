@@ -9,6 +9,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.zip.Deflater
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -236,15 +237,49 @@ object Store {
     }
 
     // ---- backup ----
-    fun backup(out: OutputStream) = synchronized(lock) {
-        ZipOutputStream(out).use { zip ->
-            root.walkTopDown().filter { it.isFile }.forEach { f ->
-                zip.putNextEntry(ZipEntry(f.relativeTo(root).path))
-                f.inputStream().use { it.copyTo(zip) }
-                zip.closeEntry()
-            }
+    /**
+     * Zips everything under [root]. The store lock is held only to list files and to read each small file
+     * (project JSON and the like), never for the whole archive: a backup of hundreds of MB used to hold it for
+     * minutes, and any screen touching [Store] (e.g. the home menu → [trashed]) froze into an ANR.
+     */
+    fun backup(out: OutputStream) {
+        val base = root
+        val files = synchronized(lock) {
+            base.walkTopDown().filter { it.isFile }.map { it to it.relativeTo(base).invariantSeparatorsPath }
+                .filterNot { backupSkip(it.second) }.toList()
+        }
+        val zip = ZipOutputStream(out)
+        try {
+            for ((f, rel) in files) backupEntry(zip, f, rel)
+        } finally {
+            zip.close()
         }
     }
+
+    private fun backupEntry(zip: ZipOutputStream, f: File, rel: String) {
+        val small = if (f.length() <= BACKUP_LOCKED_MAX) {
+            synchronized(lock) { runCatching { f.readBytes() }.getOrNull() } ?: return // deleted meanwhile
+        } else null
+        val input = if (small == null) runCatching { f.inputStream() }.getOrNull() ?: return else null
+        zip.setLevel(if (backupStored(rel)) Deflater.NO_COMPRESSION else Deflater.BEST_SPEED)
+        zip.putNextEntry(ZipEntry(rel))
+        if (small != null) zip.write(small) else input?.use { it.copyTo(zip) }
+        zip.closeEntry()
+    }
+
+    /** Files up to this size are read under the lock (consistent JSON); bigger ones are media, streamed without it. */
+    private const val BACKUP_LOCKED_MAX = 2L * 1024 * 1024
+
+    /** Pure: caches that rebuild themselves are left out of backups (path relative to [root], '/' separated). */
+    fun backupSkip(rel: String): Boolean =
+        rel.startsWith("watchnext/") || rel.endsWith(".tmp") ||
+            Regex("""(^|/)anim/[^/]+/r_[^/]+/""").containsMatchIn(rel)
+
+    /** Pure: already compressed media is stored as is — deflating it only burns CPU. */
+    fun backupStored(rel: String): Boolean =
+        rel.substringAfterLast('.', "").lowercase() in setOf(
+            "mp4", "webm", "m4a", "mp3", "aac", "ogg", "opus", "jpg", "jpeg", "png", "webp", "gif", "zip", "gz", "lottie"
+        )
 
     fun restore(input: InputStream) = synchronized(lock) {
         val base = root.canonicalFile

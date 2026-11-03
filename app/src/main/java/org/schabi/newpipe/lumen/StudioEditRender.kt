@@ -894,7 +894,15 @@ object StudioEditRender {
                     val sb = sideBmp
                     if (sb != null && sidePix.size == sw * shh && sw > 0 && shh > 0) {
                         sb.setPixels(sidePix, 0, sw, 0, 0, sw, shh)
-                        canvas.drawBitmap(sb, sx0.toFloat(), sy0.toFloat(), null)
+                        val rad = if (pip) EditSplit.pipRadius(sp.look, sw.toFloat(), shh.toFloat()) else 0f
+                        if (rad <= 0f) canvas.drawBitmap(sb, sx0.toFloat(), sy0.toFloat(), null)
+                        else {
+                            // the window's shape: the picture as a shader of a rounded rectangle (smooth edges)
+                            val sh2 = android.graphics.BitmapShader(sb, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP)
+                            sh2.setLocalMatrix(android.graphics.Matrix().apply { setTranslate(sx0.toFloat(), sy0.toFloat()) })
+                            val pp = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = sh2 }
+                            canvas.drawRoundRect(sx0.toFloat(), sy0.toFloat(), (sx0 + sw).toFloat(), (sy0 + shh).toFloat(), rad, rad, pp)
+                        }
                     }
                 }
                 val shown = StudioEdit.active(over, tMs)
@@ -1190,6 +1198,24 @@ private object StudioEditGl {
         void main() {
             vec3 c = texture2D(uS, vUv).rgb;
             gl_FragColor = vec4(clamp(uC * c + uO, 0.0, 1.0), 1.0);
+        }
+    """.trimIndent()
+
+    // the second video in a window with rounded corners: outside the rounded box (window pixels) nothing is drawn,
+    // the edge is smoothed over a pixel by blending
+    private val FS_ROUND = """
+        #extension GL_OES_EGL_image_external : require
+        precision mediump float;
+        varying vec2 vUv;
+        uniform samplerExternalOES uS;
+        uniform vec4 uBox;
+        uniform float uRad;
+        void main() {
+            vec2 p = gl_FragCoord.xy;
+            vec2 c = clamp(p, uBox.xy + uRad, uBox.zw - uRad);
+            float a = 1.0 - smoothstep(uRad - 1.0, uRad + 0.5, length(p - c));
+            if (uRad <= 0.0) a = 1.0;
+            gl_FragColor = vec4(texture2D(uS, vUv).rgb, a);
         }
     """.trimIndent()
 
@@ -1493,6 +1519,7 @@ private object StudioEditGl {
             val prog2d = program(FS_2D)
             val progFill = program(FS_FILL)
             val progBlur = program(FS_BLUR)
+            val progRound = program(FS_ROUND)
             val tex = IntArray(2)
             android.opengl.GLES20.glGenTextures(2, tex, 0)
             val oes = tex[0]
@@ -1634,7 +1661,20 @@ private object StudioEditGl {
                     if (tr != null && tr.shown) {
                         scissor(sh)
                         viewport(EditSplit.cover(tr.w, tr.h, sh, w.toFloat(), h.toFloat()))
-                        draw(progOes, OES, tr.tex, tr.m)
+                        if (pip) {
+                            // the window's shape: rounded corners or a circle, cut in the shader
+                            val bl = sh.l * w
+                            val bb = (1f - sh.b) * h
+                            val br = sh.r * w
+                            val bt = (1f - sh.t) * h
+                            android.opengl.GLES20.glUseProgram(progRound)
+                            android.opengl.GLES20.glUniform4f(android.opengl.GLES20.glGetUniformLocation(progRound, "uBox"), bl, bb, br, bt)
+                            android.opengl.GLES20.glUniform1f(android.opengl.GLES20.glGetUniformLocation(progRound, "uRad"), EditSplit.pipRadius(sp.look, br - bl, bt - bb))
+                            android.opengl.GLES20.glEnable(android.opengl.GLES20.GL_BLEND)
+                            android.opengl.GLES20.glBlendFunc(android.opengl.GLES20.GL_SRC_ALPHA, android.opengl.GLES20.GL_ONE_MINUS_SRC_ALPHA)
+                            draw(progRound, OES, tr.tex, tr.m)
+                            android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_BLEND)
+                        } else draw(progOes, OES, tr.tex, tr.m)
                     }
                     android.opengl.GLES20.glDisable(android.opengl.GLES20.GL_SCISSOR_TEST)
                     android.opengl.GLES20.glViewport(0, 0, w, h)

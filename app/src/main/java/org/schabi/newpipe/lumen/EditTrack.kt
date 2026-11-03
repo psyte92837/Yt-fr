@@ -389,7 +389,17 @@ object EditSplit {
     /** Picture in picture: the main video on the whole frame, the second one in the box of the block (moved and scaled like a picture). */
     const val PIP = "pip"
 
-    fun isPip(b: EBlock): Boolean = b.kind == KIND && b.look == PIP
+    fun isPip(b: EBlock): Boolean = b.kind == KIND && b.look.startsWith(PIP)
+
+    /** Shapes of the window: rounded corners (the default "pip"), square corners, a circle. */
+    val PIP_SHAPES = listOf(PIP, "${PIP}_sq", "${PIP}_circle")
+
+    /** Corner radius of a window [bw]×[bh] px of shape [look]: rounded — 12 % of the short side, circle — half of it. */
+    fun pipRadius(look: String, bw: Float, bh: Float): Float = when (look) {
+        "${PIP}_sq" -> 0f
+        "${PIP}_circle" -> min(bw, bh) / 2
+        else -> min(bw, bh) * 0.12f
+    }
 
     /** A new picture-in-picture box: a third of the frame width in the top right corner, the shape of the video. */
     fun pipStart(fw: Int, fh: Int, vw: Int, vh: Int): Triple<Float, Float, Float> {
@@ -404,7 +414,7 @@ object EditSplit {
      * height by [EBlock.ratio]), kept inside the frame.
      */
     fun boxes(b: EBlock, fw: Float, fh: Float): Pair<FRect, FRect> {
-        if (b.look != PIP) return halves(b.look)
+        if (!b.look.startsWith(PIP)) return halves(b.look)
         val (hw, hh) = StudioEdit.halfSize(b, fw, fh)
         val l = (b.x * fw - hw) / fw
         val t = (b.y * fh - hh) / fh
@@ -455,5 +465,5 @@ object EditSplit {
     fun mainVolume(blocks: List<EBlock>, tMs: Long, clipVolume: Float): Float = clipVolume * (active(blocks, tMs)?.mainVolume ?: 1f)
 
     /** Blocks on the stage over the picture (a split screen and sounds are not; a picture-in-picture box is, to move it). */
-    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { (it.kind != KIND || it.look == PIP) && it.kind != EditMusic.KIND }
+    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { (it.kind != KIND || it.look.startsWith(PIP)) && it.kind != EditMusic.KIND }
 }

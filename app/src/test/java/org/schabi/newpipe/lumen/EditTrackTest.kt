@@ -209,5 +209,11 @@ class EditTrackTest {
         assertEquals(listOf("p"), EditSplit.overlays(listOf(b, b.copy(id = "s", look = "lr"))).map { it.id })
         // other layouts keep their halves
         assertEquals(EditSplit.halves("tb"), EditSplit.boxes(b.copy(look = "tb"), 1080f, 1920f))
+        // the window's shapes: rounded by default, square corners, a circle; all of them are windows
+        assertEquals(12f, EditSplit.pipRadius(EditSplit.PIP, 100f, 200f), 0.001f)
+        assertEquals(0f, EditSplit.pipRadius("pip_sq", 100f, 200f), 0f)
+        assertEquals(50f, EditSplit.pipRadius("pip_circle", 100f, 200f), 0f)
+        assertTrue(EditSplit.PIP_SHAPES.all { EditSplit.isPip(b.copy(look = it)) })
+        assertFalse(EditSplit.isPip(b.copy(look = "lr")))
     }
 }

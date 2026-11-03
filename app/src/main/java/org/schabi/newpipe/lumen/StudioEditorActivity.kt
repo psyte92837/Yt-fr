@@ -1432,9 +1432,17 @@ class StudioEditorActivity : LumenBase() {
                     }
                     val (vw, vh) = sideSize(sp.file)
                     placeTurned(tv2, EditSplit.cover(vw.toFloat(), vh.toFloat(), box, fw, fh), box.l * fw, box.t * fh, 0)
+                    // the window's shape: rounded corners or a circle
+                    val rad = EditSplit.pipRadius(sp.look, box.w * fw, box.h * fh)
+                    sb.outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: View, outline: android.graphics.Outline) = outline.setRoundRect(0, 0, view.width, view.height, rad)
+                    }
+                    sb.clipToOutline = rad > 0f
+                    sb.invalidateOutline()
                     sb.visibility = View.VISIBLE
                 }
             } else {
+                sb.clipToOutline = false
                 val (mh, sh) = EditSplit.boxes(sp, fw, fh)
                 fun fit(box: View, inner: View, half: FRect, vw: Float, vh: Float) {
                     box.layoutParams = FrameLayout.LayoutParams((half.w * fw).toInt(), (half.h * fh).toInt()).apply {
@@ -2598,11 +2606,18 @@ class StudioEditorActivity : LumenBase() {
         bottomSheet(t("⊟ Разделённый экран", "⊟ Split screen")) { dismiss ->
             muted(t("Основное видео и второе делят кадр пополам, каждое обрезается по своей половине. Звук обоих смешивается — громкость в «🔊 Звук».",
                 "The main and the second video share the frame, each cropped to its half. Both sounds are mixed — loudness in \"🔊 Sound\"."))
-            add(choiceChips(ctx, (EditSplit.LAYOUTS + EditSplit.PIP).map { it to splitName(it) }, b.look) { v ->
+            add(choiceChips(ctx, (EditSplit.LAYOUTS + EditSplit.PIP).map { it to splitName(it) }, if (EditSplit.isPip(b)) EditSplit.PIP else b.look) { v ->
                 change(b.id) { pipLook(it, v) }
                 dismiss()
             })
-            if (EditSplit.isPip(b)) muted(t("Окошко двигается и меняет размер на кадре, как картинка.", "The window is moved and resized on the frame like a picture."))
+            if (EditSplit.isPip(b)) {
+                muted(t("Окошко двигается и меняет размер на кадре, как картинка.", "The window is moved and resized on the frame like a picture."))
+                label(this, t("Форма окошка", "Window shape"))
+                add(choiceChips(ctx, EditSplit.PIP_SHAPES.map { it to pipShapeName(it) }, b.look) { v ->
+                    change(b.id) { pipLook(it, v) }
+                    dismiss()
+                })
+            }
             button(t("⏮ Второе видео с ", "⏮ Second video from ") + StudioEdit.clock(b.srcMs), style = BtnStyle.TONAL) {
                 dismiss()
                 splitFrom(b)
@@ -2615,10 +2630,22 @@ class StudioEditorActivity : LumenBase() {
     }
 
     /** Layout [v] of a split screen; turning into a window gives it a box of the shape of the second video. */
+    private fun pipShapeName(l: String) = when (l) {
+        "${EditSplit.PIP}_sq" -> t("▢ Прямые углы", "▢ Square corners")
+        "${EditSplit.PIP}_circle" -> t("● Круг", "● Circle")
+        else -> t("▢ Скруглённое", "▢ Rounded")
+    }
+
     private fun pipLook(b: EBlock, v: String): EBlock {
         val p = project ?: return b.copy(look = v)
-        if (v != EditSplit.PIP) return b.copy(look = v)
-        if (b.look == EditSplit.PIP) return b
+        if (!v.startsWith(EditSplit.PIP)) return b.copy(look = v)
+        // a circle is square in pixels (height = width); back from a circle — the shape of the video again
+        if (EditSplit.isPip(b)) {
+            if (v == b.look) return b
+            val (vw, vh) = sideSize(b.file)
+            val ratio = if (v.endsWith("_circle")) 1f else if (vw > 0 && vh > 0) vh.toFloat() / vw else b.ratio
+            return b.copy(look = v, ratio = ratio)
+        }
         val (vw, vh) = sideSize(b.file)
         val (x, y, w) = EditSplit.pipStart(p.w, p.h, vw, vh)
         val ratio = if (vw > 0 && vh > 0) vh.toFloat() / vw else 9f / 16f

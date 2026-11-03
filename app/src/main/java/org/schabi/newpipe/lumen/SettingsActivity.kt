@@ -464,6 +464,7 @@ class SettingsActivity : LumenBase() {
             KMap.PATH to t("Карта знаний · путь обучения", "Knowledge map · learning path"),
             "ideas_queries" to t("Идеи для бизнеса · подбор запросов", "Business ideas · queries"),
             "ideas_digest" to t("Идеи для бизнеса · сводка", "Business ideas · digest"),
+            "ideas_translate" to t("Идеи для бизнеса · перевод запросов", "Business ideas · query translation"),
         ) + algoPromptLabels()
         for ((k, label) in names) {
             val card = c.card {

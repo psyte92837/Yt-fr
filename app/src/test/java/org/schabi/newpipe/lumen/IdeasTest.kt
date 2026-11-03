@@ -89,4 +89,35 @@ class IdeasTest {
     fun configWithoutIdGetsOne() {
         assertTrue(IdeasConfig.from(JSONObject().put("business", "x")).id.isNotEmpty())
     }
+
+    @Test
+    fun searchLanguageAndFiltersRoundTrip() {
+        val c = IdeasConfig(business = "кофейня", country = "DE")
+        assertEquals("de", c.searchLang)
+        c.lang = "en"
+        c.userQueries = mutableListOf("кофе на вынос")
+        c.period = "month"; c.sort = "views"; c.noShorts = true; c.limit = 50; c.comments = 0; c.digestLang = "market"
+        val back = IdeasConfig.from(c.toJson())
+        assertEquals("en", back.searchLang)
+        assertEquals(listOf("кофе на вынос"), back.userQueries)
+        val f = back.filters()
+        assertEquals("month", f.period)
+        assertEquals("views", f.sort)
+        assertTrue(f.excludeShorts)
+        assertEquals("en", f.origLang)
+        assertEquals("DE", f.country)
+        assertEquals(0, back.comments)
+        assertEquals("market", back.digestLang)
+        assertEquals("week", IdeasConfig.from(JSONObject().put("business", "x")).period)
+    }
+
+    @Test
+    fun translationOnlyWhenLanguageDiffers() {
+        assertTrue(IdeasLogic.needsTranslation(listOf("кофейня с выпечкой", "как открыть кофейню"), "en"))
+        assertEquals(false, IdeasLogic.needsTranslation(listOf("кофейня с выпечкой", "как открыть кофейню"), "ru"))
+        assertEquals(false, IdeasLogic.needsTranslation(emptyList(), "en"))
+        assertEquals(false, IdeasLogic.needsTranslation(listOf("кофе"), ""))
+        assertEquals(30, IdeasLogic.windowDays("month"))
+        assertEquals(7, IdeasLogic.windowDays("week"))
+    }
 }

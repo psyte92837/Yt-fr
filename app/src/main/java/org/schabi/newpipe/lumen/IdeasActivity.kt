@@ -71,7 +71,7 @@ class IdeasActivity : LumenBase() {
 
     private fun readFields() {
         businessEdit?.let { draft.business = it.text.toString().trim() }
-        queriesEdit?.let { draft.queries = IdeasLogic.splitUser(it.text.toString()).toMutableList() }
+        queriesEdit?.let { draft.userQueries = IdeasLogic.splitUser(it.text.toString()).toMutableList() }
     }
 
     private fun render() {
@@ -132,7 +132,21 @@ class IdeasActivity : LumenBase() {
             draft.business, multiline = true)
         c.add(text(this, t("Рынок", "Market"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         val countries = Regions.countries.filter { it.first.isNotEmpty() }.sortedBy { if (it.first == "US") 0 else 1 }
-        c.add(choiceChips(this, countries, draft.country) { draft.country = it }, 4)
+        c.add(choiceChips(this, countries, draft.country) {
+            readFields()
+            draft.country = it
+            render()
+        }, 4)
+        c.add(text(this, t("Язык поиска", "Search language"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+        val market = IdeasLogic.langFor(draft.country)
+        val auto = t("Как на рынке", "Market's") + if (market.isNotEmpty()) " · " + Regions.languageName(market) else ""
+        c.add(choiceChips(this, listOf("" to auto) + Regions.languages.filter { it.first.isNotEmpty() }, draft.lang) {
+            readFields()
+            draft.lang = it
+            render()
+        }, 4)
+        c.muted(t("Пишите о бизнесе и запросы на любом языке: Lumen ищет видео и читает комментарии на языке рынка, запросы переведёт ИИ.",
+            "Describe the business and queries in any language: Lumen searches videos and reads comments in the market language, AI translates the queries."))
         c.add(text(this, t("Как часто проверять", "How often to check"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
         val hours = listOf(6, 12, 24, 168)
         c.add(segBar(this, listOf(t("6 ч", "6 h"), t("12 ч", "12 h"), t("День", "Day"), t("Неделя", "Week")), hours.indexOf(draft.hours).coerceAtLeast(0)) {
@@ -141,8 +155,9 @@ class IdeasActivity : LumenBase() {
             render()
         }, 4)
         c.add(text(this, t("Поисковые запросы (необязательно)", "Search queries (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
-        queriesEdit = c.edit(t("По одному в строке. Пусто — ИИ подберёт на языке рынка", "One per line. Empty: AI picks them in the market language"),
-            draft.queries.joinToString("\n"), multiline = true)
+        queriesEdit = c.edit(t("По одному в строке, можно по-русски. Пусто — ИИ подберёт на языке рынка", "One per line, any language. Empty: AI picks them in the market language"),
+            draft.userQueries.ifEmpty { draft.queries }.joinToString("\n"), multiline = true)
+        filters(c)
         if (Provider.active() == null) {
             c.muted(t("AI не подключён: видео и комментарии будут собираться, но сводка и подбор запросов требуют API (Настройки → AI).",
                 "AI is not connected: videos and comments will be collected, but digests and query suggestions need an API (Settings → AI)."))
@@ -161,6 +176,37 @@ class IdeasActivity : LumenBase() {
         if (saved != null) c.button(t("Удалить бизнес", "Delete business"), style = BtnStyle.TEXT) { delete(saved) }
     }
 
+    private fun seg(c: Col, label: String, labels: List<String>, keys: List<String>, value: String, set: (String) -> Unit) {
+        c.add(text(this, label, Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        c.add(segBar(this, labels, keys.indexOf(value).coerceAtLeast(0)) {
+            readFields()
+            set(keys[it])
+            render()
+        }, 4)
+    }
+
+    private fun filters(c: Col) {
+        c.h2(t("Фильтры", "Filters"))
+        seg(c, t("Период видео", "Video period"), listOf(t("Сутки", "Day"), t("Неделя", "Week"), t("Месяц", "Month")),
+            listOf("today", "week", "month"), draft.period) { draft.period = it }
+        seg(c, t("Сортировка", "Sort"), listOf(t("Новые", "Newest"), t("Популярные", "Popular"), t("По теме", "Relevant")),
+            listOf("date", "views", "relevance"), draft.sort) { draft.sort = it }
+        seg(c, t("Длительность", "Duration"), listOf(t("Любая", "Any"), t("< 4 мин", "< 4 min"), t("4–20 мин", "4–20 min"), t("> 20 мин", "> 20 min")),
+            listOf("any", "short", "medium", "long"), draft.duration) { draft.duration = it }
+        c.check(t("Без Shorts", "No Shorts"), draft.noShorts) {
+            readFields()
+            draft.noShorts = it
+        }
+        seg(c, t("Видео за проверку", "Videos per check"), listOf("15", "30", "50", "100"),
+            listOf("15", "30", "50", "100"), draft.limit.toString()) { draft.limit = it.toInt() }
+        seg(c, t("Комментариев к видео", "Comments per video"), listOf(t("Нет", "None"), "30", "60", "100"),
+            listOf("0", "30", "60", "100"), draft.comments.toString()) { draft.comments = it.toInt() }
+        val lang = draft.searchLang
+        seg(c, t("Язык сводки", "Digest language"),
+            listOf(t("Язык приложения", "App language"), t("Язык рынка", "Market language") + if (lang.isNotEmpty()) " · " + Regions.languageName(lang) else ""),
+            listOf("app", "market"), draft.digestLang) { draft.digestLang = it }
+    }
+
     private fun delete(b: IdeasConfig) {
         val items = arrayOf(t("Удалить, видео оставить в проектах", "Delete, keep videos in projects"), t("Удалить вместе с собранными видео", "Delete with collected videos"))
         android.app.AlertDialog.Builder(this).setTitle(t("Удалить «${b.business.take(40)}»?", "Delete \"${b.business.take(40)}\"?"))
@@ -177,11 +223,21 @@ class IdeasActivity : LumenBase() {
             toast(t("Опишите бизнес хотя бы парой слов", "Describe the business in a few words"))
             return
         }
-        val cfg = draft.copy(queries = draft.queries.toMutableList(), enabled = true)
-        busy = if (cfg.queries.isEmpty()) t("Подбираю запросы для рынка…", "Picking queries for the market…") else t("Запускаю…", "Starting…")
+        val cfg = draft.copy(queries = draft.queries.toMutableList(), userQueries = draft.userQueries.toMutableList(), enabled = true)
+        val saved = Ideas.config(cfg.id)
+        // unchanged setup: keep the queries already picked/translated
+        val keep = saved != null && saved.queries.isNotEmpty() && saved.business == cfg.business &&
+            saved.searchLang == cfg.searchLang && saved.country == cfg.country &&
+            (cfg.userQueries.isEmpty() && saved.userQueries.isEmpty() || cfg.userQueries == saved.userQueries || cfg.userQueries == saved.queries)
+        if (keep && cfg.userQueries == saved?.queries) cfg.userQueries = saved.userQueries.toMutableList()
+        busy = when {
+            keep -> t("Запускаю…", "Starting…")
+            cfg.userQueries.isEmpty() -> t("Подбираю запросы на языке рынка…", "Picking queries in the market language…")
+            else -> t("Перевожу запросы на язык рынка…", "Translating queries into the market language…")
+        }
         render()
         bgTask(t("Идеи: запуск", "Ideas: start"), {
-            if (cfg.queries.isEmpty()) cfg.queries = Ideas.suggestQueries(cfg.business, cfg.country).toMutableList()
+            if (keep) cfg.queries = saved!!.queries.toMutableList() else Ideas.prepareQueries(cfg)
             Ideas.apply(Lumen.app, cfg)
             cfg
         }, onError = {
@@ -220,9 +276,12 @@ class IdeasActivity : LumenBase() {
         val p = Store.project(cfg.projectId)
         c.card {
             add(text(ctx, cfg.business, Type.TITLE_M, bold = true).apply { maxLines = 3 }, 0)
-            muted(t("Рынок: ", "Market: ") + Ideas.countryName(cfg.country) + " · " + freq(cfg.hours) +
-                if (cfg.enabled) "" else t(" · на паузе", " · paused"))
+            muted(t("Рынок: ", "Market: ") + Ideas.countryName(cfg.country) +
+                (if (cfg.searchLang.isNotEmpty()) " · " + t("язык: ", "language: ") + Regions.languageName(cfg.searchLang) else "") +
+                " · " + freq(cfg.hours) + if (cfg.enabled) "" else t(" · на паузе", " · paused"))
+            muted(t("Фильтры: ", "Filters: ") + filtersLine(cfg))
             if (cfg.queries.isNotEmpty()) muted(t("Запросы: ", "Queries: ") + cfg.queries.joinToString(", "))
+            if (cfg.userQueries.isNotEmpty() && cfg.userQueries != cfg.queries) muted(t("Ваши запросы: ", "Your queries: ") + cfg.userQueries.joinToString(", "))
             if (p != null) muted(t("Видео: ", "Videos: ") + p.videoCount + " · " + t("последняя проверка: ", "last check: ") +
                 if (p.lastRunAt > 0) Fmt.dateTime(p.lastRunAt) else "—")
             add(btn(ctx, t("Обновить сейчас", "Update now"), style = BtnStyle.FILLED) { refresh() }, 12)
@@ -292,6 +351,16 @@ class IdeasActivity : LumenBase() {
         fun open(ctx: Context, id: String = "") = ctx.startActivity(intent(ctx, id))
 
         fun intent(ctx: Context, id: String = ""): Intent = Intent(ctx, IdeasActivity::class.java).apply { if (id.isNotEmpty()) putExtra("id", id) }
+
+        fun filtersLine(c: IdeasConfig): String = listOfNotNull(
+            when (c.period) { "today" -> t("за сутки", "last day"); "month" -> t("за месяц", "last month"); else -> t("за неделю", "last week") },
+            when (c.sort) { "views" -> t("популярные", "popular"); "relevance" -> t("по теме", "relevant"); else -> t("новые", "newest") },
+            when (c.duration) { "short" -> t("< 4 мин", "< 4 min"); "medium" -> t("4–20 мин", "4–20 min"); "long" -> t("> 20 мин", "> 20 min"); else -> null },
+            if (c.noShorts) t("без Shorts", "no Shorts") else null,
+            t("до ${c.limit} видео", "up to ${c.limit} videos"),
+            if (c.comments > 0) t("${c.comments} комм.", "${c.comments} comments") else t("без комментариев", "no comments"),
+            if (c.digestLang == "market") t("сводка на языке рынка", "digest in market language") else null
+        ).joinToString(" · ")
 
         fun freq(hours: Int): String = when (hours) {
             168 -> t("раз в неделю", "weekly")

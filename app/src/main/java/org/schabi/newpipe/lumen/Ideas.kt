@@ -23,11 +23,32 @@ data class IdeasConfig(
     var hours: Int = 24,
     var enabled: Boolean = false,
     var projectId: String = "",
-    val id: String = newId()
+    val id: String = newId(),
+    /** Search language (ISO 639-1); "" = main language of the market. */
+    var lang: String = "",
+    /** Queries as the user typed them (any language); [queries] are their search-language version. */
+    var userQueries: MutableList<String> = mutableListOf(),
+    /** Digest language: "app" = interface language, "market" = search language. */
+    var digestLang: String = "app",
+    var period: String = "week", // today | week | month
+    var sort: String = "date", // date | views | relevance
+    var duration: String = "any", // any | short | medium | long
+    var noShorts: Boolean = false,
+    var limit: Int = 30,
+    var comments: Int = 60
 ) {
+    /** Language the market is searched in. */
+    val searchLang: String get() = lang.ifEmpty { IdeasLogic.langFor(country) }
+
+    fun filters() = SearchFilters(sort = sort, period = period, duration = duration, excludeShorts = noShorts,
+        limit = limit, country = country, origLang = searchLang)
+
     fun toJson(): JSONObject = JSONObject().put("business", business).put("country", country)
         .put("queries", JSONArray(queries)).put("hours", hours)
         .put("enabled", enabled).put("projectId", projectId).put("id", id)
+        .put("lang", lang).put("userQueries", JSONArray(userQueries)).put("digestLang", digestLang)
+        .put("period", period).put("sort", sort).put("duration", duration).put("noShorts", noShorts)
+        .put("limit", limit).put("comments", comments)
 
     companion object {
         fun from(o: JSONObject?) = IdeasConfig(id = o?.optString("id", "")?.takeIf { it.isNotEmpty() } ?: newId()).apply {
@@ -38,6 +59,15 @@ data class IdeasConfig(
             hours = o.optInt("hours", 24)
             enabled = o.optBoolean("enabled", false)
             projectId = o.optString("projectId", "")
+            lang = o.optString("lang", "")
+            userQueries = IdeasLogic.strings(o.optJSONArray("userQueries"))
+            digestLang = o.optString("digestLang", "app")
+            period = o.optString("period", "week")
+            sort = o.optString("sort", "date")
+            duration = o.optString("duration", "any")
+            noShorts = o.optBoolean("noShorts", false)
+            limit = o.optInt("limit", 30)
+            comments = o.optInt("comments", 60)
         }
     }
 }
@@ -61,6 +91,20 @@ object IdeasLogic {
         "JP" -> "ja"
         "KR" -> "ko"
         else -> ""
+    }
+
+    /** Days of videos a manual digest looks back over for a search period. */
+    fun windowDays(period: String): Int = when (period) {
+        "today" -> 2
+        "month" -> 30
+        else -> 7
+    }
+
+    /** True when the user's queries need translating into [lang]: their guessed language differs. */
+    fun needsTranslation(queries: List<String>, lang: String): Boolean {
+        if (queries.isEmpty() || lang.isEmpty()) return false
+        val g = LangGuess.guess(queries.joinToString(". "))
+        return g.isNotEmpty() && g != lang
     }
 
     fun configsFrom(a: JSONArray?): List<IdeasConfig> =
@@ -162,10 +206,16 @@ object IdeasLogic {
 
 val IDEAS_PROMPTS = linkedMapOf(
     "ideas_queries" to (
-        "Бизнес пользователя: \"{business}\". Рынок: {country}, язык поиска: {lang}.\n" +
+        "Бизнес пользователя (описан, возможно, на другом языке): \"{business}\". Рынок: {country}, язык поиска: {lang}.\n" +
             "Придумай {n} коротких поисковых запросов для YouTube на языке {lang}, по которым там ищут свежие видео: " +
             "тренды ниши, проблемы и вопросы клиентов, обзоры, новые продукты и сервисы, кейсы. " +
             "Пиши так, как ищут носители языка, без кавычек и операторов. Верни строго JSON: {\"queries\":[\"...\"]}"
+        ),
+    "ideas_translate" to (
+        "Бизнес пользователя: \"{business}\". Рынок: {country}, язык поиска: {lang}.\n" +
+            "Пользователь написал поисковые запросы для YouTube на своём языке. Переведи каждый на язык {lang} так, " +
+            "как его набрали бы носители языка в этой стране (не дословно, привычными словами ниши), без кавычек и операторов. " +
+            "Порядок и количество сохрани. Верни строго JSON: {\"queries\":[\"...\"]}\n\nЗапросы:\n{queries}"
         ),
     "ideas_digest" to (
         "Ты бизнес-аналитик. Бизнес пользователя: \"{business}\". Рынок: {country}.\n" +
@@ -247,15 +297,40 @@ object Ideas {
 
     fun countryName(code: String) = Regions.countryName(code)
 
+    /** Language name for prompts ("en" → "Английский (en)"). */
+    fun langLabel(code: String) = Regions.languageName(code).let { if (it == code) code else "$it ($code)" }
+
     /** AI search queries for the market language; without AI the business text itself. Blocking. */
-    fun suggestQueries(business: String, country: String): List<String> {
+    fun suggestQueries(business: String, country: String, lang: String = IdeasLogic.langFor(country)): List<String> {
         val prov = Provider.active() ?: return IdeasLogic.splitUser(business)
-        val lang = IdeasLogic.langFor(country).ifEmpty { "en" }
         val prompt = Prompts.get("ideas_queries").replace("{business}", business.trim())
-            .replace("{country}", countryName(country).ifBlank { country }).replace("{lang}", lang)
+            .replace("{country}", countryName(country).ifBlank { country }).replace("{lang}", langLabel(lang.ifEmpty { "en" }))
             .replace("{n}", IdeasLogic.MAX_QUERIES.toString())
         val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 400, task = "ideas_queries")
         return IdeasLogic.parseQueries(r.text).ifEmpty { IdeasLogic.splitUser(business) }
+    }
+
+    /** The user's queries in the search language (AI translation); unchanged without AI or when already in it. Blocking. */
+    fun translateQueries(c: IdeasConfig, queries: List<String>): List<String> {
+        val lang = c.searchLang
+        if (!IdeasLogic.needsTranslation(queries, lang)) return queries
+        val prov = Provider.active() ?: return queries
+        val prompt = Prompts.get("ideas_translate").replace("{business}", c.business.trim())
+            .replace("{country}", countryName(c.country).ifBlank { c.country }).replace("{lang}", langLabel(lang))
+            .replace("{queries}", queries.joinToString("\n"))
+        return try {
+            val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 400, task = "ideas_translate")
+            IdeasLogic.parseQueries(r.text).ifEmpty { queries }
+        } catch (e: Exception) {
+            L.w("ideas", "translate failed: ${e.message}")
+            queries
+        }
+    }
+
+    /** Fills [IdeasConfig.queries] in the search language from what the user typed (or from the business). Blocking. */
+    fun prepareQueries(c: IdeasConfig) {
+        c.queries = (if (c.userQueries.isEmpty()) suggestQueries(c.business, c.country, c.searchLang)
+        else translateQueries(c, c.userQueries)).toMutableList()
     }
 
     /** Creates or updates the monitoring project behind the config and (re)schedules it. Blocking. */
@@ -266,8 +341,8 @@ object Ideas {
         p.phrase = c.queries.firstOrNull() ?: c.business.trim().take(80)
         p.domain = c.business.trim().take(200)
         p.queries = c.queries.toMutableList()
-        p.filters = SearchFilters(sort = "date", period = "week", limit = 30, country = c.country, origLang = IdeasLogic.langFor(c.country))
-        p.collect = CollectConfig(meta = true, subtitles = false, comments = true, commentsLimit = 60, commentsSort = "top", replies = false, channelStats = false)
+        p.filters = c.filters()
+        p.collect = CollectConfig(meta = true, subtitles = false, comments = c.comments > 0, commentsLimit = c.comments.coerceAtLeast(1), commentsSort = "top", replies = false, channelStats = false)
         p.monitor = MonitorConfig(enabled = c.enabled, hours = c.hours, aiSummary = false,
             aiFilter = Provider.active() != null, recDrip = 0, anyLang = false)
         p.archived = false
@@ -317,11 +392,12 @@ object Ideas {
 
     /** Manual "Update now": monitoring run; when nothing new arrived, a digest of the last week's videos. Blocking. */
     fun refreshNow(ctx: Context, id: String): IdeasLogic.Digest? {
-        val pid = config(id)?.projectId?.takeIf { it.isNotEmpty() } ?: return null
+        val cfg = config(id) ?: return null
+        val pid = cfg.projectId.takeIf { it.isNotEmpty() } ?: return null
         val before = digests(id).firstOrNull()?.at ?: 0
         Monitoring.runOnce(ctx, pid)
         digests(id).firstOrNull()?.takeIf { it.at > before }?.let { return it }
-        val weekAgo = System.currentTimeMillis() - 7 * 86_400_000L
+        val weekAgo = System.currentTimeMillis() - IdeasLogic.windowDays(cfg.period) * 86_400_000L
         val recent = Store.videos(pid).values.filter { maxOf(it.uploadMs, it.addedAt) >= weekAgo }
             .sortedByDescending { it.addedAt }.take(40)
         if (recent.isEmpty()) return null
@@ -336,7 +412,8 @@ object Ideas {
         val prompt = Prompts.get("ideas_digest").replace("{business}", c.business.trim())
             .replace("{country}", countryName(c.country).ifBlank { c.country })
             .replace("{count}", items.size.toString())
-            .replace("{lang}", if (Settings.lang == "en") "English" else "русский")
+            .replace("{lang}", if (c.digestLang == "market" && c.searchLang.isNotEmpty()) langLabel(c.searchLang)
+            else if (Settings.lang == "en") "English" else "русский")
             .replace("{data}", IdeasLogic.dataBlock(items))
         return try {
             val text = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, maxTokens = 2500, task = "ideas_digest", pid = pid).text.trim()

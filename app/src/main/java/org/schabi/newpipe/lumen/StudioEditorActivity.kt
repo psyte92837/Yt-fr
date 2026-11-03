@@ -3409,7 +3409,7 @@ class StudioEditorActivity : LumenBase() {
         var place = prefs.getInt("studio_subs_place", 0).coerceIn(0, EditCaptions.PLACES.lastIndex)
         var anim = prefs.getString("studio_subs_anim", "pop").takeIf { it in StudioEdit.ANIMS } ?: "pop"
         var motion = prefs.getString("studio_subs_motion", "karaoke").takeIf { it in EditCaptions.MOTIONS } ?: ""
-        var font = prefs.getString("studio_subs_font", "lf:montserrat").takeIf { it.isEmpty() || LumenFonts.of(it) != null } ?: ""
+        var font = prefs.getString("studio_subs_font", "lf:montserrat").takeIf { it != null && (it.isEmpty() || LumenFonts.of(it) != null) } ?: ""
         val has = blocks.count { EditCaptions.isSub(it) }
         bottomSheet(t("💬 Автосубтитры", "💬 Auto subtitles")) { dismiss ->
             muted(if (words.isEmpty()) t("Речь ролика ещё не распознана: распознаю на телефоне (Android 13+), затем поставлю субтитры.",

@@ -105,6 +105,10 @@ class StudioMixActivity : LumenBase() {
         var savedAs: String
             get() = p.getString("studio_mix_saved", "") ?: ""
             set(v) = p.edit().putString("studio_mix_saved", v).apply()
+        /** Length of the video set before cutting (0 = as the pieces come); the voice-over, when there is one, sets it instead. */
+        var targetMs: Long
+            get() = p.getLong("studio_mix_target", 0)
+            set(v) = p.edit().putLong("studio_mix_target", v).apply()
         /** What the build that is running shows (taken over when it ends, also by a reopened screen). */
         var pending: String
             get() = p.getString("studio_mix_pending", "") ?: ""
@@ -119,6 +123,8 @@ class StudioMixActivity : LumenBase() {
     private val voiceFile get() = File(dir, "voice.wav")
     private val wordsFile get() = File(dir, "words.json")
     private val assistFile get() = File(dir, "assist.json")
+    /** Parts of the videos taken before: "🎲 New pieces" does not take them again. */
+    private val usedFile get() = File(dir, "used.json")
 
     private var clips: List<SClip> = emptyList()
     private var items: List<MixItem> = emptyList()
@@ -254,8 +260,12 @@ class StudioMixActivity : LumenBase() {
     /** The whole storyboard cut again by the current settings (hand edits are gone; ↶ brings them back). */
     private fun recut(msg: String?) {
         if (readyClips().isEmpty()) return
-        change(StudioMix.build(specs(), Prefs.pieceMs, Prefs.mode, Prefs.cutSeed, Prefs.seed), msg)
+        change(fitted(StudioMix.build(specs(), Prefs.pieceMs, Prefs.mode, Prefs.cutSeed, Prefs.seed)), msg)
     }
+
+    /** The storyboard made as long as set in "2. Cutting" (not when a voice-over sets the length). */
+    private fun fitted(list: List<MixItem>): List<MixItem> =
+        if (Prefs.targetMs > 0 && !voiceFile.exists() && list.isNotEmpty()) StudioMix.fitTo(list, Prefs.targetMs, clipCaps()) else list
 
     /** Pieces of clip [id] cut again by its settings and put back at random places. */
     private fun recutClip(id: String): List<MixItem> {
@@ -317,6 +327,10 @@ class StudioMixActivity : LumenBase() {
         boardRv = null
         selBox = null
         val c = Col(this)
+        c.add(StudioActivity.tabs(this, StudioActivity.MIX_TAB) { i ->
+            StudioActivity.openTask(this, StudioTask.entries[i])
+            finish()
+        }, 0)
         if (Prefs.format.isEmpty()) {
             formatCard(c)
             page(t("🔀 Микс", "🔀 Mix"), c.root)
@@ -373,8 +387,8 @@ class StudioMixActivity : LumenBase() {
 
     private fun clipsCard(c: Col) = c.card {
         add(text(ctx, t("1. Клипы", "1. Clips"), Type.TITLE_M, bold = true), 0)
-        muted(t("Найдите видео, выберите нужные и задайте им отрезок: начало и длину (до 30 с). Скачиваются только эти секунды, без звука. ⋮ у клипа — выбрать момент по кадрам видео, взять ещё отрезок, своя нарезка.",
-            "Find videos, tick the ones you need and set their piece: start and length (up to 30 s). Only those seconds are downloaded, without sound. ⋮ at a clip — pick the moment by the video frames, take one more piece, own cutting."))
+        muted(t("Найдите видео: скачиваются только нужные секунды. ⋮ у клипа — момент по кадрам, ещё отрезок, своя нарезка.",
+            "Find videos: only the needed seconds are downloaded. ⋮ at a clip — the moment by frames, one more part, own cutting."))
         clips.forEach { cl ->
             val ready = cl.file.isNotEmpty() && File(clipsDir, cl.file).exists()
             val onBoard = items.count { it.clipId == cl.id }
@@ -400,8 +414,9 @@ class StudioMixActivity : LumenBase() {
         progress("dl", t("Загрузка клипов…", "Downloading clips…"))
         progress("assist", t("Помощник смотрит видео…", "The assistant watches the videos…"))
         if (busy.isNotEmpty()) return@card
-        val views = mutableListOf<View>(btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findSheet() })
-        if (clips.isNotEmpty()) {
+        val views = mutableListOf<View>(btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findSheet() },
+            btn(ctx, t("🧭 Подобрать с ИИ", "🧭 Pick with AI"), style = BtnStyle.TONAL) { assistSheet() })
+        if (clips.size > 1) {
             val all = clips.all { it.id in clipMarks }
             views += btn(ctx, if (all) t("☐ Снять выбор", "☐ Clear selection") else t("☑ Выбрать все", "☑ Select all"), style = BtnStyle.TEXT) {
                 if (all) clipMarks.clear() else clipMarks += clips.map { it.id }
@@ -409,7 +424,6 @@ class StudioMixActivity : LumenBase() {
             }
         }
         row(*views.toTypedArray())
-        button(t("🧭 Помощник составителя: кадры по смыслу", "🧭 Composer assistant: shots by meaning"), style = BtnStyle.TONAL) { assistSheet() }
         if (assist.pending.isNotEmpty() && assist.pending.all { it.first in readyIds() }) {
             button(t("🧭 Раскадровка по плану помощника", "🧭 Storyboard by the assistant's plan"), style = BtnStyle.TEXT) { applyPlan() }
         }
@@ -426,39 +440,56 @@ class StudioMixActivity : LumenBase() {
 
     private fun mixCard(c: Col) = c.card {
         add(text(ctx, t("2. Нарезка", "2. Cutting"), Type.TITLE_M, bold = true), 0)
-        muted(t("Клипы режутся на куски и перемешиваются: два куска одного клипа не идут подряд. Своя нарезка для клипа — ⋮ у него в списке.",
-            "The clips are cut into pieces and shuffled: two pieces of one clip never go in a row. Own cutting of a clip — ⋮ at it in the list."))
-        add(text(ctx, t("Длина куска — сразу для всех клипов", "Piece length — for all clips at once"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(text(ctx, t("Длина куска", "Piece length"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
         val now = Prefs.pieceMs
-        val chips = (StudioMix.PIECES + now).distinct().sorted().map { ms ->
+        chips((StudioMix.PIECES + now).distinct().sorted().map { ms ->
             chip(ctx, StudioMix.pieceLabel(ms), ms == now) { if (busy.isEmpty() && ms != now) applyPiece(ms) }
         } + chip(ctx, t("✎ Своя", "✎ Own")) {
             if (busy.isEmpty()) prompt(t("Длина куска, секунд", "Piece length, seconds"), t("напр. 0.8 или 4", "e.g. 0.8 or 4"), (now / 1000.0).toString()) { v ->
                 val ms = StudioMix.parsePiece(v)
                 if (ms == null) toast(t("Нужно число секунд", "A number of seconds is needed")) else applyPiece(ms)
             }
+        })
+        add(text(ctx, t("Длина ролика", "Video length"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        if (voiceFile.exists()) muted(t("Задаёт озвучка (${StudioCuts.stamp(voiceMs())}) — подгонка в шаге 4.", "Set by the voice-over (${StudioCuts.stamp(voiceMs())}) — fitting is in step 4."))
+        else {
+            val target = Prefs.targetMs
+            chips(listOf(0L, 15_000L, 30_000L, 60_000L).let { if (target in it) it else it + target }.map { ms ->
+                chip(ctx, if (ms == 0L) t("Авто", "Auto") else StudioCuts.stamp(ms), ms == target) { if (busy.isEmpty() && ms != target) applyTarget(ms) }
+            } + chip(ctx, t("✎ Своя", "✎ Own")) {
+                if (busy.isEmpty()) prompt(t("Длина ролика", "Video length"), t("напр. 0:45 или 45", "e.g. 0:45 or 45"), if (target > 0) StudioCuts.stamp(target) else "") { v ->
+                    val ms = StudioCuts.parseTime(v)?.takeIf { it >= 1_000 }
+                    if (ms == null) toast(t("Нужно время: 45 или 0:45", "A time is needed: 45 or 0:45")) else applyTarget(ms)
+                }
+            })
+            muted(if (target > 0) t("Куски прореживаются или растягиваются ровно до ${StudioCuts.stamp(target)}; не хватает — повторяются.",
+                "Pieces are thinned out or stretched to exactly ${StudioCuts.stamp(target)}; when short, they repeat.")
+            else t("Ролик длиной со все куски.", "The video is as long as all the pieces."))
         }
-        chips(chips)
         add(text(ctx, t("Где резать", "Where to cut"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        add(choiceChips(ctx, listOf(MixCut.EVEN to t("▦ Ровно, подряд", "▦ Even, in a row"), MixCut.RANDOM to t("🎲 Случайные моменты", "🎲 Random moments")),
+        add(choiceChips(ctx, listOf(MixCut.EVEN to t("▦ Подряд", "▦ In a row"), MixCut.RANDOM to t("🎲 Случайно", "🎲 Random")),
             Prefs.mode) { m -> if (busy.isEmpty()) setMode(m) }, 4)
-        muted(if (Prefs.mode == MixCut.EVEN) t("Каждый клип делится на равные куски от начала до конца.", "Every clip is split into equal pieces from start to end.")
-        else t("Куски берутся из случайных мест клипа, длина гуляет ±40 %. «🎲 Нарезать в новых местах» в «⋯ Варианты» — другие места.",
-            "Pieces come from random places of a clip, the length varies ±40 %. \"🎲 Cut at new places\" in \"⋯ Options\" gives other places."))
         val own = readyClips().filter { cuts[it.id]?.isDefault == false }.map { it.id }
         if (own.isNotEmpty()) muted(t("Своя нарезка у клипов: ", "Own cutting of clips: ") + own.joinToString(", "))
         if (busy.isNotEmpty()) return@card
         if (items.isEmpty()) button(t("✂ Нарезать", "✂ Cut"), primary = true) { shuffle() }
         else {
             val missing = StudioMix.missing(items, readyClips().map { it.id })
-            if (missing.isNotEmpty()) button(t("＋ Куски клипов, которых нет в раскадровке: ", "＋ Pieces of clips missing on the storyboard: ") + missing.joinToString(", "),
-                style = BtnStyle.TONAL) {
+            if (missing.isNotEmpty()) button(t("＋ Вернуть в раскадровку: ", "＋ Back to the storyboard: ") + missing.joinToString(", "),
+                style = BtnStyle.TEXT) {
                 var list = items
                 val specs = specs().associateBy { it.id }
                 for (id in missing) specs[id]?.let { list = StudioMix.addPieces(list, StudioMix.cut(it, Prefs.pieceMs, Prefs.mode, Prefs.cutSeed), System.nanoTime()) }
                 change(list, t("Добавлено кусков: ${list.size - items.size}", "Pieces added: ${list.size - items.size}"))
             }
         }
+    }
+
+    /** A new video length: the storyboard is cut again to it (↶ brings the old one back). */
+    private fun applyTarget(ms: Long) {
+        Prefs.targetMs = ms
+        if (items.isEmpty()) return render()
+        recut(if (ms > 0) t("Ролик ${StudioCuts.stamp(ms)}", "Video ${StudioCuts.stamp(ms)}") else t("Длина — по кускам", "Length by the pieces"))
     }
 
     /** New piece length: every clip is cut again at once; ↶ or "Undo" brings the old storyboard back. */
@@ -498,56 +529,44 @@ class StudioMixActivity : LumenBase() {
     /** All the ways to shuffle and to cut again, explained; the quick "🔀 Shuffle" is on the card. */
     // only what the cards have not: a random shuffle is on the storyboard, even/random cutting in step 2,
     // shuffling the ticked ones on their panel, fitting to the voice-over in step 4
-    private fun shuffleSheet() = bottomSheet(t("⋯ Варианты: порядок, нарезка, длина", "⋯ Options: order, cutting, length")) { dismiss ->
+    private fun shuffleSheet() = bottomSheet(t("⋯ Ещё варианты", "⋯ More options")) { dismiss ->
         val pinned = items.count { it.locked }
         if (pinned > 0) muted(t("📌 Закреплённые куски ($pinned) остаются на своих местах.", "📌 Pinned pieces ($pinned) stay in their places."))
         add(text(ctx, t("Те же куски — другой порядок", "Same pieces — another order"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        button(t("▤ По порядку: клип за клипом", "▤ In order: clip after clip"), style = BtnStyle.TONAL) { dismiss(); reorder(MixOrder.ORDER) }
+        button(t("▤ Клип за клипом", "▤ Clip after clip"), style = BtnStyle.TONAL) { dismiss(); reorder(MixOrder.ORDER) }
         button(t("🔁 По кругу: c1, c2, c3, c1…", "🔁 In turn: c1, c2, c3, c1…"), style = BtnStyle.TEXT) { dismiss(); reorder(MixOrder.ROUND) }
-        add(text(ctx, t("Новые куски из скачанных отрезков", "New pieces from the downloaded parts"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
-        muted(t("Клипы режутся заново. Отметки, закрепления и схемы сбрасываются — ↶ вернёт.", "The clips are cut again. Ticks, pins and schemes are reset — ↶ brings them back."))
-        button(t("🎲 Нарезать в новых случайных местах", "🎲 Cut at new random places"), style = BtnStyle.TONAL) {
+        add(text(ctx, t("Новые куски из уже скачанного", "New pieces of what is downloaded"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+        button(t("✂ Нарезать скачанное в других местах", "✂ Cut the downloads at other places"), style = BtnStyle.TONAL) {
             dismiss()
             Prefs.mode = MixCut.RANDOM
             Prefs.cutSeed = System.nanoTime()
             Prefs.seed = System.nanoTime()
-            recut(t("Новые случайные куски", "New random pieces"))
+            recut(t("Новые места нарезки", "New cutting places"))
         }
-        add(text(ctx, t("Новые моменты из видео", "New moments of the videos"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
-        muted(t("Для каждого видео берётся новый случайный отрезок той же длины и скачивается заново (нужен интернет). Куски этих клипов нарежутся заново.",
-            "Every video gets a new random part of the same length, downloaded again (needs internet). The pieces of those clips are cut again."))
-        val ready = readyClips()
-        button(t("🌐 Новые моменты у всех клипов (${ready.size})", "🌐 New moments for all clips (${ready.size})"), style = BtnStyle.TONAL) {
-            dismiss()
-            randomMoments(ready)
-        }
-        val tickedClips = ready.filter { it.id in clipMarks }
-        if (tickedClips.isNotEmpty() && tickedClips.size < ready.size) button(t("🌐 Только у выбранных клипов: ", "🌐 Only for the selected clips: ") + tickedClips.joinToString(", ") { it.id },
-            style = BtnStyle.TEXT) { dismiss(); randomMoments(tickedClips) }
-        add(text(ctx, t("Длина ролика", "Video length"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
-        val total = StudioMix.totalMs(items)
-        if (voiceFile.exists()) muted(t("Подогнать под озвучку — в шаге «4. Озвучка и сборка».", "Fitting to the voice-over is in step \"4. Voice-over and saving\"."))
-        val opts = listOf(10, 15, 20, 30, 45, 60, 90, 120).map { it * 1000L }.filter { it < total }
-        if (opts.isEmpty()) muted(t("Ролик уже короче 10 с (${StudioCuts.stamp(total)}).", "The video is already shorter than 10 s (${StudioCuts.stamp(total)})."))
-        else {
-            muted(t("Сейчас ${StudioCuts.stamp(total)}. Куски с конца убираются, последний укорачивается.", "Now ${StudioCuts.stamp(total)}. Pieces at the end are dropped, the last one is shortened."))
-            chips(opts.map { ms ->
-                chip(ctx, "≤ " + StudioCuts.stamp(ms)) {
-                    dismiss()
-                    change(StudioMix.trimTo(items, ms), t("Ролик обрезан до ${StudioCuts.stamp(ms)}", "Video cut to ${StudioCuts.stamp(ms)}"))
-                }
-            })
+        val ticked = readyClips().filter { it.id in clipMarks && it.id !in lockedClips() }
+        if (ticked.isNotEmpty()) {
+            add(text(ctx, t("Новые моменты из видео", "New moments of the videos"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+            button(t("🎲 Только у выбранных клипов: ", "🎲 Only for the selected clips: ") + ticked.joinToString(", ") { it.id }, style = BtnStyle.TONAL) {
+                dismiss()
+                newPieces(ticked)
+            }
         }
     }
 
-    /** New random parts of the videos of [list], downloaded again (the download task re-cuts their pieces). */
-    private fun randomMoments(list: List<SClip>) {
-        if (list.isEmpty()) return
-        confirm(t("Новые случайные моменты?", "New random moments?"),
-            t("Клипов: ${list.size}. Их отрезки заменятся случайными из тех же видео и скачаются заново.",
-                "Clips: ${list.size}. Their parts are replaced by random ones of the same videos and downloaded again."), t("Скачать", "Download")) {
-            download(list.map { it.id }.toSet())
-        }
+    /** Clips with pinned pieces keep their part of the video. */
+    private fun lockedClips(): Set<String> = items.filter { it.locked }.map { it.clipId }.toSet()
+
+    /**
+     * "🎲 New pieces": new random parts of the videos of [list] (not taken before, no intro or end screen),
+     * downloaded again and cut at new places in a new order; clips with pinned pieces stay as they are.
+     */
+    private fun newPieces(list: List<SClip> = readyClips().filter { it.id !in lockedClips() }) {
+        if (busy.isNotEmpty() || rendering()) return toast(t("Дождитесь конца задачи", "Wait for the task to end"))
+        if (list.isEmpty()) return toast(t("Нет клипов без закреплённых кусков", "No clips without pinned pieces"))
+        Prefs.cutSeed = System.nanoTime()
+        Prefs.seed = System.nanoTime()
+        toast(t("Новые куски: качаю ${list.size} клип(ов)…", "New pieces: downloading ${list.size} clip(s)…"))
+        download(list.map { it.id }.toSet())
     }
 
     // ---------- storyboard ----------
@@ -571,8 +590,8 @@ class StudioMixActivity : LumenBase() {
                 })
             }
         }, 0)
-        muted(t("Тап по кадру — настроить кусок (начало, длина, место). ○ — отметить несколько. Удерживайте и тащите — переставить. 📌 — закреплён: не двигается при перемешивании.",
-            "Tap a frame to set up the piece (start, length, place). ○ ticks several. Hold and drag to move. 📌 — pinned: stays in place when shuffled."))
+        muted(t("Тап — настроить кусок, ○ — отметить, удержать и тащить — переставить, 📌 — не двигается.",
+            "Tap — set up a piece, ○ — tick, hold and drag — move, 📌 — stays in place."))
         boardInfo = add(text(ctx, "", 14f, bold = true), 8)
         updateInfo()
         val (rv, height) = board()
@@ -582,9 +601,14 @@ class StudioMixActivity : LumenBase() {
         fillSelection()
         row(
             btn(ctx, t("🔀 Перемешать", "🔀 Shuffle"), style = BtnStyle.TONAL) { reorder(MixOrder.SHUFFLE) },
-            btn(ctx, t("⋯ Варианты", "⋯ Options"), style = BtnStyle.TEXT) { shuffleSheet() }
+            btn(ctx, t("🎲 Новые куски", "🎲 New pieces"), style = BtnStyle.TONAL) { newPieces() }.apply {
+                contentDescription = t("Новые случайные куски из видео: скачать заново", "New random pieces of the videos: download again")
+            },
+            iconBtn(ctx, "⋯") { shuffleSheet() }.apply { contentDescription = t("Ещё варианты", "More options") }
         )
-        button(t("▶ Просмотр без сборки", "▶ Preview without building"), style = BtnStyle.TONAL) { previewSheet(0) }
+        muted(t("🔀 — те же куски в другом порядке; 🎲 — новые моменты из тех же видео (скачиваются заново).",
+            "🔀 — the same pieces in another order; 🎲 — new moments of the same videos (downloaded again)."))
+        button(t("▶ Просмотр без сборки", "▶ Preview without building"), style = BtnStyle.TEXT) { previewSheet(0) }
     }
 
     /** Under the storyboard: "Tick all", or the actions for the ticked elements. */
@@ -608,8 +632,6 @@ class StudioMixActivity : LumenBase() {
             if (n >= 2) chip(this, t("🔀 Перемешать их", "🔀 Shuffle them")) {
                 change(StudioMix.shuffleMarked(items, System.nanoTime()), t("Отмеченные перемешаны", "Ticked ones shuffled"))
             } else null,
-            chip(this, t("⏮ В начало", "⏮ To start")) { change(StudioMix.markedTo(items, true)) },
-            chip(this, t("⏭ В конец", "⏭ To end")) { change(StudioMix.markedTo(items, false)) },
             chip(this, t("⧉ Дубль", "⧉ Duplicate")) { change(StudioMix.duplicateMarked(items), t("Дубли добавлены: $n", "Duplicates added: $n")) },
             chip(this, t("✕ Удалить", "✕ Delete")) { change(StudioMix.removeMarked(items), t("Удалено кадров: $n", "Frames deleted: $n")) }
         )
@@ -1149,11 +1171,19 @@ class StudioMixActivity : LumenBase() {
             )
         }
         val schemes = items.count { it.scheme != null }
-        val extras = listOfNotNull(
-            if (schemes > 0) t("🧩 схем: $schemes", "🧩 schemes: $schemes") else null,
-            if (Prefs.subs && words.isNotEmpty()) t("💬 субтитры", "💬 subtitles") else null
+        // what is added, as chips: a tap removes it (one place instead of separate "✕ Remove" buttons)
+        val added = listOfNotNull(
+            if (schemes > 0) chip(ctx, t("🧩 схем: $schemes  ✕", "🧩 schemes: $schemes  ✕")) {
+                if (busy.isEmpty() && !rendering()) change(items.map { it.copy(scheme = null) }, t("Схемы убраны", "Schemes removed"))
+            }.apply { contentDescription = t("Убрать схемы", "Remove schemes") } else null,
+            if (Prefs.subs && words.isNotEmpty()) chip(ctx, t("💬 субтитры  ✕", "💬 subtitles  ✕")) {
+                if (busy.isEmpty() && !rendering()) {
+                    Prefs.subs = false
+                    render()
+                }
+            }.apply { contentDescription = t("Убрать субтитры", "Remove subtitles") } else null
         )
-        if (extras.isNotEmpty()) muted(t("Добавлено: ", "Added: ") + extras.joinToString(" · "))
+        if (added.isNotEmpty()) chips(added)
         progress("schemes", t("ИИ составляет схемы…", "AI composes schemes…"))
         progress("subs", t("Распознавание речи…", "Recognising speech…"))
         if (rendering()) {
@@ -1165,25 +1195,12 @@ class StudioMixActivity : LumenBase() {
         if (!voice) button(t("🎙 Записать озвучку (необязательно)", "🎙 Record a voice-over (optional)"), style = BtnStyle.TONAL) { startVoice() }
         spinner(t("Язык озвучки, субтитров и схем (общий со Студией)", "Language of the voice-over, subtitles and schemes (shared with the Studio)"),
             Studio.VOICE_LANGS.map { it to Studio.langName(it) }, lang()) { StudioPrefs.voiceLang = it }
-        check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
+        if (items.any { it.marked }) check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
         row(
-            btn(ctx, if (schemes > 0) t("🧩 Схемы заново", "🧩 Schemes again") else t("🧩 Добавить схемы", "🧩 Add schemes"), style = BtnStyle.TONAL) { addSchemes() },
-            btn(ctx, t("💬 Добавить субтитры", "💬 Add subtitles"), style = BtnStyle.TONAL) { addSubs() }
+            btn(ctx, if (schemes > 0) t("🧩 Схемы заново", "🧩 Schemes again") else t("🧩 Схемы", "🧩 Schemes"), style = BtnStyle.TONAL) { addSchemes() },
+            btn(ctx, t("💬 Субтитры", "💬 Subtitles"), style = BtnStyle.TONAL) { addSubs() }
         )
-        if (schemes > 0 || Prefs.subs) {
-            val views = mutableListOf<View>()
-            if (schemes > 0) views += btn(ctx, t("✕ Убрать схемы", "✕ Remove schemes"), style = BtnStyle.TEXT) {
-                saveItems(items.map { it.copy(scheme = null) })
-                render()
-            }
-            if (Prefs.subs) views += btn(ctx, t("✕ Убрать субтитры", "✕ Remove subtitles"), style = BtnStyle.TEXT) {
-                Prefs.subs = false
-                render()
-            }
-            row(*views.toTypedArray())
-        }
-        muted(t("Видео сохраняется на телефон: Галерея → Фильмы/Lumen. Озвучка не обязательна — можно сохранить одну картинку.",
-            "The video is saved on the phone: Gallery → Movies/Lumen. A voice-over is optional — the picture alone can be saved."))
+        muted(t("Сохраняется в Галерею → Фильмы/Lumen. Озвучка не обязательна.", "Saved to Gallery → Movies/Lumen. A voice-over is optional."))
         val video = lastVideo()
         val fresh = video != null && Prefs.videoSig == StudioMix.signature(items, Prefs.format)
         if (voice) check(t("🎙 Со своей озвучкой (иначе только картинка)", "🎙 With my voice-over (otherwise the picture only)"), withVoice) {
@@ -1199,15 +1216,20 @@ class StudioMixActivity : LumenBase() {
                 "The storyboard changed after saving — save the video again."))
             row(
                 btn(ctx, t("▶ Открыть", "▶ Open"), primary = fresh) { openVideo(video) },
-                btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") }
+                btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") },
+                iconBtn(ctx, "⋯") { videoMore(video) }.apply { contentDescription = t("Ещё: копия в папку, другой ИИ", "More: a copy to a folder, another AI") }
             )
-            button(t("✏️ Доработать в Редакторе: схемы, картинки, надписи", "✏️ Finish in the Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
+            button(t("✏️ Доработать в Редакторе", "✏️ Finish in the Editor"), style = BtnStyle.TONAL) {
                 StudioEditorActivity.open(this@StudioMixActivity, video, words)
             }
-            button(t("💾 Сохранить копию в папку…", "💾 Save a copy to a folder…"), style = BtnStyle.TEXT) { saveCopy(video) }
-            if (Prefs.videoVoice) button(t("🤖 Попросить другой ИИ смонтировать (видео + промпт)", "🤖 Ask another AI to edit it (video + prompt)"),
-                style = BtnStyle.TEXT) { sendToAi(video) }
         }
+    }
+
+    /** Rarely needed actions with the saved video. */
+    private fun videoMore(video: File) = bottomSheet(t("Видео", "Video")) { dismiss ->
+        button(t("💾 Сохранить копию в папку…", "💾 Save a copy to a folder…"), style = BtnStyle.TONAL) { dismiss(); saveCopy(video) }
+        if (Prefs.videoVoice) button(t("🤖 Отдать другому ИИ на монтаж (видео + промпт)", "🤖 Give it to another AI to edit (video + prompt)"),
+            style = BtnStyle.TEXT) { dismiss(); sendToAi(video) }
     }
 
     private fun rendering() = StudioJob.running && Prefs.pending.isNotEmpty()
@@ -1240,11 +1262,10 @@ class StudioMixActivity : LumenBase() {
                 btn(ctx, if (diff < 0) t("✂ Обрезать конец", "✂ Cut the end") else t("＋ Дополнить повтором", "＋ Continue by repeats"), style = BtnStyle.TEXT) { fitVoice(false) }
             )
         } else muted(t("✓ Длина ролика совпадает с озвучкой", "✓ The video length matches the voice-over"))
-        if (items.size > 1) {
-            val on = if (words.isEmpty()) -1 else StudioMix.seamsOnWords(items, words)
-            button(t("🎯 Склейки на словах", "🎯 Cuts on words") + if (on >= 0) " ($on/${items.size - 1})" else "", style = BtnStyle.TEXT) {
-                if (words.isEmpty()) toast(t("Нужна расшифровка речи: нажмите «💬 Добавить субтитры»", "The speech must be recognised: tap \"💬 Add subtitles\""))
-                else {
+        if (items.size > 1 && words.isNotEmpty()) {
+            val on = StudioMix.seamsOnWords(items, words)
+            button(t("🎯 Склейки на словах", "🎯 Cuts on words") + " ($on/${items.size - 1})", style = BtnStyle.TEXT) {
+                run {
                     val next = StudioMix.snapToWords(items, words, clipCaps())
                     if (next == items) toast(t("Ближе к словам склейки не сдвинуть", "The cuts cannot get closer to words"))
                     else change(next, t("Склеек на словах: ${StudioMix.seamsOnWords(next, words)}", "Cuts on words: ${StudioMix.seamsOnWords(next, words)}"))
@@ -1641,7 +1662,7 @@ class StudioMixActivity : LumenBase() {
      */
     private fun assistSheet() {
         if (busy.isNotEmpty()) return
-        bottomSheet(t("🧭 Помощник составителя", "🧭 Composer assistant")) { dismiss ->
+        bottomSheet(t("🧭 Подобрать с ИИ", "🧭 Pick with AI")) { dismiss ->
             muted(t("Напишите, что должно быть на экране — по пункту в строке (или возьмите текст озвучки). Gemini посмотрит видео по ссылке и найдёт таймкоды подходящих кадров, а Lumen соберёт из них видеоряд по порядку плана.",
                 "Write what must be on screen — one point per line (or take the voice-over text). Gemini watches the videos by link and finds timecodes of fitting shots, and Lumen builds the video in the order of the plan."))
             val prov = videoAi()
@@ -2134,6 +2155,7 @@ class StudioMixActivity : LumenBase() {
         render()
         val dirNow = clipsDir
         val maxH = StudioPrefs.quality
+        val used = if (usedFile.exists()) StudioMix.usedFromJson(usedFile.readText()) else emptyMap()
         val key = TASK + "dl"
         BgTasks.run(this, key, t("Микс: загрузка клипов", "Mix: downloading clips"), BgTasks.reopen(this), {
             val done = java.util.concurrent.ConcurrentHashMap<String, SClip>()
@@ -2145,7 +2167,7 @@ class StudioMixActivity : LumenBase() {
                     var cl = cl0
                     if (cl.id in randomize) {
                         val dur = cl.durMs.takeIf { it > 0 } ?: StudioCutsLoad.durationMs(cl.url)
-                        val at = StudioMix.randomStart(dur, cl.ms, cl.fromMs, System.nanoTime() + i)
+                        val at = StudioMix.freshStart(dur, cl.ms, (used[cl.url].orEmpty()) + (cl.fromMs to cl.toMs), System.nanoTime() + i)
                         val (a, b) = StudioCuts.span(at, at + cl.ms)
                         cl = cl.copy(fromMs = a, toMs = b, durMs = dur)
                     }
@@ -2170,6 +2192,10 @@ class StudioMixActivity : LumenBase() {
             saveClips(now.map { cl ->
                 done[cl.id]?.takeIf { it.url == cl.url && (cl.id in randomize || it.fromMs == cl.fromMs && it.toMs == cl.toMs) } ?: cl
             })
+            // remember the parts taken, so the next "🎲 New pieces" takes others
+            val taken = HashMap(used)
+            for (cl in done.values) taken[cl.url] = taken[cl.url].orEmpty().filter { it != cl.fromMs to cl.toMs } + (cl.fromMs to cl.toMs)
+            runCatching { usedFile.writeText(StudioMix.usedJson(taken)) }
             busy = ""
             // the new pieces join the storyboard (one step of ↶); clips of the assistant's plan make the storyboard in its order
             var list = items
@@ -2185,6 +2211,8 @@ class StudioMixActivity : LumenBase() {
                         list = StudioMix.replaceClip(list, id, StudioMix.cut(spec, Prefs.pieceMs, Prefs.mode, Prefs.cutSeed), System.nanoTime())
                     }
                 }
+                if (randomize.isNotEmpty()) list = StudioMix.rearrange(list, MixOrder.SHUFFLE, Prefs.seed)
+                if (list != items) list = fitted(list)
             }
             if (isDestroyed) {
                 if (list != items) saveItems(StudioMix.unique(list))

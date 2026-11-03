@@ -225,6 +225,29 @@ class StudioActivity : LumenBase() {
         private const val REQ_BG = 7406
         private const val REQ_CHAR_IMG = 7407
 
+        /** Index of the Mix in [tabs]: the Mix is its own screen, the other items are the tasks of this one. */
+        const val MIX_TAB = 5
+
+        /**
+         * The Studio panel: the five tasks and the Mix, in two rows of three so the names fit on a phone
+         * (the same panel on the Mix screen, with the Mix selected).
+         */
+        fun tabs(ctx: Context, selected: Int, onSelect: (Int) -> Unit): View {
+            val labels = listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"),
+                t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix"))
+            return LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                for (r in 0..1) addView(segBar(ctx, labels.subList(r * 3, r * 3 + 3), if (selected / 3 == r) selected % 3 else -1) { onSelect(r * 3 + it) },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (r == 1) topMargin = ctx.dp(6) })
+            }
+        }
+
+        /** Back from the Mix to a task of the Studio: the open Studio screen switches to it (or a new one opens). */
+        fun openTask(ctx: Context, task: StudioTask) {
+            ctx.startActivity(Intent(ctx, StudioActivity::class.java).putExtra("switch", task.id)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+        }
+
         fun open(ctx: Context) {
             ctx.startActivity(Intent(ctx, StudioActivity::class.java).putExtra("fresh", true)
                 .addFlags(if (ctx is android.app.Activity) 0 else Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -306,6 +329,11 @@ class StudioActivity : LumenBase() {
     private val seen = HashSet<String>()
     private val draftsDir get() = File(dir, "drafts")
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("switch")?.let { if (!foreign) switchTask(StudioTask.of(it)) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         foreign = BgTasks.has("studio:") && BgTasks.find("studio:")?.key != "studio:render"
@@ -314,6 +342,10 @@ class StudioActivity : LumenBase() {
         savedInstanceState?.getStringArrayList("seen")?.let { seen.addAll(it) }
         // the notification reopens this screen with its intent: it must show the work, not start a new one
         intent.removeExtra("fresh")
+        if (savedInstanceState == null) intent.getStringExtra("switch")?.let { id ->
+            if (!foreign && !StudioJob.running && !BgTasks.has("studio:")) StudioPrefs.task = StudioTask.of(id).id
+        }
+        intent.removeExtra("switch")
         val given = if (savedInstanceState == null) intent.getStringExtra("script") else null
         intent.removeExtra("script")
         if (given != null) {
@@ -552,8 +584,8 @@ class StudioActivity : LumenBase() {
         saveInputs()
         bars.clear()
         val c = Col(this)
-        c.add(segBar(this, listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"), t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation")), task.ordinal) {
-            switchTask(StudioTask.entries[it])
+        c.add(tabs(this, task.ordinal) { i ->
+            if (i == MIX_TAB) StudioMixActivity.open(this) else switchTask(StudioTask.entries[i])
         }, 0)
         c.muted(when (task) {
             StudioTask.SHORTS -> t(
@@ -566,8 +598,8 @@ class StudioActivity : LumenBase() {
                 "Готовая озвучка → анимированный ролик. Загрузите аудио или запишите голос: ИИ-режиссёр сам разметит сцены, графику, зумы, плашки и звуки и вырежет оговорки. Кадр 9:16, 16:9 или 1:1.",
                 "A ready voice-over → an animated video. Upload audio or record your voice: the AI director lays out scenes, graphics, zooms, stickers and sounds and cuts slips. Frame 9:16, 16:9 or 1:1.")
             StudioTask.CUTS -> t(
-                "Клипы под ваш текст: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, ИИ-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1. Ритмичная нарезка без текста — «🔀 Микс» внизу.",
-                "Clips for your text: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1. A rhythmic cut without a text is the «🔀 Mix» below.")
+                "Клипы под ваш текст: отметьте куски видео с YouTube (ссылка и время), Lumen скачает только эти секунды, ИИ-режиссёр поставит клипы на нужные слова, между ними — графика. Кадр 16:9, 9:16 или 1:1. Ритмичная нарезка без текста — «🔀 Микс» в панели сверху.",
+                "Clips for your text: mark pieces of YouTube videos (link and time), Lumen downloads only those seconds, the AI director puts the clips on the right words with graphics in between. Frame 16:9, 9:16 or 1:1. A rhythmic cut without a text is the «🔀 Mix» in the panel above.")
             StudioTask.CARTOON -> t(
                 "Познавательная анимация: персонажи (лиса, робот, сова…) разговаривают разными голосами и объясняют тему, рядом появляются схемы и цифры. Рот двигается под слоги, герои моргают, жестикулируют и показывают эмоции. Кадр 16:9, 9:16 или 1:1.",
                 "An informational animation: characters (fox, robot, owl…) talk in different voices and explain the topic while schemes and numbers appear next to them. Mouths follow the syllables, characters blink, gesture and show emotions. Frame 16:9, 9:16 or 1:1.")
@@ -616,7 +648,6 @@ class StudioActivity : LumenBase() {
         // entry buttons with "↗", not tabs, so it is clear they open another screen (Back returns here)
         c.add(text(this, t("Другие инструменты", "Other tools"), Type.LABEL, bold = true, color = Palette.MUTED), 20)
         c.add(chipScroller(this, listOf(
-            chip(this, t("🔀 Микс ↗", "🔀 Mix ↗")) { StudioMixActivity.open(this) }.apply { contentDescription = t("Открыть Микс", "Open Mix") },
             chip(this, t("✏️ Редактор ↗", "✏️ Editor ↗")) { StudioEditorActivity.open(this) }.apply { contentDescription = t("Открыть редактор", "Open the editor") }
         )), 4)
     }

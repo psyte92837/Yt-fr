@@ -315,4 +315,38 @@ class StudioMixTest {
         assertEquals(2, StudioMix.seamsOnWords(s, words))
         assertEquals(0, StudioMix.seamsOnWords(items, words))
     }
+
+    @Test
+    fun fitsToTargetLength() {
+        val specs = listOf(MixSpec("c1", 20_000), MixSpec("c2", 20_000), MixSpec("c3", 6_000))
+        val items = StudioMix.build(specs, 1_000, MixCut.EVEN, 1, 7)
+        val caps = mapOf("c1" to 20_000L, "c2" to 20_000L, "c3" to 6_000L)
+        assertEquals(46_000L, StudioMix.totalMs(items))
+        // shorter: pieces dropped (not squeezed into flicker), every clip stays, exact length
+        val short = StudioMix.fitTo(items, 15_000, caps)
+        assertEquals(15_000L, StudioMix.totalMs(short))
+        assertEquals(setOf("c1", "c2", "c3"), short.map { it.clipId }.toSet())
+        assertTrue(short.all { it.lenMs >= 700 })
+        // longer than the clips allow: stretched and continued by repeats
+        val long = StudioMix.fitTo(items, 90_000, caps)
+        assertEquals(90_000L, StudioMix.totalMs(long))
+        // pinned pieces stay
+        val pinned = items.mapIndexed { i, it -> if (i == 3) it.copy(locked = true) else it }
+        assertTrue(StudioMix.thinTo(pinned, 10_000).any { it.locked })
+        assertEquals(items, StudioMix.fitTo(items, 0, caps))
+    }
+
+    @Test
+    fun newPiecesAvoidIntroEndAndOldParts() {
+        val used = listOf(10_000L to 15_000L, 40_000L to 45_000L)
+        repeat(50) { k ->
+            val at = StudioMix.freshStart(100_000, 5_000, used, k.toLong())
+            assertTrue(at >= 5_000 && at + 5_000 <= 90_000)
+            assertTrue(used.none { (a, b) -> at < b && at + 5_000 > a })
+        }
+        assertEquals(0L, StudioMix.freshStart(4_000, 5_000, emptyList(), 1))
+        val back = StudioMix.usedFromJson(StudioMix.usedJson(mapOf("u1" to used), keep = 1))
+        assertEquals(listOf(40_000L to 45_000L), back["u1"])
+        assertTrue(StudioMix.usedFromJson("bad").isEmpty())
+    }
 }

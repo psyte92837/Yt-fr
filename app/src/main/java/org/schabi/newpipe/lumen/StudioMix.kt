@@ -368,6 +368,43 @@ object StudioMix {
     }
 
     /**
+     * Pieces dropped until the storyboard is about [targetMs] long: always from the clip with the most pieces left
+     * (so every clip stays), from the middle of its pieces; pinned pieces stay. Used before [scaleTo] so a long
+     * storyboard is not squeezed into flicker.
+     */
+    fun thinTo(items: List<MixItem>, targetMs: Long): List<MixItem> {
+        val out = items.toMutableList()
+        while (out.size > 1) {
+            val total = totalMs(out)
+            if (total <= targetMs) break
+            val byClip = out.indices.filter { !out[it].locked }.groupBy { out[it].clipId }
+            if (byClip.isEmpty()) break
+            // a clip keeps its last piece while others have more
+            val pool = byClip.filterValues { it.size > 1 }.ifEmpty { byClip }
+            val idx = pool.entries.maxWith(compareBy<Map.Entry<String, List<Int>>> { it.value.size }.thenByDescending { it.key }).value
+            val j = idx[idx.size / 2]
+            val after = total - out[j].lenMs
+            // the drop overshoots: keep the piece when that is closer to the target
+            if (after < targetMs && targetMs - after > total - targetMs) break
+            out.removeAt(j)
+        }
+        return out
+    }
+
+    /**
+     * The storyboard made [targetMs] long, the way it looks best: too many pieces are thinned out ([thinTo]),
+     * the rest is stretched or squeezed within its clips ([scaleTo]), and what the clips still lack is continued
+     * by repeats ([loopTo]).
+     */
+    fun fitTo(items: List<MixItem>, targetMs: Long, clipMs: Map<String, Long>): List<MixItem> {
+        if (items.isEmpty() || targetMs <= 0) return items
+        var next = if (totalMs(items) > targetMs) thinTo(items, targetMs) else items
+        next = scaleTo(next, targetMs, clipMs)
+        if (totalMs(next) != targetMs) next = loopTo(next, targetMs)
+        return next
+    }
+
+    /**
      * Seams between pieces moved to the nearest word start of the voice-over (within [maxShiftMs]), so the picture
      * changes on a word. The length of the storyboard stays; a seam stays where a piece would leave its bounds.
      */
@@ -423,6 +460,36 @@ object StudioMix {
         repeat(8) { if (kotlin.math.abs(at - oldMs) < lenMs && room > lenMs * 3) at = rnd.nextLong(room + 1) }
         return at / 100 * 100
     }
+
+    /**
+     * A new random start of a [lenMs] part of a [durMs] long video for "🎲 New pieces": not in the first 5 % and
+     * the last 10 % (intros, end screens) and not overlapping the parts taken before ([used], from–to ms); when the
+     * video has no such room, anywhere apart from the last part ([randomStart]).
+     */
+    fun freshStart(durMs: Long, lenMs: Long, used: List<Pair<Long, Long>>, seed: Long): Long {
+        if (durMs <= lenMs) return 0
+        val lo = durMs / 20
+        val hi = durMs - durMs / 10 - lenMs
+        val rnd = Random(seed)
+        if (hi > lo) repeat(24) {
+            val at = (lo + rnd.nextLong(hi - lo + 1)) / 100 * 100
+            if (used.none { (a, b) -> at < b && at + lenMs > a }) return at
+        }
+        return randomStart(durMs, lenMs, used.lastOrNull()?.first ?: -lenMs * 10, seed)
+    }
+
+    /** Parts of videos already taken, url → [from, to] ms (newest last, at most [keep] per video). */
+    fun usedJson(used: Map<String, List<Pair<Long, Long>>>, keep: Int = 30): String = JSONObject().apply {
+        for ((u, l) in used) put(u, JSONArray().apply { l.takeLast(keep).forEach { (a, b) -> put(JSONArray().put(a).put(b)) } })
+    }.toString()
+
+    fun usedFromJson(s: String): Map<String, List<Pair<Long, Long>>> = runCatching {
+        val o = JSONObject(s)
+        o.keys().asSequence().associateWith { u ->
+            val a = o.getJSONArray(u)
+            (0 until a.length()).mapNotNull { i -> a.optJSONArray(i)?.let { it.optLong(0) to it.optLong(1) } }
+        }
+    }.getOrDefault(emptyMap())
 
     /** Own moments typed as "0:03, 7.5; 0:12" → sorted ms; null when a part is not a time. */
     fun parseMarks(s: String): List<Long>? {

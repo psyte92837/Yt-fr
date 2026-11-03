@@ -3,6 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:installLocation="auto">
 
+    <!-- Lumen: AppFunctions libraries declare minSdk 24; their service is bound only on Android 16+ (tools:targetApi 36 below) -->
+    <uses-sdk tools:overrideLibrary="androidx.appfunctions,androidx.appfunctions.service,androidx.appfunctions.schema.common,androidx.appfunctions.metadata" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />

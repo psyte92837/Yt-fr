@@ -36,20 +36,45 @@ object SchemeStyles {
     val ANCHORS = listOf("auto", "left", "right", "top", "bottom")
     const val AUTO = "auto"
 
-    /** "auto" follows the colours of the video style (dark, light, montage); the rest are fixed looks. */
+    /**
+     * Built-in looks, made anew for the simple choice of the Studio (lumen.overlay): every look is designed as a solid
+     * card that also works as glass and without a plate ([StudioOverlay.style]); the placement is a separate option.
+     * "auto" follows the colours of the video style (dark, light, montage).
+     */
     val PRESETS = listOf(
         SchemeStyle(AUTO, "Авто", builtIn = true),
-        SchemeStyle("glass", "Стекло", card = 0x2EFFFFFF, ink = 0xFFFFFFFF.toInt(), muted = 0xD9FFFFFF.toInt(), fill = "glass", place = "overlay", builtIn = true),
-        SchemeStyle("paper", "Бумага", card = 0xF7FFFFFF.toInt(), ink = 0xFF16181D.toInt(), muted = 0xFF5B6270.toInt(), line = 0xFF8A93A3.toInt(),
-            fill = "solid", radius = 0.14f, place = "panel", dim = 0.25f, bg = 0xCC000000.toInt(), builtIn = true),
-        SchemeStyle("neon", "Неон", card = 0xD90B0F1A.toInt(), ink = 0xFFE6F1FF.toInt(), muted = 0xFF8FA3BF.toInt(), accent = 0xFF00E5FF.toInt(),
-            line = 0xFF00E5FF.toInt(), fill = "outline", radius = 0.10f, border = 1.6f, font = "condensed", upper = true, enter = "draw", builtIn = true),
-        SchemeStyle("podcast_side", "Подкаст: сбоку", card = 0x24FFFFFF, fill = "glass", place = "side", size = 92, dim = 0.6f, builtIn = true),
-        SchemeStyle("podcast_pip", "Подкаст: картинка в картинке", card = 0xFF1C2028.toInt(), ink = 0xFFF4F6FA.toInt(), muted = 0xFF9AA3B2.toInt(),
-            line = 0xFF6B7485.toInt(), bg = 0xFF101318.toInt(), fill = "solid", place = "pip", size = 92, builtIn = true),
-        SchemeStyle("minimal", "Минимал", card = 0x00000000, ink = 0xFFFFFFFF.toInt(), muted = 0xE6FFFFFF.toInt(), line = 0xFFFFFFFF.toInt(),
-            fill = "none", border = 0f, font = "sans", enter = "fade", place = "panel", dim = 0.5f, builtIn = true)
+        // white cards, graphite text: reads on any video
+        SchemeStyle("clean", "Чистый", card = 0xFFFFFFFF.toInt(), ink = 0xFF14161B.toInt(), muted = 0xFF5B6270.toInt(), line = 0xFFD5DAE3.toInt(),
+            fill = "solid", radius = 0.18f, border = 1f, font = "sans", enter = "pop", builtIn = true),
+        // dark smoked cards, white text (the classic of podcasts and talking heads)
+        SchemeStyle("glass", "Стекло", card = 0xB3161A22.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFC9CED8.toInt(), line = 0x66FFFFFF,
+            fill = "glass", radius = 0.22f, border = 1f, font = "sans", enter = "fade", dur = 360, builtIn = true),
+        // warm paper, serif: calm explanations, history, books
+        SchemeStyle("paper", "Бумага", card = 0xFFFFF8EC.toInt(), ink = 0xFF2B2118.toInt(), muted = 0xFF6E5E4C.toInt(), accent = 0xFFB4532A.toInt(),
+            line = 0xFFD9C7AE.toInt(), fill = "solid", radius = 0.10f, border = 1f, font = "serif", enter = "fade", dur = 420, builtIn = true),
+        // dark with a cyan glow: tech, games, numbers
+        SchemeStyle("neon", "Неон", card = 0xFF0B0F1A.toInt(), ink = 0xFFE6F1FF.toInt(), muted = 0xFF9FB3CF.toInt(), accent = 0xFF00E5FF.toInt(),
+            line = 0xFF00E5FF.toInt(), fill = "solid", radius = 0.10f, border = 1.6f, font = "condensed", upper = true, enter = "draw", builtIn = true),
+        // yellow plates, black capitals: fast Shorts, lists, "3 mistakes"
+        SchemeStyle("bold", "Смело", card = 0xFFFFD60A.toInt(), ink = 0xFF111111.toInt(), muted = 0xFF3A3300.toInt(), accent = 0xFF111111.toInt(),
+            line = 0xFF111111.toInt(), fill = "solid", radius = 0.08f, border = 0f, font = "condensed", upper = true, textScale = 1.08f,
+            enter = "slide", dur = 260, builtIn = true),
+        // soft lilac, rounded: lifestyle, psychology, education for kids
+        SchemeStyle("soft", "Мягко", card = 0xFFF3EEFF.toInt(), ink = 0xFF2A2340.toInt(), muted = 0xFF5F5680.toInt(), accent = 0xFF6D4AFF.toInt(),
+            line = 0xFFD9CFFF.toInt(), fill = "solid", radius = 0.35f, border = 1f, font = "rounded", enter = "pop", dur = 380, builtIn = true),
+        // white bars with a red accent, square corners: news, facts, business
+        SchemeStyle("news", "Новости", card = 0xFFFFFFFF.toInt(), ink = 0xFF0E1116.toInt(), muted = 0xFF4A505C.toInt(), accent = 0xFFD32F2F.toInt(),
+            line = 0xFFD32F2F.toInt(), fill = "solid", radius = 0.03f, border = 0f, font = "condensed", upper = true, enter = "slide", dur = 280, builtIn = true),
+        // text and thin lines, almost no plate: quiet design videos
+        SchemeStyle("minimal", "Минимал", card = 0xFF0F1115.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFDADDE3.toInt(), line = 0x99FFFFFF.toInt(),
+            fill = "solid", radius = 0.12f, border = 0.6f, font = "sans", textScale = 0.96f, enter = "fade", dur = 400, builtIn = true)
     )
+
+    /** Ids of the old built-in looks → the new ones (saved projects and settings keep working). */
+    fun alias(id: String): String = when (id) {
+        "podcast_side", "podcast_pip" -> "glass"
+        else -> id
+    }
 
     /** Rules from motion-design practice: in the AI prompt and on the screen. */
     const val RULES = "Правила хорошей инфографики в видео: " +
@@ -131,10 +156,11 @@ object SchemeStyles {
      * Applies the rules that can be checked by numbers: text contrast 4.5:1, captions and accent 3:1 (else the
      * colour is replaced), a backdrop when the blocks have no fill over a live video. Returns the style and what was changed.
      */
-    fun enforce(s0: SchemeStyle): Pair<SchemeStyle, List<String>> {
+    fun enforce(s0: SchemeStyle, bare: Boolean = false): Pair<SchemeStyle, List<String>> {
         var s = s0
         val notes = mutableListOf<String>()
-        if (s.fill in listOf("none", "outline") && s.place == "overlay") {
+        // [bare]: a block without a plate was chosen on purpose (the painter gives its text a shadow)
+        if (!bare && s.fill in listOf("none", "outline") && s.place == "overlay") {
             s = s.copy(place = "panel", dim = max(s.dim, 0.45f))
             notes += "без подложки на видео текст не читается: включена панель с затемнением"
         }
@@ -226,7 +252,7 @@ object SchemeStyles {
     fun list(dir: File): List<SchemeStyle> = PRESETS + (dir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedBy { it.lastModified() }
         .mapNotNull { f -> fromJson(f.readText(), f.name.removeSuffix(".json")) })
 
-    fun find(dir: File, id: String): SchemeStyle? = PRESETS.firstOrNull { it.id == id } ?: File(dir, "$id.json").takeIf { it.exists() }?.let { fromJson(it.readText(), id) }
+    fun find(dir: File, id: String): SchemeStyle? = PRESETS.firstOrNull { it.id == alias(id) } ?: File(dir, "$id.json").takeIf { it.exists() }?.let { fromJson(it.readText(), id) }
 
     fun save(dir: File, s: SchemeStyle) {
         dir.mkdirs()

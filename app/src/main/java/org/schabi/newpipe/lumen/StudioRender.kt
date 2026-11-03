@@ -86,7 +86,9 @@ class StudioPlan(
     val schemePlace: String = "overlay",
     val schemeAnchor: String = "auto",
     /** Animation with characters: how schemes are shown ([StudioLayers.TOON_MODES]). */
-    val toonSchemes: String = "board"
+    val toonSchemes: String = "board",
+    /** Background of the blocks (schemes, tiles, cards): solid, glass or clear ([StudioOverlay.BGS]). */
+    val blockBg: String = "solid"
 ) {
     val subs get() = layers.subs
     val graphics get() = layers.graphics
@@ -140,7 +142,7 @@ class StudioPlan(
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
             templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.8f,
             schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto",
-            toonSchemes: String = "board"
+            toonSchemes: String = "board", blockBg: String = "solid"
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
@@ -150,7 +152,7 @@ class StudioPlan(
                 if (style == StudioStyle.EXPLAIN && cast == null) Studio.captions(words, it, StudioExplain.CAPTION_WORDS, StudioExplain.CAPTION_CHARS)
                 else Studio.captions(words, it, maxWords = if (single) 1 else 4)
             }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes))
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes), blockBg)
         }
     }
 }
@@ -1177,10 +1179,49 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         if (!plan.graphics || a <= 0f || !StudioLayers.hasScheme(sc.kind, sc.items.size)) return
         val k = StudioLayers.readable(plan.overScale, sc.kind, sc.items.size)
         val cy = h * StudioLayers.overY(k, plan.subs)
-        c.save()
-        c.scale(k, k, w / 2f, cy)
-        visual(c, sc, i, w / 2f, cy, local, sceneMs, a)
-        c.restore()
+        onVideo(c) { cv ->
+            cv.save()
+            cv.scale(k, k, w / 2f, cy)
+            visual(cv, sc, i, w / 2f, cy, local, sceneMs, a)
+            cv.restore()
+        }
+    }
+
+    /** Blocks are drawn over a live picture (video, clip, photo) right now: glass and clear blocks take light text. */
+    private var overVideo = false
+    private var layerBmp: Bitmap? = null
+    private val shadowTint = Paint(Paint.FILTER_BITMAP_FLAG).apply { color = 0xD0000000.toInt() }
+    private val shadowBlur = Paint().apply { maskFilter = android.graphics.BlurMaskFilter(3f, android.graphics.BlurMaskFilter.Blur.NORMAL) }
+
+    /**
+     * Draws [draw] over a live picture. Solid blocks as usual; glass and clear blocks switch to light text, and clear
+     * blocks (no plate at all) get a soft shadow under everything drawn — text, emoji, lines — taken from a quarter-size
+     * copy of the layer, so they stay readable on any video.
+     */
+    private fun onVideo(c: Canvas, draw: (Canvas) -> Unit) {
+        if (plan.blockBg == "solid") return draw(c)
+        val wasDark = dark
+        val wasOver = overVideo
+        palette(true)
+        overVideo = true
+        try {
+            if (plan.blockBg != "clear") return draw(c)
+            val b = layerBmp?.takeIf { !it.isRecycled } ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { layerBmp = it }
+            b.eraseColor(0)
+            draw(Canvas(b))
+            val q = 4
+            val small = Bitmap.createScaledBitmap(b, max(1, w / q), max(1, h / q), true)
+            val off = IntArray(2)
+            val sh = small.extractAlpha(shadowBlur, off)
+            small.recycle()
+            val dy = 0.25f * u
+            c.drawBitmap(sh, null, RectF(off[0] * q.toFloat(), off[1] * q + dy, (off[0] + sh.width) * q.toFloat(), (off[1] + sh.height) * q + dy), shadowTint)
+            sh.recycle()
+            c.drawBitmap(b, 0f, 0f, null)
+        } finally {
+            overVideo = wasOver
+            palette(wasDark)
+        }
     }
 
     private fun visual(c: Canvas, sc: SScene, index: Int, cx: Float, cy: Float, local: Long, sceneMs: Long, a: Float) {
@@ -1216,8 +1257,19 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     // ---------- info-schemes (lumen.scheme, styled by lumen.schemestyle) ----------
 
     /** The style of the schemes: the chosen one, or "auto" built from the colours of the current palette. */
-    private fun sstyle(): SchemeStyle = plan.schemeStyle ?: SchemeStyle(SchemeStyles.AUTO, "", card = card, ink = ink, muted = muted, accent = accent,
-        line = stroke, fill = "solid", radius = 0.18f, border = 1f, shadow = true)
+    private fun sstyle(): SchemeStyle {
+        plan.schemeStyle?.let { return it }
+        val base = SchemeStyle(SchemeStyles.AUTO, "", card = card, ink = ink, muted = muted, accent = accent,
+            line = stroke, fill = "solid", radius = 0.18f, border = 1f, shadow = true)
+        return when {
+            plan.blockBg == "solid" -> base
+            overVideo -> autoStyles.getOrPut(card) { StudioOverlay.style(base, plan.blockBg) }
+            plan.blockBg == "glass" -> base.copy(fill = "glass", card = (card and 0x00FFFFFF) or (0x8C shl 24))
+            else -> base.copy(fill = "none", border = 0f)
+        }
+    }
+
+    private val autoStyles = HashMap<Int, SchemeStyle>()
 
     private val schP = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
     private val faces = HashMap<String, Typeface>()
@@ -1455,7 +1507,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     /** Is scene [i] a scheme that takes part in the placement (montage style, schemes on)? */
     private fun placed(i: Int): Boolean {
         val sc = plan.script.scenes.getOrNull(i) ?: return false
-        return plan.style == StudioStyle.VIDEO && plan.graphics && sc.kind == "scheme" && sc.scheme != null && plan.clipScenes?.let { i in it } != false
+        return plan.style == StudioStyle.VIDEO && plan.overlay && plan.graphics && sc.kind == "scheme" && sc.scheme != null && plan.clipScenes?.let { i in it } != false
     }
 
     /** 0..1: how far the frame has moved into the placement of the scheme of the scene at [tMs] (eases in and out). */
@@ -1522,18 +1574,23 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             line.strokeWidth = max(1.5f, 0.4f * u)
             c.drawRoundRect(r, 2.4f * u, 2.4f * u, line)
         }
-        scheme(c, s, i, box.centerX(), box.centerY(), tMs, a * (if (place == "side" || place == "pip") fp else 1f), box)
+        onVideo(c) { cv -> scheme(cv, s, i, box.centerX(), box.centerY(), tMs, a * (if (place == "side" || place == "pip") fp else 1f), box) }
     }
+
+    /** Alpha of the card fill for the background of the blocks: solid, glass or clear. */
+    private val cardK = StudioOverlay.cardAlpha(plan.blockBg)
 
     private fun cardPaint(alpha: Float) = fill.apply {
         color = card
-        this.alpha = (255 * alpha).toInt()
-        if (!dark) setShadowLayer(2.4f * u, 0f, 0.8f * u, ((0x22 * alpha).toInt() shl 24)) else clearShadowLayer()
+        this.alpha = (255 * alpha * cardK).toInt()
+        if (!dark && cardK >= 1f) setShadowLayer(2.4f * u, 0f, 0.8f * u, ((0x22 * alpha).toInt() shl 24)) else clearShadowLayer()
     }
 
     private fun roundCard(c: Canvas, r: RectF, radius: Float, alpha: Float, border: Int = stroke) {
-        c.drawRoundRect(r, radius, radius, cardPaint(alpha))
+        if (cardK > 0f) c.drawRoundRect(r, radius, radius, cardPaint(alpha))
         fill.clearShadowLayer()
+        // without a plate only an accent frame stays (the highlighted block)
+        if (cardK <= 0f && border == stroke) return
         line.color = border
         line.alpha = (255 * alpha).toInt()
         line.strokeWidth = max(1f, 0.25f * u)

@@ -132,30 +132,24 @@ object StudioPrefs {
     var prompter: Boolean
         get() = p.getBoolean("studio_prompter", true)
         set(v) = p.edit().putBoolean("studio_prompter", v).apply()
-    /** VIDEO style: graphics as cards over the speaker instead of full-screen inserts. */
-    var overlay: Boolean
-        get() = p.getBoolean("studio_overlay", true)
-        set(v) = p.edit().putBoolean("studio_overlay", v).apply()
-    /** What is drawn over the picture: [StudioLayers.id]. */
-    var layers: String
-        get() = p.getString("studio_layers", StudioLayers.ALL.id) ?: StudioLayers.ALL.id
-        set(v) = p.edit().putString("studio_layers", v).apply()
-    /** Animation with characters: schemes off, on a board or big ([StudioLayers.TOON_MODES]). */
-    var toonSchemes: String
-        get() = StudioLayers.toonMode(p.getString("studio_toon_schemes", "board") ?: "board")
-        set(v) = p.edit().putString("studio_toon_schemes", v).apply()
-    /** Style of the info-schemes: [SchemeStyle.id]. */
-    var schemeStyle: String
-        get() = p.getString("studio_scheme_style", SchemeStyles.AUTO) ?: SchemeStyles.AUTO
-        set(v) = p.edit().putString("studio_scheme_style", v).apply()
-    /** How schemes sit in a montage: "style" (as the style says) or one of [SchemeStyles.PLACES]. */
-    var schemePlace: String
-        get() = p.getString("studio_scheme_place", "style") ?: "style"
-        set(v) = p.edit().putString("studio_scheme_place", v).apply()
-    /** Size of a scheme over a background, % of its full-screen size. */
-    var overSize: Int
-        get() = p.getInt("studio_over_size", 80)
-        set(v) = p.edit().putInt("studio_over_size", v).apply()
+    /**
+     * What goes over the picture in every task: subtitles or info-schemes and their options ([StudioOverlay],
+     * lumen.overlay v1). The first read takes the settings of the old screens (what to overlay, style, size).
+     */
+    var over: StudioOverlay
+        get() = StudioOverlay.parse(p.getString("studio_over", null)) ?: StudioOverlay.migrate(
+            p.getString("studio_layers", StudioLayers.ALL.id) ?: StudioLayers.ALL.id, p.getBoolean("studio_overlay", true),
+            p.getInt("studio_over_size", 80), p.getString("studio_scheme_style", SchemeStyles.AUTO) ?: SchemeStyles.AUTO,
+            p.getString("studio_scheme_place", "style") ?: "style", p.getString("studio_toon_schemes", "board") ?: "board")
+        set(v) = p.edit().putString("studio_over", v.toJson().toString()).apply()
+    /** Wish of the author for the AI schemes (optional, in «⚙ Опции схем»). */
+    var schemeWish: String
+        get() = p.getString("studio_scheme_wish", "") ?: ""
+        set(v) = p.edit().putString("studio_scheme_wish", v).apply()
+    /** Key of the script the AI was last asked to compose schemes for: it is not asked again by itself. */
+    var schemesTried: String
+        get() = p.getString(key("studio_schemes_tried"), "") ?: ""
+        set(v) = p.edit().putString(key("studio_schemes_tried"), v).apply()
     var musicName: String
         get() = p.getString("studio_music_name", "") ?: ""
         set(v) = p.edit().putString("studio_music_name", v).apply()
@@ -672,7 +666,6 @@ class StudioActivity : LumenBase() {
         "ai_direct" -> t("ИИ-режиссёр", "AI director")
         "broll" -> t("поиск B-roll", "finding B-roll")
         "schemes" -> t("ИИ составляет инфосхемы", "AI composes info-schemes")
-        "style" -> t("ИИ создаёт стиль инфосхем", "AI makes a scheme style")
         "board" -> t("раскадровка", "storyboard")
         "music" -> t("музыка", "music")
         "bg" -> t("клипы фона", "background clips")
@@ -1186,8 +1179,6 @@ class StudioActivity : LumenBase() {
                 sc.scenes.count { StudioStock.isVideo(it.media) }.let { n -> if (n > 0) t(" (клипов $n)", " ($n clips)") else "" })
             if (busy.isEmpty() && got < asked) button(t("🖼 Подобрать B-roll", "🖼 Find B-roll"), style = BtnStyle.TEXT) { fetchBroll() }
             progress("schemes", t("ИИ составляет инфосхемы…", "AI composes info-schemes…"))
-            if (busy.isEmpty()) button(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes") +
-                sc.scenes.count { it.scheme != null }.let { if (it > 0) " ($it)" else "" }, style = BtnStyle.TEXT) { schemesSheet() }
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
@@ -1257,53 +1248,7 @@ class StudioActivity : LumenBase() {
             StudioStyle.VIDEO -> if (videoReady()) t("Ваше видео, слово под голос внизу, графика вставками.", "Your video, the spoken word below, graphics cut in.")
             else t("Фоновые клипы по кругу под озвучку, слово внизу, графика вставками.", "Background clips loop under the voice-over, the word below, graphics cut in.")
         })
-        add(text(ctx, t("Что накладывать", "What to overlay"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        add(segBar(ctx, listOf(t("Всё", "All"), t("Субтитры", "Subtitles"), t("Схемы", "Schemes"), t("Ничего", "Nothing")),
-            StudioLayers.of(StudioPrefs.layers).ordinal) {
-            StudioPrefs.layers = StudioLayers.entries[it].id
-            board = emptyList()
-            render()
-        }, 4)
-        muted(when (StudioLayers.of(StudioPrefs.layers)) {
-            StudioLayers.ALL -> t("Субтитры под голос и инфосхемы, заголовки, стикеры.", "Subtitles with the voice plus schemes, headlines, stickers.")
-            StudioLayers.SUBS -> t("Только субтитры: без схем, заголовков и стикеров.", "Subtitles only: no schemes, headlines or stickers.")
-            StudioLayers.GRAPHICS -> t("Только схемы, заголовки и стикеры: без субтитров.", "Schemes, headlines and stickers only: no subtitles.")
-            StudioLayers.NONE -> t("Чистая картинка: ни субтитров, ни схем.", "A clean picture: no subtitles, no schemes.")
-        })
-        if (task == StudioTask.CARTOON && StudioLayers.of(StudioPrefs.layers).graphics) {
-            add(text(ctx, t("Инфосхемы в анимации", "Info-schemes in the animation"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            add(segBar(ctx, listOf(t("Нет", "Off"), t("На доске", "On a board"), t("Крупно", "Big")),
-                StudioLayers.TOON_MODES.indexOf(StudioPrefs.toonSchemes).coerceAtLeast(1)) {
-                StudioPrefs.toonSchemes = StudioLayers.TOON_MODES[it]
-                board = emptyList()
-                render()
-            }, 4)
-            muted(when (StudioPrefs.toonSchemes) {
-                "off" -> t("Схемы не показываются: только персонажи и текст.", "Schemes are hidden: only the characters and the text.")
-                "big" -> t("На сценах со схемой персонажи плавно уменьшаются, схема крупно над ними.", "On scheme scenes the characters shrink smoothly, the scheme is big above them.")
-                else -> t("Схема на доске над персонажами — они её объясняют.", "The scheme on a board above the characters, who explain it.")
-            })
-        }
-        if (StudioLayers.of(StudioPrefs.layers).graphics) {
-            check(t("🖼 Схемы поверх фона: видео, клипов и картинок, фон остаётся виден", "🖼 Schemes over the background: video, clips and pictures stay visible"), StudioPrefs.overlay) {
-                StudioPrefs.overlay = it
-                board = emptyList()
-                render()
-            }
-            if (StudioPrefs.overlay) {
-                add(text(ctx, t("Размер схемы поверх фона", "Size of a scheme over the background"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
-                chips(StudioLayers.SIZES.map { pc ->
-                    chip(ctx, "$pc%", pc == StudioPrefs.overSize) {
-                        StudioPrefs.overSize = pc
-                        board = emptyList()
-                        render()
-                    }
-                })
-            } else if (currentStyle() == StudioStyle.VIDEO) muted(t("Схемы будут вставками на весь экран вместо видео.", "Schemes become full-screen inserts instead of the video."))
-            progress("style", t("ИИ создаёт стиль…", "AI makes a style…"))
-            if (busy.isEmpty()) button(t("🎨 Стиль инфосхем: ", "🎨 Scheme style: ") + schemeStyleNow().name + " · " + placeLabel(schemePlaceNow()),
-                style = BtnStyle.TONAL) { styleSheet() }
-        }
+        overlayBlock(this)
         if (currentStyle() == StudioStyle.VIDEO) {
             add(text(ctx, t("Автомонтаж", "Auto-edit"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             check(t("🔍 Зумы и наезды камеры по сценам", "🔍 Camera zooms and push-ins per scene"), StudioPrefs.zooms) {
@@ -1414,7 +1359,7 @@ class StudioActivity : LumenBase() {
 
     /** Storyboard: a small frame of every scene; a tap shows that scene in the preview. */
     private fun storyboard(c: Col, plan: StudioPlan) {
-        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.layers}:${plan.overScale}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
+        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.layers}:${plan.overScale}:${plan.blockBg}:${plan.schemeStyle?.id}:${plan.schemePlace}:${plan.toonSchemes}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
             plan.script.scenes.joinToString(",") { it.clip } + ":" + readyIds().joinToString(",")
         if (board.isNotEmpty() && boardKey == key) {
             c.add(text(this, t("Раскадровка", "Storyboard"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -2217,14 +2162,14 @@ class StudioActivity : LumenBase() {
         val style = currentStyle()
         val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) StudioCuts.effectiveClips(sc.scenes, readyIds()).let { ids -> sc.scenes.indices.filter { ids[it].isNotEmpty() }.toSet() }
         else null
-        return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, StudioPrefs.overlay,
+        val ov = StudioPrefs.over
+        return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, ov.overlay(),
             StudioPrefs.zooms, StudioPrefs.transitions,
             if (StudioPrefs.pulse) pulseOf(voice) else null,
             if (StudioPrefs.liveEmoji) emojiDir else null,
             clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls,
-            StudioLayers.of(StudioPrefs.layers), StudioLayers.scale(StudioPrefs.overSize),
-            schemeStyleNow().takeIf { style == StudioStyle.VIDEO && it.id != SchemeStyles.AUTO },
-            if (style == StudioStyle.VIDEO) schemePlaceNow() else "overlay", schemeStyleNow().anchor, StudioPrefs.toonSchemes)
+            ov.layers(), ov.overScale(), schemeStyleOf(ov, style), if (style == StudioStyle.VIDEO) ov.schemePlace() else "overlay", "auto",
+            ov.toon, ov.bg)
     }
 
     private val emojiDir get() = File(dir, "emoji")
@@ -3109,157 +3054,74 @@ class StudioActivity : LumenBase() {
         }
     }
 
-    // ---------- info-schemes (protocol lumen.scheme) ----------
+    // ---------- what goes over the picture: subtitles or info-schemes (lumen.overlay) ----------
 
-    private fun schemesSheet() {
-        val sc = script ?: return
-        val have = sc.scenes.count { it.scheme != null }
-        bottomSheet(t("🧩 Инфосхемы ИИ", "🧩 AI info-schemes")) { dismiss ->
-            muted(t("ИИ выберет сцены, где схема объяснит лучше слов: цепочка, центр и связи, дерево, шкала времени, воронка, пирамида, матрица 2×2, пересечения. " +
-                "Он описывает схему по протоколу lumen.scheme, Lumen проверяет её и при ошибках просит AI исправить. Блоки появляются на своих словах.",
-                "AI picks the scenes where a scheme explains better than words: chain, hub, tree, timeline, funnel, pyramid, 2×2 matrix, overlaps. " +
-                    "It describes it in the lumen.scheme protocol; Lumen checks it and asks the AI to fix mistakes. Blocks appear on their words."))
-            val wish = edit(t("Пожелание (необязательно): например «этапы покажи воронкой»", "Wish (optional): e.g. “show the stages as a funnel”"))
-            button(t("Составить", "Compose"), primary = true) {
+    private fun overlayWhere() = StudioOverlayUi.Where(
+        video = currentStyle() == StudioStyle.VIDEO, cartoon = task == StudioTask.CARTOON,
+        schemes = script?.scenes?.count { it.scheme != null } ?: 0, working = busy.isNotEmpty())
+
+    /** Look of the schemes in a montage (null = the colours of the video style, "auto"). */
+    private fun schemeStyleOf(ov: StudioOverlay, style: StudioStyle): SchemeStyle? {
+        if (style != StudioStyle.VIDEO || ov.look == SchemeStyles.AUTO) return null
+        val look = SchemeStyles.PRESETS.firstOrNull { it.id == ov.look } ?: return null
+        return StudioOverlay.style(look, ov.bg, ov.schemePlace())
+    }
+
+    /** Key of the current script for [StudioPrefs.schemesTried]. */
+    private fun schemesKey(): String = script?.let { sc -> task.id + ":" + sc.scenes.joinToString("|") { it.say }.hashCode() } ?: ""
+
+    private fun setOverlay(n: StudioOverlay) {
+        val was = StudioPrefs.over
+        StudioPrefs.over = n
+        board = emptyList()
+        render()
+        // the schemes are chosen: the AI composes them now (once per script), no separate button
+        if (n.schemes && !was.schemes) composeIfNeeded(explicit = true)
+    }
+
+    private fun overlayBlock(c: Col) {
+        val w = overlayWhere()
+        StudioOverlayUi.block(c, StudioPrefs.over, w, { setOverlay(it) }) { overlaySheet() }
+        c.progress("schemes", t("ИИ составляет инфосхемы…", "AI composes info-schemes…"))
+    }
+
+    private fun overlaySheet() {
+        val have = script?.scenes?.count { it.scheme != null } ?: 0
+        StudioOverlayUi.sheet(this, StudioPrefs.over, overlayWhere(), { n ->
+            StudioPrefs.over = n
+            board = emptyList()
+            render()
+        }) { dismiss ->
+            add(text(ctx, t("Пожелание к схемам (необязательно)", "A wish for the schemes (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val wish = edit(t("например: больше сравнений, без пирамид", "e.g. more comparisons, no pyramids"), StudioPrefs.schemeWish)
+            if (script != null && hasAi()) button(if (have > 0) t("🔄 Составить схемы заново", "🔄 Compose the schemes again") else t("🧩 Составить схемы", "🧩 Compose the schemes"),
+                style = BtnStyle.TONAL) {
+                StudioPrefs.schemeWish = wish.text.toString().trim()
                 dismiss()
-                composeSchemes(wish.text.toString().trim())
+                composeSchemes(StudioPrefs.schemeWish)
             }
-            if (have > 0) button(t("Убрать инфосхемы ($have)", "Remove info-schemes ($have)"), style = BtnStyle.TEXT) {
+            if (have > 0) button(t("Убрать схемы ИИ ($have)", "Remove the AI schemes ($have)"), style = BtnStyle.TEXT) {
+                StudioPrefs.schemeWish = wish.text.toString().trim()
                 dismiss()
                 removeSchemes()
             }
-            button(t("🎨 Стиль и встраивание: ", "🎨 Style and placement: ") + schemeStyleNow().name, style = BtnStyle.TEXT) {
-                dismiss()
-                styleSheet()
-            }
-            button(t("📄 Протокол lumen.scheme", "📄 lumen.scheme protocol"), style = BtnStyle.TEXT) {
-                showText("lumen.scheme v1", StudioScheme.PROTOCOL)
-            }
         }
     }
 
-    // ---------- scheme styles (protocol lumen.schemestyle) ----------
+    private fun hasAi() = Provider.active() != null || Relay.mode != "off"
 
-    private val styleDir get() = File(dir, "templates/style")
-
-    private fun schemeStyleNow(): SchemeStyle = SchemeStyles.find(styleDir, StudioPrefs.schemeStyle) ?: SchemeStyles.PRESETS[0]
-
-    private fun schemePlaceNow(): String = StudioPrefs.schemePlace.takeIf { it in SchemeStyles.PLACES } ?: schemeStyleNow().place
-
-    private fun placeLabel(p: String) = when (p) {
-        "panel" -> t("панель", "panel")
-        "side" -> t("сбоку", "side")
-        "pip" -> t("картинка в картинке", "picture in picture")
-        else -> t("поверх", "over")
-    }
-
-    private fun styleSheet() {
-        val cur = schemeStyleNow()
-        bottomSheet(t("🎨 Стиль инфосхем", "🎨 Info-scheme style")) { dismiss ->
-            muted(t("Стиль задаёт цвета, подложку, шрифт, появление и встраивание схем в видео. Работает в стилях ролика «Моё видео» и «Клипы на фоне» (своё видео, фон, нарезка).",
-                "A style sets colours, backdrop, font, entrance and how schemes sit in the video. Works in the Montage style (own video, background, cuts)."))
-            add(text(ctx, t("Встраивание в видео", "Placement in the video"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            chips((listOf("style") + SchemeStyles.PLACES).map { pl ->
-                chip(ctx, if (pl == "style") t("как в стиле", "as the style") else placeLabel(pl), StudioPrefs.schemePlace == pl ||
-                    pl == "style" && StudioPrefs.schemePlace !in SchemeStyles.PLACES) {
-                    StudioPrefs.schemePlace = pl
-                    board = emptyList()
-                    dismiss()
-                    render()
-                    styleSheet()
-                }
-            })
-            muted(t("Поверх — схема на видео без фона. Панель — затемнённая подложка. Сбоку — кадр со спикером сдвигается, схема рядом (подкаст 16:9). " +
-                "Картинка в картинке — спикер уходит в угол, схема на весь кадр.",
-                "Over — the scheme on the video, no backdrop. Panel — a dimmed backdrop. Side — the speaker's frame slides aside, the scheme beside it (16:9 podcast). " +
-                    "Picture in picture — the speaker goes into a corner, the scheme takes the frame."))
-            add(text(ctx, t("Стили", "Styles"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            for (st in SchemeStyles.list(styleDir)) {
-                val on = st.id == cur.id
-                val pick = btn(ctx, (if (on) "● " else "") + st.name + " · " + placeLabel(st.place), style = if (on) BtnStyle.TONAL else BtnStyle.TEXT) {
-                    StudioPrefs.schemeStyle = st.id
-                    board = emptyList()
-                    dismiss()
-                    render()
-                }
-                if (st.builtIn) add(pick, 2)
-                else row(pick,
-                    btn(ctx, "⧉", style = BtnStyle.TEXT) { copyText(SchemeStyles.toJson(st).toString(2)) },
-                    btn(ctx, "✕", style = BtnStyle.TEXT) {
-                        confirm(t("Удалить стиль «${st.name}»?", "Delete the style \"${st.name}\"?"), "", t("Удалить", "Delete")) {
-                            SchemeStyles.delete(styleDir, st.id)
-                            if (StudioPrefs.schemeStyle == st.id) StudioPrefs.schemeStyle = SchemeStyles.AUTO
-                            board = emptyList()
-                            dismiss()
-                            render()
-                        }
-                    })
-            }
-            add(text(ctx, t("Свой стиль", "Own style"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val ask = edit(t("Опишите стиль: например «тёмное стекло, мятный акцент, для подкаста сбоку»", "Describe it: e.g. “dark glass, mint accent, side panel for a podcast”"), multiline = true)
-            button(t("✨ Создать стиль по описанию (ИИ)", "✨ Make a style from a description (AI)"), primary = true) {
-                val text = ask.text.toString().trim()
-                if (text.isEmpty()) {
-                    toast(t("Опишите стиль", "Describe the style"))
-                    return@button
-                }
-                dismiss()
-                createStyle(text)
-            }
-            button(t("📥 Вставить стиль JSON из буфера", "📥 Paste a style JSON"), style = BtnStyle.TEXT) {
-                val clip = getSystemService(android.content.ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }
-                    ?.getItemAt(0)?.coerceToText(this@StudioActivity)?.toString().orEmpty()
-                val st = SchemeStyles.fromJson(clip)
-                if (st == null) toast(t("В буфере нет JSON стиля", "No style JSON in the clipboard"))
-                else {
-                    dismiss()
-                    saveStyle(st, emptyList())
-                }
-            }
-            button(t("ℹ Правила хорошей инфографики", "ℹ Rules of good infographics"), style = BtnStyle.TEXT) {
-                showText(t("Правила", "Rules"), SchemeStyles.RULES.replace("; ", ";\n") + "\n\n" + SchemeStyles.PROTOCOL)
-            }
-        }
-    }
-
-    /** Checks the numbers of the rules (contrast, backdrop), saves the style under a free id and makes it current. */
-    private fun saveStyle(st0: SchemeStyle, notes: List<String>) {
-        val (st, fixes) = SchemeStyles.enforce(st0)
-        val taken = SchemeStyles.list(styleDir).map { it.id }.toSet()
-        val id = SchemeStyles.freeId(st.name.ifBlank { "style" }, taken).let { if (it == "style" || it.startsWith("style")) "s" + java.lang.Long.toString(System.currentTimeMillis(), 36) else it }
-        val saved = st.copy(id = id, builtIn = false)
-        SchemeStyles.save(styleDir, saved)
-        StudioPrefs.schemeStyle = saved.id
-        board = emptyList()
-        render()
-        val msg = (notes + fixes).joinToString("\n") { "• $it" }
-        if (msg.isNotEmpty()) showText(t("Стиль «${saved.name}»", "Style \"${saved.name}\""), msg) else toast(t("Стиль сохранён", "Style saved"))
-    }
-
-    private fun createStyle(ask: String) {
-        if (busy.isNotEmpty()) return
-        busy = "style"
-        cancel = false
-        render()
-        job("style", {
-            aiJson("studio_scheme_style", mapOf("ask" to ask, "lang" to aiLang(), "rules" to SchemeStyles.RULES, "protocol" to SchemeStyles.PROTOCOL),
-                "You are a motion designer of video infographics. Answer with JSON only.", 900, fast = true) { reply ->
-                SchemeStyles.fromJson(reply)?.let { st ->
-                    val notes = runCatching {
-                        val o = org.json.JSONObject(reply.trim().removePrefix("```json").removePrefix("```").removeSuffix("```").trim())
-                        o.optJSONArray("notes")?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotEmpty() }.take(3) }.orEmpty()
-                    }.getOrDefault(emptyList())
-                    st to notes
-                }
-            }
-        }, { e ->
-            busy = ""
-            render()
-            if (e !is java.util.concurrent.CancellationException) err(e)
-        }) { (st, notes) ->
-            busy = ""
-            saveStyle(st, notes)
-        }
+    /**
+     * The schemes mode is on and the scenes have none: the AI composes them — at once when the user chose the
+     * schemes ([explicit], a manual relay is fine then), before the build only with a connected AI.
+     */
+    private fun composeIfNeeded(explicit: Boolean, then: (() -> Unit)? = null): Boolean {
+        val sc = script
+        val ai = if (explicit) hasAi() else Provider.active() != null
+        if (sc == null || busy.isNotEmpty() || currentPlan() == null ||
+            !StudioOverlay.needCompose(StudioPrefs.over, ai, sc.scenes.count { it.scheme != null }, StudioPrefs.schemesTried, schemesKey())) return false
+        StudioPrefs.schemesTried = schemesKey()
+        composeSchemes(StudioPrefs.schemeWish, then)
+        return true
     }
 
     /** Schemes of the current scenes with the words they cover: they survive a new direction ([StudioScheme.carry]). */
@@ -3288,7 +3150,7 @@ class StudioActivity : LumenBase() {
         if (busy.isNotEmpty()) return run { then?.invoke() }
         val ranges = sc0.scenes.indices.map { i -> plan.times.firstOrNull { it.scene == i }?.words ?: IntRange.EMPTY }
         val vars = mapOf(
-            "format" to formatText(), "lang" to aiLang(), "max" to StudioScheme.maxSchemes(sc0.scenes.size).toString(),
+            "format" to formatText(), "lang" to aiLang(), "max" to StudioPrefs.over.maxSchemes(sc0.scenes.size).toString(),
             "wish" to if (wish.isNotEmpty()) "Пожелание автора: $wish" else "", "protocol" to StudioScheme.PROTOCOL,
             "scenes" to StudioScheme.scenesBlock(sc0.scenes, words, ranges)
         )
@@ -3451,10 +3313,9 @@ class StudioActivity : LumenBase() {
     private fun autoFinish() {
         if (!autoAll) return
         autoAll = false
-        val schemes = podcastAuto && Provider.active() != null && script?.scenes?.none { it.scheme != null } == true
         podcastAuto = false
-        // a podcast also gets AI info-schemes before the build
-        if (schemes) composeSchemes("") { renderVideo() } else renderVideo()
+        // with «🧩 Инфосхемы» the AI composes them before the build (renderVideo does it)
+        renderVideo()
     }
 
     // ---------- step 4: video ----------
@@ -3462,6 +3323,8 @@ class StudioActivity : LumenBase() {
     /** Starts the build in [StudioService]: it goes on with the screen closed or the phone locked. */
     private fun renderVideo() {
         val sc = script ?: return
+        // «🧩 Инфосхемы» chosen and none made for this script yet: the AI composes them first, then the build goes on
+        if (composeIfNeeded(explicit = false) { renderVideo() }) return
         if (StudioPrefs.liveEmoji && busy.isEmpty()) {
             val need = StudioLiveEmoji.used(sc).filter { !StudioLottie.file(emojiDir, it).exists() && !StudioLottie.missing(emojiDir, it).exists() }.toSet()
             if (need.isNotEmpty()) {

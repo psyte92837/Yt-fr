@@ -81,6 +81,14 @@ class StudioMixActivity : LumenBase() {
         var subs: Boolean
             get() = p.getBoolean("studio_mix_subs", false)
             set(v) = p.edit().putBoolean("studio_mix_subs", v).apply()
+        /** What goes over the video: subtitles or info-schemes with options ([StudioOverlay]); null = not chosen yet. */
+        var over: StudioOverlay?
+            get() = StudioOverlay.parse(p.getString("studio_mix_over", null))
+            set(v) = p.edit().putString("studio_mix_over", v?.toJson()?.toString()).apply()
+        /** Storyboard the AI was last asked to compose schemes for (it is not asked again by itself). */
+        var schemesTried: String
+            get() = p.getString("studio_mix_schemes_tried", "") ?: ""
+            set(v) = p.edit().putString("studio_mix_schemes_tried", v).apply()
         var seed: Long
             get() = p.getLong("studio_mix_seed", 1)
             set(v) = p.edit().putLong("studio_mix_seed", v).apply()
@@ -1054,7 +1062,6 @@ class StudioMixActivity : LumenBase() {
                     chip(ctx, if (it.locked) t("Открепить", "Unpin") else t("📌 Закрепить", "📌 Pin"), it.locked) { put(it.copy(locked = !it.locked)) },
                     chip(ctx, t("⧉ Дубль", "⧉ Duplicate")) { applyEdit(StudioMix.duplicate(items, i), i) },
                     StudioMix.halves(items, i)?.let { h -> chip(ctx, t("✂ Пополам", "✂ In halves")) { applyEdit(h, i) } },
-                    if (it.scheme != null) chip(ctx, t("🧩 Убрать схему", "🧩 Remove scheme")) { put(it.copy(scheme = null)) } else null,
                     chip(ctx, t("✕ Удалить", "✕ Delete")) {
                         dismiss()
                         change(items.filterIndexed { k, _ -> k != i }, t("Кадр удалён", "Frame deleted"))
@@ -1200,20 +1207,9 @@ class StudioMixActivity : LumenBase() {
                 }
             )
         }
-        val schemes = items.count { it.scheme != null }
-        // what is added, as chips: a tap removes it (one place instead of separate "✕ Remove" buttons)
-        val added = listOfNotNull(
-            if (schemes > 0) chip(ctx, t("🧩 схем: $schemes  ✕", "🧩 schemes: $schemes  ✕")) {
-                if (busy.isEmpty() && !rendering()) change(items.map { it.copy(scheme = null) }, t("Схемы убраны", "Schemes removed"))
-            }.apply { contentDescription = t("Убрать схемы", "Remove schemes") } else null,
-            if (Prefs.subs && words.isNotEmpty()) chip(ctx, t("💬 субтитры  ✕", "💬 subtitles  ✕")) {
-                if (busy.isEmpty() && !rendering()) {
-                    Prefs.subs = false
-                    render()
-                }
-            }.apply { contentDescription = t("Убрать субтитры", "Remove subtitles") } else null
-        )
-        if (added.isNotEmpty()) chips(added)
+        val ov = over()
+        if (busy.isEmpty() && !rendering()) StudioOverlayUi.block(this, ov, mixWhere(), { setOver(it) }) { overSheet() }
+        else muted(StudioOverlayUi.summary(ov, mixWhere()))
         progress("schemes", t("ИИ составляет схемы…", "AI composes schemes…"))
         progress("subs", t("Распознавание речи…", "Recognising speech…"))
         if (rendering()) {
@@ -1225,11 +1221,11 @@ class StudioMixActivity : LumenBase() {
         if (!voice) button(t("🎙 Записать озвучку (необязательно)", "🎙 Record a voice-over (optional)"), style = BtnStyle.TONAL) { startVoice() }
         spinner(t("Язык озвучки, субтитров и схем (общий со Студией)", "Language of the voice-over, subtitles and schemes (shared with the Studio)"),
             Studio.VOICE_LANGS.map { it to Studio.langName(it) }, lang()) { StudioPrefs.voiceLang = it }
-        if (items.any { it.marked }) check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
-        row(
-            btn(ctx, if (schemes > 0) t("🧩 Схемы заново", "🧩 Schemes again") else t("🧩 Схемы", "🧩 Schemes"), style = BtnStyle.TONAL) { addSchemes() },
-            btn(ctx, t("💬 Субтитры", "💬 Subtitles"), style = BtnStyle.TONAL) { addSubs() }
-        )
+        // subtitles follow the voice-over: recognised once, by a tap (the recogniser may need the network)
+        if (ov.subs && words.isEmpty()) {
+            if (voice) button(t("💬 Распознать речь для субтитров", "💬 Recognise the speech for subtitles"), style = BtnStyle.TONAL) { addSubs() }
+            else muted(t("Субтитры появятся по вашей озвучке — запишите её выше.", "Subtitles come from your voice-over — record it above."))
+        }
         muted(t("Сохраняется в Галерею → Фильмы/Lumen. Озвучка не обязательна.", "Saved to Gallery → Movies/Lumen. A voice-over is optional."))
         val video = lastVideo()
         val fresh = video != null && Prefs.videoSig == StudioMix.signature(items, Prefs.format)
@@ -1399,7 +1395,8 @@ class StudioMixActivity : LumenBase() {
         val ranges = if (words.isEmpty()) items.map { IntRange.EMPTY } else StudioMix.wordsIn(words, times0)
         val times = StudioMix.times(items, ranges)
         val chosen = StudioMix.chosen(items, Prefs.onlyMarked).toSet()
-        val subs = Prefs.subs && words.isNotEmpty()
+        val ov = over()
+        val subs = ov.subs && words.isNotEmpty()
         val caps = ranges.mapIndexed { i, r -> if (subs && i in chosen && !r.isEmpty()) Studio.captions(words, r, maxWords = 1) else emptyList() }
         val notes = notes()
         val scenes = items.mapIndexed { i, it ->
@@ -1408,8 +1405,10 @@ class StudioMixActivity : LumenBase() {
         }
         return StudioPlan(
             script = SScript("", scenes), words = words, times = times, captions = caps, totalMs = StudioMix.totalMs(items),
-            style = StudioStyle.VIDEO, accent = StudioPrefs.accent, overlay = true, zooms = false, transitions = false,
-            clipScenes = items.indices.toSet(), layers = StudioLayers.ALL
+            style = StudioStyle.VIDEO, accent = StudioPrefs.accent, overlay = ov.overlay(), zooms = false, transitions = false,
+            clipScenes = items.indices.toSet(), layers = if (ov.schemes) StudioLayers.ALL else StudioLayers.SUBS, overScale = ov.overScale(),
+            schemeStyle = SchemeStyles.PRESETS.firstOrNull { it.id == ov.look && it.id != SchemeStyles.AUTO }?.let { StudioOverlay.style(it, ov.bg, ov.schemePlace()) },
+            schemePlace = ov.schemePlace(), blockBg = ov.bg
         )
     }
 
@@ -1423,6 +1422,8 @@ class StudioMixActivity : LumenBase() {
             toast(t("Уже собирается другое видео Студии", "Another Studio video is being built"))
             return
         }
+        // «🧩 Инфосхемы» chosen and none made for this storyboard yet: the AI composes them, then the build goes on
+        if (!forRecording && composeIfNeeded(false) { build(false, mute) }) return
         val ready = readyClips()
         if (items.isEmpty() || ready.isEmpty()) return
         val plan = plan()
@@ -1653,10 +1654,11 @@ class StudioMixActivity : LumenBase() {
     }
 
     /** The AI writes info-schemes for the chosen elements (by the voice-over words or the clip notes). */
-    private fun addSchemes() {
+    private fun addSchemes(then: (() -> Unit)? = null) {
         val sel = StudioMix.chosen(items, Prefs.onlyMarked)
         if (sel.isEmpty()) {
             toast(t("Отметьте элементы на раскадровке", "Tick elements on the storyboard"))
+            then?.invoke()
             return
         }
         val ranges = if (words.isEmpty()) items.map { IntRange.EMPTY } else StudioMix.wordsIn(words, StudioMix.times(items))
@@ -1668,8 +1670,8 @@ class StudioMixActivity : LumenBase() {
         else t("горизонтального видео-микса 16:9", "a horizontal 16:9 video mix")
         val vars = mapOf(
             "format" to format, "lang" to Studio.langName(lang()),
-            "max" to (if (Prefs.onlyMarked) sel.size.coerceAtMost(12) else StudioScheme.maxSchemes(sel.size)).toString(),
-            "wish" to "", "protocol" to StudioScheme.PROTOCOL,
+            "max" to (if (Prefs.onlyMarked) sel.size.coerceAtMost(12) else over().maxSchemes(sel.size)).toString(),
+            "wish" to StudioPrefs.schemeWish.let { if (it.isNotEmpty()) "Пожелание автора: $it" else "" }, "protocol" to StudioScheme.PROTOCOL,
             "scenes" to StudioScheme.scenesBlock(scenes, words, selRanges)
         )
         busy = "schemes"
@@ -1695,7 +1697,7 @@ class StudioMixActivity : LumenBase() {
             busy = ""
             if (isDestroyed) return@run
             render()
-            err(e)
+            if (then != null && e !is java.util.concurrent.CancellationException) then() else err(e)
         }, { cancel = true }) { found ->
             // the storyboard may have changed meanwhile: schemes go to their elements by key
             val now = if (mixFile.exists()) StudioMix.fromJson(mixFile.readText()) else items
@@ -1703,7 +1705,61 @@ class StudioMixActivity : LumenBase() {
             busy = ""
             if (isDestroyed) return@run
             render()
-            toast(if (found.isEmpty()) t("ИИ не нашёл, что показать схемой", "AI found nothing to show as a scheme") else t("Схем: ${found.size}. Соберите видео", "Schemes: ${found.size}. Build the video"))
+            toast(if (found.isEmpty()) t("ИИ не нашёл, что показать схемой", "AI found nothing to show as a scheme")
+            else if (then != null) t("Схем: ${found.size}", "Schemes: ${found.size}") else t("Схем: ${found.size}. Соберите видео", "Schemes: ${found.size}. Build the video"))
+            then?.invoke()
+        }
+    }
+
+    // ---------- what goes over the video: subtitles or info-schemes (lumen.overlay) ----------
+
+    /** The choice of this mix; before it was made — as the old buttons left it (schemes if there are any). */
+    private fun over(): StudioOverlay = Prefs.over ?: items.any { it.scheme != null }.let { has ->
+        StudioOverlay(mode = if (has) StudioOverlay.SCHEMES else StudioOverlay.SUBS, subsToo = !has || Prefs.subs)
+    }
+
+    private fun mixWhere() = StudioOverlayUi.Where(video = true, cartoon = false, schemes = items.count { it.scheme != null }, working = busy.isNotEmpty())
+
+    private fun setOver(n: StudioOverlay) {
+        val was = over()
+        Prefs.over = n
+        render()
+        if (n.schemes && !was.schemes) composeIfNeeded(true)
+    }
+
+    private fun hasAi() = Provider.active() != null || Relay.mode != "off"
+
+    /** Schemes chosen and the storyboard has none: the AI composes them (at once on the choice, before a build only with a connected AI). */
+    private fun composeIfNeeded(explicit: Boolean, then: (() -> Unit)? = null): Boolean {
+        val key = StudioMix.signature(items, Prefs.format)
+        val ai = if (explicit) hasAi() else Provider.active() != null
+        if (busy.isNotEmpty() || items.isEmpty() || !StudioOverlay.needCompose(over(), ai, items.count { it.scheme != null }, Prefs.schemesTried, key)) return false
+        Prefs.schemesTried = key
+        addSchemes(then)
+        return true
+    }
+
+    private fun overSheet() {
+        val have = items.count { it.scheme != null }
+        StudioOverlayUi.sheet(this, over(), mixWhere(), { n ->
+            Prefs.over = n
+            render()
+        }) { dismiss ->
+            if (items.any { it.marked }) check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
+            add(text(ctx, t("Пожелание к схемам (необязательно)", "A wish for the schemes (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val wish = edit(t("например: больше сравнений, без пирамид", "e.g. more comparisons, no pyramids"), StudioPrefs.schemeWish)
+            if (hasAi() && items.isNotEmpty()) button(if (have > 0) t("🔄 Составить схемы заново", "🔄 Compose the schemes again") else t("🧩 Составить схемы", "🧩 Compose the schemes"),
+                style = BtnStyle.TONAL) {
+                StudioPrefs.schemeWish = wish.text.toString().trim()
+                dismiss()
+                Prefs.schemesTried = StudioMix.signature(items, Prefs.format)
+                addSchemes()
+            }
+            if (have > 0) button(t("Убрать схемы ИИ ($have)", "Remove the AI schemes ($have)"), style = BtnStyle.TEXT) {
+                StudioPrefs.schemeWish = wish.text.toString().trim()
+                dismiss()
+                change(items.map { it.copy(scheme = null) }, t("Схемы убраны", "Schemes removed"))
+            }
         }
     }
 

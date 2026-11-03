@@ -100,6 +100,11 @@ object Settings {
         get() = p.getBoolean("report_ch_links", false)
         set(v) = p.edit().putBoolean("report_ch_links", v).apply()
 
+    /** On-device AI agents (Gemini via Android AppFunctions, Android 16+) may read projects. */
+    var agentAccess: Boolean
+        get() = p.getBoolean("agent_access", true)
+        set(v) = p.edit().putBoolean("agent_access", v).apply()
+
     var taskStuckMin: Int
         get() = p.getInt("task_stuck_min", TaskHealth.DEFAULT_MIN)
         set(v) = p.edit().putInt("task_stuck_min", v).apply()

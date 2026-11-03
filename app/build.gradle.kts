@@ -31,6 +31,11 @@ kotlin {
     jvmToolchain(21)
 }
 
+// Lumen: AppFunctions XML for Android 16 (v1) next to the v2 one for Android 17+
+ksp {
+    arg("appfunctions:generateV1Xml", "true")
+}
+
 configure<ApplicationExtension> {
     compileSdk {
         version = release(NEWPIPE_VERSION_SDK_COMPILE_MAJOR) {
@@ -353,6 +358,9 @@ dependencies {
 
     // Lumen Studio: Lottie for animated emoji in the videos
     implementation(libs.lottie)
+    // Lumen: Android AppFunctions (on-device agents, Android 16+); KSP generates LumenAgentService + XML
+    implementation(libs.androidx.appfunctions)
+    ksp(libs.androidx.appfunctions.compiler)
 
     // Debugging and memory leak detection
     debugImplementation(libs.squareup.leakcanary.watcher)

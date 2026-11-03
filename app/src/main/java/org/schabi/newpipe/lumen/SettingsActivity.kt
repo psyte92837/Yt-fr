@@ -193,6 +193,15 @@ class SettingsActivity : LumenBase() {
         c.check(t("Ссылки на каналы в отчётах", "Channel links in reports"), Settings.reportChannelLinks) {
             Settings.reportChannelLinks = it
         }
+        c.h2(t("ИИ-агенты на телефоне", "AI agents on the phone"))
+        c.check(t("Разрешить ИИ-агентам (Gemini и др.) читать проекты", "Let AI agents (Gemini etc.) read projects"), Settings.agentAccess) {
+            Settings.agentAccess = it
+        }
+        c.p(
+            if (android.os.Build.VERSION.SDK_INT >= 36) t("Через Android AppFunctions: агент вызывает функции Lumen на устройстве (список проектов, отчёт, всё собранное, поиск видео, выводы ИИ). Только чтение.", "Via Android AppFunctions: the agent calls Lumen functions on the device (projects, report, collected data, video search, AI insights). Read-only.")
+            else t("Нужен Android 16 или новее (Android AppFunctions).", "Needs Android 16 or newer (Android AppFunctions)."),
+            Type.LABEL, Palette.MUTED,
+        )
         c.h2(t("Уведомления", "Notifications"))
         c.button(t("⚙ Менеджер задач (зависшие, автоостановка)", "⚙ Task manager (hung tasks, auto-stop)"), style = BtnStyle.OUTLINED) { TasksActivity.open(this) }
         c.check(t("Уведомлять о завершении задач (сбор, анализ, граф, озвучка)", "Notify when tasks finish (collection, analysis, graph, speech)"), Settings.notifyDone) {

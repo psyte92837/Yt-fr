@@ -3396,16 +3396,7 @@ class StudioEditorActivity : LumenBase() {
         val cues = EditCaptions.cues(words, size)
         if (cues.isEmpty()) return toast(t("В ролике не нашлось слов", "No words in the video"))
         val (fw, fh) = EditCanvas.frame(p)
-        val portrait = fh >= fw
-        val list = blocks.filterNot { EditCaptions.isSub(it) }.toMutableList()
-        var next = (list.mapNotNull { it.id.removePrefix("b").toIntOrNull() }.maxOrNull() ?: 0) + 1
-        for (c in cues) {
-            val text = if (size == 1) c.text.uppercase() else c.text
-            val ratio = StudioEdit.textRatio(text)
-            val w = StudioEdit.fitWidth(StudioEdit.defaultWidth("text", portrait), ratio, fw, fh)
-            list += StudioEdit.clampTime(EBlock("b" + next++, "text", c.startMs, max(StudioEdit.MIN_MS, c.endMs - c.startMs), x = 0.5f, y = y, w = w,
-                ratio = ratio, animIn = anim, animOut = "none", look = look, text = text, ask = EditCaptions.TAG), total)
-        }
+        val list = EditCaptions.withSubs(blocks, words, size, look, y, anim, fw, fh, total)
         commit(list, null)
         stage?.refresh()
         toast(t("Субтитров: ${cues.size}", "Subtitles: ${cues.size}"))

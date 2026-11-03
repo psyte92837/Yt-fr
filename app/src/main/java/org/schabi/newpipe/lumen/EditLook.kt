@@ -391,6 +391,23 @@ object EditCaptions {
 
     fun isSub(b: EBlock): Boolean = b.kind == "text" && b.ask == TAG
 
+    /**
+     * [blocks] with the subtitles made again from [words]: [size] words a caption (one word in capitals), caption
+     * look [look], height [y] (fraction), entrance [anim], on a [fw]×[fh] frame of a [totalMs] long video.
+     */
+    fun withSubs(blocks: List<EBlock>, words: List<SWord>, size: Int, look: String, y: Float, anim: String, fw: Int, fh: Int, totalMs: Long): List<EBlock> {
+        val list = blocks.filterNot { isSub(it) }.toMutableList()
+        var next = (list.mapNotNull { it.id.removePrefix("b").toIntOrNull() }.maxOrNull() ?: 0) + 1
+        for (c in cues(words, size)) {
+            val text = if (size == 1) c.text.uppercase() else c.text
+            val ratio = StudioEdit.textRatio(text)
+            val w = StudioEdit.fitWidth(StudioEdit.defaultWidth("text", fh >= fw), ratio, fw, fh)
+            list += StudioEdit.clampTime(EBlock("b" + next++, "text", c.startMs, maxOf(StudioEdit.MIN_MS, c.endMs - c.startMs), x = 0.5f, y = y, w = w,
+                ratio = ratio, animIn = anim, animOut = "none", look = look, text = text, ask = TAG), totalMs)
+        }
+        return list
+    }
+
     private fun endsSentence(w: String) = w.trimEnd().lastOrNull()?.let { it in ".!?…" } == true
 
     /** Captions of at most [maxWords] words and [maxMs]; a pause over [gapMs] or a sentence end starts a new one. */

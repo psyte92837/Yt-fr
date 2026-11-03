@@ -1249,9 +1249,54 @@ class StudioMixActivity : LumenBase() {
                 btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioMixActivity, video, false, video.name, "video/mp4") },
                 iconBtn(ctx, "⋯") { videoMore(video) }.apply { contentDescription = t("Ещё: копия в папку, другой ИИ", "More: a copy to a folder, another AI") }
             )
-            button(t("✏️ Доработать в Редакторе", "✏️ Finish in the Editor"), style = BtnStyle.TONAL) {
-                StudioEditorActivity.open(this@StudioMixActivity, video, words)
-            }
+            row(
+                btn(ctx, t("✨ Оформить", "✨ Style it"), style = BtnStyle.TONAL) { lookSheet(video) }.apply {
+                    contentDescription = t("Оформить как в Редакторе: тема, субтитры, плашки", "Style it like the Editor: theme, subtitles, plates")
+                },
+                btn(ctx, t("✏️ В Редактор", "✏️ To the Editor"), style = BtnStyle.TEXT) { StudioEditorActivity.open(this@StudioMixActivity, video, words) }
+            )
+        }
+    }
+
+    /**
+     * "✨ Style it": the look of the Editor in one step — a theme (colours, font, plates), subtitles by the words of the
+     * voice-over and the plate opacity; the video opens as an Editor project with all of it, ready to export or edit.
+     */
+    private fun lookSheet(video: File) = bottomSheet(t("✨ Оформить как в Редакторе", "✨ Style it like the Editor")) { dismiss ->
+        val p = Lumen.prefs
+        var theme = p.getString("studio_mix_look_theme", "glass") ?: "glass"
+        var subs = p.getInt("studio_mix_look_subs", if (words.isNotEmpty()) 3 else 0)
+        var place = p.getInt("studio_mix_look_place", 0).coerceIn(0, EditCaptions.PLACES.lastIndex)
+        var plate = p.getInt("studio_mix_look_plate", -1)
+        add(text(ctx, t("Тема", "Theme"), Type.LABEL, bold = true, color = Palette.MUTED), 0)
+        add(choiceChips(ctx, EditThemes.PRESETS.map { it.id to it.name }, theme) { theme = it }, 4)
+        add(text(ctx, t("Субтитры", "Subtitles"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        if (words.isEmpty()) muted(t("Нужна озвучка с расшифровкой («💬 Субтитры» выше) — иначе без субтитров.", "A voice-over with recognised words is needed (\"💬 Subtitles\" above) — otherwise none."))
+        else {
+            add(choiceChips(ctx, listOf(0 to t("Нет", "None"), 1 to t("По слову", "Word by word"), 3 to t("3 слова", "3 words"), 6 to t("Строка", "A line")), subs) { subs = it }, 4)
+            add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("Центр", "Centre"), 2 to t("Вверху", "Top")), place) { place = it }, 4)
+        }
+        add(text(ctx, t("Плашки под текстом", "Plates under the text"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(-1 to t("Как в теме", "As the theme"), 0 to t("Нет", "None"), 40 to t("Лёгкие", "Light"), 70 to t("Средние", "Medium"), 100 to t("Плотные", "Solid")), plate) { plate = it }, 4)
+        button(t("✨ Открыть оформленным", "✨ Open styled"), primary = true) {
+            p.edit().putString("studio_mix_look_theme", theme).putInt("studio_mix_look_subs", subs).putInt("studio_mix_look_place", place)
+                .putInt("studio_mix_look_plate", plate).apply()
+            dismiss()
+            val ws = words
+            val app = applicationContext
+            toast(t("Готовлю проект Редактора…", "Preparing the Editor project…"))
+            Lumen.async({
+                var pr = StudioEditStore.create(app, video, ws)
+                val th0 = EditThemes.preset(theme) ?: EditThemes.PRESETS.first()
+                val th = if (plate >= 0) th0.copy(plateAlpha = plate, plate = if (plate == 0) "none" else th0.plate.takeIf { it != "none" } ?: "solid") else th0
+                val (fw, fh) = EditCanvas.frame(pr)
+                var blocks = pr.blocks
+                if (subs > 0 && ws.isNotEmpty()) blocks = EditCaptions.withSubs(blocks, ws, subs, if (th.plate == "none") "shadow" else "plate",
+                    EditCaptions.PLACES[place], if (subs == 1) "pop" else "fade", fw, fh, pr.durMs)
+                pr = pr.copy(blocks = EditThemes.apply(blocks, th), theme = EditThemes.json(th).toString())
+                StudioEditStore.save(app, pr)
+                pr
+            }, { e -> if (!isDestroyed) err(e) }) { pr -> if (!isDestroyed) StudioEditorActivity.openProject(this@StudioMixActivity, pr.id) }
         }
     }
 

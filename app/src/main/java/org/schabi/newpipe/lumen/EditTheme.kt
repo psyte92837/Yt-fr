@@ -124,7 +124,7 @@ object EditThemes {
         val mo = o.optJSONObject("motion") ?: JSONObject()
         val fx = o.optJSONObject("fx") ?: JSONObject()
         fun one(v: String, ok: Collection<String>, d: String) = ok.firstOrNull { it.equals(v.trim(), ignoreCase = true) } ?: d
-        val font = ty.optString("family").trim().let { f -> if (f.startsWith("file:")) f else one(f, SchemeStyles.FONTS, base.font) }
+        val font = ty.optString("family").trim().let { f -> if (f.startsWith("file:") || LumenFonts.of(f) != null) f else one(f, SchemeStyles.FONTS, base.font) }
         return EditTheme(
             o.optString("id").trim().ifEmpty { "t" + Integer.toHexString(body.hashCode() and 0xFFFFFF) }.take(24),
             o.optString("name").trim().ifEmpty { "Тема" }.take(30),
@@ -192,12 +192,15 @@ object EditThemes {
     fun toLook(t: EditTheme): BlockLook = BlockLook(t.plate, t.plateAlpha, t.accent, t.font, t.upper, if (t.scale != 1f) t.scale else 0f, t.radius, t.stroke > 0f, t.shadow)
 
     /** The CSS font family of a theme font. */
-    fun cssFont(f: String): String = when {
+    fun cssFont(f0: String): String {
+        val f = LumenFonts.generic(f0)
+        return when {
         f.startsWith("file:") -> "LumenBrand, sans-serif"
         f == "serif" -> "serif"
         f == "mono" -> "monospace"
         f == "condensed" -> "sans-serif-condensed, sans-serif"
         else -> "sans-serif"
+        }
     }
 
     /** data.theme of an animation (lumen.anim v1.1): colours as CSS, the rest as numbers and words. */

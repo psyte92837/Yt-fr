@@ -1268,6 +1268,8 @@ class StudioMixActivity : LumenBase() {
         var subs = p.getInt("studio_mix_look_subs", if (words.isNotEmpty()) 3 else 0)
         var place = p.getInt("studio_mix_look_place", 0).coerceIn(0, EditCaptions.PLACES.lastIndex)
         var plate = p.getInt("studio_mix_look_plate", -1)
+        var font = p.getString("studio_mix_look_font", "") ?: ""
+        var motion = p.getString("studio_mix_look_motion", "karaoke") ?: ""
         add(text(ctx, t("Тема", "Theme"), Type.LABEL, bold = true, color = Palette.MUTED), 0)
         add(choiceChips(ctx, EditThemes.PRESETS.map { it.id to it.name }, theme) { theme = it }, 4)
         add(text(ctx, t("Субтитры", "Subtitles"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -1275,12 +1277,16 @@ class StudioMixActivity : LumenBase() {
         else {
             add(choiceChips(ctx, listOf(0 to t("Нет", "None"), 1 to t("По слову", "Word by word"), 3 to t("3 слова", "3 words"), 6 to t("Строка", "A line")), subs) { subs = it }, 4)
             add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("Центр", "Centre"), 2 to t("Вверху", "Top")), place) { place = it }, 4)
+            add(text(ctx, t("Движение по словам", "Motion by the words"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            add(choiceChips(ctx, LumenFonts.motions(), motion) { motion = it }, 4)
         }
+        add(text(ctx, t("Шрифт", "Font"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(LumenFonts.chips(ctx, font) { font = it }, 4)
         add(text(ctx, t("Плашки под текстом", "Plates under the text"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         add(choiceChips(ctx, listOf(-1 to t("Как в теме", "As the theme"), 0 to t("Нет", "None"), 40 to t("Лёгкие", "Light"), 70 to t("Средние", "Medium"), 100 to t("Плотные", "Solid")), plate) { plate = it }, 4)
         button(t("✨ Открыть оформленным", "✨ Open styled"), primary = true) {
             p.edit().putString("studio_mix_look_theme", theme).putInt("studio_mix_look_subs", subs).putInt("studio_mix_look_place", place)
-                .putInt("studio_mix_look_plate", plate).apply()
+                .putInt("studio_mix_look_plate", plate).putString("studio_mix_look_font", font).putString("studio_mix_look_motion", motion).apply()
             dismiss()
             val ws = words
             val app = applicationContext
@@ -1288,11 +1294,12 @@ class StudioMixActivity : LumenBase() {
             Lumen.async({
                 var pr = StudioEditStore.create(app, video, ws)
                 val th0 = EditThemes.preset(theme) ?: EditThemes.PRESETS.first()
-                val th = if (plate >= 0) th0.copy(plateAlpha = plate, plate = if (plate == 0) "none" else th0.plate.takeIf { it != "none" } ?: "solid") else th0
+                val th1 = if (font.isNotEmpty()) th0.copy(font = font) else th0
+                val th = if (plate >= 0) th1.copy(plateAlpha = plate, plate = if (plate == 0) "none" else th1.plate.takeIf { it != "none" } ?: "solid") else th1
                 val (fw, fh) = EditCanvas.frame(pr)
                 var blocks = pr.blocks
                 if (subs > 0 && ws.isNotEmpty()) blocks = EditCaptions.withSubs(blocks, ws, subs, if (th.plate == "none") "shadow" else "plate",
-                    EditCaptions.PLACES[place], if (subs == 1) "pop" else "fade", fw, fh, pr.durMs)
+                    EditCaptions.PLACES[place], if (subs == 1) "pop" else "fade", fw, fh, pr.durMs, motion, th.font.takeIf { LumenFonts.isBuiltIn(it) }.orEmpty())
                 pr = pr.copy(blocks = EditThemes.apply(blocks, th), theme = EditThemes.json(th).toString())
                 StudioEditStore.save(app, pr)
                 pr

@@ -68,7 +68,11 @@ data class EBlock(
     /** Segments of an animation "intro,loop,outro" in ms (lumen.anim v1.1): any length without a new render. */
     val seg: String = "",
     /** The video blurred under the block while it is shown (0..1), fading with it like [dim]. */
-    val blur: Float = 0f
+    val blur: Float = 0f,
+    /** Motion of a caption by the spoken words ([EditCaptions.MOTIONS]; "" = the whole text at once). */
+    val motion: String = "",
+    /** When each word of the caption is said, ms from the block start (for [motion]). */
+    val wordMs: List<Long> = emptyList()
 ) {
     val endMs: Long get() = startMs + durMs
 }
@@ -593,7 +597,12 @@ object StudioEdit {
             val local = tMs - b.startMs
             ":f" + (if (b.loopMs > 0) (local % b.loopMs) else local) * b.fps / 1000
         } else ""
-        b.id + "@" + b.hashCode() + frame + if (moving) ":$tMs" else ""
+        // a caption moving by its words: redrawn while a word is coming in, otherwise when the said word changes
+        val words = if (b.motion.isNotEmpty() && b.wordMs.isNotEmpty()) {
+            val i = EditCaptions.wordAt(b, tMs)
+            ":w$i" + if (i >= 0 && EditCaptions.wordIn(b, i, tMs) < 1f) ":$tMs" else ""
+        } else ""
+        b.id + "@" + b.hashCode() + frame + words + if (moving) ":$tMs" else ""
     }
 
     /** The video under a block darkens and brightens again this long ([EBlock.dim]). */
@@ -722,6 +731,8 @@ object StudioEdit {
             if (b.emph.isNotEmpty()) put("emph", b.emph)
             if (b.seg.isNotEmpty()) put("seg", b.seg)
             if (b.blur > 0f) put("blur", b.blur.toDouble())
+            if (b.motion.isNotEmpty()) put("motion", b.motion)
+            if (b.wordMs.isNotEmpty()) put("wm", JSONArray(b.wordMs))
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
@@ -743,7 +754,9 @@ object StudioEdit {
             o.optInt("fps", EditInsert.DEFAULT_FPS).coerceIn(1, 60), o.optLong("loop").coerceIn(0L, EditInsert.MAX_ANIM_MS), req,
             o.optString("brief"), EditInsert.lookFrom(o.optJSONObject("over")), f("dim", 0f).coerceIn(0f, 0.6f), o.optBoolean("dimAll"),
             o.optJSONArray("history")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() }.take(3) }.orEmpty(),
-            o.optString("theme"), o.optString("emph").takeIf { it in EMPHS } ?: "", o.optString("seg"), f("blur", 0f).coerceIn(0f, 1f)
+            o.optString("theme"), o.optString("emph").takeIf { it in EMPHS } ?: "", o.optString("seg"), f("blur", 0f).coerceIn(0f, 1f),
+            o.optString("motion").takeIf { it in EditCaptions.MOTIONS } ?: "",
+            o.optJSONArray("wm")?.let { a -> (0 until a.length()).map { a.optLong(it).coerceAtLeast(0) } }.orEmpty()
         )
     }
 

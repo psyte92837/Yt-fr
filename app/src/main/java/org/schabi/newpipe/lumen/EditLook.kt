@@ -387,7 +387,28 @@ object EditCaptions {
     /** Height of the caption centre in the frame: low, middle, high. */
     val PLACES = listOf(0.8f, 0.5f, 0.2f)
 
-    data class Cue(val text: String, val startMs: Long, val endMs: Long)
+    /** A caption: its text, time and when each of its words is said (absolute ms). */
+    data class Cue(val text: String, val startMs: Long, val endMs: Long, val wordStarts: List<Long> = emptyList())
+
+    /**
+     * Motion of a caption by the spoken words: karaoke (said words in the accent), word (words appear as said),
+     * bounce (the word being said jumps up larger), box (a plate of the accent under the word being said),
+     * wave (each word rises into place as it is said).
+     */
+    val MOTIONS = listOf("", "karaoke", "word", "bounce", "box", "wave")
+
+    /** Index of the word said at [tMs] of block [b] (−1 before the first one); −1 without word times. */
+    fun wordAt(b: EBlock, tMs: Long): Int {
+        if (b.wordMs.isEmpty()) return -1
+        val at = tMs - b.startMs
+        return b.wordMs.indexOfLast { it <= at }
+    }
+
+    /** How far word [i] of [b] is into its entrance at [tMs] (0..1 over [ms]). */
+    fun wordIn(b: EBlock, i: Int, tMs: Long, ms: Long = 220): Float {
+        val s = b.wordMs.getOrNull(i) ?: return 1f
+        return ((tMs - b.startMs - s).toFloat() / ms).coerceIn(0f, 1f)
+    }
 
     fun isSub(b: EBlock): Boolean = b.kind == "text" && b.ask == TAG
 
@@ -395,7 +416,8 @@ object EditCaptions {
      * [blocks] with the subtitles made again from [words]: [size] words a caption (one word in capitals), caption
      * look [look], height [y] (fraction), entrance [anim], on a [fw]×[fh] frame of a [totalMs] long video.
      */
-    fun withSubs(blocks: List<EBlock>, words: List<SWord>, size: Int, look: String, y: Float, anim: String, fw: Int, fh: Int, totalMs: Long): List<EBlock> {
+    fun withSubs(blocks: List<EBlock>, words: List<SWord>, size: Int, look: String, y: Float, anim: String, fw: Int, fh: Int, totalMs: Long,
+                 motion: String = "", font: String = ""): List<EBlock> {
         val list = blocks.filterNot { isSub(it) }.toMutableList()
         var next = (list.mapNotNull { it.id.removePrefix("b").toIntOrNull() }.maxOrNull() ?: 0) + 1
         for (c in cues(words, size)) {
@@ -403,7 +425,9 @@ object EditCaptions {
             val ratio = StudioEdit.textRatio(text)
             val w = StudioEdit.fitWidth(StudioEdit.defaultWidth("text", fh >= fw), ratio, fw, fh)
             list += StudioEdit.clampTime(EBlock("b" + next++, "text", c.startMs, maxOf(StudioEdit.MIN_MS, c.endMs - c.startMs), x = 0.5f, y = y, w = w,
-                ratio = ratio, animIn = anim, animOut = "none", look = look, text = text, ask = TAG), totalMs)
+                ratio = ratio, animIn = if (motion.isNotEmpty() && size > 1) "fade" else anim, animOut = "none", look = look, text = text, ask = TAG,
+                over = if (font.isNotEmpty()) BlockLook(font = font) else null,
+                motion = if (size > 1 || motion == "bounce") motion else "", wordMs = c.wordStarts.map { it - c.startMs }), totalMs)
         }
         return list
     }
@@ -430,7 +454,7 @@ object EditCaptions {
             val start = g.first().startMs
             val next = groups.getOrNull(i + 1)?.first()?.startMs ?: Long.MAX_VALUE
             val end = max(g.last().endMs, start + minMs).coerceAtMost(next).coerceAtLeast(start + 1)
-            out += Cue(g.joinToString(" ") { it.text.trim() }, start, end)
+            out += Cue(g.joinToString(" ") { it.text.trim() }, start, end, g.map { it.startMs })
         }
         return out
     }

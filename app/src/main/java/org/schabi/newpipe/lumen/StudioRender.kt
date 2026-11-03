@@ -1224,6 +1224,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     private fun face(font: String, bold: Boolean): Typeface = faces.getOrPut("$font$bold") {
         val st = if (bold) Typeface.BOLD else Typeface.NORMAL
+        if (LumenFonts.isBuiltIn(font)) return@getOrPut LumenFonts.typeface(font) ?: Typeface.create(Typeface.SANS_SERIF, st)
         when (font) {
             "condensed" -> Typeface.create("sans-serif-condensed", st)
             "serif" -> Typeface.create(Typeface.SERIF, st)

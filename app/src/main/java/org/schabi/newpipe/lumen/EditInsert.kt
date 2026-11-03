@@ -1069,7 +1069,7 @@ v1.1 (необязательно, но лучше):
         return st.copy(
             fill = when (o.fill) { "none" -> "none"; "glass", "semi" -> "glass"; "solid", "full" -> "solid"; else -> st.fill },
             accent = o.accent ?: st.accent,
-            font = o.font.takeIf { it in SchemeStyles.FONTS } ?: st.font,
+            font = o.font.takeIf { it in SchemeStyles.FONTS || LumenFonts.of(it) != null } ?: st.font,
             upper = o.upper ?: st.upper,
             textScale = if (o.textScale > 0f) st.textScale * o.textScale else st.textScale,
             radius = when (o.radius) { "none" -> 0f; "s" -> 0.08f; "m" -> 0.14f; "l" -> 0.24f; else -> st.radius },

@@ -2917,9 +2917,32 @@ class StudioEditorActivity : LumenBase() {
                 if (b.kind == "scheme") lastStyle = v
                 stage?.refresh()
             })
+            var font = b.over?.font.orEmpty()
+            var motion = b.motion
+            if (b.kind == "text") {
+                label(this, t("Шрифт", "Font"))
+                add(LumenFonts.chips(ctx, font) { v ->
+                    font = v
+                    change(b.id) { it.copy(over = (it.over ?: BlockLook()).copy(font = v).takeIf { o -> !o.isEmpty }) }
+                    stage?.refresh()
+                })
+                if (b.wordMs.isNotEmpty()) {
+                    label(this, t("Движение по словам", "Motion by the words"))
+                    add(choiceChips(ctx, LumenFonts.motions(), motion) { v ->
+                        motion = v
+                        change(b.id) { it.copy(motion = v) }
+                        stage?.refresh()
+                    })
+                }
+            }
             if (blocks.count { it.kind == b.kind } > 1) button(t("Применить ко всем таким блокам", "Apply to all blocks of this kind"), style = BtnStyle.TEXT) {
                 dismiss()
-                commit(blocks.map { if (it.kind == b.kind) it.copy(look = chosen) else it })
+                commit(blocks.map {
+                    if (it.kind != b.kind) it
+                    else if (b.kind == "text") it.copy(look = chosen, over = (it.over ?: BlockLook()).copy(font = font).takeIf { o -> !o.isEmpty },
+                        motion = if (it.wordMs.isNotEmpty()) motion else it.motion)
+                    else it.copy(look = chosen)
+                })
                 stage?.refresh()
             }
         }
@@ -3385,6 +3408,8 @@ class StudioEditorActivity : LumenBase() {
         var look = prefs.getString("studio_subs_look", "plate").takeIf { it in StudioEdit.TEXT_LOOKS } ?: "plate"
         var place = prefs.getInt("studio_subs_place", 0).coerceIn(0, EditCaptions.PLACES.lastIndex)
         var anim = prefs.getString("studio_subs_anim", "pop").takeIf { it in StudioEdit.ANIMS } ?: "pop"
+        var motion = prefs.getString("studio_subs_motion", "karaoke").takeIf { it in EditCaptions.MOTIONS } ?: ""
+        var font = prefs.getString("studio_subs_font", "lf:montserrat").takeIf { it.isEmpty() || LumenFonts.of(it) != null } ?: ""
         val has = blocks.count { EditCaptions.isSub(it) }
         bottomSheet(t("💬 Автосубтитры", "💬 Auto subtitles")) { dismiss ->
             muted(if (words.isEmpty()) t("Речь ролика ещё не распознана: распознаю на телефоне (Android 13+), затем поставлю субтитры.",
@@ -3399,11 +3424,15 @@ class StudioEditorActivity : LumenBase() {
             add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("По центру", "Middle"), 2 to t("Вверху", "Top")), place) { place = it })
             label(this, t("Появление", "Entrance"))
             add(choiceChips(ctx, listOf("pop" to animName("pop"), "fade" to animName("fade"), "none" to animName("none")), anim) { anim = it })
+            label(this, t("Движение по словам", "Motion by the words"))
+            add(choiceChips(ctx, LumenFonts.motions(), motion) { motion = it })
+            label(this, t("Шрифт", "Font"))
+            add(LumenFonts.chips(ctx, font) { font = it })
             button(if (has > 0) t("Пересоздать субтитры", "Re-make the subtitles") else t("Создать субтитры", "Make subtitles"), primary = true) {
                 prefs.edit().putInt("studio_subs_words", size).putString("studio_subs_look", look).putInt("studio_subs_place", place)
-                    .putString("studio_subs_anim", anim).apply()
+                    .putString("studio_subs_anim", anim).putString("studio_subs_motion", motion).putString("studio_subs_font", font).apply()
                 dismiss()
-                val go = { makeSubs(size, look, EditCaptions.PLACES[place], anim) }
+                val go = { makeSubs(size, look, EditCaptions.PLACES[place], anim, motion, font) }
                 if (words.isEmpty()) recognizeSpeech(p, go) else go()
             }
             if (has > 0) button(t("Убрать субтитры ($has)", "Remove the subtitles ($has)"), style = BtnStyle.TEXT) {
@@ -3418,12 +3447,12 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun makeSubs(size: Int, look: String, y: Float, anim: String) {
+    private fun makeSubs(size: Int, look: String, y: Float, anim: String, motion: String = "", font: String = "") {
         val p = project ?: return
         val cues = EditCaptions.cues(words, size)
         if (cues.isEmpty()) return toast(t("В ролике не нашлось слов", "No words in the video"))
         val (fw, fh) = EditCanvas.frame(p)
-        val list = EditCaptions.withSubs(blocks, words, size, look, y, anim, fw, fh, total)
+        val list = EditCaptions.withSubs(blocks, words, size, look, y, anim, fw, fh, total, motion, font)
         commit(list, null)
         stage?.refresh()
         toast(t("Субтитров: ${cues.size}", "Subtitles: ${cues.size}"))
@@ -3895,6 +3924,12 @@ class StudioEditorActivity : LumenBase() {
                     startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*"), REQ_THEME_IMG)
                 }
             )
+            label(this, t("Шрифт ролика — надписи, схемы, вставки", "Font of the video — captions, schemes, inserts"))
+            add(LumenFonts.chips(ctx, cur?.font?.takeIf { LumenFonts.isBuiltIn(it) }.orEmpty()) { v ->
+                val base = cur ?: EditThemes.PRESETS.first()
+                dismiss()
+                applyTheme(base.copy(font = v.ifEmpty { "sans" }), true)
+            })
             button(t("🔤 Свой шрифт (.ttf, .otf)", "🔤 Own font (.ttf, .otf)"), style = BtnStyle.TEXT) {
                 dismiss()
                 @Suppress("DEPRECATION")

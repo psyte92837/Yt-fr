@@ -180,19 +180,19 @@ object Export {
             sb.append("## ").append(t("Что рекомендует YouTube", "What YouTube recommends")).append("\n\n")
             RecEngine.ranked(rg, "hits").take(10).forEachIndexed { i, n ->
                 sb.append(i + 1).append(". [").append(n.title.replace("]", ")")).append("](").append(n.url).append(") — ")
-                    .append(n.channel).append(", ×").append(n.hits).append(", ").append(t("шаг ", "step ")).append(n.depth).append('\n')
+                    .append(ChLink.md(n.channel, n.channelUrl)).append(", ×").append(n.hits).append(", ").append(t("шаг ", "step ")).append(n.depth).append('\n')
             }
             sb.append('\n')
         }
         sb.append("## ").append(t("Топ каналов", "Top channels")).append("\n\n| # | ").append(t("Канал", "Channel"))
             .append(" | ").append(t("Видео", "Videos")).append(" | ").append(t("Просмотры", "Views")).append(" |\n|---|---|---|---|\n")
         Analytics.topChannels(vids, "videos", 15).forEachIndexed { i, c ->
-            sb.append("| ").append(i + 1).append(" | ").append(c.name.replace("|", "/")).append(" | ").append(c.videos).append(" | ").append(Fmt.num(c.views)).append(" |\n")
+            sb.append("| ").append(i + 1).append(" | ").append(ChLink.md(c.name.replace("|", "/"), c.url)).append(" | ").append(c.videos).append(" | ").append(Fmt.num(c.views)).append(" |\n")
         }
         sb.append("\n## ").append(t("Топ видео по просмотрам", "Top videos by views")).append("\n\n")
         Analytics.topVideos(vids, "views", 15).forEachIndexed { i, v ->
             sb.append(i + 1).append(". [").append(v.title.replace("]", ")")).append("](").append(v.url).append(") — ")
-                .append(v.channel).append(", ").append(Fmt.num(v.views)).append("\n")
+                .append(ChLink.md(v.channel, v.channelUrl)).append(", ").append(Fmt.num(v.views)).append("\n")
         }
         sb.append("\n## ").append(t("Быстрорастущие", "Fastest growing")).append("\n\n")
         Analytics.topVideos(vids, "velocity", 10).forEachIndexed { i, v ->

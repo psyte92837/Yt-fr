@@ -304,7 +304,7 @@ object CustomReport {
             .append(", avg ").append(s.avgViews).append(", comments ").append(s.comments)
         if (s.firstMs > 0) sb.append(", period ").append(Fmt.date(s.firstMs)).append(" — ").append(Fmt.date(s.lastMs))
         sb.append("\n\nTop channels:\n")
-        Analytics.topChannels(vids, "views", 10).forEach { sb.append("- ").append(it.name).append(": ").append(it.videos).append(" videos, ").append(it.views).append(" views\n") }
+        Analytics.topChannels(vids, "views", 10).forEach { sb.append("- ").append(ChLink.plain(it.name, it.url)).append(": ").append(it.videos).append(" videos, ").append(it.views).append(" views\n") }
         sb.append("\nTop videos:\n")
         val top = Analytics.topVideos(vids, "views", 15)
         top.forEach { sb.append("- ").append(it.title).append(" | ").append(it.channel).append(" | ").append(it.views).append(" views | ").append(Fmt.date(it.uploadMs)).append('\n') }

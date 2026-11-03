@@ -247,10 +247,11 @@ object GraphReport {
                 listOfNotNull(
                     if (n.views > 0) "👥 " + Fmt.num(n.views) else null,
                     t("шаг ", "step ") + n.depth,
-                    n.uploadText.takeIf { it.isNotBlank() }
+                    n.uploadText.takeIf { it.isNotBlank() },
+                    n.url.takeIf { ChLink.on && it.startsWith("http") }
                 ).joinToString(" · ")
             } else {
-                listOfNotNull(n.channel.takeIf { it.isNotBlank() }, if (n.views >= 0) "👁 " + Fmt.num(n.views) else null, t("шаг ", "step ") + n.depth).joinToString(" · ")
+                listOfNotNull(n.channel.takeIf { it.isNotBlank() }?.let { ChLink.plain(it, n.channelUrl) }, if (n.views >= 0) "👁 " + Fmt.num(n.views) else null, t("шаг ", "step ") + n.depth).joinToString(" · ")
             }
         }
         if (s.topPr.isNotEmpty()) {

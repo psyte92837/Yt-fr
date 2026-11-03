@@ -30,7 +30,9 @@ object Artifacts {
         /** Everything else the project holds: AI results and analysis data (graphs, niches, topic, language game…). */
         val extras: Boolean = false,
         /** Characters per extra file; a bigger one is cut with a note. */
-        val extraMax: Int = 400_000
+        val extraMax: Int = 400_000,
+        /** Link next to a channel name (setting "Channel links in reports"). */
+        val channelLinks: Boolean = false
     )
 
     /** One more collected thing: [section] "ai" (an AI result) or "data" (a project file). */
@@ -180,7 +182,7 @@ object Artifacts {
         src.videos.forEachIndexed { i, v ->
             h(3, (i + 1).toString() + ". " + one(v.title.ifBlank { v.id }))
             out.append("- ссылка: ").append(v.url.ifBlank { "https://www.youtube.com/watch?v=" + v.id }).append('\n')
-            if (v.channel.isNotBlank()) out.append("- канал: ").append(one(v.channel)).append('\n')
+            if (v.channel.isNotBlank()) out.append("- канал: ").append(if (plain) ChLink.plain(one(v.channel), v.channelUrl, o.channelLinks) else ChLink.md(one(v.channel), v.channelUrl, o.channelLinks)).append('\n')
             val date = if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText
             if (date.isNotBlank()) out.append("- дата: ").append(date).append('\n')
             val nums = listOfNotNull(
@@ -414,7 +416,9 @@ object Artifacts {
             out.append("<div class=\"card\" id=\"v").append((i + 1).toString()).append("\"><h3>").append((i + 1).toString()).append(". <a href=\"").append(esc(url)).append("\">")
                 .append(esc(one(v.title.ifBlank { v.id }))).append("</a></h3><div class=\"meta\">")
             val date = if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText
-            out.append(esc(listOf(v.channel, date).filter { it.isNotBlank() }.joinToString(" · "))).append("<br>").append(esc(stats(v, cm.size))).append("</div>")
+            val chHtml = if (o.channelLinks && v.channel.isNotBlank() && v.channelUrl.startsWith("http"))
+                "<a href=\"" + esc(v.channelUrl) + "\">" + esc(v.channel) + "</a>" else esc(v.channel)
+            out.append(listOf(chHtml, esc(date)).filter { it.isNotBlank() }.joinToString(" · ")).append("<br>").append(esc(stats(v, cm.size))).append("</div>")
             if (v.tags.isNotEmpty()) out.append("<div class=\"tags\">").append(v.tags.joinToString("") { "<span>#" + esc(it) + "</span>" }).append("</div>")
             if (o.descriptions && v.description.isNotBlank()) out.append("<details><summary>Описание</summary><div class=\"pre\">").append(esc(v.description.trim())).append("</div></details>")
             if (o.transcripts) src.transcript(v.id)?.takeIf { it.isNotBlank() }?.let {
@@ -467,7 +471,7 @@ object Artifacts {
     var opts: Opts
         get() = Lumen.prefs.let {
             Opts(it.getBoolean("art_comments", true), it.getBoolean("art_transcripts", true), it.getBoolean("art_desc", true),
-                it.getBoolean("art_authors", false), it.getInt("art_max_comments", 0), it.getBoolean("art_extras", true))
+                it.getBoolean("art_authors", false), it.getInt("art_max_comments", 0), it.getBoolean("art_extras", true), channelLinks = ChLink.on)
         }
         set(v) = Lumen.prefs.edit().putBoolean("art_comments", v.comments).putBoolean("art_transcripts", v.transcripts)
             .putBoolean("art_desc", v.descriptions).putBoolean("art_authors", v.authors).putInt("art_max_comments", v.maxComments)
@@ -521,7 +525,7 @@ object Artifacts {
         src.videos.forEachIndexed { i, v ->
             val cm = counts[v.id].orEmpty()
             val date = if (v.uploadMs > 0) Fmt.date(v.uploadMs) else v.uploadText
-            out += ReportKit.Section("${i + 1}. " + LangGame.clip(v.title.ifBlank { v.id }, 140), listOf(v.channel, date).filter { it.isNotBlank() }.joinToString(" · "))
+            out += ReportKit.Section("${i + 1}. " + LangGame.clip(v.title.ifBlank { v.id }, 140), listOf(ChLink.plain(v.channel, v.channelUrl, o.channelLinks && v.channel.isNotBlank()), date).filter { it.isNotBlank() }.joinToString(" · "))
             val head = StringBuilder(stats(v, cm.size))
             head.append("\n").append(v.url.ifBlank { "https://www.youtube.com/watch?v=" + v.id })
             if (v.tags.isNotEmpty()) head.append("\n").append(v.tags.take(25).joinToString(" ") { "#" + it.replace(' ', '_') })
@@ -606,7 +610,8 @@ private fun LumenBase.artifactsOptions(project: Project, f: Artifacts.Format) {
         .show()
 }
 
-private fun LumenBase.artifactsShare(project: Project, f: Artifacts.Format, o: Artifacts.Opts) {
+private fun LumenBase.artifactsShare(project: Project, f: Artifacts.Format, opts: Artifacts.Opts) {
+    val o = opts.copy(channelLinks = ChLink.on)
     val base = ReportKit.safeName(project.name) + if (o.extras && f != Artifacts.Format.PDF && f != Artifacts.Format.PNG) "-all" else "-artifacts"
     val subject = project.name + t(" — артефакты", " — artifacts")
     bgTask(t("Файл артефактов", "Artifacts file"), {

@@ -189,6 +189,10 @@ class SettingsActivity : LumenBase() {
         c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер NewPipe", "Analytics + NewPipe player")), Settings.mode) {
             Settings.mode = it
         }
+        c.h2(t("Отчёты", "Reports"))
+        c.check(t("Ссылки на каналы в отчётах", "Channel links in reports"), Settings.reportChannelLinks) {
+            Settings.reportChannelLinks = it
+        }
         c.h2(t("Уведомления", "Notifications"))
         c.button(t("⚙ Менеджер задач (зависшие, автоостановка)", "⚙ Task manager (hung tasks, auto-stop)"), style = BtnStyle.OUTLINED) { TasksActivity.open(this) }
         c.check(t("Уведомлять о завершении задач (сбор, анализ, граф, озвучка)", "Notify when tasks finish (collection, analysis, graph, speech)"), Settings.notifyDone) {

@@ -448,10 +448,13 @@ object AuditMath {
         r.perStep.forEach { s ->
             sb.append("| ${s.step} | ${s.n} | ${fmt2(s.similarity)} | ${pct(s.onTopic)} | ${short(s.medianViews)} | ${if (s.medianAgeDays < 0) "—" else s.medianAgeDays} | ${pct(s.shorts)} | ${pct(s.newChannels)} |\n")
         }
+        val chUrls = if (!ChLink.on) emptyMap<String, String>() else run.walks.flatMap { w -> w.steps.map { it.item } + w.seed }
+            .filter { it.channel.isNotBlank() && it.channelUrl.isNotBlank() }.associate { it.channel to it.channelUrl }
+        fun ch(name: String) = ChLink.md(name, chUrls[name].orEmpty())
         fun list(h: String, l: List<AuditCount>, video: Boolean) {
             if (l.isEmpty()) return
             sb.append("\n## ").append(h).append("\n")
-            l.forEach { sb.append("- ").append(if (video) "${it.title} — ${it.channel}" else it.title).append(" · ").append(it.count).append(" (").append(pct(it.share)).append(")\n") }
+            l.forEach { sb.append("- ").append(if (video) "${it.title} — ${ch(it.channel)}" else ch(it.title)).append(" · ").append(it.count).append(" (").append(pct(it.share)).append(")\n") }
         }
         list(t("Каналы, куда ведёт алгоритм", "Channels the algorithm leads to"), r.topChannels, false)
         list(t("Аттракторы (видео в нескольких прогулках)", "Attractors (videos in several walks)"), r.attractors, true)
@@ -459,7 +462,7 @@ object AuditMath {
         sb.append("\n## ").append(t("Прогулки", "Walks")).append("\n")
         run.walks.forEachIndexed { i, w ->
             sb.append("\n").append(i + 1).append(". ").append(w.seed.title.ifBlank { w.seed.id }).append("\n")
-            w.steps.forEachIndexed { j, s -> sb.append("   ${j + 1}. [#${s.rank + 1}] ${s.item.title} — ${s.item.channel}\n") }
+            w.steps.forEachIndexed { j, s -> sb.append("   ${j + 1}. [#${s.rank + 1}] ${s.item.title} — ${ChLink.md(s.item.channel, s.item.channelUrl)}\n") }
             if (w.end != "done") sb.append("   — ").append(w.end).append('\n')
         }
         return sb.toString()

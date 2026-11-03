@@ -114,7 +114,7 @@ object DossierReport {
                 subs?.let { "👥 " + Fmt.num(it) },
                 t("видео в проекте: ", "videos in project: ") + g.videos.size,
                 "👁 " + Fmt.num(g.views)
-            ).joinToString(" · ")
+            ).joinToString(" · ") + (if (ChLink.on && g.url.startsWith("http")) "\n" + g.url else "")
             out += ChannelHeader(gi + 1, g.name, meta)
             val c = cards[g.key]
             if (c != null) {

@@ -66,6 +66,25 @@ object Lumen {
 }
 
 /** Settings asked in the first-run wizard and editable later. */
+/** Channel name for reports, with a link when the setting is on. Pure with an explicit [on]. */
+object ChLink {
+    val on: Boolean get() = runCatching { Settings.reportChannelLinks }.getOrDefault(false)
+
+    /** Markdown: "[Name](url)"; just the name when off or without url. */
+    fun md(name: String, url: String, on: Boolean = this.on): String {
+        val u = url.trim()
+        if (!on || !u.startsWith("http")) return name
+        return "[" + name.ifBlank { u }.replace("[", "(").replace("]", ")") + "](" + u.replace(" ", "%20").replace(")", "%29") + ")"
+    }
+
+    /** Plain text: "Name (url)"; just the name when off or without url. */
+    fun plain(name: String, url: String, on: Boolean = this.on): String {
+        val u = url.trim()
+        if (!on || !u.startsWith("http")) return name
+        return if (name.isBlank()) u else "$name ($u)"
+    }
+}
+
 object Settings {
     private val p get() = Lumen.prefs
 
@@ -74,6 +93,11 @@ object Settings {
         set(v) = p.edit().putString("lang", v).apply()
 
     /** Minutes without progress after which a task is stopped (0 = never). */
+    /** Reports that mention channels also give a link to the channel. */
+    var reportChannelLinks: Boolean
+        get() = p.getBoolean("report_ch_links", false)
+        set(v) = p.edit().putBoolean("report_ch_links", v).apply()
+
     var taskStuckMin: Int
         get() = p.getInt("task_stuck_min", TaskHealth.DEFAULT_MIN)
         set(v) = p.edit().putInt("task_stuck_min", v).apply()

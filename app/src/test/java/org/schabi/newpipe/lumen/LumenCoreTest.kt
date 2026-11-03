@@ -507,4 +507,16 @@ class QuickAndChannelsTest {
         val p = Project(name = "n", source = "https://youtu.be/x", sourceType = "video")
         assertEquals(p, Project.from(JSONObject(p.toJson().toString())))
     }
+
+    @Test
+    fun channelLinkOptional() {
+        val u = "https://www.youtube.com/channel/UC1"
+        assertEquals("Ch", ChLink.md("Ch", u, false))
+        assertEquals("[Ch](https://www.youtube.com/channel/UC1)", ChLink.md("Ch", u, true))
+        assertEquals("[a(b)](https://www.youtube.com/channel/UC1)", ChLink.md("a[b]", u, true))
+        assertEquals("Ch", ChLink.md("Ch", "", true))
+        assertEquals("Ch ($u)", ChLink.plain("Ch", u, true))
+        assertEquals(u, ChLink.plain("", u, true))
+        assertEquals("Ch", ChLink.plain("Ch", u, false))
+    }
 }

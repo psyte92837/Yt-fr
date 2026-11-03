@@ -4,13 +4,11 @@
  */
 package org.schabi.newpipe.lumen
 
-import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -19,22 +17,17 @@ import android.media.MediaMetadataRetriever
 import android.os.Bundle
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import org.json.JSONObject
-import java.io.ByteArrayInputStream
 import java.io.File
-import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CancellationException
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+
+
+private typealias LayerError = CanvasHost.LayerError
 
 /**
  * Studio tab "🎛 Montage": the hand editor ([StudioEditorActivity]) and the second renderer (lumen.canvas v1,
@@ -58,7 +51,6 @@ class WebLayerActivity : LumenBase() {
         }
     }
 
-    private class LayerError(msg: String) : Exception(msg)
 
     private val dir by lazy { dir(this) }
     private val store by lazy { LayerStore(File(dir, "layers")) }
@@ -82,8 +74,7 @@ class WebLayerActivity : LumenBase() {
     private var result: File? = null
     private var savedAs = ""
     private var statusView: TextView? = null
-    private var web: WebView? = null
-    private var pageReady: (() -> Unit)? = null
+    private val host by lazy { CanvasHost(this) }
 
     private var full: Boolean
         get() = Lumen.prefs.getBoolean("weblayer_full", false)
@@ -112,11 +103,7 @@ class WebLayerActivity : LumenBase() {
 
     override fun onDestroy() {
         cancel = true
-        web?.let { w ->
-            (w.parent as? ViewGroup)?.removeView(w)
-            w.destroy()
-        }
-        web = null
+        host.destroy()
         super.onDestroy()
     }
 
@@ -305,61 +292,17 @@ class WebLayerActivity : LumenBase() {
 
     // ---------- WebView ----------
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun webView(): WebView = web ?: WebView(this).also { w ->
-        w.settings.javaScriptEnabled = true
-        w.settings.blockNetworkLoads = true
-        w.settings.allowFileAccess = false
-        w.settings.allowContentAccess = false
-        w.settings.domStorageEnabled = false
-        w.settings.cacheMode = WebSettings.LOAD_NO_CACHE
-        w.setBackgroundColor(Color.TRANSPARENT)
-        w.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
-
-            // nothing leaves the phone: every request except inline data is answered empty
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                if (request.url.scheme == "data") null else WebResourceResponse("text/plain", "utf-8", ByteArrayInputStream(ByteArray(0)))
-
-            override fun onPageFinished(view: WebView, url: String?) {
-                pageReady?.invoke()
-                pageReady = null
-            }
-        }
-        web = w
-    }
+    private fun webView(): WebView = host.view()
 
     /** Runs [script] on the main thread; the returned function waits (worker thread) for its result. */
-    private fun jsAsync(script: String): () -> String? {
-        val q = ArrayBlockingQueue<String>(1)
-        runOnUiThread {
-            val w = web
-            if (w == null) q.offer("null") else w.evaluateJavascript(script) { q.offer(it ?: "null") }
-        }
-        return { q.poll(30, TimeUnit.SECONDS) }
-    }
+    private fun jsAsync(script: String): () -> String? = host.jsAsync(script)
 
     /** Loads the page with [layerCode] and calls init(data); throws [LayerError] on a broken layer (worker thread). */
-    private fun load(layerCode: String, d: JSONObject) {
-        val latch = CountDownLatch(1)
-        val html = WebLayer.page(layerCode, d.optInt("w"), d.optInt("h"))
-        runOnUiThread {
-            pageReady = { latch.countDown() }
-            webView().loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
-        }
-        if (!latch.await(20, TimeUnit.SECONDS)) throw LayerError(t("страница слоя не загрузилась", "the layer page did not load"))
-        val r = jsAsync("__lumen.init(" + d.toString() + ")")() ?: throw LayerError(t("WebView не ответил", "The WebView gave no answer"))
-        val s = runCatching { org.json.JSONArray("[$r]").getString(0) }.getOrDefault(r)
-        if (s != "OK") throw LayerError(s.removePrefix("ERR:").ifBlank { t("слой не запустился", "the layer did not start") })
-    }
+    private fun load(layerCode: String, d: JSONObject) = host.load(layerCode, d)
 
-    private fun call(sec: Double) = "__lumen.frame(" + String.format(java.util.Locale.US, "%.4f", sec) + ")"
+    private fun call(sec: Double) = CanvasHost.call(sec)
 
-    private fun overlay(res: String?): Bitmap? = when (val f = WebLayer.frameOf(res)) {
-        is WebLayer.Frame.Empty -> null
-        is WebLayer.Frame.Error -> throw LayerError(f.message)
-        is WebLayer.Frame.Png -> android.util.Base64.decode(f.base64, android.util.Base64.DEFAULT).let { BitmapFactory.decodeByteArray(it, 0, it.size) }
-    }
+    private fun overlay(res: String?): Bitmap? = host.overlay(res)
 
     // ---------- preview, comparison, render ----------
 
@@ -707,7 +650,7 @@ class WebLayerActivity : LumenBase() {
             }, 14f), 8) as TextView
             c.button(t("Остановить", "Stop"), style = BtnStyle.OUTLINED) { cancel = true }
         } else {
-            web?.let { w -> (w.parent as? ViewGroup)?.removeView(w) }
+            host.detach()
             if (idle && v != null && code.isNotBlank()) c.button(t("🎬 Рендер с этим монтажом", "🎬 Render with this montage"), primary = true) { renderVideo() }
         }
         result?.takeIf { it.exists() }?.let { f ->

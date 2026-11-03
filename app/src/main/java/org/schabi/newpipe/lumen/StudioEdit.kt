@@ -46,9 +46,57 @@ data class EBlock(
     val volume: Float = 1f,
     val mainVolume: Float = 1f,
     /** Keyframes of place, size, turn and opacity (see [EditKeys]); empty = the block stands still. */
-    val keys: List<EKey> = emptyList()
+    val keys: List<EKey> = emptyList(),
+    /** Animation: frames per second and the length of one cycle (0 = no loop); [file] = anim/<code>/<render>. */
+    val fps: Int = EditInsert.FPS,
+    val loopMs: Long = 0,
+    /** The mark of a request sent to another AI: the block waits for its answer (see [EditInsert]). */
+    val req: String = "",
+    /** The brief of the insert wizard (JSON of [EditBrief]), to make the block again with the same form. */
+    val brief: String = "",
+    /** The look set by the wizard over the style: plate, its opacity, accent, font… (schemes; null = the style as is). */
+    val over: BlockLook? = null,
+    /** The video darkened under the block (0..0.8): under the block only, or the whole frame with [dimAll]. */
+    val dim: Float = 0f,
+    val dimAll: Boolean = false,
+    /** Earlier answers of the AI (scheme JSON or the animation folder), newest first, at most 3. */
+    val past: List<String> = emptyList()
 ) {
     val endMs: Long get() = startMs + durMs
+
+    /** Waits for the AI: no content yet (a scheme or an animation without its code). */
+    val pending: Boolean get() = (kind == "scheme" && scheme == null) || (kind == EditAnim.KIND && file.isEmpty())
+}
+
+/**
+ * The look of a block set over its style by the insert wizard: plate kind [fill] (none, glass, semi, solid, full)
+ * and its opacity [bgAlpha] (-1 = by the kind), accent, font, case, text scale, corner radius (-1 = style), outline, shadow.
+ */
+data class BlockLook(
+    val fill: String = "", val bgAlpha: Float = -1f, val accent: Int? = null, val font: String = "", val upper: Boolean? = null,
+    val textScale: Float = 1f, val radius: Float = -1f, val border: Boolean? = null, val shadow: Boolean? = null
+) {
+    fun json(): JSONObject = JSONObject().apply {
+        if (fill.isNotEmpty()) put("fill", fill)
+        if (bgAlpha >= 0f) put("bgAlpha", bgAlpha.toDouble())
+        accent?.let { put("accent", it) }
+        if (font.isNotEmpty()) put("font", font)
+        upper?.let { put("upper", it) }
+        if (textScale != 1f) put("textScale", textScale.toDouble())
+        if (radius >= 0f) put("radius", radius.toDouble())
+        border?.let { put("border", it) }
+        shadow?.let { put("shadow", it) }
+    }
+
+    companion object {
+        fun of(o: JSONObject?): BlockLook? {
+            if (o == null) return null
+            fun bool(k: String): Boolean? = if (o.has(k)) o.optBoolean(k) else null
+            return BlockLook(o.optString("fill"), o.optDouble("bgAlpha", -1.0).toFloat(), if (o.has("accent")) o.optInt("accent") else null,
+                o.optString("font"), bool("upper"), o.optDouble("textScale", 1.0).toFloat().coerceIn(0.5f, 2f), o.optDouble("radius", -1.0).toFloat(),
+                bool("border"), bool("shadow")).takeIf { it != BlockLook() }
+        }
+    }
 }
 
 /** A keyframe of a block: [atMs] from its start, its place, width, turn and opacity then. */
@@ -74,7 +122,9 @@ data class EProject(
     val fill: Boolean = false,
     val bg: Int = 0xFF000000.toInt(),
     /** The background of a fitted video is the video itself, enlarged and blurred (instead of [bg]). */
-    val blur: Boolean = false
+    val blur: Boolean = false,
+    /** The style of the video set in the insert wizard (JSON of an [EditBrief] look), for every new block. */
+    val brand: String = ""
 )
 
 /** Look of a block at a moment of its in / out animation: opacity, scale and shift (fractions of the frame). */
@@ -93,7 +143,7 @@ object StudioEdit {
     const val MIN_W = 0.06f
     const val MAX_W = 2f
 
-    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio")
+    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio", "anim")
     val ANIMS = listOf("none", "fade", "pop", "slide", "zoom")
     val TEXT_LOOKS = listOf("plate", "shadow", "accent", "light")
     val IMAGE_LOOKS = listOf("plain", "round", "card", "circle")
@@ -427,7 +477,7 @@ object StudioEdit {
 
     /** Width of a new block as a fraction of the frame width. */
     fun defaultWidth(kind: String, portrait: Boolean): Float = when (kind) {
-        "scheme" -> if (portrait) 0.92f else 0.8f
+        "scheme", "anim" -> if (portrait) 0.92f else 0.8f
         "image" -> if (portrait) 0.8f else 0.5f
         "text" -> if (portrait) 0.86f else 0.62f
         else -> if (portrait) 0.24f else 0.13f
@@ -524,7 +574,7 @@ object StudioEdit {
     fun overlayKey(shown: List<EBlock>, tMs: Long, settle: (EBlock) -> Long): String = shown.joinToString("|") { b ->
         val d = animMs(b)
         val moving = tMs < b.startMs + d || tMs > b.endMs - d || (b.kind == "scheme" && tMs < settle(b)) || b.keys.size > 1
-        b.id + "@" + b.hashCode() + if (moving) ":$tMs" else ""
+        b.id + "@" + b.hashCode() + if (moving) ":$tMs" else if (b.kind == EditAnim.KIND && b.file.isNotEmpty()) ":f" + EditInsert.frameAt(b, tMs) else ""
     }
 
     /** Time left of a job [fraction] done after [elapsedMs]; null while too early to tell. */
@@ -610,20 +660,31 @@ object StudioEdit {
             if (b.srcMs > 0) put("src", b.srcMs)
             if (b.kind == "split" || b.kind == "audio") put("vol", b.volume.toDouble()).put("mainVol", b.mainVolume.toDouble())
             if (b.keys.isNotEmpty()) put("keys", EditKeys.json(b.keys))
+            if (b.kind == EditAnim.KIND) put("fps", b.fps).put("loop", b.loopMs)
+            if (b.req.isNotEmpty()) put("req", b.req)
+            if (b.brief.isNotEmpty()) put("brief", b.brief)
+            b.over?.let { put("over", it.json()) }
+            if (b.dim > 0f) put("dim", b.dim.toDouble()).put("dimAll", b.dimAll)
+            if (b.past.isNotEmpty()) put("past", JSONArray(b.past))
         }
 
     fun blockFrom(o: JSONObject): EBlock? {
         val kind = o.optString("kind")
         if (kind !in KINDS) return null
         val scheme = o.optJSONObject("scheme")?.let { StudioScheme.fromJson(it) }
-        if (kind == "scheme" && scheme == null) return null
+        // a block still waiting for the AI is kept only when it waits for another AI's answer (its mark)
+        if (kind == "scheme" && scheme == null && o.optString("req").isEmpty()) return null
+        if (kind == EditAnim.KIND && o.optString("file").isEmpty() && o.optString("req").isEmpty()) return null
         fun f(k: String, d: Float) = o.optDouble(k, d.toDouble()).toFloat().takeIf { !it.isNaN() } ?: d
         return EBlock(
             o.optString("id").ifEmpty { return null }, kind, max(0L, o.optLong("start")), max(MIN_MS, o.optLong("dur", DEFAULT_MS)),
             f("x", 0.5f), f("y", 0.5f), f("w", 0.6f).coerceIn(MIN_W, MAX_W), f("ratio", 0.6f).coerceIn(0.05f, 20f), f("rot", 0f), f("opacity", 1f).coerceIn(0f, 1f),
             o.optString("in", "pop").takeIf { it in ANIMS } ?: "pop", o.optString("out", "fade").takeIf { it in ANIMS } ?: "fade",
             o.optString("look"), o.optString("text"), o.optString("file"), scheme, o.optString("ask"), max(0L, o.optLong("src")),
-            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f), EditKeys.from(o.optJSONArray("keys"))
+            f("vol", 1f).coerceIn(0f, 2f), f("mainVol", 1f).coerceIn(0f, 2f), EditKeys.from(o.optJSONArray("keys")),
+            o.optInt("fps", EditInsert.FPS).coerceIn(10, 60), max(0L, o.optLong("loop")), o.optString("req"), o.optString("brief"),
+            BlockLook.of(o.optJSONObject("over")), f("dim", 0f).coerceIn(0f, 0.8f), o.optBoolean("dimAll"),
+            o.optJSONArray("past")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() }.take(3) }.orEmpty()
         )
     }
 
@@ -639,6 +700,7 @@ object StudioEdit {
         .apply {
             if (p.clips.isNotEmpty()) put("clips", EditTrack.json(p.clips))
             if (p.ratio.isNotEmpty()) put("ratio", p.ratio).put("fill", p.fill).put("bg", p.bg).put("blur", p.blur)
+            if (p.brand.isNotEmpty()) put("brand", p.brand)
         }
 
     fun fromJson(s: String): EProject? = runCatching {
@@ -649,7 +711,7 @@ object StudioEdit {
         if (w <= 0 || h <= 0) return null
         EProject(o.getString("id"), o.optString("source"), w, h, o.optLong("dur"), blocksFrom(o.optJSONArray("blocks")), o.optLong("created"), o.optString("exported"),
             EditTrack.from(o.optJSONArray("clips")), o.optString("ratio").takeIf { it in EditCanvas.RATIOS } ?: "", o.optBoolean("fill"),
-            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt(), o.optBoolean("blur"))
+            o.optInt("bg", 0xFF000000.toInt()) or 0xFF000000.toInt(), o.optBoolean("blur"), o.optString("brand"))
     }.getOrNull()
 }
 

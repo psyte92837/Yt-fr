@@ -133,8 +133,8 @@ object AnimRender {
 
     /**
      * Renders [code] with [data] into [out] (frames f00000.png… and meta.json written last), [w]×[h] px, [durMs] at
-     * [fps] (one cycle when [loopMs] > 0). Frames already there are kept (a render stopped half way goes on).
-     * Worker thread; [host] must be attached to a window.
+     * [fps] (one cycle when [loopMs] > 0). The folder counts as done only with its meta.json, so a render stopped half
+     * way is simply made again. Worker thread; [host] must be attached to a window.
      */
     fun run(
         host: CanvasHost, code: String, data: JSONObject, w: Int, h: Int, fps: Int, durMs: Long, loopMs: Long, out: File,

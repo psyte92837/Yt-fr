@@ -63,10 +63,11 @@ class StudioEditorActivity : LumenBase() {
         private const val REQ_SPLIT = 7713
         private const val REQ_AUDIO = 7714
         private const val REQ_CLIP = 7715
+        private const val REQ_REF = 7716
 
         private const val TASK = "studioedit:"
         private const val TASK_EXPORT = TASK + "export"
-        private const val TASK_AI = TASK + "ai"
+        internal const val TASK_AI = TASK + "ai"
         private const val TASK_REV = TASK + "reverse"
 
         /** Words of the voice handed over with the video until its project is made. */
@@ -93,9 +94,9 @@ class StudioEditorActivity : LumenBase() {
         )
     }
 
-    private var project: EProject? = null
+    internal var project: EProject? = null
     /** Words of the voice in output time (after cuts and speed changes of the main track). */
-    private var words: List<SWord> = emptyList()
+    internal var words: List<SWord> = emptyList()
     /** The same words in the time of the original video. */
     private var srcWords: List<SWord> = emptyList()
     private var selected: String? = null
@@ -109,17 +110,20 @@ class StudioEditorActivity : LumenBase() {
     /** Blocks before the gesture now going on (for undo). */
     private var gestureBase: String? = null
     private var player: ExoPlayer? = null
-    private var curMs = 0L
+    internal var curMs = 0L
     private var lastSeekAt = 0L
     private var resumed = false
     private var pickFor: String? = null
     private var pickAt = 0L
-    private var lastStyle = SchemeStyles.AUTO
+    internal var lastStyle = SchemeStyles.AUTO
     @Volatile private var cancelExport = false
+    private var staleOk = false
+    /** Animation blocks: renders, the answer of another AI from the clipboard (see [EditAnims]). */
+    internal val anims by lazy { EditAnims(this) }
 
-    private var stage: EditStage? = null
+    internal var stage: EditStage? = null
     private var timeline: EditTimeline? = null
-    private var texture: TextureView? = null
+    internal var texture: TextureView? = null
     // split screen preview: the main video and a second player each in its half of the frame
     private var frameView: FrameLayout? = null
     private var mainBox: FrameLayout? = null
@@ -141,7 +145,7 @@ class StudioEditorActivity : LumenBase() {
     private var blurView: android.widget.ImageView? = null
     private var stillView: android.widget.ImageView? = null
     private var stillOf = -1
-    private var previewBox: FrameLayout? = null
+    internal var previewBox: FrameLayout? = null
     private var topBarView: View? = null
     private var ratioChip: TextView? = null
     private var fullBtn: TextView? = null
@@ -199,12 +203,12 @@ class StudioEditorActivity : LumenBase() {
     private var statusBar: ProgressBar? = null
     private var statusStop: TextView? = null
 
-    private val blocks: List<EBlock> get() = project?.blocks.orEmpty()
-    private val dir: File get() = StudioEditStore.dir(applicationContext, project?.id ?: "none")
-    private val styleDir: File get() = StudioEditStore.styleDir(applicationContext)
+    internal val blocks: List<EBlock> get() = project?.blocks.orEmpty()
+    internal val dir: File get() = StudioEditStore.dir(applicationContext, project?.id ?: "none")
+    internal val styleDir: File get() = StudioEditStore.styleDir(applicationContext)
     private val clips: List<VClip> get() = project?.let { EditTrack.of(it) } ?: emptyList()
     private val total: Long get() = project?.let { outLen(it) } ?: 1L
-    private fun outLen(p: EProject): Long = EditTrack.total(EditTrack.of(p))
+    internal fun outLen(p: EProject): Long = EditTrack.total(EditTrack.of(p))
     private val watcher: () -> Unit = { watch() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -241,7 +245,21 @@ class StudioEditorActivity : LumenBase() {
 
     override fun onDestroy() {
         stopPlayer()
+        anims.destroy()
         super.onDestroy()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // Android lets an app read the clipboard only while it has focus
+        if (hasFocus && project != null) anims.onFocus()
+    }
+
+    /** A sample picture for the insert wizard's brief. */
+    internal fun pickRefImage() {
+        @Suppress("DEPRECATION")
+        runCatching { startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).setType("image/*").addCategory(Intent.CATEGORY_OPENABLE), REQ_REF) }
+            .onFailure { toast(t("Нет приложения для выбора картинки", "No app to pick a picture")) }
     }
 
     @Deprecated("Deprecated in Java")
@@ -557,6 +575,8 @@ class StudioEditorActivity : LumenBase() {
         toolsRow = row
         toolsLine = ctxLine
         st.blocks = EditSplit.overlays(p.blocks)
+        // animations whose frames are missing (a render stopped, a new size) are rendered while the editor is open
+        if (p.blocks.any { it.kind == EditAnim.KIND }) anims.checkLater()
         st.portrait = EditCanvas.frame(p).let { (w, h) -> h > w * 1.1f }
         st.onSelect = { id ->
             pause()
@@ -911,6 +931,36 @@ class StudioEditorActivity : LumenBase() {
                     danger("🗑", t("Удалить", "Delete")) { delete(b.id) }
                 )
             }
+            b != null && b.pending -> {
+                line = blockName(b)
+                listOfNotNull(
+                    done { select(null) },
+                    if (b.req.isNotEmpty()) act("📥", t("Ответ ИИ", "AI answer")) { InsertWizard.open(this, b) } else null,
+                    act("⏱", t("Время", "Timing")) { timingSheet(b) },
+                    act("📐", t("Положение", "Position")) { positionSheet(b.id) },
+                    danger("🗑", t("Удалить", "Delete")) { delete(b.id) }
+                )
+            }
+            b != null && b.kind == EditAnim.KIND -> {
+                line = blockName(b) + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
+                listOf(
+                    done { select(null) },
+                    act("✨", t("Помощник", "Wizard")) { InsertWizard.open(this, b) },
+                    act("◐", t("Прозрач­ность", "Opacity")) { opacitySheet(b) },
+                    act("◑", t("Затемнение", "Darken"), on = b.dim > 0f) { dimSheet(b) },
+                    act("⏱", t("Время", "Timing")) { timingSheet(b) },
+                    act("🎞", t("Анимация", "Animation")) { animSheet(b) },
+                    act("⧉", t("Дубль", "Duplicate")) { duplicate(b.id) },
+                    act("⇤", t("Начало сюда", "Start here")) { change(b.id) { StudioEdit.startAt(it, curMs, total) } },
+                    act("⇥", t("Конец сюда", "End here")) { change(b.id) { StudioEdit.endAt(it, curMs, total) } },
+                    act("◆", t("Ключ", "Keyframe"), on = b.keys.isNotEmpty()) { toggleKey(b) },
+                    act("⬆", t("Выше", "Forward")) { commit(StudioEdit.reorder(blocks, b.id, 1)) },
+                    act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) },
+                    act("📐", t("Положение", "Position")) { positionSheet(b.id) },
+                    act("⟳", t("Перерисовать", "Re-render")) { anims.enqueue(b.id) },
+                    danger("🗑", t("Удалить", "Delete")) { delete(b.id) }
+                )
+            }
             b != null && b.kind == EditMusic.KIND -> {
                 line = blockName(b) + " · " + StudioEdit.secs(b.durMs) + t(" с", " s")
                 listOf(
@@ -945,7 +995,8 @@ class StudioEditorActivity : LumenBase() {
                     add(act("⬇", t("Ниже", "Backward")) { commit(StudioEdit.reorder(blocks, b.id, -1)) })
                     add(act("⊙", t("В центр", "Centre")) { change(b.id) { it.copy(x = 0.5f, y = 0.5f, rot = 0f) } })
                     add(act("📐", t("Положение", "Position")) { positionSheet(b.id) })
-                    if (b.kind == "scheme") add(act("🤖", t("Переделать ИИ", "Redo with AI")) { aiSchemeSheet(b) })
+                    if (b.kind == "scheme") add(act("✨", t("Переделать ИИ", "Redo with AI")) { InsertWizard.open(this@StudioEditorActivity, b) })
+                    if (b.kind == "scheme") add(act("◑", t("Затемнение", "Darken"), on = b.dim > 0f) { dimSheet(b) })
                     if (EditCaptions.isSub(b)) add(act("💬", t("Все субтитры", "All subtitles")) { subsSheet() })
                     add(danger("🗑", t("Удалить", "Delete")) { delete(b.id) })
                 }
@@ -1018,7 +1069,7 @@ class StudioEditorActivity : LumenBase() {
                 line = catName("ai")
                 listOfNotNull(
                     back(),
-                    act("🧩", t("Схема ИИ", "AI scheme")) { aiSchemeSheet(null) },
+                    act("✨", t("Помощник", "Wizard")) { InsertWizard.open(this) },
                     if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null,
                     act("T", t("Надпись ИИ", "AI caption")) { captionSheet(null) },
                     act("🌐", t("Фото ИИ", "AI photo")) { photoSheet(null) }
@@ -1385,7 +1436,7 @@ class StudioEditorActivity : LumenBase() {
         playBtn?.text = if (playing) "⏸" else "▶"
     }
 
-    private fun pause() {
+    internal fun pause() {
         playing = false
         player?.pause()
         player3?.pause()
@@ -1513,22 +1564,23 @@ class StudioEditorActivity : LumenBase() {
         .put("r", project?.ratio.orEmpty()).put("f", project?.fill == true).put("bg", project?.bg ?: 0xFF000000.toInt())
         .put("bl", project?.blur == true).toString()
 
-    private fun setBlocks(list: List<EBlock>) {
+    internal fun setBlocks(list: List<EBlock>) {
         val p = project ?: return
         project = p.copy(blocks = list)
         stage?.blocks = EditSplit.overlays(list)
         timeline?.blocks = list
         splitKey = ""
         layoutSplit()
+        if (list.any { it.kind == EditAnim.KIND }) anims.checkLater()
     }
 
-    private fun save() {
+    internal fun save() {
         val p = project ?: return
         runCatching { StudioEditStore.save(applicationContext, p) }.onFailure { L.w("studio", "edit save: ${it.message}") }
     }
 
     /** A finished change: remembered for undo, saved, the selection kept when the block is still there. */
-    private fun commit(list: List<EBlock>, sel: String? = selected) {
+    internal fun commit(list: List<EBlock>, sel: String? = selected) {
         history.push(snapshot())
         setBlocks(list)
         save()
@@ -1584,7 +1636,7 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun select(id: String?, seek: Boolean = true) {
+    internal fun select(id: String?, seek: Boolean = true) {
         selected = id
         if (id != null && clipSel >= 0) {
             clipSel = -1
@@ -1805,7 +1857,7 @@ class StudioEditorActivity : LumenBase() {
     }
 
     /** A new block at [at] of project [p] (list [list]); its place and size by kind. */
-    private fun newBlock(p: EProject, list: List<EBlock>, kind: String, at: Long, durMs: Long, ratio: Float, build: (EBlock) -> EBlock): EBlock {
+    internal fun newBlock(p: EProject, list: List<EBlock>, kind: String, at: Long, durMs: Long, ratio: Float, build: (EBlock) -> EBlock): EBlock {
         val (s, d) = StudioEdit.placeAt(at, outLen(p), durMs)
         val (fw, fh) = EditCanvas.frame(p)
         val portrait = fh >= fw
@@ -1887,7 +1939,7 @@ class StudioEditorActivity : LumenBase() {
 
     private fun label(c: Col, s: String) = c.add(text(this, s, Type.LABEL, bold = true, color = Palette.MUTED), 12)
 
-    private fun lang(): String = Studio.langName(Studio.voiceLang(StudioPrefs.voiceLang,
+    internal fun lang(): String = Studio.langName(Studio.voiceLang(StudioPrefs.voiceLang,
         EdgeTts.detectLang(words.take(400).joinToString(" ") { it.text }), Settings.lang == "en"))
 
     /** Shape of a scheme block in the frame of [p] (its format). */
@@ -1924,7 +1976,7 @@ class StudioEditorActivity : LumenBase() {
                 muted(sub)
             }
             if (words.isNotEmpty()) item(t("📝 По тексту речи", "📝 From the speech text"), t("выделите фразу — блок встанет ровно на неё", "select a phrase — the block goes exactly on it")) { textSheet() }
-            item(t("🧩 Инфосхема от ИИ", "🧩 AI info-scheme"), t("по словам этого момента и вашему пожеланию", "from the words of this moment and your wish")) { aiSchemeSheet(null) }
+            item(t("✨ Схема или анимация от ИИ", "✨ A scheme or an animation by AI"), t("помощник: что показать, как выглядит, прозрачность, движение — встроенный или другой ИИ", "the wizard: what to show, the look, transparency, motion — the built-in or another AI")) { InsertWizard.open(this@StudioEditorActivity) }
             if (words.isNotEmpty()) item(t("🤖 Схемы на весь ролик", "🤖 Schemes for the whole video"), t("ИИ сам выберет места и поставит схемы", "the AI picks the places and puts schemes there")) { autoSchemes() }
             item(t("✍️ Схема своим текстом", "✍️ Scheme from your text"), t("строки «эмодзи Подпись — значение», без ИИ", "lines \"emoji Label — value\", no AI")) { textSchemeSheet(null) }
             item(t("🖼 Картинка из галереи", "🖼 Picture from the gallery"), t("фото, скриншот, логотип (PNG с прозрачностью тоже)", "a photo, screenshot or logo (transparent PNG too)")) { pickImage(null) }
@@ -1935,94 +1987,6 @@ class StudioEditorActivity : LumenBase() {
             item(t("🎞 Ещё видео в ролик", "🎞 Another video into the track"), t("клип с телефона: в конец или у курсора, как в CapCut", "a clip from the phone: at the end or at the playhead, like CapCut")) { addClipSheet() }
             item(t("🎵 Музыка", "🎵 Music"), t("трек с телефона с этого места; громкость и затухание", "a track from the phone from here; volume and fades")) { pickAudio(null) }
             item(t("⊟ Второе видео рядом", "⊟ A second video beside"), t("разделённый экран: реакция, сравнение", "split screen: a reaction, a comparison")) { pickSplit(null) }
-        }
-    }
-
-    private fun aiSchemeSheet(old: EBlock?, span: IntRange? = null) {
-        pause()
-        val p = project ?: return
-        if (BgTasks.has(TASK_AI)) return toast(t("ИИ уже работает — дождитесь или остановите", "The AI is already working — wait or stop it"))
-        val at = old?.startMs ?: span?.let { StudioEdit.spanOf(words, it, outLen(p)).first } ?: curMs
-        var layout = old?.scheme?.layout ?: "auto"
-        var durMs = 5000L
-        var style = old?.look?.ifEmpty { null } ?: lastStyle
-        bottomSheet(if (old == null) t("🧩 Инфосхема от ИИ", "🧩 AI info-scheme") else t("🤖 Переделать схему", "🤖 Redo the scheme")) { dismiss ->
-            val said = span?.joinToString(" ") { words[it].text } ?: StudioEdit.momentText(words, at, 2000, 10_000)
-            if (span != null) muted(t("Схема встанет на фразу: ", "The scheme goes on the phrase: ") + "«" + said.take(260) + "»")
-            else if (said.isNotBlank()) muted(t("Звучит с ", "Spoken from ") + StudioEdit.clock(at) + ": «" + said.take(260) + "»")
-            else muted(t("У этого видео нет слов с таймингом — опишите, какую схему нарисовать.", "This video has no timed words — describe the scheme to draw."))
-            val wish = edit(t("Что показать (необязательно)", "What to show (optional)"), old?.ask.orEmpty(), multiline = true)
-            label(this, t("Тип схемы", "Scheme type"))
-            add(choiceChips(ctx, listOf("auto" to t("Авто", "Auto")) + StudioScheme.LAYOUTS.map { it to layoutName(it) }, layout) { layout = it })
-            if (old == null && span == null) {
-                label(this, t("Длительность", "Length"))
-                add(choiceChips(ctx, listOf(3000L to "3 с", 5000L to "5 с", 8000L to "8 с", 12_000L to "12 с"), durMs) { durMs = it })
-            }
-            label(this, t("Стиль", "Style"))
-            add(choiceChips(ctx, styles(), style) { style = it })
-            button(t("🤖 Нарисовать", "🤖 Draw"), primary = true) {
-                val w = wish.text.toString().trim()
-                if (said.isBlank() && w.isBlank()) return@button toast(t("Опишите схему", "Describe the scheme"))
-                dismiss()
-                lastStyle = style
-                runAiScheme(p, at, w, layout, durMs, style, old?.id, span)
-            }
-        }
-    }
-
-    private fun runAiScheme(p: EProject, at: Long, wish: String, layout: String, durMs: Long, style: String, replaceId: String?, span: IntRange? = null) {
-        val (numbered, range) = if (span != null) StudioEdit.numbered(words, span) to span else StudioEdit.momentNumbered(words, at)
-        val vars = mapOf(
-            "format" to formatText(p), "lang" to lang(), "at" to StudioEdit.clock(at),
-            "moment" to numbered.ifEmpty { t("(речи с таймингом нет — опирайся на пожелание автора)", "(no timed speech — follow the author's wish)") },
-            "wish" to if (wish.isNotEmpty()) "Пожелание автора: $wish" else "",
-            "layout" to if (layout != "auto") "Тип схемы (layout): $layout." else "Тип схемы (layout) выбери сам по смыслу.",
-            "protocol" to StudioScheme.PROTOCOL
-        )
-        val system = "You are an infographic designer for videos. Answer with JSON only."
-        // a placeholder shows at once where the scheme goes; it can be moved and trimmed while the AI works
-        val ph: EBlock? = if (replaceId == null) {
-            val (st, du) = span?.let { StudioEdit.spanOf(words, it, outLen(p)) } ?: (at to durMs)
-            newBlock(p, blocks, "scheme", st, du, schemeRatio(p)) { it.copy(look = style, ask = wish, animIn = "fade", animOut = "fade") }
-                .also { commit(blocks + it, it.id) }
-        } else null
-        val target = replaceId ?: ph?.id ?: return
-        BgTasks.run(this, TASK_AI, t("Редактор: ИИ рисует схему", "Editor: the AI draws a scheme"), BgTasks.reopen(this), {
-            val prov = AiTasks.requireProvider()
-            val r = Llm.complete(prov, prov.smartModel, system, Prompts.fill("studio_edit_scheme", vars), json = true, maxTokens = 1800,
-                task = "studio_edit_scheme", pid = "studio")
-            var s = StudioEdit.parseScheme(r.text)
-            var pr = StudioScheme.problems(s)
-            if (pr.isNotEmpty()) {
-                BgTasks.progress(TASK_AI, t("Исправляю схему", "Fixing the scheme"))
-                val json = s?.let { StudioScheme.toJson(it).put("scene", 1).toString() } ?: r.text.take(4000)
-                val r2 = Llm.complete(prov, prov.smartModel, system, Prompts.fill("studio_scheme_fix", mapOf(
-                    "errors" to pr.joinToString("; "), "protocol" to StudioScheme.PROTOCOL, "json" to "[$json]"
-                )), json = true, maxTokens = 1800, task = "studio_scheme_fix", pid = "studio")
-                s = StudioEdit.parseScheme(r2.text) ?: s
-                pr = StudioScheme.problems(s)
-            }
-            if (s == null || pr.isNotEmpty()) throw LlmException(t("ИИ не смог составить схему: ", "The AI could not make the scheme: ") + pr.joinToString("; "), r.text)
-            StudioScheme.repair(s, range.takeIf { !it.isEmpty() })
-        }, { e ->
-            // the placeholder goes away (not an undo step)
-            if (ph != null && !isDestroyed && project?.id == p.id) {
-                setBlocks(StudioEdit.remove(blocks, ph.id))
-                save()
-                if (selected == ph.id) select(null, seek = false)
-            }
-            if (!isDestroyed) err(e)
-        }) { s ->
-            deliverTo(p.id) { _, list, onScreen ->
-                when {
-                    list.any { it.id == target } -> list.map { if (it.id == target) it.copy(scheme = s, look = if (replaceId != null) style else it.look, ask = wish) else it }
-                    // the screen was closed: placeholders are not kept in the file, the scheme goes where it was
-                    ph != null && !onScreen -> list + ph.copy(id = StudioEdit.nextId(list), scheme = s)
-                    // deleted while the AI worked
-                    else -> list
-                }
-            }
-            if (!isDestroyed) stage?.refresh()
         }
     }
 
@@ -2167,9 +2131,9 @@ class StudioEditorActivity : LumenBase() {
                 if (r == null) info.text = "" else {
                     val (st, du) = StudioEdit.spanOf(words, r, outLen(p))
                     info.text = StudioEdit.clock(st) + " – " + StudioEdit.clock(st + du) + "  ·  " + r.joinToString(" ") { words[it].text }.take(90)
-                    acts.addView(chip(ctx, t("🧩 Схема ИИ", "🧩 AI scheme")) {
+                    acts.addView(chip(ctx, t("✨ Схема или анимация", "✨ Scheme or animation")) {
                         dismiss()
-                        aiSchemeSheet(null, r)
+                        InsertWizard.open(this@StudioEditorActivity, null, r)
                     })
                     acts.addView(chip(ctx, t("T Надпись", "T Caption")) {
                         dismiss()
@@ -2195,10 +2159,12 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun blockName(b: EBlock): String = when (b.kind) {
-        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + t("ИИ рисует…", "AI drawing…")
+    internal fun blockName(b: EBlock): String = when (b.kind) {
+        "scheme" -> if (b.scheme == null) "🧩 ⏳ " + if (b.req.isNotEmpty()) t("ждёт ответ ИИ #", "waits for the AI #") + b.req else t("ИИ рисует…", "AI drawing…")
         else "🧩 " + (b.scheme.title.takeIf { it.isNotBlank() } ?: b.scheme.nodes.joinToString(" → ") { it.label }.take(40))
         "image" -> "🖼 " + (b.ask.ifBlank { t("Картинка", "Picture") })
+        EditAnim.KIND -> "🎞 " + if (b.file.isEmpty()) "⏳ " + if (b.req.isNotEmpty()) t("ждёт ответ ИИ #", "waits for the AI #") + b.req else t("ИИ пишет…", "AI writing…")
+        else b.text.ifBlank { t("Анимация", "Animation") }
         "text" -> "T " + b.text.replace('\n', ' ').take(40)
         EditSplit.KIND -> "⊟ " + t("Разделённый экран", "Split screen")
         EditMusic.KIND -> (if (b.text.startsWith("🎙")) "" else "🎵 ") + b.text.ifBlank { t("Музыка", "Music") }
@@ -2305,7 +2271,7 @@ class StudioEditorActivity : LumenBase() {
             }
             if (old != null) button(t("🤖 Переделать ИИ", "🤖 Redo with AI"), style = BtnStyle.TEXT) {
                 dismiss()
-                aiSchemeSheet(old)
+                InsertWizard.open(this@StudioEditorActivity, old)
             }
         }
     }
@@ -2411,11 +2377,12 @@ class StudioEditorActivity : LumenBase() {
             REQ_SPLIT -> importSplit(uri)
             REQ_AUDIO -> importAudio(uri)
             REQ_CLIP -> importClip(uri)
+            REQ_REF -> InsertWizard.current?.refPicked(uri)
         }
     }
 
     /** A picture from the phone: scaled to 2048 px at most, turned upright by its EXIF, kept as PNG when it has transparency. */
-    private fun saveImage(uri: Uri, d: File): Pair<String, Float> {
+    internal fun saveImage(uri: Uri, d: File): Pair<String, Float> {
         val cr = applicationContext.contentResolver
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         cr.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, o) }
@@ -2609,7 +2576,8 @@ class StudioEditorActivity : LumenBase() {
     // ---------- block settings ----------
 
     private fun edit(b: EBlock) = when (b.kind) {
-        "scheme" -> textSchemeSheet(b)
+        "scheme" -> if (b.brief.isNotEmpty()) InsertWizard.open(this, b) else textSchemeSheet(b)
+        EditAnim.KIND -> InsertWizard.open(this, b)
         "image" -> imageSheet(b)
         "text" -> captionSheet(b)
         EditSplit.KIND -> splitSheet(b)
@@ -2705,6 +2673,19 @@ class StudioEditorActivity : LumenBase() {
             row(t("Угол", "Angle"), { "${it.rot.roundToInt()}°" }) { b, d -> b.copy(rot = ((b.rot + d * 5f + 540f) % 360f) - 180f) }
             row(t("Начало", "Start"), { StudioEdit.clock(it.startMs) }) { b, d -> b.copy(startMs = (b.startMs + d * 100L).coerceAtLeast(0)) }
             row(t("Длительность", "Duration"), { StudioEdit.clock(it.durMs) }) { b, d -> b.copy(durMs = (b.durMs + d * 100L).coerceAtLeast(300)) }
+        }
+    }
+
+    /** ◑ The video darkened under the block (or over the whole frame) while it is shown, fading with it. */
+    private fun dimSheet(b: EBlock) {
+        bottomSheet(t("◑ Затемнение видео", "◑ Darken the video")) { _ ->
+            muted(t("Видео под блоком темнеет, пока блок на экране, — текст читается на любом кадре.", "The video under the block darkens while the block is shown — the text reads on any frame."))
+            slider(t("Затемнение", "Darkness"), b.dim, 0f, 0.8f, { "${(it * 100).roundToInt()}%" }) { v, up ->
+                StudioEdit.find(blocks, b.id)?.let { live(it.copy(dim = v), up) }
+            }
+            add(choiceChips(ctx, listOf(false to t("Под блоком", "Under the block"), true to t("Весь кадр", "The whole frame")), b.dimAll) { v ->
+                change(b.id) { it.copy(dimAll = v) }
+            }, 12)
         }
     }
 
@@ -3372,9 +3353,18 @@ class StudioEditorActivity : LumenBase() {
         val track = EditTrack.of(p)
         val cut = !EditTrack.plain(track, p.durMs) || EditCanvas.reshaped(p) || p.fill
         val rebuilt = !EditTrack.soundPlain(track, p.durMs) || EditSplit.mixes(p.blocks) || EditMusic.mixes(p.blocks)
-        if (!cut && !rebuilt && p.blocks.none { it.kind != "scheme" || it.scheme != null })
+        if (!cut && !rebuilt && p.blocks.none { !it.pending })
             return toast(t("Пока нечего сохранять: добавьте надпись, музыку, фильтр или разрежьте ролик (✂).", "Nothing to save yet: add a caption, music, a filter or split the video (✂)."))
         pause()
+        val stale = anims.stale(p)
+        if (stale.isNotEmpty() && !staleOk) return confirm(t("Анимации не перерисованы", "Animations are not rendered"),
+            t("${stale.size} анимац. ещё рисуются или не подходят к новой длине/размеру. Перерисовать сейчас (экран должен быть открыт) или экспортировать как есть — растянутыми, а без кадров — без них?",
+                "${stale.size} animation(s) are still rendering or do not fit the new length/size. Re-render now (keep the screen open) or export as they are — stretched, and without frames — left out?"),
+            t("Экспорт как есть", "Export as is")) {
+            staleOk = true
+            exportSheet()
+            staleOk = false
+        }.also { stale.forEach { anims.enqueue(it.id) } }
         val prefs = Lumen.prefs
         var side = prefs.getInt("studio_edit_side", 1920)
         val (ow, oh) = EditCanvas.outSize(p.w, p.h, p.ratio, 1920)

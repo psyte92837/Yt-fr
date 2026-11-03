@@ -98,6 +98,8 @@ data class EditBrief(
     val face: List<Float> = emptyList(),
     /** Where a pointer points: x, y — fractions of the frame. */
     val target: List<Float> = emptyList(),
+    /** The centre of a block put by hand on the mock-up ([place] = custom): x, y — fractions of the frame. */
+    val pos: List<Float> = emptyList(),
     /** top | under */
     val layer: String = ""
 )
@@ -192,10 +194,15 @@ object EditInsert {
             sampleRu = "точки по порядку", sampleEn = "points in order", task = "схема маршрута: точки по порядку соединяются линией, у точек подписи"),
         InsertType("cta", "📣", "Призыв", "Call to action", "anim", fields = listOf("text", "icon"),
             sampleRu = "подписка, ссылка", sampleEn = "subscribe, a link", task = "призыв к действию: яркая кнопка-плашка с иконкой, пульсирует"),
-        InsertType("custom", "✨", "Своё", "Your own", "both", task = "")
+        InsertType("custom", "✨", "Своё", "Your own", "both", task = ""),
+        // not in the gallery: a canvas template of the Montage tab put on a span (see [adaptCanvas])
+        InsertType("montage", "🎛", "Шаблон Монтажа", "Montage template", "anim", task = "")
     )
 
-    fun type(id: String): InsertType = TYPES.firstOrNull { it.id == id } ?: TYPES.last()
+    /** The types offered in the gallery of the wizard. */
+    val GALLERY: List<InsertType> get() = TYPES.filter { it.id != "montage" }
+
+    fun type(id: String): InsertType = TYPES.firstOrNull { it.id == id } ?: TYPES.first { it.id == "custom" }
 
     /** "scheme" or "anim" of a brief: its own choice, else by the type (both → scheme when it has a layout, else anim). */
     fun kindOf(b: EditBrief): String {
@@ -272,7 +279,7 @@ object EditInsert {
     )
 
     /** A recipe: the brief without its content (the type, look, transparency, motion and place stay). */
-    fun recipe(b: EditBrief): EditBrief = b.copy(what = "", items = emptyList(), fields = emptyMap(), title = "", face = emptyList(), target = emptyList(), refImage = "", durMs = 0)
+    fun recipe(b: EditBrief): EditBrief = b.copy(what = "", items = emptyList(), fields = emptyMap(), title = "", face = emptyList(), target = emptyList(), pos = emptyList(), refImage = "", durMs = 0)
 
     // ---------- numbers and names of the speech ----------
 
@@ -833,7 +840,12 @@ object EditInsert {
     /** Where a block of brief [b] stands in a [fw]×[fh] frame: the place preset, size and shape, away from the face. */
     fun place(b: EditBrief, kind: String, fw: Int, fh: Int): PlaceBox {
         val portrait = fh > fw
-        if (b.place == "full" || b.place == "cover") return PlaceBox(0.5f, 0.5f, 1f, fh.toFloat() / max(1, fw))
+        if (b.place == "full" || b.place == "cover" || b.type == "montage") return PlaceBox(0.5f, 0.5f, 1f, fh.toFloat() / max(1, fw))
+        if (b.place == "custom" && b.pos.size >= 2) {
+            val c = place(b.copy(place = "center", pos = emptyList()), kind, fw, fh)
+            val hh = c.w * fw * c.ratio / 2f / fh
+            return c.copy(x = if (c.w < 1f) b.pos[0].coerceIn(c.w / 2, 1f - c.w / 2) else 0.5f, y = b.pos[1].coerceIn(min(0.5f, hh), max(0.5f, 1f - hh)))
+        }
         var w = widthOf(if (b.place == "corner" && b.size.isEmpty()) "s" else b.size, portrait)
         var ratio = ratioOf(b.shape, b.type, kind, fw, fh)
         // not taller than the frame allows
@@ -867,14 +879,15 @@ object EditInsert {
 
     /**
      * Best contrast text can get on a plate of colour [plate] at opacity [alpha] over a video of mean luminance
-     * [videoLum] (0..1) darkened by [dim]: the better of light and dark text.
+     * [videoLum] (0..1) darkened by [dim]: of the text colour [ink], or the better of light and dark text when null.
      */
-    fun contrastOver(plate: Int, alpha: Float, videoLum: Float, dim: Float): Double {
+    fun contrastOver(plate: Int, alpha: Float, videoLum: Float, dim: Float, ink: Int? = null): Double {
         val g = (videoLum.coerceIn(0f, 1f) * 255 * (1 - dim.coerceIn(0f, 1f))).roundToInt()
         fun mix(c: Int, sh: Int) = (((c shr sh) and 0xFF) * alpha + g * (1 - alpha)).roundToInt().coerceIn(0, 255)
         val a = alpha.coerceIn(0f, 1f)
         val bg = (0xFF shl 24) or (mix(plate, 16) shl 16) or (mix(plate, 8) shl 8) or mix(plate, 0)
         val bgC = if (a <= 0f) (0xFF shl 24) or (g shl 16) or (g shl 8) or g else bg
+        if (ink != null) return SchemeStyles.contrast(ink or 0xFF000000.toInt(), bgC)
         return max(SchemeStyles.contrast(0xFFFFFFFF.toInt(), bgC), SchemeStyles.contrast(0xFF14161B.toInt(), bgC))
     }
 
@@ -894,7 +907,8 @@ object EditInsert {
             "opaque", t("Сделать 100 %", "Make it 100 %"))
         if (videoLum != null && b.fill != "full") {
             val alpha = if (b.fill == "none") 0f else if (b.bgAlpha >= 0f) b.bgAlpha else defaultAlpha(b.fill.ifEmpty { "semi" })
-            val c = contrastOver(ctx.card, alpha, videoLum, b.dim)
+            // a see-through plate: the text of the style lies on the video itself
+            val c = contrastOver(ctx.card, alpha, videoLum, b.dim, if (alpha < 0.5f) ctx.ink else null)
             if (c < 4.5) out += InsertWarn("contrast", t("Текст может плохо читаться на этом кадре (контраст ", "The text may read badly on this frame (contrast ") +
                 String.format(Locale.US, "%.1f", c) + ":1)", if (alpha < 0.8f) "denser" else "dim",
                 if (alpha < 0.8f) t("Плотнее подложка", "Denser plate") else t("Затемнить видео 40 %", "Darken the video 40 %"))
@@ -965,6 +979,7 @@ object EditInsert {
         if (b.avoid != d.avoid) put("avoid", JSONArray(b.avoid))
         if (b.face.size >= 4) put("face", JSONArray(b.face.map { it.toDouble() }))
         if (b.target.size >= 2) put("target", JSONArray(b.target.map { it.toDouble() }))
+        if (b.pos.size >= 2) put("pos", JSONArray(b.pos.map { it.toDouble() }))
     }
 
     fun briefFrom(s: String?): EditBrief? = runCatching { briefFrom(JSONObject(s ?: return null)) }.getOrNull()
@@ -989,7 +1004,7 @@ object EditInsert {
             dim = o.optDouble("dim", 0.0).toFloat().coerceIn(0f, 0.8f), dimAll = o.optBoolean("dimAll"), durMs = o.optLong("dur"),
             enter = str("enter"), reveal = str("reveal"), pace = str("pace"), emphasis = o.optBoolean("emphasis", true), holdMs = o.optLong("hold", -1),
             exit = str("exit"), loopMs = o.optLong("loop"), sfx = str("sfx"), place = str("place"), size = str("size"), shape = str("shape"),
-            avoid = strs("avoid") ?: EditBrief().avoid, face = floats("face"), target = floats("target"), layer = str("layer")
+            avoid = strs("avoid") ?: EditBrief().avoid, face = floats("face"), target = floats("target"), pos = floats("pos"), layer = str("layer")
         )
     }
 

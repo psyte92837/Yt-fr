@@ -21,6 +21,7 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.VideoView
@@ -142,6 +143,13 @@ class StudioMixActivity : LumenBase() {
         var autoMaxMin: Int
             get() = p.getInt("studio_mix_auto_max", 20)
             set(v) = p.edit().putInt("studio_mix_auto_max", v).apply()
+        /** Topic and wishes of the last "✨ Compose with AI" of the voice-over text. */
+        var scriptTopic: String
+            get() = p.getString("studio_mix_script_topic", "") ?: ""
+            set(v) = p.edit().putString("studio_mix_script_topic", v).apply()
+        var scriptWish: String
+            get() = p.getString("studio_mix_script_wish", "") ?: ""
+            set(v) = p.edit().putString("studio_mix_script_wish", v).apply()
         /** What the build that is running shows (taken over when it ends, also by a reopened screen). */
         var pending: String
             get() = p.getString("studio_mix_pending", "") ?: ""
@@ -156,6 +164,8 @@ class StudioMixActivity : LumenBase() {
     private val voiceFile get() = File(dir, "voice.wav")
     private val wordsFile get() = File(dir, "words.json")
     private val assistFile get() = File(dir, "assist.json")
+    /** Text of the voice-over: shown on the teleprompter while recording. */
+    private val scriptFile get() = File(dir, "script.txt")
     /** Parts of the videos taken before: "🎲 New pieces" does not take them again. */
     private val usedFile get() = File(dir, "used.json")
 
@@ -179,7 +189,7 @@ class StudioMixActivity : LumenBase() {
     /** Build with the recorded voice-over (on) or the picture only (off); asked only when there is a voice-over. */
     private var withVoice = true
 
-    /** Running work of this screen: "dl", "schemes", "subs" or "". */
+    /** Running work of this screen: "dl", "schemes", "subs", "script" or "". */
     private var busy = ""
     @Volatile private var cancel = false
     private var status: Pair<TextView, ProgressBar>? = null
@@ -194,7 +204,7 @@ class StudioMixActivity : LumenBase() {
     private val jobListener: () -> Unit = { onJob() }
     private val watcher: () -> Unit = {
         val task = BgTasks.find(TASK)
-        if (task == null && (busy == "dl" || busy == "schemes") && !isDestroyed) {
+        if (task == null && (busy == "dl" || busy == "schemes" || busy == "script") && !isDestroyed) {
             busy = ""
             load()
             render()
@@ -1212,13 +1222,15 @@ class StudioMixActivity : LumenBase() {
         else muted(StudioOverlayUi.summary(ov, mixWhere()))
         progress("schemes", t("ИИ составляет схемы…", "AI composes schemes…"))
         progress("subs", t("Распознавание речи…", "Recognising speech…"))
+        progress("script", t("ИИ пишет текст озвучки…", "AI writes the voice-over text…"))
         if (rendering()) {
             renderBar = working(StudioJob.message)
             button(t("Отмена", "Cancel"), style = BtnStyle.TEXT) { StudioService.cancel(this@StudioMixActivity) }
         }
         if (busy.isNotEmpty() || rendering()) return@card
         // the order of the work: voice-over → language, subtitles, schemes → build
-        if (!voice) button(t("🎙 Записать озвучку (необязательно)", "🎙 Record a voice-over (optional)"), style = BtnStyle.TONAL) { startVoice() }
+        scriptBlock(this)
+        if (!voice) button(t("🎙 Записать озвучку (необязательно)", "🎙 Record a voice-over (optional)"), style = if (script().isNotEmpty()) BtnStyle.FILLED else BtnStyle.TONAL) { startVoice() }
         spinner(t("Язык озвучки, субтитров и схем (общий со Студией)", "Language of the voice-over, subtitles and schemes (shared with the Studio)"),
             Studio.VOICE_LANGS.map { it to Studio.langName(it) }, lang()) { StudioPrefs.voiceLang = it }
         // subtitles follow the voice-over: recognised once, by a tap (the recogniser may need the network)
@@ -1506,6 +1518,140 @@ class StudioMixActivity : LumenBase() {
         }
     }
 
+
+    // ---------- voice-over text and teleprompter ----------
+
+    private fun script(): String = runCatching { scriptFile.takeIf { it.exists() }?.readText()?.trim() }.getOrNull().orEmpty()
+
+    private fun saveScript(text: String) {
+        runCatching { if (text.isBlank()) scriptFile.delete() else scriptFile.writeText(text.trim()) }.onFailure { err(it) }
+    }
+
+    /** Length the voice-over should take: the storyboard, else the length chosen before cutting, else 30 s. */
+    private fun scriptMs(): Long = StudioMix.totalMs(items).takeIf { it > 0 } ?: Prefs.targetMs.takeIf { it > 0 } ?: 30_000L
+
+    /** "📝 Voice-over text": write it or let the AI compose it by the storyboard; it is on the teleprompter while recording. */
+    private fun scriptBlock(c: Col) = with(c) {
+        add(text(ctx, t("📝 Текст озвучки", "📝 Voice-over text"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        val sc = script()
+        if (sc.isEmpty()) {
+            muted(t("Напишите, что скажете, или пусть ИИ составит текст по раскадровке — при записи он будет на суфлёре.",
+                "Write what you will say or let the AI compose it by the storyboard — it is on the teleprompter while recording."))
+            row(
+                btn(ctx, t("✨ Составить с ИИ", "✨ Compose with AI"), style = BtnStyle.TONAL) { aiScriptSheet() },
+                btn(ctx, t("✎ Написать", "✎ Write"), style = BtnStyle.TEXT) { scriptSheet() }
+            )
+            return@with
+        }
+        add(text(ctx, if (sc.length > 240) sc.take(240).trimEnd() + "…" else sc, 14f).apply {
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            background = roundBg(Palette.SURFACE, 12f, this@StudioMixActivity)
+            setOnClickListener { scriptSheet() }
+        }, 4)
+        val n = StudioMix.scriptLines(sc).sumOf { it.size }
+        val readMs = n * 60_000L / StudioPrefs.prompterWpm.coerceAtLeast(1)
+        val need = scriptMs()
+        muted(t("$n слов · ≈${StudioCuts.stamp(readMs)} при ${StudioPrefs.prompterWpm} сл/мин · микс ${StudioCuts.stamp(need)}",
+            "$n words · ≈${StudioCuts.stamp(readMs)} at ${StudioPrefs.prompterWpm} wpm · the mix is ${StudioCuts.stamp(need)}") +
+            if (readMs > need * 6 / 5) t(" — длинновато, сократите или ускорьте суфлёр", " — rather long: shorten it or speed up the teleprompter") else "")
+        row(
+            btn(ctx, t("✎ Править", "✎ Edit"), style = BtnStyle.TONAL) { scriptSheet() },
+            btn(ctx, t("✨ Заново с ИИ", "✨ Again with AI"), style = BtnStyle.TEXT) { aiScriptSheet() },
+            iconBtn(ctx, "✕") {
+                val old = sc
+                undoable(t("Текст озвучки убран", "Voice-over text removed"), apply = { saveScript(""); render() }, revert = { saveScript(old); render() })
+            }.apply { contentDescription = t("Убрать текст озвучки", "Remove the voice-over text") }
+        )
+        check(t("Суфлёр: показывать текст при записи", "Teleprompter: show the text while recording"), StudioPrefs.prompter) {
+            StudioPrefs.prompter = it
+            render()
+        }
+        if (StudioPrefs.prompter) spinner(t("Скорость подсветки слов, слов в минуту", "Word highlight speed, words per minute"),
+            StudioPrompter.SPEEDS.map { it to it.toString() }.let { l -> if (StudioPrefs.prompterWpm in StudioPrompter.SPEEDS) l else l + (StudioPrefs.prompterWpm to StudioPrefs.prompterWpm.toString()) },
+            StudioPrefs.prompterWpm) {
+            StudioPrefs.prompterWpm = it
+            render()
+        }
+    }
+
+    private fun scriptSheet() = bottomSheet(t("📝 Текст озвучки", "📝 Voice-over text")) { dismiss ->
+        muted(t("Абзац на план. Что и когда подсветил суфлёр, станет таймингом субтитров — распознавать речь не нужно.",
+            "A paragraph per shot. What the teleprompter lit up and when times the subtitles — no speech recognition needed."))
+        val e = edit(t("Текст, который вы прочитаете", "The text you will read"), script(), multiline = true)
+        e.minLines = 6
+        e.maxLines = 14
+        button(t("💾 Сохранить", "💾 Save"), primary = true) {
+            saveScript(e.text.toString())
+            dismiss()
+            render()
+        }
+        button(t("✨ Составить с ИИ", "✨ Compose with AI"), style = BtnStyle.TEXT) {
+            saveScript(e.text.toString())
+            dismiss()
+            aiScriptSheet()
+        }
+    }
+
+    private fun aiScriptSheet() {
+        if (!hasAi()) {
+            toast(t("Подключите ИИ в настройках", "Connect an AI in the settings"))
+            return
+        }
+        bottomSheet(t("✨ Текст озвучки с ИИ", "✨ Voice-over text with AI")) { dismiss ->
+            muted(t("ИИ напишет текст на ${StudioCuts.stamp(scriptMs())} по планам раскадровки (по заметкам и названиям клипов), язык — ${Studio.langName(lang())}.",
+                "The AI writes ${StudioCuts.stamp(scriptMs())} of text by the storyboard shots (clip notes and titles), language — ${Studio.langName(lang())}."))
+            val topicE = edit(t("О чём ролик (тема, идея)", "What the video is about (topic, idea)"), Prefs.scriptTopic, multiline = true)
+            val wishE = edit(t("Пожелание: тон, призыв, что упомянуть", "Wish: tone, call to action, what to mention"), Prefs.scriptWish, multiline = true)
+            val old = script()
+            if (old.isNotEmpty()) muted(t("Текущий текст будет учтён как черновик.", "The current text is used as a draft."))
+            button(t("✨ Составить", "✨ Compose"), primary = true) {
+                Prefs.scriptTopic = topicE.text.toString().trim()
+                Prefs.scriptWish = wishE.text.toString().trim()
+                dismiss()
+                writeScript(old)
+            }
+        }
+    }
+
+    /** The AI writes the voice-over text by the storyboard shots; the old text (if any) is its draft. */
+    private fun writeScript(draft: String) {
+        val total = scriptMs()
+        val sec = ((total + 500) / 1000).toInt().coerceAtLeast(3)
+        val shots = if (items.isEmpty()) notes().values.filter { it.isNotBlank() }.mapIndexed { i, s -> "${i + 1}. ${s.take(160)}" }.joinToString("\n")
+        else StudioMix.scriptShots(items, notes())
+        val format = if (aspect() == StudioAspect.PORTRAIT) t("видео-микса 9:16 (Shorts / Stories)", "a 9:16 video mix (Shorts / Stories)")
+        else t("горизонтального видео-микса 16:9", "a horizontal 16:9 video mix")
+        val vars = mapOf(
+            "lang" to Studio.langName(lang()), "format" to format, "seconds" to sec.toString(),
+            "words" to (sec * StudioPrefs.prompterWpm / 60).coerceAtLeast(5).toString(),
+            "shots" to shots.ifBlank { "—" },
+            "topic" to Prefs.scriptTopic.let { if (it.isNotEmpty()) "Тема: $it\n" else "" },
+            "wish" to (Prefs.scriptWish.let { if (it.isNotEmpty()) "Пожелание автора: $it\n" else "" } +
+                if (draft.isNotEmpty()) "Черновик автора, сохрани его мысли:\n${draft.take(3000)}\n" else "")
+        )
+        busy = "script"
+        cancel = false
+        render()
+        BgTasks.run(this, TASK + "script", t("Микс: ИИ пишет текст озвучки", "Mix: AI writes the voice-over text"), BgTasks.reopen(this), {
+            val prov = AiTasks.requireProvider()
+            val r = Llm.complete(prov, prov.smartModel, "You write voice-over texts for short videos. Answer with the text only.",
+                Prompts.fill("studio_mix_script", vars), maxTokens = 400 + sec * 12, task = "studio_mix_script", pid = "studio")
+            if (cancel) throw java.util.concurrent.CancellationException()
+            StudioMix.cleanScript(r.text).ifBlank { throw LlmException(t("ИИ не вернул текст", "AI returned no text"), r.text) }
+        }, { e ->
+            busy = ""
+            if (isDestroyed) return@run
+            render()
+            err(e)
+        }, { cancel = true }) { text ->
+            saveScript(text)
+            busy = ""
+            if (isDestroyed) return@run
+            render()
+            toast(t("Текст готов: проверьте и запишите озвучку с суфлёром", "The text is ready: check it and record with the teleprompter"))
+        }
+    }
+
     // ---------- voice-over ----------
 
     /** Recording over the mix: the built video plays without sound while the microphone records. */
@@ -1540,6 +1686,36 @@ class StudioMixActivity : LumenBase() {
         lateinit var go: Button
         lateinit var player: VideoView
         var close: () -> Unit = {}
+        // teleprompter: the script lit word by word by the recorder clock; what lit up when times the subtitles
+        val lines = if (StudioPrefs.prompter) StudioMix.scriptLines(script()) else emptyList()
+        val clock = lines.flatten().takeIf { it.isNotEmpty() }?.let { PrompterClock(it, StudioPrefs.prompterWpm) }
+        val (pBody, pRanges) = StudioPrompter.layout(lines)
+        var recMs = 0L
+        var pText: TextView? = null
+        var pScroll: ScrollView? = null
+        var pSpeed: TextView? = null
+
+        fun paint() {
+            val c = clock ?: return
+            pSpeed?.text = t("${c.wpm} сл/мин", "${c.wpm} wpm") + if (c.paused) t(" · пауза", " · paused") else ""
+            val tv = pText ?: return
+            val r = pRanges.getOrNull(c.index)
+            if (r == null) {
+                tv.text = pBody
+                return
+            }
+            val sp = android.text.SpannableString(pBody)
+            if (r.first > 0) sp.setSpan(android.text.style.ForegroundColorSpan(Palette.MUTED), 0, r.first, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sp.setSpan(android.text.style.BackgroundColorSpan(Palette.ACCENT), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sp.setSpan(android.text.style.ForegroundColorSpan(Palette.ON_ACCENT), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            tv.text = sp
+            val sv = pScroll ?: return
+            tv.post {
+                val lay = tv.layout ?: return@post
+                val y = lay.getLineTop(lay.getLineForOffset(r.first)) + tv.paddingTop
+                sv.smoothScrollTo(0, (y - sv.height / 3).coerceAtLeast(0))
+            }
+        }
 
         fun finishTake(keep: Boolean) {
             val rec = recorder ?: return
@@ -1563,6 +1739,16 @@ class StudioMixActivity : LumenBase() {
             done = true
             close()
             render()
+            // read by the teleprompter: its log times the words, the subtitles need no recognition
+            val log = clock?.log?.toList().orEmpty()
+            if (clock != null && log.isNotEmpty()) Lumen.async({
+                StudioPrompter.words(clock.tokens, log, Studio.speechSpans(data, rec.rate), Studio.durationMs(data.size, rec.rate))
+            }, { L.w("studio", "mix prompter words: ${it.message}") }) { w ->
+                if (w.isEmpty() || isDestroyed) return@async
+                words = w
+                runCatching { wordsFile.writeText(StudioMix.wordsJson(w)) }
+                render()
+            }
             val diff = voiceMs() - StudioMix.totalMs(items)
             toast(if (kotlin.math.abs(diff) > FIT_TOL_MS) t("Озвучка записана. Длина ролика другая — подгоните его в «4. Озвучка и сборка»", "Voice-over recorded. The video length differs — fit it in \"4. Video\"")
             else t("Озвучка записана. Нажмите «Собрать видео с озвучкой»", "Voice-over recorded. Tap \"Build the video with the voice-over\""))
@@ -1573,7 +1759,7 @@ class StudioMixActivity : LumenBase() {
             muted(t("Видео играет без звука, микрофон пишет. Запись остановится в конце микса (${StudioCuts.stamp(total)}).",
                 "The video plays without sound while the microphone records. Recording stops at the end of the mix (${StudioCuts.stamp(total)})."))
             player = VideoView(ctx)
-            val hgt = (resources.displayMetrics.heightPixels * 0.45f).toInt()
+            val hgt = (resources.displayMetrics.heightPixels * (if (clock != null) 0.26f else 0.45f)).toInt()
             add(FrameLayout(ctx).apply {
                 addView(player, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER))
             }, 8).layoutParams.height = hgt
@@ -1584,6 +1770,46 @@ class StudioMixActivity : LumenBase() {
             }
             player.setOnCompletionListener { finishTake(true) }
             state = add(text(ctx, t("Готово к записи", "Ready to record"), 14f, bold = true), 8)
+            if (clock != null) {
+                pSpeed = text(ctx, "", 14f, bold = true).apply { gravity = Gravity.CENTER }
+                fun speed(d: Int) {
+                    clock.tick(recMs)
+                    clock.wpm += d
+                    StudioPrefs.prompterWpm = clock.wpm
+                    paint()
+                }
+                val pause = btn(ctx, "⏸", style = BtnStyle.TONAL) {}
+                pause.setOnClickListener {
+                    clock.togglePause(recMs)
+                    pause.text = if (clock.paused) "▶" else "⏸"
+                    paint()
+                }
+                pause.contentDescription = t("Пауза суфлёра", "Pause the teleprompter")
+                row(
+                    btn(ctx, "−", style = BtnStyle.TONAL) { speed(-StudioPrompter.STEP_WPM) }.apply { contentDescription = t("Медленнее", "Slower") },
+                    pSpeed!!,
+                    btn(ctx, "＋", style = BtnStyle.TONAL) { speed(StudioPrompter.STEP_WPM) }.apply { contentDescription = t("Быстрее", "Faster") },
+                    pause
+                )
+                val tv = text(ctx, pBody, 22f, bold = true).apply { setPadding(dp(16), dp(40), dp(16), dp(160)) }
+                // tap on a word: the reader is there now
+                tv.setOnTouchListener { v, e ->
+                    if (e.action == android.view.MotionEvent.ACTION_UP && recorder != null) {
+                        val i = StudioPrompter.wordAt(pRanges, (v as TextView).getOffsetForPosition(e.x, e.y))
+                        if (i >= 0 && clock.jump(i, recMs)) paint()
+                        v.performClick()
+                    }
+                    true
+                }
+                pText = tv
+                val sv = ScrollView(ctx).apply {
+                    addView(tv)
+                    background = roundBg(Palette.SURFACE, 12f, this@StudioMixActivity)
+                }
+                pScroll = sv
+                add(sv, 8).layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230))
+                paint()
+            } else if (StudioPrefs.prompter) muted(t("Суфлёр пуст: добавьте «📝 Текст озвучки» в карточке 4.", "The teleprompter is empty: add the \"📝 Voice-over text\" in card 4."))
             go = button(t("⏺ Начать запись", "⏺ Start recording"), primary = true) {
                 if (recorder != null) {
                     finishTake(true)
@@ -1592,6 +1818,8 @@ class StudioMixActivity : LumenBase() {
                 val rec = StudioRecorder { level, ms ->
                     val bars = "▮".repeat((level * 12).toInt().coerceIn(0, 12))
                     state.text = "⏺ ${StudioCuts.stamp(ms)} / ${StudioCuts.stamp(total)}  $bars"
+                    recMs = ms
+                    if (clock?.tick(ms) == true) paint()
                     if (ms >= total + 300) finishTake(true)
                 }
                 try {

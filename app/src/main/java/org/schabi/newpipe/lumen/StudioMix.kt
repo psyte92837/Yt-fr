@@ -665,4 +665,40 @@ object StudioMix {
             SWord(w.optString(0), w.optLong(1), w.optLong(2)).takeIf { it.text.isNotBlank() }
         }
     }.getOrDefault(emptyList())
+
+    // ---------- voice-over script ----------
+
+    /**
+     * Shots of the mix for the AI writing the voice-over: neighbour pieces of one clip are one shot,
+     * "N. m:ss–m:ss what is seen" per line (the note of the clip or its title).
+     */
+    fun scriptShots(items: List<MixItem>, notes: Map<String, String>): String {
+        val sb = StringBuilder()
+        var n = 0
+        var at = 0L
+        var i = 0
+        while (i < items.size) {
+            val id = items[i].clipId
+            var len = 0L
+            while (i < items.size && items[i].clipId == id) { len += items[i].lenMs; i++ }
+            n++
+            if (sb.isNotEmpty()) sb.append('\n')
+            sb.append(n).append(". ").append(StudioCuts.stamp(at)).append('–').append(StudioCuts.stamp(at + len)).append(' ')
+                .append(notes[id].orEmpty().replace(Regex("\\s+"), " ").trim().take(160).ifEmpty { "—" })
+            at += len
+        }
+        return sb.toString()
+    }
+
+    /** Text to read aloud from an AI answer: no code fences, markdown, headings, timecodes or [remarks]. */
+    fun cleanScript(answer: String): String = answer.replace(Regex("```[a-zA-Z]*"), "").lines().map { l ->
+        l.replace(Regex("\\*\\*|__|^#+\\s*|^\\s*[-•*]\\s+"), "")
+            .replace(Regex("^\\s*\\(?\\d{1,2}:\\d{2}(\\s*[-–—]\\s*\\d{1,2}:\\d{2})?\\)?\\s*[:.\\-–—]?\\s*"), "")
+            .replace(Regex("\\[[^\\]]*]"), "")
+            .replace(Regex("\\s+"), " ").trim()
+    }.dropWhile { it.isEmpty() || Regex("^(текст|text|озвучка|voice-?over|script|сценарий)[^:]{0,20}:$", RegexOption.IGNORE_CASE).matches(it) }
+        .joinToString("\n").replace(Regex("\n{3,}"), "\n\n").trim().removeSurrounding("\"").removeSurrounding("«", "»").trim()
+
+    /** Words of the script for the teleprompter, by paragraph (a line is a paragraph). */
+    fun scriptLines(script: String): List<List<String>> = script.lines().map { Studio.tokens(it) }.filter { it.isNotEmpty() }
 }

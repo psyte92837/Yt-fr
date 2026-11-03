@@ -349,4 +349,14 @@ class StudioMixTest {
         assertEquals(listOf(40_000L to 45_000L), back["u1"])
         assertTrue(StudioMix.usedFromJson("bad").isEmpty())
     }
+
+    @Test
+    fun voiceOverScriptShotsAndCleaning() {
+        val items = listOf(MixItem("a", 0, 2_000), MixItem("a", 2_000, 2_000), MixItem("b", 0, 3_000), MixItem("a", 9_000, 1_000))
+        val shots = StudioMix.scriptShots(items, mapOf("a" to "Кот  на\nкрыше", "b" to ""))
+        assertEquals("1. 0:00–0:04 Кот на крыше\n2. 0:04–0:07 —\n3. 0:07–0:08 Кот на крыше", shots)
+        val clean = StudioMix.cleanScript("```text\nТекст озвучки:\n**Вот** кот [пауза] гуляет.\n\n0:04–0:07 — А тут **ничего**.\n```")
+        assertEquals("Вот кот гуляет.\n\nА тут ничего.", clean)
+        assertEquals(listOf(listOf("Вот", "кот", "гуляет."), listOf("А", "тут", "ничего.")), StudioMix.scriptLines(clean))
+    }
 }

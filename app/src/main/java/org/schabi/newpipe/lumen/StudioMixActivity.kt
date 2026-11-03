@@ -126,6 +126,14 @@ class StudioMixActivity : LumenBase() {
                 .putLong("studio_mix_b_pad", b.padMs).putBoolean("studio_mix_b_phrase", b.toPhrase).putString("studio_mix_b_similar", b.similar.id)
                 .putInt("studio_mix_b_batch", b.batch).putInt("studio_mix_b_parallel", b.parallel).putFloat("studio_mix_b_fps", b.fps.toFloat())
                 .putInt("studio_mix_b_per_video", b.perVideo).apply()
+        /** The assistant looks for videos on YouTube itself: videos per plan line (0 = only the given ones). */
+        var autoVideos: Int
+            get() = p.getInt("studio_mix_auto", 3)
+            set(v) = p.edit().putInt("studio_mix_auto", v).apply()
+        /** Longest video the assistant takes from the search, minutes. */
+        var autoMaxMin: Int
+            get() = p.getInt("studio_mix_auto_max", 20)
+            set(v) = p.edit().putInt("studio_mix_auto_max", v).apply()
         /** What the build that is running shows (taken over when it ends, also by a reopened screen). */
         var pending: String
             get() = p.getString("studio_mix_pending", "") ?: ""
@@ -1714,6 +1722,11 @@ class StudioMixActivity : LumenBase() {
                 check(titles[u].orEmpty().take(70) + if (n > 0) t(" · найдено: $n", " · found: $n") else "", true) { on -> if (on) chosen += u else chosen -= u }
             }
             val linksE = edit(t("Ещё ссылки на YouTube, по одной в строке", "More YouTube links, one per line"), multiline = true)
+            var auto = Prefs.autoVideos
+            add(text(ctx, t("🔎 Сам найти ролики на YouTube — на каждый пункт", "🔎 Find videos on YouTube itself — per point"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            add(choiceChips(ctx, listOf(0 to t("Нет", "No"), 1 to "1", 3 to "3", 5 to "5"), auto) { auto = it; Prefs.autoVideos = it }, 4)
+            muted(t("ИИ составит запрос по каждому пункту, Lumen найдёт видео (до ${Prefs.autoMaxMin} мин) и отдаст их на поиск кадров вместе с выбранными.",
+                "The AI writes a query for each point, Lumen finds videos (up to ${Prefs.autoMaxMin} min) and passes them to the shot search with the chosen ones."))
             val bs = Prefs.bounds
             muted(t("Ссылок в запросе: ${bs.batch} · кадр в ${fpsLabel(bs.fps)} · границы: ", "Links per request: ${bs.batch} · a frame every ${fpsLabel(bs.fps)} · bounds: ") +
                 if (bs.fit) t("подгоняет Lumen", "fitted by Lumen") else t("как дал ИИ", "as the AI gave"))
@@ -1725,11 +1738,11 @@ class StudioMixActivity : LumenBase() {
                 if (beats.isEmpty()) return@button toast(t("Напишите, что показать", "Write what to show"))
                 val extra = linksE.text.toString().lines().map { it.trim() }.filter { it.startsWith("http") }
                 val list = (chosen.toList() + extra).distinct()
-                if (list.isEmpty()) return@button toast(t("Выберите видео или вставьте ссылку", "Pick a video or paste a link"))
+                if (list.isEmpty() && auto == 0) return@button toast(t("Выберите видео, вставьте ссылку или включите «Сам найти»", "Pick a video, paste a link or turn on \"Find itself\""))
                 val p = videoAi() ?: return@button toast(t("Нужен ключ Gemini: Настройки → AI", "A Gemini key is needed: Settings → AI"))
                 dismiss()
                 saveAssist(s)
-                findMoments(p, beats, list, titles)
+                findMoments(p, beats, list, titles, auto)
             }
 
             val beats = assistBeats()
@@ -1805,6 +1818,8 @@ class StudioMixActivity : LumenBase() {
                 }
             }
         )
+        add(text(ctx, t("Видео из поиска YouTube — не длиннее", "Videos from the YouTube search — not longer than"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        add(choiceChips(ctx, listOf(5, 10, 20, 60).map { it to t("$it мин", "$it min") }, Prefs.autoMaxMin) { Prefs.autoMaxMin = it }, 4)
         add(text(ctx, t("Похожие кадры (≈)", "Similar shots (≈)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         add(choiceChips(ctx, listOf(StudioMixAssist.Similar.ALL to t("Брать", "Take"), StudioMixAssist.Similar.FALLBACK to t("Если нет точных", "If no exact"),
             StudioMixAssist.Similar.NONE to t("Не брать", "Skip")), b.similar) { save(b.copy(similar = it)) }, 4)
@@ -1818,7 +1833,7 @@ class StudioMixActivity : LumenBase() {
      * The AI looks through [urls] in batches (several links in one request, one array of moments for all of them)
      * and names the moments for [beats]; results join the saved ones. A failed batch is asked again in halves.
      */
-    private fun findMoments(prov: Provider, beats: List<MixBeat>, urls: List<String>, titles: Map<String, String>) {
+    private fun findMoments(prov: Provider, beats: List<MixBeat>, given: List<String>, titles0: Map<String, String>, auto: Int = 0) {
         busy = "assist"
         cancel = false
         render()
@@ -1826,7 +1841,8 @@ class StudioMixActivity : LumenBase() {
         val s0 = assist
         val b = Prefs.bounds
         val known = clips.groupBy { it.url }.mapValues { (_, l) -> l.maxOf { it.durMs } }
-        val groups = StudioMixAssist.batches(urls, b.batch)
+        val maxVideoMs = Prefs.autoMaxMin * 60_000L
+        val qLang = Studio.langName(lang())
         val vars = mapOf(
             "needs" to StudioMixAssist.needs(beats), "k" to b.perVideo.toString(),
             "wish" to s0.wish.takeIf { it.isNotBlank() }?.let { " $it." }.orEmpty(),
@@ -1840,6 +1856,32 @@ class StudioMixActivity : LumenBase() {
             val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
             val durs = java.util.concurrent.ConcurrentHashMap(known.filterValues { it > 0 })
             val done = java.util.concurrent.atomic.AtomicInteger()
+            val titles = java.util.concurrent.ConcurrentHashMap(titles0)
+            // the assistant looks for videos itself: a query per line (AI, or the line's words), YouTube search, best few
+            var urls = given
+            if (auto > 0) {
+                BgTasks.progress(key, t("Составляю запросы для поиска…", "Writing search queries…"))
+                val queries = if (prov == Provider.MANUAL) StudioMixAssist.parseQueries("", beats)
+                else runCatching {
+                    val q = Llm.complete(prov, prov.fastModel, "Answer with JSON only.",
+                        Prompts.fill("studio_mix_query", mapOf("needs" to StudioMixAssist.needs(beats), "lang" to qLang)),
+                        json = true, maxTokens = 60 * beats.size + 200, task = "studio_mix_query", pid = "studio")
+                    StudioMixAssist.parseQueries(q.text, beats)
+                }.getOrElse { if (it is java.util.concurrent.CancellationException) throw it else StudioMixAssist.parseQueries("", beats) }
+                val hits = LinkedHashMap<Int, List<Pair<String, Long>>>()
+                for ((n, q) in queries) {
+                    if (cancel) throw java.util.concurrent.CancellationException()
+                    BgTasks.progress(key, t("Ищу на YouTube: ", "Searching YouTube: ") + q)
+                    val found = runCatching { YouTube.search(listOf(q), SearchFilters(limit = 12, excludeShorts = aspect() != StudioAspect.PORTRAIT)) }.getOrDefault(emptyList())
+                    found.forEach { v ->
+                        titles.putIfAbsent(v.url, v.title)
+                        if (v.duration > 0) durs.putIfAbsent(v.url, v.duration * 1000)
+                    }
+                    hits[n] = found.map { it.url to if (it.duration > 0) it.duration * 1000 else 0L }
+                }
+                urls = (given + StudioMixAssist.pickVideos(hits, auto, maxVideoMs, given.toSet())).distinct()
+            }
+            val groups = StudioMixAssist.batches(urls, b.batch)
             fun ask(g: List<String>, depth: Int) {
                 if (cancel) throw java.util.concurrent.CancellationException()
                 try {

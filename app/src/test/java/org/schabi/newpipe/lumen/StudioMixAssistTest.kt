@@ -175,4 +175,20 @@ class StudioMixAssistTest {
         assertEquals(listOf("a", "b"), MediaOpts.links(" a\n\nb "))
         assertTrue(MediaOpts.links(null).isEmpty())
     }
+
+    @Test
+    fun findsVideosItself() {
+        val beats = listOf(MixBeat(1, "Утро в горах, туман над озером"), MixBeat(2, "Человек варит кофе"))
+        val q = StudioMixAssist.parseQueries("""[[1,"горы утро туман"]]""", beats)
+        assertEquals("горы утро туман", q[1])
+        assertEquals("человек варит кофе", q[2])
+        assertEquals("утро горах туман над озером", StudioMixAssist.fallbackQuery("Утро в горах, туман над озером"))
+        assertEquals("горы", StudioMixAssist.parseQueries("""{"1":"горы"}""", beats)[1])
+        val hits = mapOf(
+            1 to listOf("a" to 60_000L, "b" to 3_600_000L, "c" to 0L, "d" to 5_000L, "e" to 90_000L),
+            2 to listOf("a" to 60_000L, "f" to 120_000L)
+        )
+        // too long, too short and already given are skipped; a link is taken once
+        assertEquals(listOf("c", "e", "f"), StudioMixAssist.pickVideos(hits, 2, 20 * 60_000L, setOf("a")))
+    }
 }

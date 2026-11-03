@@ -190,6 +190,55 @@ object StudioMixAssist {
         }
     }
 
+    // ---------- the assistant looks for videos itself ----------
+
+    private val stop = setOf("и", "в", "на", "с", "по", "к", "у", "о", "из", "за", "от", "до", "что", "как", "это", "а", "но", "the", "a", "an",
+        "of", "in", "on", "at", "to", "and", "with", "is", "are", "for")
+
+    /** A YouTube query from the text of a line when there is no AI for it: its first meaningful words. */
+    fun fallbackQuery(text: String, words: Int = 6): String =
+        text.lowercase().split(Regex("""[^\p{L}\p{N}]+""")).filter { it.length > 1 && it !in stop }.take(words).joinToString(" ")
+
+    /** The queries answer [[need, "query"], …] (or {"1":"query"}) → need → query; lines without one get [fallbackQuery]. */
+    fun parseQueries(answer: String, beats: List<MixBeat>): Map<Int, String> {
+        val s = RelayText.clean(answer, true)
+        val out = HashMap<Int, String>()
+        runCatching {
+            val a = s.indexOf('[')
+            val o = s.indexOf('{')
+            if (a >= 0 && (o < 0 || a < o)) {
+                val arr = JSONArray(s.substring(a, s.lastIndexOf(']') + 1))
+                for (i in 0 until arr.length()) {
+                    val row = arr.optJSONArray(i) ?: continue
+                    val n = num(row.opt(0))?.toInt() ?: continue
+                    row.optString(1).trim().takeIf { it.isNotEmpty() }?.let { out[n] = it.take(100) }
+                }
+            } else if (o >= 0) {
+                val obj = JSONObject(s.substring(o, s.lastIndexOf('}') + 1))
+                obj.keys().forEach { k -> num(k)?.toInt()?.let { n -> obj.optString(k).trim().takeIf { it.isNotEmpty() }?.let { out[n] = it.take(100) } } }
+            }
+        }
+        return beats.associate { b -> b.n to (out[b.n] ?: fallbackQuery(b.text)) }.filterValues { it.isNotBlank() }
+    }
+
+    /**
+     * Videos for the lines: from the results of each line's query ([hits]: need → found links with length in ms,
+     * best first) up to [perNeed] links not taken yet, not longer than [maxMs] and not shorter than 10 s (0 = not
+     * known passes); a link found for several lines is taken once.
+     */
+    fun pickVideos(hits: Map<Int, List<Pair<String, Long>>>, perNeed: Int, maxMs: Long, skip: Set<String> = emptySet()): List<String> {
+        val out = LinkedHashSet<String>()
+        for (n in hits.keys.sorted()) {
+            var k = 0
+            for ((u, d) in hits[n].orEmpty()) {
+                if (k >= perNeed) break
+                if (u in skip || (d > 0 && (d > maxMs || d < 10_000))) continue
+                if (out.add(u)) k++
+            }
+        }
+        return out.toList()
+    }
+
     /** Score of a moment that shows what was asked, and of one that only looks similar ("≈"). */
     const val EXACT = 1.0
     const val SIMILAR = 0.6

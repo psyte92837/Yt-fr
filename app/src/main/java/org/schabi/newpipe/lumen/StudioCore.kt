@@ -1354,6 +1354,10 @@ val STUDIO_PROMPTS = linkedMapOf(
         "Videos 1-{n} in order. Find shots showing each need, or similar.{wish} Needs: {needs}. " +
             "Reply JSON [[video_no,need,start_s,end_s,exact1_or_similar0]], max {k} per video."
         ),
+    "studio_mix_query" to (
+        "YouTube search queries in {lang} to find footage for each need (what is seen, not what is said). Needs: {needs}. " +
+            "Reply JSON [[need,\"query\"]], one short query each."
+        ),
     "studio_stt" to (
         "Дословно расшифруй речь в этой записи на языке оригинала. Без таймкодов, имён говорящих, пояснений и описаний звуков. " +
             "Если речи нет — верни пустой ответ."

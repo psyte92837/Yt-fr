@@ -441,6 +441,11 @@ class StudioMixActivity : LumenBase() {
         if (busy.isNotEmpty()) return@card
         val views = mutableListOf<View>(btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findSheet() },
             btn(ctx, t("🧭 Подобрать с ИИ", "🧭 Pick with AI"), style = BtnStyle.TONAL) { assistSheet() })
+        if (clips.isNotEmpty()) views += iconBtn(ctx, "▶") {
+            feedSheet(clips.distinctBy { it.url }.map { FeedItem(it.url, it.title.ifBlank { it.note }, it.fromMs) }) { item, at ->
+                takeFrom(item.url, at)
+            }
+        }.apply { contentDescription = t("Пролистать видео в мини-плеере", "Flip through the videos in a mini player") }
         if (clips.size > 1) {
             val all = clips.all { it.id in clipMarks }
             views += btn(ctx, if (all) t("☐ Снять выбор", "☐ Clear selection") else t("☑ Выбрать все", "☑ Select all"), style = BtnStyle.TEXT) {
@@ -2032,19 +2037,30 @@ class StudioMixActivity : LumenBase() {
             frame.post(tick)
         }
 
-        /** Opens the look at [url]: the frames strip first, the video only on a tap. */
-        fun open(url: String) {
+        /** Playback speed of the mini player (the feed: ×1, ×1.5, ×2). */
+        var speed = 1f
+            set(v) {
+                field = v
+                player?.setPlaybackSpeed(v)
+            }
+
+        /** Opens the look at [url]: the frames strip first, the video only on a tap ([auto]: plays at once from [fromMs], or the middle when −1). */
+        fun open(url: String, auto: Boolean = false, fromMs: Long = -1) {
             stop()
             current = url
             strip.removeAllViews()
             playBtn.text = "▶"
-            looks[url]?.let { return show(it) }
+            fun go(lk: StudioCutsLoad.Look) {
+                show(lk)
+                if (auto) play(if (fromMs >= 0) fromMs else lk.frames.getOrNull(lk.frames.size / 2)?.first ?: 0)
+            }
+            looks[url]?.let { return go(it) }
             state.text = t("Загрузка кадров…", "Loading frames…")
             Lumen.async({ StudioCutsLoad.look(url) }, { e ->
                 if (current == url) state.text = (e.message ?: e.javaClass.simpleName).take(160)
             }) { lk ->
                 looks[url] = lk
-                if (current == url && !isDestroyed) show(lk)
+                if (current == url && !isDestroyed) go(lk)
             }
         }
 
@@ -2086,6 +2102,7 @@ class StudioMixActivity : LumenBase() {
             p.setMediaSource(src)
             p.prepare()
             if (fromMs > 0) p.seekTo(fromMs)
+            p.setPlaybackSpeed(speed)
             p.playWhenReady = true
             started = true
             playBtn.text = "⏸"
@@ -2110,6 +2127,66 @@ class StudioMixActivity : LumenBase() {
             player?.release()
             player = null
         }
+    }
+
+    /** One video of the feed: [fromMs] — where to start (−1 = the middle). */
+    private data class FeedItem(val url: String, val title: String, val fromMs: Long)
+
+    /**
+     * The feed: the videos one after another in the low-quality mini player, playing at once from the clip's start
+     * (or the middle), ×1 / ×1.5 / ×2, ⏮ ⏭ to flip; "✓ Take from here" gives the video and the moment to [take].
+     */
+    private fun feedSheet(items: List<FeedItem>, take: (FeedItem, Long) -> Unit) {
+        if (items.isEmpty()) return
+        val look = MiniLook()
+        var i = 0
+        lateinit var title: TextView
+        lateinit var count: TextView
+        fun show() {
+            val it = items[i]
+            title.text = it.title.ifBlank { it.url }.take(90)
+            count.text = "${i + 1} / ${items.size}"
+            look.open(it.url, auto = true, fromMs = it.fromMs)
+        }
+        bottomSheet(t("▶ Пролистать", "▶ Flip through"), onDismiss = { look.release() }) { _ ->
+            count = add(text(ctx, "", Type.LABEL, bold = true, color = Palette.MUTED), 0)
+            title = add(text(ctx, "", 14f, bold = true), 2)
+            add(look.view, 4)
+            add(choiceChips(ctx, listOf(1f to "×1", 1.5f to "×1.5", 2f to "×2"), look.speed) { look.speed = it }, 6)
+            row(
+                btn(ctx, t("⏮ Назад", "⏮ Back"), style = BtnStyle.TEXT) { if (i > 0) { i--; show() } },
+                btn(ctx, t("✓ Взять отсюда", "✓ Take from here"), primary = true) {
+                    val at = look.posMs()
+                    if (at < 0) return@btn toast(t("Видео ещё не играет", "The video does not play yet"))
+                    take(items[i], at / 100 * 100)
+                    if (i < items.lastIndex) { i++; show() }
+                },
+                btn(ctx, t("Дальше ⏭", "Next ⏭"), style = BtnStyle.TONAL) { if (i < items.lastIndex) { i++; show() } else toast(t("Это последнее", "This is the last one")) }
+            )
+            muted(t("«Взять отсюда» ставит начало клипа на текущий момент (длина — как у клипа или 5 с) и переходит к следующему.",
+                "\"Take from here\" sets the clip start to the current moment (length as the clip's or 5 s) and goes to the next one."))
+            show()
+        }
+    }
+
+    /** The clip of [url] starts at [atMs] now (a new clip when there is none, from [hit]); download it later with ⬇. */
+    private fun takeFrom(url: String, atMs: Long, hit: CutHit? = null) {
+        val cl = clips.firstOrNull { it.url == url }
+        if (cl == null) {
+            val list = StudioCuts.addHits(clips, listOfNotNull(hit ?: CutHit(url, url)))
+            val added = list.drop(clips.size).firstOrNull() ?: return toast(t("Не больше ${StudioCuts.MAX_CLIPS} клипов", "At most ${StudioCuts.MAX_CLIPS} clips"))
+            val (a, b) = StudioCuts.span(atMs, atMs + added.ms)
+            saveClips(list.map { if (it.id == added.id) it.copy(fromMs = a, toMs = b) else it })
+            clipMarks += added.id
+            toast(t("Добавлен ${added.id} с ${StudioCuts.stamp(a)}", "Added ${added.id} from ${StudioCuts.stamp(a)}"))
+        } else {
+            val (a, b) = StudioCuts.span(atMs, atMs + cl.ms)
+            if (cl.fromMs == a && cl.toMs == b) return toast(t("Отрезок тот же", "The part is the same"))
+            if (cl.file.isNotEmpty()) File(clipsDir, cl.file).delete()
+            saveClips(clips.map { if (it.id == cl.id) it.copy(fromMs = a, toMs = b, file = "", leadMs = 0, lenMs = 0) else it })
+            toast(t("${cl.id}: начало ${StudioCuts.stamp(a)} — скачайте ⬇", "${cl.id}: start ${StudioCuts.stamp(a)} — download ⬇"))
+        }
+        if (busy.isEmpty()) render()
     }
 
     /** Search on YouTube by title: tick results in bulk and add them; the sheet stays open for more searches. */
@@ -2203,6 +2280,14 @@ class StudioMixActivity : LumenBase() {
             val query = edit(t("Что искать", "What to search"))
             button(t("🔎 Искать", "🔎 Search"), style = BtnStyle.TONAL) { search(query.text.toString().trim()) }
             info = add(text(ctx, "", 13f, color = Palette.MUTED), 4)
+            button(t("▶ Пролистать найденное", "▶ Flip through the results"), style = BtnStyle.TEXT) {
+                if (hits.isEmpty()) return@button toast(t("Сначала найдите видео", "Find videos first"))
+                look.stop()
+                feedSheet(hits.map { FeedItem(it.url, it.title, -1) }) { item, at ->
+                    takeFrom(item.url, at, hits.firstOrNull { it.url == item.url })
+                    fill()
+                }
+            }
             allBtn = button(t("☑ Отметить все", "☑ Tick all"), style = BtnStyle.TEXT) {
                 if (hits.all { it.url in marked }) marked.clear() else marked += hits.map { it.url }
                 fill()

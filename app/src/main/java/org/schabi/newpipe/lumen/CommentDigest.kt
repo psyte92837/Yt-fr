@@ -50,17 +50,34 @@ object CommentDigest {
         val prov = AiTasks.requireProvider()
         val msgs = Pains.projectMessages(p.id)
         if (msgs.isEmpty()) throw LlmException(t("Нет собранных комментариев.", "No collected comments."))
-        val prompt = Prompts.get(KIND).replace("{lang}", if (Settings.lang == "en") "English" else "русский")
-            .replace("{data}", input(title(p.id), msgs, Settings.chunkChars * 3))
-        val key = sha1("$KIND|${prov.smartModel}|${prompt.hashCode()}")
-        if (!force) Store.ai(p.id, key)?.let { return it }
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, prompt, maxTokens = 8000, task = KIND, pid = p.id)
-        return AiResult(key, KIND, "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
+        val key0 = sha1("$KIND|${prov.smartModel}|${Prompts.get(KIND).hashCode()}|${msgs.size}|${msgs.sumOf { it.text.length + it.likes }}")
+        if (!force) Store.ai(p.id, key0)?.let { return it }
+        // the comments are read once into short items with ids (VocAi, cached); the digest is written from the items
+        val items = VocAi.items(p.id, msgs, force = force)
+        val data = "Source: " + title(p.id) + "\nComments: " + msgs.size + "\nItems extracted from the comments " +
+            "(## type (comments), - [×same thought ♥likes sev] essence (ids)):\n" + VocAi.block(items, msgs, Settings.chunkChars)
+        val prompt = Prompts.get(KIND).replace("{lang}", if (Settings.lang == "en") "English" else "русский").replace("{data}", data)
+        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, prompt, maxTokens = 5000, task = KIND, pid = p.id)
+        val text = VocCore.expandQuotes(r.text, VocAi.byId(msgs))
+        return AiResult(key0, KIND, "project", r.model, text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 
-    /** Chat context for [AiTasks.chat] on the comments tab. */
-    fun chatContext(pid: String): String =
-        chatData(latest(pid)?.text, title(pid), Pains.projectMessages(pid), Settings.chunkChars * 3)
+    /**
+     * Chat context for [AiTasks.chat] on the comments tab: the digest and the extracted items, then the comments the
+     * question is about (TF-IDF) — not all comments on every question.
+     */
+    fun chatContext(pid: String, question: String = ""): String {
+        val msgs = Pains.projectMessages(pid)
+        val budget = Settings.chunkChars
+        val items = VocAi.cached(pid)
+        val head = buildString {
+            latest(pid)?.text?.takeIf { it.isNotBlank() }?.let { append("Digest of the comments:\n").append(it.take(budget / 3)).append("\n\n") }
+            if (items.isNotEmpty()) append("Items extracted from the comments:\n").append(VocAi.block(items, msgs, budget / 3)).append('\n')
+        }
+        val ordered = Pains.ordered(msgs)
+        val pick = if (question.isBlank()) ordered else Retrieve.topK(question, ordered.map { it.text }, budget, minDocs = 20).map { ordered[it] }
+        return head + input(title(pid), pick, (budget - head.length).coerceAtLeast(4000))
+    }
 
     /** Full text to read, share or save. */
     fun text(pid: String): String {
@@ -71,7 +88,7 @@ object CommentDigest {
 
 val COMMENT_DIGEST_PROMPTS = linkedMapOf(
     CommentDigest.KIND to (
-        "Ниже ВСЕ собранные комментарии к одному видео YouTube, формат строки: [id ♥лайки] текст.\n" +
+        "Ниже мысли из ВСЕХ собранных комментариев к видео YouTube, сгруппированные по типам: «- [×сколько комментариев ♥лайки] суть (id)».\n" +
             "Сделай полную сводку обсуждения на языке {lang}, ничего ценного не теряй. Разделы (пустые пропускай):\n" +
             "## Главное — 4-6 предложений: кто комментирует, о чём спорят, общий настрой.\n" +
             "## Кейсы и истории — каждая личная история: кто, что случилось, что пробовал, итог (с id).\n" +
@@ -83,9 +100,9 @@ val COMMENT_DIGEST_PROMPTS = linkedMapOf(
             "## Боли и проблемы — что беспокоит людей.\n" +
             "## Советы, лайфхаки, факты и ссылки — полезное от зрителей.\n" +
             "## Юмор и мемы — если есть.\n" +
-            "## Цитаты — 5-8 самых показательных, дословно, с id.\n" +
+            "## Цитаты — 5-8 самых показательных: каждая строкой «- c12» (только id, текст подставит приложение).\n" +
             "## Выводы — 3-5 пунктов: что из этого следует.\n" +
             "Пункты списком «- », в конце пункта id комментариев в скобках, например (c3, c17). " +
-            "Самое частое и залайканное — первым. Не выдумывай того, чего нет в комментариях.\n\n{data}"
+            "Самое частое и залайканное — первым. Пункт — до 25 слов, в разделе до 7 пунктов. Не выдумывай того, чего нет в данных.\n\n{data}"
         )
 )

@@ -193,6 +193,9 @@ object Settings {
         get() = p.getInt("chunk_chars", 24000)
         set(v) = p.edit().putInt("chunk_chars", v).apply()
 
+    /** The user picked the chunk size: it is kept even for big-context models. */
+    val chunkUserSet: Boolean get() = p.contains("chunk_chars")
+
     var priceInPerM: Double
         get() = p.getFloat("price_in", 0f).toDouble()
         set(v) = p.edit().putFloat("price_in", v.toFloat()).apply()

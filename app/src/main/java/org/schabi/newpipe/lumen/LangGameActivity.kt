@@ -91,9 +91,9 @@ object LangGameData {
         val prov = AiTasks.requireProvider()
         val prompt = Prompts.fill("langgame_read", mapOf("phrase" to p.phrase, "domain" to p.domain, "lang" to lang(),
             "data" to LangGame.compact(JSONObject(game.toString()).apply { remove("reading") })))
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 6000, task = "langgame_read", pid = p.id)
-        val o = JsonText.firstObject(r.text)?.let { runCatching { JSONObject(it) }.getOrNull() }
-            ?: throw LlmException(t("Модель вернула невалидный JSON: ", "The model returned invalid JSON: ") + r.text.take(200))
+        val r = LlmJson.call(prov, prov.smartModel, Prompts.SYSTEM, prompt, "langgame_read", p.id, 6000,
+            { JsonText.firstObject(it)?.let { s -> JSONObject(s) } })
+        val o = r.value
         val reading = LangGame.reading(o)
         if (reading.length() == 0) throw LlmException(t("В ответе нет полей толкования", "The answer has no reading fields"))
         game.put("reading", reading.put("model", r.model).put("at", System.currentTimeMillis()))

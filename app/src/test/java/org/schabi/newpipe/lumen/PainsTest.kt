@@ -117,4 +117,14 @@ class PainsTest {
         assertTrue(md.contains("## Кейсы людей"))
         assertTrue(md.contains("AI: model-x"))
     }
+
+    @Test
+    fun quotesById() {
+        // the model gives only ids: the text comes from the comment, nothing is dropped
+        val r = Pains.parse("""{"pains":[{"title":"Боль","ids":["c1"],"quotes":["c1","c99"]}],"cases":[{"situation":"история","quote":"c2"}]}""", msgs)!!
+        assertEquals("c1", r.pains[0].quotes.single().id)
+        assertTrue(r.pains[0].quotes.single().text.startsWith("Спина болит"))
+        assertEquals("c2", r.cases.single().quote!!.id)
+        assertEquals(0, r.dropped)
+    }
 }

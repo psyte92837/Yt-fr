@@ -483,9 +483,12 @@ object VideoStyle {
             append("Measured metrics (approximate):\n")
             m.lines().forEach { append("- ").append(it).append('\n') }
             if (m.hook.isNotBlank()) append("First 30 s of speech: ").append(m.hook).append('\n')
-            append("Description: ").append(v.description.take(1200)).append('\n')
+            DescClean.clean(v.description).takeIf { it.isNotBlank() }?.let { append("Description: ").append(it.take(1200)).append('\n') }
             if (!watch) {
-                Store.transcript(p.id, v.id)?.takeIf { it.isNotBlank() }?.let { append("Transcript with timecodes (start):\n").append(it.take(9000)).append('\n') }
+                // a timecode per ~15 s and the whole video sampled (start, middle, end) within the same budget
+                Store.transcript(p.id, v.id)?.takeIf { it.isNotBlank() }?.let {
+                    append("Transcript with timecodes:\n").append(Transcript.sample(Transcript.forAi(it, 15), 9000)).append('\n')
+                }
             }
         }
         val mode = if (watch) {
@@ -499,7 +502,7 @@ object VideoStyle {
         val key = sha1("video_style|${v.id}|$model|${prompt.hashCode()}")
         if (!force) Store.ai(p.id, key)?.let { return it }
         val r = Llm.complete(prov, model, Prompts.SYSTEM, prompt, fileUri = if (watch) v.url else null,
-            maxTokens = 6000, task = "video_style", pid = p.id, lowMedia = watch)
+            maxTokens = 4500, task = "video_style", pid = p.id, lowMedia = watch)
         return AiResult(key, "video_style", v.id, r.model + if (watch) " · 👁" else "", r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 

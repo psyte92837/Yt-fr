@@ -22,12 +22,13 @@ val SEO_PROMPTS = linkedMapOf(
         "Исследуй транскрипт и комментарии.\n" +
             "Извлеки вопросы, pain, JTBD, дословные VOC-цитаты, возражения и неудовлетворённые потребности.\n" +
             "Различай автора видео (speaker_type=author, цитата из транскрипта) и комментаторов (speaker_type=commenter).\n" +
-            "Не выводи поисковую частотность. Цитата должна быть ДОСЛОВНОЙ копией фрагмента исходного текста.\n" +
+            "Не выводи поисковую частотность. Цитата автора (quote) — ДОСЛОВНЫЙ фрагмент транскрипта до 200 символов; " +
+                "для комментатора quote оставь пустым — текст возьмётся из комментария по comment_id.\n" +
             "Для каждого элемента: type (question|pain|jtbd|voc|objection|unmet_need|content_gap), statement (кратко), quote, " +
             "speaker_type, comment_id (например c12) или null, timestamp (mm:ss из транскрипта) или null, " +
-            "confidence (high|medium|low), interpretation, hypothesis. JTBD формулируй: «Когда [ситуация], я хочу [действие], чтобы [результат]».\n" +
+            "confidence (high|medium|low); interpretation и hypothesis — только если они неочевидны, иначе не пиши. JTBD формулируй: «Когда [ситуация], я хочу [действие], чтобы [результат]».\n" +
             "Объединяй точные дубли, не смешивай разные задачи. Язык формулировок: {lang}.\n" +
-            "Цитаты — до 200 символов, statement — одно предложение. Верни компактный JSON {\"items\":[...]} без пробелов-отступов. Максимум 15 элементов.\n\n" +
+            "statement — одно предложение. Верни компактный JSON {\"items\":[...]} без пробелов-отступов. Максимум 15 элементов.\n\n" +
             "PROJECT: {project_context}\nTRANSCRIPT:\n{transcript}\nCOMMENTS:\n{comments}"
         ),
     "p2_clusters" to (
@@ -43,7 +44,8 @@ val SEO_PROMPTS = linkedMapOf(
         "Оцени тему как гипотезу для статьи.\n" +
             "Укажи primary_question, search_intent, reader, needed_info (список), added_value, overlaps (пересечения с другими темами/страницами), unknowns.\n" +
             "Используй переданные keyword/SERP данные с источником и датой. Если их нет — пометь спрос и конкуренцию как непроверенные. " +
-            "Подсказки автодополнения подтверждают только формулировки, но не объём спроса.\n" +
+            "Подсказки автодополнения подтверждают только формулировки, но не объём спроса (×N — сколько раз встречалась). " +
+                "SERP_DATA — видео YouTube рядом с темой (/day — просмотров в день, d — возраст): косвенный признак спроса и конкуренции на YouTube, не веб-выдача.\n" +
             "decision: investigate | merge | reject, decision_reason. Язык: {lang}. Верни JSON.\n\n" +
             "TOPIC: {topic}\nEVIDENCE:\n{evidence}\nEXISTING_PAGES:\n{existing_pages}\nKEYWORD_DATA:\n{keyword_data}\nSERP_DATA: {serp_data}"
         ),
@@ -175,46 +177,24 @@ object Seo {
 
     private fun ctx(p: Project) = p.seo.summary(p)
 
-    /** JSON call with schema check and one retry, logged to usage.json. */
+    /** JSON call with a schema check, cheap repairs and continuation of a cut answer ([LlmJson]), logged to usage.json. */
     private fun aiJson(p: Project, key: String, vars: Map<String, String>, required: String, maxTokens: Int = 8000): Pair<JSONObject, JSONObject> {
         val prov = AiTasks.requireProvider()
         val base = Prompts.fill(key, vars + ("lang" to lang()))
-        var prompt = base
-        var limit = maxTokens
-        var last = ""
-        var salvaged: Pair<JSONObject, JSONObject>? = null
-        for (attempt in 0..2) {
-            val r = try {
-                Llm.complete(prov, prov.smartModel, SEO_SYSTEM, prompt, json = true, maxTokens = limit, task = key, pid = p.id)
-            } catch (e: Exception) {
-                logUsage(p.id, key, prov.smartModel, 0, 0, e.message)
-                throw e
-            }
-            val o = parseJson(r.text, required)
-            val ok = o != null && !r.truncated
-            logUsage(p.id, key, r.model, r.inTokens, r.outTokens, if (ok) null else if (r.truncated) "truncated" else "invalid json")
-            L.i("seo", "$key attempt ${attempt + 1}: ${if (ok) "ok" else if (r.truncated) "truncated at limit $limit" else "invalid json: " + r.text.take(200)} in=${r.inTokens} out=${r.outTokens}")
-            if (ok) return o!! to meta(key, r)
-            // keep the complete part of a cut-off answer as a fallback
-            if (o == null) {
-                JsonSalvage.array(r.text, required)?.let { s -> runCatching { JSONObject(s) }.getOrNull() }
-                    ?.let { s -> salvaged = s.put("_partial", true) to meta(key, r) }
-            } else if (salvaged == null) {
-                salvaged = o.put("_partial", true) to meta(key, r)
-            }
-            last = r.text.take(200)
-            if (r.truncated || o == null && looksCut(r.text)) {
-                limit = minOf(limit * 2, 32000)
-                prompt = base + "\n\nПредыдущий ответ оборвался из-за лимита длины. Отвечай компактнее: короткие statement, цитаты до 200 символов, не больше 12 элементов. Верни только JSON."
-            } else {
-                prompt = base + "\n\nПредыдущий ответ не был валидным JSON с ключом \"$required\". Верни только JSON."
-            }
+        val out = try {
+            LlmJson.call(prov, prov.smartModel, SEO_SYSTEM, base, key, p.id, maxTokens, { parseJson(it, required) },
+                arrayKey = required, hint = "{\"$required\": …}", fullRetries = 1, allowPartial = true,
+                retryNote = { cut -> if (cut) "\n\nПредыдущий ответ оборвался из-за лимита длины. Отвечай компактнее: короткие statement, не больше 12 элементов. Верни только JSON."
+                    else "\n\nПредыдущий ответ не был валидным JSON с ключом \"$required\". Верни только JSON." })
+        } catch (e: Exception) {
+            logUsage(p.id, key, prov.smartModel, 0, 0, e.message)
+            throw e
         }
-        salvaged?.let {
-            L.w("seo", "$key: using partial answer with ${it.first.optJSONArray(required)?.length() ?: 0} items")
-            return it
-        }
-        throw LlmException(t("Модель вернула невалидный JSON: ", "The model returned invalid JSON: ") + last)
+        logUsage(p.id, key, out.model, out.inTokens, out.outTokens, if (out.partial) "partial" else null)
+        val m = JSONObject().put("model", out.model).put("prompt_key", key).put("prompt_version", sha1(Prompts.get(key)).take(8))
+            .put("at", System.currentTimeMillis()).put("in_tokens", out.inTokens).put("out_tokens", out.outTokens)
+        if (out.partial) out.value.put("_partial", true)
+        return out.value to m
     }
 
     private fun parseJson(text: String, required: String): JSONObject? = try {
@@ -222,9 +202,6 @@ object Seo {
     } catch (e: Exception) {
         null
     }
-
-    /** Opened but never closed JSON = cut off by the output limit. */
-    private fun looksCut(text: String) = text.trim().let { it.startsWith("{") && !it.endsWith("}") }
 
     private fun aiText(p: Project, key: String, vars: Map<String, String>, maxTokens: Int = 8000): Pair<String, JSONObject> {
         val prov = AiTasks.requireProvider()
@@ -261,7 +238,7 @@ object Seo {
     fun hasInsights(pid: String, vid: String) = Store.readFile(pid, "voc_ai/$vid.json") != null
 
     fun estimateP1(pid: String, v: Video): Int {
-        val tr = (Store.transcript(pid, v.id) ?: "").take(Settings.chunkChars)
+        val tr = Transcript.sample(Transcript.forAi(Store.transcript(pid, v.id) ?: ""), Settings.chunkChars)
         val cm = Store.comments(pid, v.id).take(150).sumOf { it.text.length.coerceAtMost(400) }
         return Llm.estimateTokens(tr) + cm / 3 + 1500
     }
@@ -281,7 +258,8 @@ object Seo {
             if (sb.length + line.length > Settings.chunkChars) break
             sb.append(line)
         }
-        val tr = if (transcript.length > Settings.chunkChars) transcript.take(Settings.chunkChars) + "\n…(truncated)" else transcript
+        // paragraphs with a timecode per ~30 s; a long one keeps its beginning, middle and end (not only the beginning)
+        val tr = Transcript.sample(Transcript.forAi(transcript), Settings.chunkChars)
         val (o, m) = aiJson(
             p, "p1_insights",
             mapOf(
@@ -297,10 +275,12 @@ object Seo {
         for (i in 0 until minOf(items.length(), 30)) {
             val it = items.optJSONObject(i) ?: continue
             val type = it.optString("type").lowercase().let { t -> if (t in INSIGHT_TYPES) t else "hypothesis" }
-            val quote = it.optString("quote")
             val cid = it.optString("comment_id").takeIf { s -> s.isNotBlank() && s != "null" }
             val idx = cid?.removePrefix("c")?.toIntOrNull()?.minus(1)
             val comment = idx?.let { j -> comments.getOrNull(j) }
+            // commenters are quoted by id: the text comes from the comment itself
+            val quote = it.optString("quote").takeIf { s -> s.isNotBlank() && s != "null" }
+                ?: comment?.text?.replace('\n', ' ')?.trim()?.let { t -> if (t.length > 200) t.take(200).substringBeforeLast(' ') + "…" else t } ?: ""
             val ts = it.optString("timestamp").takeIf { s -> s.isNotBlank() && s != "null" }
             val speaker = if (comment != null) "commenter" else it.optString("speaker_type", "author").ifBlank { "author" }
             val verified = when {
@@ -487,9 +467,28 @@ object Seo {
     fun keywordData(pid: String, c: JSONObject): String {
         val list = keywordsFor(pid, c.optString("name") + " " + c.optString("need") + " " + c.optString("summary"))
         if (list.isEmpty()) return "нет данных (спрос не проверен)"
-        return list.take(40).joinToString("\n") {
-            "- \"${it.optString("q")}\" — ${it.optString("source")}, ${Fmt.isoDay(it.optLong("checked_at"))}, volume: unknown"
-        }
+        // a suggestion seen in several sources or queries is a stronger hint of real searches (volume is still unknown)
+        val seen = list.groupingBy { Voc.normalize(it.optString("q")) }.eachCount()
+        return "volume: unknown for all; ×N = seen N times across sources/queries\n" +
+            list.distinctBy { Voc.normalize(it.optString("q")) }.sortedByDescending { seen[Voc.normalize(it.optString("q"))] ?: 0 }.take(40)
+                .joinToString("\n") { "- \"${it.optString("q")}\" ×${seen[Voc.normalize(it.optString("q"))] ?: 1} — ${it.optString("source")}, ${Fmt.isoDay(it.optLong("checked_at"))}" }
+    }
+
+    /**
+     * YouTube as the search results we do have: the project's videos close to the topic with their speed per day and
+     * age — a proxy of demand (fast fresh videos) and of competition (many strong channels). Not web SERP data.
+     */
+    fun serpData(pid: String, topic: String): String {
+        val vids = Store.videos(pid).values.filter { !isLocalSource(it.id) }
+        val near = vids.map { it to Voc.similarity(topic, it.title + " " + it.query) }.filter { it.second >= 0.15 }
+            .sortedByDescending { it.second }.take(15).map { it.first }
+        if (near.isEmpty()) return "нет данных (SERP-источник не подключён)"
+        val now = System.currentTimeMillis()
+        val speeds = near.map { ViewStats.perDay(it.views, it.uploadMs, now) }.filter { !it.isNaN() }.sorted()
+        val fresh = near.count { ViewStats.ageDays(it.uploadMs, now) in 0..90 }
+        return "YouTube videos of the project close to the topic (not web search): ${near.size}, channels ${near.map { it.channel }.distinct().size}, " +
+            "fresh ≤90d $fresh, median ${ViewStats.short(speeds.getOrElse(speeds.size / 2) { Double.NaN })}/day\n" +
+            near.joinToString("\n") { v -> "- ${v.title} — ${v.channel} (${ViewStats.ageDays(v.uploadMs, now)}d${ViewStats.tag(v.views, v.uploadMs, now, null)})" }
     }
 
     fun existingPages(p: Project): String = p.seo.existingPages.ifBlank { "нет" }
@@ -516,7 +515,7 @@ object Seo {
         val (o, m) = aiJson(
             p, "p3_qualify",
             mapOf("topic" to topic, "evidence" to evidence(p.id, c), "existing_pages" to existingPages(p),
-                "keyword_data" to keywordData(p.id, c), "serp_data" to "нет данных (SERP-источник не подключён)"),
+                "keyword_data" to keywordData(p.id, c), "serp_data" to serpData(p.id, c.optString("name") + " " + c.optString("need"))),
             "decision"
         )
         val kws = keywordsFor(p.id, c.optString("name") + " " + c.optString("need") + " " + c.optString("summary"))
@@ -538,7 +537,7 @@ object Seo {
             p, "p4_brief",
             mapOf("topic" to c.optString("name"),
                 "research" to "QUALIFICATION: ${q?.toString() ?: "нет"}\nEVIDENCE:\n${evidence(p.id, c)}\nKEYWORDS:\n${keywordData(p.id, c)}",
-                "serp_notes" to "нет данных",
+                "serp_notes" to serpData(p.id, c.optString("name") + " " + c.optString("need")),
                 "site_context" to ctx(p) + "\nEXISTING_PAGES:\n" + existingPages(p)),
             "primary_question"
         )

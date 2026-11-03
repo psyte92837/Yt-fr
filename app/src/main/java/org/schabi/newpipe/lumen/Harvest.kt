@@ -152,7 +152,7 @@ class HarvestState(var spec: HarvestSpec = HarvestSpec()) {
 /** Pure rules of a collection (covered by unit tests). */
 object HarvestRules {
     const val DAY = 86_400_000L
-    const val AI_BATCH = 15
+    const val AI_BATCH = 30
 
     fun label(mode: String) = when (mode) {
         "channels" -> t("Похожие каналы", "Similar channels")

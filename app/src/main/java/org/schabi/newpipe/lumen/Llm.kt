@@ -72,7 +72,11 @@ enum class Provider(
 }
 
 /** [truncated] = the provider stopped because of the output token limit. */
-data class LlmReply(val text: String, val inTokens: Int, val outTokens: Int, val model: String, val truncated: Boolean = false)
+data class LlmReply(
+    val text: String, val inTokens: Int, val outTokens: Int, val model: String, val truncated: Boolean = false,
+    /** Hidden reasoning tokens (already counted in [outTokens]) and prompt tokens served from the provider's cache. */
+    val thoughtTokens: Int = 0, val cachedTokens: Int = 0
+)
 
 /** [raw] keeps the provider response body (shown in the AI journal). */
 class LlmException(msg: String, val raw: String = "", val code: Int = 0) : IOException(msg)
@@ -88,7 +92,7 @@ data class LlmEndpoint(
 )
 
 object Llm {
-    fun estimateTokens(text: String): Int = (text.length / 3.6).toInt() + 1
+    fun estimateTokens(text: String): Int = TokenEstimate.of(text)
 
     fun estimateCost(inTok: Int, outTok: Int): Double =
         inTok / 1e6 * Settings.priceInPerM + outTok / 1e6 * Settings.priceOutPerM
@@ -160,9 +164,16 @@ object Llm {
         /** A picture sent with the message (base64 of a JPEG or PNG), for models that see images. */
         image: String? = null,
         imageMime: String = "image/jpeg",
-        media: MediaOpts? = null
+        media: MediaOpts? = null,
+        /** JSON schema of the answer (OpenAPI subset): Gemini responseSchema, OpenAI json_schema; others keep the prompt's format. */
+        schema: JSONObject? = null,
+        /** Minimal thinking (extraction, classification); null = by [LlmTasks.isLight]. */
+        light: Boolean? = null
     ): LlmReply {
         val started = System.currentTimeMillis()
+        val opts = (media ?: MediaOpts()).let { m ->
+            m.copy(schema = m.schema ?: if (json) schema?.toString() else null, noThinking = m.noThinking || (light ?: LlmTasks.isLight(task)))
+        }
         // another AI by hand: the request is copied out and the answer pasted back (no API, no key)
         if (task != "ping" && (p == Provider.MANUAL || Relay.routes(task))) return relay(task, pid, system, user, json, fileUri, image, imageMime, started)
         var raw: String? = null
@@ -177,10 +188,10 @@ object Llm {
         val sent = out.user
         val file = out.fileUri
         try {
-            val r = if (p == Provider.FREE) free(model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, media) { raw = it }
-            else Par.retrying { completeRaw(endpoint(p), model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, media) { raw = it } }
+            val r = if (p == Provider.FREE) free(model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, opts) { raw = it }
+            else Par.retrying { completeRaw(endpoint(p), model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, opts) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
-                if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file)
+                if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file, r.thoughtTokens, r.cachedTokens)
             // stopped while waiting for the answer: the answer stays in the journal, the task ends here
             BgTasks.checkpoint()
             return r
@@ -270,6 +281,29 @@ object Llm {
         imageMime: String,
         media: MediaOpts? = null,
         onRaw: (String) -> Unit
+    ): LlmReply = try {
+        completeRaw0(p, model, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, media, onRaw)
+    } catch (e: LlmException) {
+        // a model that does not take the schema or the thinking setting: once more without them (the prompt has the format)
+        val extra = media != null && (media.schema != null || media.noThinking)
+        if (e.code != 400 || !extra) throw e
+        L.w("llm", "400 with schema/thinking options, retry without: ${e.message?.take(200)}")
+        completeRaw0(p, model, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, media!!.copy(schema = null, noThinking = false), onRaw)
+    }
+
+    private fun completeRaw0(
+        p: LlmEndpoint,
+        model: String,
+        system: String,
+        user: String,
+        json: Boolean,
+        fileUri: String?,
+        maxTokens: Int,
+        lowMedia: Boolean,
+        image: String?,
+        imageMime: String,
+        media: MediaOpts?,
+        onRaw: (String) -> Unit
     ): LlmReply {
         val headers = authHeaders(p)
         return when (p.kind) {
@@ -283,12 +317,20 @@ object Llm {
                             .put(JSONObject().put("type", "image_url").put("image_url", JSONObject().put("url", "data:$imageMime;base64,$image")))))
                 ).put(if (p.openAiTokens) "max_completion_tokens" else "max_tokens", maxTokens)
                 if (json && p.jsonMode) {
-                    body.put("response_format", JSONObject().put("type", "json_object"))
+                    val sch = media?.schema?.takeIf { p.openAiTokens }
+                    body.put("response_format", if (sch != null) JSONObject().put("type", "json_schema")
+                        .put("json_schema", JSONObject().put("name", "answer").put("schema", JSONObject(sch)).put("strict", false))
+                    else JSONObject().put("type", "json_object"))
                 }
+                if (p.openAiTokens) LlmTasks.openAiEffort(model, media?.noThinking == true)?.let { body.put("reasoning_effort", it) }
                 LlmParse.openAi(http("${p.base}/chat/completions", "POST", headers, body.toString()).also(onRaw), model, estimateTokens(system + user))
             }
             ApiKind.ANTHROPIC -> {
-                val body = JSONObject().put("model", model).put("max_tokens", maxTokens).put("system", system)
+                // the system part repeats across a task's calls: long ones are cached by the provider (Anthropic needs the mark)
+                val sys = JSONArray().put(JSONObject().put("type", "text").put("text", system).apply {
+                    if (system.length > 3000) put("cache_control", JSONObject().put("type", "ephemeral"))
+                })
+                val body = JSONObject().put("model", model).put("max_tokens", maxTokens).put("system", sys)
                     .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", if (image == null) user else JSONArray()
                         .put(JSONObject().put("type", "image").put("source", JSONObject().put("type", "base64").put("media_type", imageMime).put("data", image)))
                         .put(JSONObject().put("type", "text").put("text", user)))))
@@ -347,16 +389,19 @@ object Prompts {
         "project_summary" to (
             "Тема исследования: \"{phrase}\" ({domain}). Ниже сводки и метаданные собранных видео.\n" +
                 "Сделай аналитический отчёт на языке {lang}: главные темы и нарративы, ключевые мнения и спикеры/каналы, " +
-                "противоречия между источниками, новые тренды, что стоит изучить дальше.\n\n{data}"
+                "противоречия между источниками, новые тренды, что стоит изучить дальше. " +
+                "У видео: возраст в днях, просмотры, /day — просмотров в день, ×N ch — во сколько раз быстрее обычного для своего канала: " +
+                "что «заходит», суди по /day и ×ch, а не по сырым просмотрам. До 6 пунктов в разделе, пункт — до 30 слов.\n\n{data}"
             ),
         "clusters" to (
             "Сгруппируй видео ниже в 3-8 тематических кластеров по теме \"{phrase}\". Для каждого кластера: название, " +
                 "описание в 1-2 предложения и список номеров видео. Ответ на языке {lang}, в Markdown.\n\n{data}"
             ),
         "sentiment" to (
-            "Проанализируй тональность комментариев к видео по теме \"{phrase}\". Дай: доли позитив/негатив/нейтрально " +
-                "в процентах, основные претензии, основные похвалы, частые вопросы зрителей, примеры формулировок " +
-                "своими словами. Ответ на языке {lang}.\n\n{data}"
+            "Проанализируй тональность комментариев к видео по теме \"{phrase}\". Ниже мысли из комментариев по типам " +
+                "(«- [×сколько комментариев ♥лайки] суть (id)») и число комментариев каждого типа. Дай: доли позитив/негатив/нейтрально " +
+                "в процентах (считай по числам комментариев), основные претензии, основные похвалы, частые вопросы зрителей, " +
+                "примеры формулировок своими словами. До 6 пунктов в разделе. Ответ на языке {lang}.\n\n{data}"
             ),
         "relevance" to (
             "Тема исследования: \"{phrase}\" ({domain}). Ниже пронумерованный список видео (название — канал).\n" +
@@ -380,7 +425,7 @@ object Prompts {
             "Проанализируй YouTube-канал по данным ниже. Язык ответа: {lang}.\n" +
                 "Дай: о чём канал и для кого; основные рубрики и форматы; что заходит лучше всего (по просмотрам) и почему — как гипотеза; " +
                 "частота и регулярность выпусков; монетизация и ссылки (по описанию); сильные и слабые стороны; 3–5 идей контента. " +
-                "Не выдумывай цифры, используй только переданные.\n\n{data}"
+                "Не выдумывай цифры, используй только переданные. До 6 пунктов в разделе.\n\n{data}"
             ),
         "video_style" to (
             "Определи стиль видеоряда и монтажа YouTube-видео. {mode}\n" +
@@ -393,20 +438,20 @@ object Prompts {
                 "6. Приёмы удержания внимания.\n" +
                 "7. Шаблон для повторения: монтажный лист по секундам для видео такой же длины.\n" +
                 "8. Чек-лист из 5–10 пунктов для своего видео.\n" +
-                "Измеренные метрики приблизительны; не выдумывай цифры.\n\n{data}"
+                "Каждый раздел — до 6 пунктов по одной строке. Измеренные метрики приблизительны; не выдумывай цифры.\n\n{data}"
             ),
         "pains" to (
             "Ниже комментарии зрителей YouTube, формат строки: [id ♥лайки] текст. Найди боли людей и их реальные кейсы.\n" +
                 "Боль — повторяющаяся проблема, страх, раздражение или неудовлетворённая потребность. Кейс — конкретная история " +
                 "человека от первого лица: кто он, что случилось, что пробовал, чем кончилось, что ему нужно.\n" +
-                "Пиши на языке {lang}. Цитаты (text) копируй дословно из комментария с указанным id, не перефразируй. " +
-                "В ids перечисли все комментарии, где встречается боль. Не выдумывай того, чего нет в комментариях.\n" +
-                "Верни строго JSON без пояснений:\n" +
+                "Пиши на языке {lang}. Цитаты не переписывай: в quotes и quote укажи только id самых показательных комментариев, " +
+                "текст приложение возьмёт само. В ids перечисли все комментарии, где встречается боль.\n" +
+                "Верни JSON:\n" +
                 "{\"summary\":\"3-5 предложений: кто эти люди и что их болит\"," +
                 "\"pains\":[{\"title\":\"коротко\",\"detail\":\"суть в 1-2 предложениях\",\"severity\":1-5," +
-                "\"ids\":[\"c1\"],\"quotes\":[{\"id\":\"c1\",\"text\":\"дословно\"}]}]," +
+                "\"ids\":[\"c1\"],\"quotes\":[\"c1\"]}]," +
                 "\"cases\":[{\"who\":\"кто (без имени)\",\"situation\":\"что случилось\",\"tried\":\"что пробовал\"," +
-                "\"outcome\":\"чем кончилось\",\"need\":\"что нужно\",\"quote\":{\"id\":\"c2\",\"text\":\"дословно\"}}]," +
+                "\"outcome\":\"чем кончилось\",\"need\":\"что нужно\",\"quote\":\"c2\"}]," +
                 "\"questions\":[\"частый вопрос\"],\"objections\":[\"возражение\"],\"ideas\":[\"что сделать автору или продукту\"]}\n" +
                 "До 12 болей (самые частые и острые первыми) и до 10 кейсов.\n\n{data}"
             ),
@@ -431,6 +476,7 @@ object Prompts {
         defaults.putAll(ALGO_PROMPTS)
         defaults.putAll(COMMENT_DIGEST_PROMPTS)
         defaults.putAll(PREDICT_PROMPTS)
+        defaults.putAll(VOC_PROMPTS)
     }
 
     fun get(key: String): String = Lumen.prefs.getString("prompt_$key", null) ?: defaults[key].orEmpty()

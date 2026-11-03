@@ -157,13 +157,33 @@ object AiTasks {
         }
     }
 
+    /** Characters one call may carry: a big-context model takes a long transcript whole, without map-reduce. */
+    fun chunkFor(prov: Provider, model: String = prov.smartModel): Int =
+        LlmTasks.contextChars(prov.kind.name, model, Settings.chunkChars, Settings.chunkUserSet)
+
+    /** Per-video context of a list: speed per day, the jump over the channel's median, descriptions without boilerplate. */
+    class Ctx(videos: Collection<Video>) {
+        private val now = System.currentTimeMillis()
+        private val medians = ViewStats.channelMedians(videos.map { it.channel to ViewStats.perDay(it.views, it.uploadMs, now) })
+        private val boiler = videos.groupBy { it.channel }.mapValues { (_, l) -> DescClean.boilerplate(l.map { it.description }) }
+        fun stats(v: Video): String {
+            val age = ViewStats.ageDays(v.uploadMs, now)
+            return (if (age >= 0) "${age}d, " else "") + ViewStats.short(maxOf(v.views, 0L).toDouble()) + " views" +
+                ViewStats.tag(v.views, v.uploadMs, now, medians[v.channel])
+        }
+        fun desc(v: Video, max: Int): String = DescClean.clean(v.description, boiler[v.channel].orEmpty()).replace('\n', ' ').take(max)
+    }
+
     private fun videoData(pid: String, v: Video): String {
         val tr = Store.transcript(pid, v.id)
+        val now = System.currentTimeMillis()
         return buildString {
             append("Title: ").append(v.title).append('\n')
-            append("Channel: ").append(v.channel).append(" | views ").append(v.views).append(" | date ").append(Fmt.date(v.uploadMs)).append('\n')
-            if (v.description.isNotBlank()) append("Description: ").append(v.description.take(2000)).append('\n')
-            if (!tr.isNullOrBlank()) append("Transcript:\n").append(tr)
+            append("Channel: ").append(v.channel).append(" | views ").append(v.views).append(" | date ").append(Fmt.date(v.uploadMs))
+                .append(ViewStats.tag(v.views, v.uploadMs, now, null)).append('\n')
+            DescClean.clean(v.description).takeIf { it.isNotBlank() }?.let { append("Description: ").append(it.take(2000)).append('\n') }
+            // a timecode per ~30 s paragraph instead of per caption line: −38 % tokens, the same text
+            if (!tr.isNullOrBlank()) append("Transcript:\n").append(Transcript.forAi(tr))
         }
     }
 
@@ -176,7 +196,7 @@ object AiTasks {
         val data = videoData(p.id, v)
         val key = sha1("video_summary|${prov.smartModel}|${Prompts.get("video_summary")}|${data.hashCode()}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
-        val max = Settings.chunkChars
+        val max = chunkFor(prov)
         val inAcc = java.util.concurrent.atomic.AtomicInteger()
         val outAcc = java.util.concurrent.atomic.AtomicInteger()
         val body = if (data.length > max) {
@@ -197,20 +217,16 @@ object AiTasks {
         return res
     }
 
-    private fun corpus(p: Project, videos: List<Video>): String {
-        val sb = StringBuilder()
-        videos.forEachIndexed { i, v ->
+    /** One document per video: "#n title — channel (age, views · per day · ×channel)" + its summary or description. */
+    private fun corpusDocs(p: Project, videos: List<Video>): List<String> {
+        val c = Ctx(videos)
+        return videos.mapIndexed { i, v ->
             val sum = Store.latestAi(p.id, "video_summary", v.id)?.text
-            sb.append("#").append(i + 1).append(" ").append(v.title).append(" — ").append(v.channel)
-                .append(" (").append(Fmt.date(v.uploadMs)).append(", ").append(Fmt.num(v.views)).append(" views)\n")
-            if (sum != null) {
-                sb.append(sum.take(1500)).append("\n\n")
-            } else {
-                sb.append(v.description.take(400).replace('\n', ' ')).append("\n\n")
-            }
+            "#" + (i + 1) + " " + v.title + " — " + v.channel + " (" + c.stats(v) + ")\n" + (sum?.take(1500) ?: c.desc(v, 400)) + "\n\n"
         }
-        return sb.toString()
     }
+
+    private fun corpus(p: Project, videos: List<Video>): String = corpusDocs(p, videos).joinToString("")
 
     private fun boundedCorpus(p: Project, videos: List<Video>): String {
         val c = corpus(p, videos)
@@ -233,7 +249,8 @@ object AiTasks {
 
     fun clusters(p: Project, videos: List<Video>, force: Boolean = false): AiResult {
         val prov = requireProvider()
-        val data = videos.mapIndexed { i, v -> "#${i + 1} ${v.title} — ${v.channel}. ${v.description.take(200).replace('\n', ' ')}" }
+        val c = Ctx(videos)
+        val data = videos.mapIndexed { i, v -> "#${i + 1} ${v.title} — ${v.channel}. ${c.desc(v, 200)}" }
             .joinToString("\n").take(Settings.chunkChars * 3)
         val key = sha1("clusters|${prov.smartModel}|${Prompts.get("clusters")}|${data.hashCode()}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
@@ -243,21 +260,16 @@ object AiTasks {
 
     fun sentiment(p: Project, videos: List<Video>, force: Boolean = false): AiResult {
         val prov = requireProvider()
-        val sb = StringBuilder()
-        for (v in videos) {
-            val cs = Store.comments(p.id, v.id)
-            if (cs.isEmpty()) continue
-            sb.append("Video: ").append(v.title).append('\n')
-            cs.sortedByDescending { it.likes }.take(60).forEach { c ->
-                sb.append("- (").append(c.likes).append("♥) ").append(c.text.replace('\n', ' ').take(300)).append('\n')
-            }
-            if (sb.length > Settings.chunkChars * 3) break
-        }
-        if (sb.isEmpty()) throw LlmException(t("Нет собранных комментариев.", "No collected comments."))
-        val data = sb.toString()
-        val key = sha1("sentiment|${prov.smartModel}|${Prompts.get("sentiment")}|${data.hashCode()}|${Settings.lang}")
+        val ids = videos.map { it.id }.toSet()
+        val msgs = Pains.projectMessages(p.id).filter { it.videoId in ids }
+        if (msgs.isEmpty()) throw LlmException(t("Нет собранных комментариев.", "No collected comments."))
+        val key = sha1("sentiment|${prov.smartModel}|${Prompts.get("sentiment")}|${msgs.size}|${msgs.sumOf { it.text.length + it.likes }}|${Settings.lang}")
         cached(p.id, key, force)?.let { return it }
-        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("sentiment", vars(p, data)), maxTokens = 3000, task = "sentiment", pid = p.id)
+        // the same extracted items as the comment digest (read once, cached), not the raw comments again
+        val items = VocAi.items(p.id, msgs)
+        val counts = VocCore.counts(items).entries.joinToString(", ") { "${it.key} ${it.value}" }
+        val data = "Comments: ${msgs.size}. Comments per type: $counts\n" + VocAi.block(items, msgs, Settings.chunkChars)
+        val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, Prompts.fill("sentiment", vars(p, data)), maxTokens = 2500, task = "sentiment", pid = p.id)
         return AiResult(key, "sentiment", "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 
@@ -279,11 +291,25 @@ object AiTasks {
         else -> ""
     }
 
+    /**
+     * The videos a question is about (TF-IDF over summaries) in full and the rest by title, instead of the whole
+     * corpus on every question (PROMPTS_PLAN 1E). A small project goes whole.
+     */
+    private fun chatCorpus(p: Project, videos: List<Video>, question: String): String {
+        val docs = corpusDocs(p, videos)
+        val budget = Settings.chunkChars
+        if (docs.sumOf { it.length } <= budget) return docs.joinToString("")
+        val pick = Retrieve.topK(question, docs, budget, minDocs = 5).toSet()
+        val rest = videos.indices.filter { it !in pick }.joinToString("\n") { "#${it + 1} ${videos[it].title} — ${videos[it].channel}" }
+        return pick.sorted().joinToString("") { docs[it] } + if (rest.isBlank()) "" else "Other videos of the project (titles only):\n" + rest.take(budget / 3) + "\n"
+    }
+
     fun chat(p: Project, videos: List<Video>, question: String, tab: String = ""): AiResult {
         val prov = requireProvider()
-        val data = if (tab == CommentDigest.TAB) tabData(p, videos, tab) else {
+        val data = if (tab == CommentDigest.TAB) CommentDigest.chatContext(p.id, question) else {
             val extra = tabData(p, videos, tab).take(Settings.chunkChars)
-            if (extra.isBlank()) boundedCorpus(p, videos) else extra + "\n\n" + boundedCorpus(p, videos)
+            val corpus = chatCorpus(p, videos, question)
+            if (extra.isBlank()) corpus else extra + "\n\n" + corpus
         }
         val r = Llm.complete(
             prov, prov.smartModel, Prompts.SYSTEM,

@@ -84,7 +84,7 @@ object StudioPrefs {
         set(v) = p.edit().putBoolean("studio_auto_direct", v).apply()
     /** How the voice-over is animated: [StudioApproach.id]. */
     var approach: String
-        get() = p.getString("studio_approach", StudioApproach.FULL.id) ?: StudioApproach.FULL.id
+        get() = p.getString("studio_approach", StudioApproach.HYBRID.id) ?: StudioApproach.HYBRID.id
         set(v) = p.edit().putString("studio_approach", v).apply()
     /** The picture pulses with the loudness of the voice. */
     var pulse: Boolean
@@ -2494,26 +2494,16 @@ class StudioActivity : LumenBase() {
         aiJson(key, vars, "You write scripts for explainer videos. Answer with JSON only.", limit) { Studio.parseScript(it) }
 
     /** JSON call with a retry and a larger limit when the answer is cut off; [parse] turns the reply into a result. */
-    private fun <T : Any> aiJson(key: String, vars: Map<String, String>, system: String, limit0: Int, fast: Boolean = false, parse: (String) -> T?): T {
+    private fun <T : Any> aiJson(
+        key: String, vars: Map<String, String>, system: String, limit0: Int, fast: Boolean = false, arrayKey: String? = null, parse: (String) -> T?
+    ): T {
+        if (cancel) throw java.util.concurrent.CancellationException()
         val prov = AiTasks.requireProvider()
-        var limit = limit0
-        var prompt = Prompts.fill(key, vars)
-        var tokIn = 0
-        var tokOut = 0
-        repeat(3) { attempt ->
-            if (cancel) throw java.util.concurrent.CancellationException()
-            val r = Llm.complete(prov, if (fast) prov.fastModel else prov.smartModel, system, prompt, json = true, maxTokens = limit, task = key, pid = "studio")
-            tokIn += r.inTokens
-            tokOut += r.outTokens
-            lastTokens = tokIn to tokOut
-            val v = parse(r.text)
-            if (v != null && !r.truncated) return v
-            if (v != null && attempt == 2) return v
-            L.i("studio", "$key attempt ${attempt + 1}: ${if (r.truncated) "truncated" else "invalid json"}")
-            if (r.truncated) limit = minOf(limit * 2, 32_000)
-            prompt = Prompts.fill(key, vars) + "\n\nПредыдущий ответ был неполным или не в формате JSON. Верни только JSON, компактно."
-        }
-        throw LlmException(t("ИИ не вернул ответ в нужном формате. Откройте «Ответы ИИ».", "AI did not answer in the expected format. See \"AI answers\"."))
+        // a broken answer is fixed alone, a cut one is continued; the whole request goes again only after that (LlmJson)
+        val out = LlmJson.call(prov, if (fast) prov.fastModel else prov.smartModel, system, Prompts.fill(key, vars), key, "studio", limit0, parse,
+            arrayKey = arrayKey, fullRetries = 2)
+        lastTokens = out.inTokens to out.outTokens
+        return out.value
     }
 
     // ---------- step 2: recording and import ----------
@@ -3079,7 +3069,7 @@ class StudioActivity : LumenBase() {
         val schemesBefore = schemeSpans()
         job("ai_direct", {
             val d = aiJson("studio_direct", vars, "You are a video editor and motion designer. Answer with JSON only.",
-                if (ws.size > 600) 16_000 else 8000) { StudioDirector.parse(it, ws.size, cutsNow.map { c -> c.id }.toSet()) }
+                if (ws.size > 600) 16_000 else 8000, arrayKey = "scenes") { StudioDirector.parse(it, ws.size, cutsNow.map { c -> c.id }.toSet()) }
             val drop = if (allowDrop) StudioDirector.safeDrop(d, ws.size) else emptySet()
             var ap = StudioDirector.apply(d, ws, p0.ms, drop)
             // cartoon: the speakers of the words come back to the new scenes, split where the speaker changes

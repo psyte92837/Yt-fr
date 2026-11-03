@@ -470,6 +470,7 @@ class SettingsActivity : LumenBase() {
             "diagram_video" to t("Схема · структура видео", "Diagram · video structure"),
             "pains" to t("Боли и кейсы людей", "Pains and cases of people"),
             CommentDigest.KIND to t("Сводка комментариев видео", "Video comment digest"),
+            VocAi.TASK to t("Голос аудитории · разбор комментариев (общий для сводки, тональности, чата)", "Audience voice · comment extraction (shared by digest, tone, chat)"),
             "kmap_aspect" to t("Карта знаний · сводка по ветке", "Knowledge map · branch summary"),
             KMap.GAPS to t("Карта знаний · пробелы в знаниях", "Knowledge map · knowledge gaps"),
             KMap.PATH to t("Карта знаний · путь обучения", "Knowledge map · learning path"),

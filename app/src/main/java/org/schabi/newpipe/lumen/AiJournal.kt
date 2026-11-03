@@ -35,18 +35,22 @@ object AiJournal {
         val inTokens: Int,
         val outTokens: Int,
         val ms: Long,
-        val fileUri: String = ""
+        val fileUri: String = "",
+        val thoughts: Int = 0,
+        val cached: Int = 0
     ) {
         fun toJson(): JSONObject = JSONObject().put("id", id).put("at", at).put("pid", pid).put("task", task)
             .put("provider", provider).put("model", model).put("status", status).put("error", error)
             .put("text", text).put("raw", raw).put("system", system).put("prompt", prompt)
             .put("in", inTokens).put("out", outTokens).put("ms", ms).put("file", fileUri)
+            .put("think", thoughts).put("cached", cached)
 
         companion object {
             fun from(o: JSONObject) = Entry(
                 o.optString("id"), o.optLong("at"), o.optString("pid"), o.optString("task"), o.optString("provider"),
                 o.optString("model"), o.optString("status"), o.optString("error"), o.optString("text"), o.optString("raw"),
-                o.optString("system"), o.optString("prompt"), o.optInt("in"), o.optInt("out"), o.optLong("ms"), o.optString("file")
+                o.optString("system"), o.optString("prompt"), o.optInt("in"), o.optInt("out"), o.optLong("ms"), o.optString("file"),
+                o.optInt("think"), o.optInt("cached")
             )
         }
     }
@@ -54,7 +58,9 @@ object AiJournal {
     fun record(
         pid: String, task: String, provider: String, model: String, system: String, prompt: String,
         text: String, raw: String, inTokens: Int, outTokens: Int, status: String, error: String?, ms: Long,
-        fileUri: String? = null
+        fileUri: String? = null,
+        thoughts: Int = 0,
+        cached: Int = 0
     ) {
         val d = dir ?: return
         try {
@@ -62,7 +68,7 @@ object AiJournal {
             val e = Entry(
                 at.toString() + "_" + newId(), at, pid, task.ifBlank { "ai" }, provider, model, status, L.redact(error ?: ""),
                 L.redact(text), L.redact(raw.take(200_000)), L.redact(system.take(4000)), L.redact(prompt.take(60_000)),
-                inTokens, outTokens, ms, fileUri.orEmpty()
+                inTokens, outTokens, ms, fileUri.orEmpty(), thoughts, cached
             )
             synchronized(lock) {
                 File(d, e.id + ".json").writeText(e.toJson().toString())
@@ -112,7 +118,9 @@ object AiJournal {
 
     fun full(e: Entry): String = buildString {
         append(Fmt.dateTime(e.at)).append(" · ").append(e.task).append(" · ").append(e.provider).append('/').append(e.model).append('\n')
-        append(statusLabel(e.status)).append(" · in ").append(e.inTokens).append(" / out ").append(e.outTokens).append(" · ").append(e.ms).append(" ms\n")
+        append(statusLabel(e.status)).append(" · in ").append(e.inTokens).append(" / out ").append(e.outTokens)
+            .append(if (e.thoughts > 0) t(" (размышления ${e.thoughts})", " (thinking ${e.thoughts})") else "")
+            .append(if (e.cached > 0) t(" · из кеша ${e.cached}", " · cached ${e.cached}") else "").append(" · ").append(e.ms).append(" ms\n")
         if (e.error.isNotBlank()) append(t("\nОшибка: ", "\nError: ")).append(e.error).append('\n')
         append(t("\n=== Ответ модели ===\n", "\n=== Model answer ===\n")).append(e.text.ifBlank { t("(пусто)", "(empty)") }).append('\n')
         if (e.raw.isNotBlank() && e.raw != e.text) append(t("\n=== Сырой ответ провайдера ===\n", "\n=== Raw provider response ===\n")).append(e.raw.take(30_000)).append('\n')

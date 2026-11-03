@@ -84,18 +84,25 @@ object Pains {
      * Each line is "[c12 ♥34] text", trimmed to [lineMax]; the whole block stays within [limit] characters.
      */
     fun aiInput(msgs: List<Msg>, limit: Int, lineMax: Int = 500): String {
-        fun signal(m: Msg) = Voc.classify(m.text).isNotEmpty() || isCase(m.text)
-        val clean = msgs.filter { !Voc.isSpam(it.text) }
-        val seen = HashSet<String>()
-        val ordered = (clean.filter { signal(it) }.sortedByDescending { it.likes } + clean.filter { !signal(it) }.sortedByDescending { it.likes })
-            .filter { seen.add(Voc.normalize(it.text)) }
         val sb = StringBuilder()
-        for (m in ordered) {
+        for (m in ordered(msgs)) {
             val line = "[" + m.id + " ♥" + m.likes + "] " + m.text.replace('\n', ' ').take(lineMax) + "\n"
             if (sb.length + line.length > limit) break
             sb.append(line)
         }
         return sb.toString()
+    }
+
+    /**
+     * Comments worth reading, best first: signals (pains, questions, objections, requests, stories) by likes, then the
+     * rest by likes; spam and repeats left out.
+     */
+    fun ordered(msgs: List<Msg>): List<Msg> {
+        fun signal(m: Msg) = Voc.classify(m.text).isNotEmpty() || isCase(m.text)
+        val clean = msgs.filter { !Voc.isSpam(it.text) }
+        val seen = HashSet<String>()
+        return (clean.filter { signal(it) }.sortedByDescending { it.likes } + clean.filter { !signal(it) }.sortedByDescending { it.likes })
+            .filter { seen.add(Voc.normalize(it.text)) }
     }
 
     /** Parses the AI reply; broken elements are skipped, quotes not found in the cited comment are dropped. Null when nothing usable. */
@@ -111,8 +118,9 @@ object Pains {
             return (0 until a.length()).map { a.optString(it).trim() }.filter { it in byId }.distinct()
         }
         fun quote(id: String, text: String): Quote? {
-            if (text.isBlank()) return null
             val src = byId[id.trim()]
+            // a quote by id: the text is taken from the comment itself (no copying by the model, nothing to invent)
+            if (text.isBlank()) return src?.let { Quote(it.id, it.text.trim()) }
             if (src != null && Voc.quoteFound(text, src.text)) return Quote(src.id, text.trim())
             // the model sometimes cites a neighbour: look for the quote anywhere
             msgs.firstOrNull { Voc.quoteFound(text, it.text) }?.let { return Quote(it.id, text.trim()) }
@@ -124,7 +132,7 @@ object Pains {
             if (title.isEmpty()) return@mapNotNull null
             val qa = o.optJSONArray("quotes")
             val quotes = (0 until (qa?.length() ?: 0)).mapNotNull { i ->
-                val q = qa!!.optJSONObject(i) ?: return@mapNotNull null
+                val q = qa!!.optJSONObject(i) ?: return@mapNotNull qa.optString(i).takeIf { it.isNotBlank() }?.let { quote(it, "") }
                 quote(q.optString("id"), q.optString("text"))
             }
             val ids = (ids(o) + quotes.map { it.id }).distinct()
@@ -132,6 +140,7 @@ object Pains {
         }.sortedWith(compareByDescending<Pain> { it.ids.size }.thenByDescending { it.severity })
         val cases = objects(casesArr).mapNotNull { o ->
             val q = o.optJSONObject("quote")?.let { quote(it.optString("id"), it.optString("text")) }
+                ?: o.optString("quote").takeIf { it.isNotBlank() && !it.startsWith("{") }?.let { quote(it, "") }
             val situation = o.optString("situation").trim()
             if (situation.isEmpty() && q == null) return@mapNotNull null
             Case(o.optString("who").trim(), situation, o.optString("tried").trim(), o.optString("outcome").trim(), o.optString("need").trim(), q)
@@ -245,14 +254,9 @@ object Pains {
         val prompt = Prompts.get(KIND).replace("{lang}", if (Settings.lang == "en") "English" else "русский").replace("{data}", data)
         val key = sha1("pains|${prov.smartModel}|${prompt.hashCode()}")
         if (!force) Store.ai(p.id, key)?.let { return it }
-        var last: LlmReply? = null
-        for (attempt in 0..1) {
-            val r = Llm.complete(prov, prov.smartModel, Prompts.SYSTEM, prompt, json = true, maxTokens = if (attempt == 0) 8000 else 16000, task = KIND, pid = p.id)
-            last = r
-            if (parse(r.text, msgs) != null) break
-            L.w(KIND, "unusable JSON, attempt ${attempt + 1}")
-        }
-        val r = last!!
+        // quotes come back as ids (the text is taken from the comment), so the answer is short; a cut one is continued
+        val r = LlmJson.call(prov, prov.smartModel, Prompts.SYSTEM, prompt, KIND, p.id, 6000, { s -> s.takeIf { parse(it, msgs) != null } },
+            arrayKey = "pains", allowPartial = true)
         return AiResult(key, KIND, "project", r.model, r.text, r.inTokens, r.outTokens).also { Store.saveAi(p.id, it) }
     }
 

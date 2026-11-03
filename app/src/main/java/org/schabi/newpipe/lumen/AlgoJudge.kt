@@ -150,14 +150,14 @@ object AlgoJudge {
         val examples = Store.videos(p.id).values.filter { it.marked }.ifEmpty { Store.videos(p.id).values.sortedByDescending { it.views } }
             .take(5).joinToString("\n") { "- " + it.title + " — " + it.channel }.ifBlank { "-" }
         val done = java.util.concurrent.atomic.AtomicInteger(0)
-        Par.each(doubt.chunked(30)) { _, batch ->
+        Par.each(doubt.chunked(60)) { _, batch ->
             try {
                 val data = batch.mapIndexed { i, n -> "${i + 1}. ${n.title} — ${n.channel}" + (if (n.duration > 0) " · " + Fmt.duration(n.duration) else "") }.joinToString("\n")
                 val prompt = Prompts.fill("algo_judge_videos", vars + mapOf("examples" to examples, "count" to batch.size.toString(), "data" to data))
-                var r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt, json = true, maxTokens = 700, task = "algo_judge_videos", pid = p.id)
+                var r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt, json = true, maxTokens = 1200, task = "algo_judge_videos", pid = p.id)
                 var g = AlgoParse.grades(r.text, batch.size)
                 if (g.value == null) {
-                    r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt + AlgoParse.fixNote(g.problem), json = true, maxTokens = 700, task = "algo_judge_videos", pid = p.id)
+                    r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt + AlgoParse.fixNote(g.problem), json = true, maxTokens = 1200, task = "algo_judge_videos", pid = p.id)
                     g = AlgoParse.grades(r.text, batch.size)
                 }
                 val grades = g.value ?: throw IllegalStateException(g.problem)

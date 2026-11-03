@@ -35,9 +35,11 @@ object LlmParse {
         return LlmReply(
             text,
             u?.optInt("prompt_tokens") ?: promptTokensEstimate,
-            u?.optInt("completion_tokens") ?: Llm.estimateTokens(text),
+            u?.optInt("completion_tokens") ?: TokenEstimate.of(text),
             o.optString("model", model).ifBlank { model },
-            first.optString("finish_reason") == "length"
+            first.optString("finish_reason") == "length",
+            u?.optJSONObject("completion_tokens_details")?.optInt("reasoning_tokens") ?: 0,
+            u?.optJSONObject("prompt_tokens_details")?.optInt("cached_tokens") ?: 0
         )
     }
 
@@ -52,8 +54,9 @@ object LlmParse {
             if (b.optString("type") == "text") sb.append(b.optString("text"))
         }
         val u = o.optJSONObject("usage")
-        return LlmReply(sb.toString(), u?.optInt("input_tokens") ?: 0, u?.optInt("output_tokens") ?: 0, o.optString("model", model).ifBlank { model },
-            o.optString("stop_reason") == "max_tokens")
+        val cached = u?.optInt("cache_read_input_tokens") ?: 0
+        return LlmReply(sb.toString(), (u?.optInt("input_tokens") ?: 0) + cached + (u?.optInt("cache_creation_input_tokens") ?: 0),
+            u?.optInt("output_tokens") ?: 0, o.optString("model", model).ifBlank { model }, o.optString("stop_reason") == "max_tokens", 0, cached)
     }
 
     /** Gemini generateContent: first candidate's text parts; blocked or empty → exception. */
@@ -77,8 +80,10 @@ object LlmParse {
             throw LlmException("Gemini: $reason")
         }
         val u = o.optJSONObject("usageMetadata")
-        return LlmReply(sb.toString(), u?.optInt("promptTokenCount") ?: 0, u?.optInt("candidatesTokenCount") ?: 0, model,
-            cands?.optJSONObject(0)?.optString("finishReason") == "MAX_TOKENS")
+        // thinking is billed as output but is not part of candidatesTokenCount
+        val thoughts = u?.optInt("thoughtsTokenCount") ?: 0
+        return LlmReply(sb.toString(), u?.optInt("promptTokenCount") ?: 0, (u?.optInt("candidatesTokenCount") ?: 0) + thoughts, model,
+            cands?.optJSONObject(0)?.optString("finishReason") == "MAX_TOKENS", thoughts, u?.optInt("cachedContentTokenCount") ?: 0)
     }
 
     /** Model list: Gemini {models:[{name, supportedGenerationMethods}]}, others {data:[{id}]}. */

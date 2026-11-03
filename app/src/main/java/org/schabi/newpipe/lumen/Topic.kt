@@ -158,17 +158,17 @@ object TopicFilter {
             byKeywords(items, out)
             return out
         }
-        val batches = items.chunked(15)
+        val batches = items.chunked(30)
         val finished = java.util.concurrent.atomic.AtomicInteger(0)
         val verdicts = Par.map(batches) { _, batch ->
             val res = HashMap<String, ChVerdict>()
             try {
                 val data = batch.mapIndexed { i, (_, c) -> channelLine(i + 1, c) }.joinToString("\n")
                 val prompt = Prompts.fill("algo_judge_channels", AlgoText.topicVars(p, topic) + mapOf("count" to batch.size.toString(), "data" to data))
-                var r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt, json = true, maxTokens = 900, task = "algo_judge_channels", pid = p.id)
+                var r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt, json = true, maxTokens = 1400, task = "algo_judge_channels", pid = p.id)
                 var g = AlgoParse.grades(r.text, batch.size)
                 if (g.value == null) {
-                    r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt + AlgoParse.fixNote(g.problem), json = true, maxTokens = 900, task = "algo_judge_channels", pid = p.id)
+                    r = Llm.complete(prov, prov.fastModel, ALGO_SYSTEM, prompt + AlgoParse.fixNote(g.problem), json = true, maxTokens = 1400, task = "algo_judge_channels", pid = p.id)
                     g = AlgoParse.grades(r.text, batch.size)
                 }
                 val grades = g.value ?: throw IllegalStateException(g.problem)

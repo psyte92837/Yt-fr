@@ -161,7 +161,25 @@ object WatchFilter {
         val prov = Provider.active()
         val keep = ArrayList<Video>()
         val drop = ArrayList<Video>()
-        for (batch in list.chunked(30)) {
+        // clear cases are decided by the topic score (the Algorithm tab's scorer and thresholds): AI reads only the doubtful
+        val doubtful = if (prov == null) list else try {
+            val sc = AlgoJudge.scorer(p, TopicFilter.load(p.id), list.map { it.title + " — " + it.channel })
+            val cuts = AlgoJudge.cuts(p.id, sc)
+            val home = LangGuess.guess(p.phrase + " " + p.domain)
+            list.filter { v ->
+                val score = sc.score(v.title + " — " + v.channel)
+                when {
+                    score >= cuts.hi -> { keep += v; false }
+                    // a low score means little in another language: those still go to the AI
+                    score < cuts.lo && WatchDigest.langOf(v) == home && !Relevance.matches(kw, v.title + " " + v.channel + " " + v.description) -> { drop += v; false }
+                    else -> true
+                }
+            }
+        } catch (e: Exception) {
+            L.w("watch", "topic score failed: ${e.message}")
+            list
+        }
+        for (batch in doubtful.chunked(60)) {
             val (k, d) = if (prov == null) {
                 byKeywords(batch)
             } else {
@@ -170,7 +188,7 @@ object WatchFilter {
                     val prompt = Prompts.get("relevance").replace("{phrase}", p.phrase)
                         .replace("{domain}", p.domain.ifBlank { "-" }).replace("{data}", data)
                         .replace("{lang}", if (Settings.lang == "en") "English" else "русский")
-                    val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 600, task = "watch_filter", pid = p.id)
+                    val r = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, json = true, maxTokens = 900, task = "watch_filter", pid = p.id)
                     if (TopicFilter.hasVerdict(r.text)) split(batch, TopicFilter.parseIndexes(r.text)) else byKeywords(batch)
                 } catch (e: Exception) {
                     L.w("watch", "AI filter failed, keywords used: ${e.message}")

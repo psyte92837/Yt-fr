@@ -13,7 +13,7 @@ import org.json.JSONObject
  *
  * [bg] — background of the blocks (schemes, tiles, cards), as in the Editor: solid, glass (semi-transparent) or clear
  * (no plate: text and emoji only, with a soft shadow so they stay readable over a live video).
- * [look] — a built-in look ([SchemeStyles.PRESETS]). [size] — s/m/l. [place] — auto (over the picture), side
+ * [look] — a built-in look ([SchemeStyles.BUILT_IN]). [size] — s/m/l. [place] — auto (over the picture), side
  * (the speaker's frame slides aside), pip (the speaker into a corner) or full (full-screen inserts).
  * [toon] — animation with characters: the scheme on a board or big. [amount] — how many scenes get a scheme.
  * [full] — what the moments show where a scheme would cover the whole video (place full, or a cut montage scene with

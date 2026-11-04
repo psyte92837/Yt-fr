@@ -134,6 +134,7 @@ class SearchActivity : LumenBase() {
             SearchIndex.Item("screen", t("🎬 Lumen Studio", "🎬 Lumen Studio"), t("ролики Shorts, видео, озвучка, нарезка", "Shorts, videos, voice-over, cuts"), "studio", "studio shorts видео ролик"),
             SearchIndex.Item("screen", t("✏️ Редактор видео", "✏️ Video editor"), t("монтаж, схемы, надписи, эмодзи", "editing, schemes, captions, emoji"), "editor", "монтаж edit editor capcut"),
             SearchIndex.Item("screen", t("🔀 Микс", "🔀 Mix"), t("нарезка чужих роликов под озвучку", "cuts of videos under a voice-over"), "mix", "mix микс нарезка"),
+            SearchIndex.Item("screen", t("✂ Откусить видео или аудио", "✂ Bite a video or audio"), t("кусок видео или звук с YouTube на телефон", "a piece of a YouTube video or its sound to the phone"), "bite", "откусить вырезать скачать кусок аудио звук mp3 m4a bite cut download"),
             SearchIndex.Item("screen", t("🔊 Озвучка текста", "🔊 Read aloud"), t("голоса, MP3", "voices, MP3"), "tts", "tts голос озвучка mp3 voice"),
             SearchIndex.Item("screen", t("🌐 Браузер", "🌐 Browser"), "", "browser", "browser браузер web"),
             SearchIndex.Item("screen", t("🤖 Мои ТГ боты", "🤖 My Telegram bots"), "Telegram", "bots", "telegram боты bot"),
@@ -155,6 +156,7 @@ class SearchActivity : LumenBase() {
                 "studio" -> StudioActivity.open(ctx)
                 "editor" -> StudioEditorActivity.open(ctx)
                 "mix" -> StudioMixActivity.open(ctx)
+                "bite" -> BiteActivity.open(ctx)
                 "tts" -> TtsActivity.open(ctx)
                 "browser" -> BrowserActivity.open(ctx)
                 "bots" -> BotsActivity.open(ctx)

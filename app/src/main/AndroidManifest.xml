@@ -445,6 +445,14 @@
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <!-- ===== Lumen: "Bite a video or audio" — a piece of a YouTube video saved on the phone ===== -->
+        <activity
+            android:name=".lumen.BiteActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- ===== Lumen: free AI manager (catalog from FreeLLMAPI, failover between free tiers) ===== -->
         <!-- ===== Lumen: search across projects, videos, help, settings and screens ===== -->
         <activity

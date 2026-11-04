@@ -373,6 +373,7 @@ class LumenActivity : LumenBase() {
         val trashed = runCatching { Store.trashed().size }.getOrDefault(0)
         if (trashed > 0) items.add(t("🗑 Корзина ($trashed)", "🗑 Trash ($trashed)") to { trashSheet() })
         items.add(t("🔍 Поиск по приложению", "🔍 Search the app") to { SearchActivity.open(this) })
+        items.add(t("✂ Откусить видео или аудио", "✂ Bite a video or audio") to { BiteActivity.open(this) })
         items.add(t("Восстановить из резервной копии…", "Restore from a backup…") to {
             @Suppress("DEPRECATION")
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)

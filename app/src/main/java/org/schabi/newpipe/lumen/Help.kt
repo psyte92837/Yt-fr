@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "bots", "bot_posts", "settings"
+        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "bite", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -42,6 +42,7 @@ object HelpMap {
         "StudioActivity" to "studio",
         "StudioTemplatesActivity" to "studio",
         "StudioMixActivity" to "studio",
+        "BiteActivity" to "bite",
         "StudioEditorActivity" to "studio",
         "WebLayerActivity" to "montage",
         "BotsActivity" to "bots",
@@ -328,6 +329,26 @@ object Help {
                     "The layer runs in a WebView without internet: pictures and fonts by link do not load, only system fonts, emoji are fine. The protocol text — the \"📄 Protocol\" button."),
                 t("Галочка «Слой в полном разрешении» делает надписи чётче, но рендер медленнее. Если в видео уже есть субтитры из Студии, ИИ получает указание их не перекрывать.",
                     "The \"Layer at full resolution\" tick makes text sharper but the render slower. If the video already has Studio subtitles, the AI is told not to cover them.")
+            )),
+        HelpTopic("bite", t("Откусить видео или аудио", "Bite a video or audio"),
+            t("Сохраняет на телефон кусок видео с YouTube — видео со звуком (MP4) или только звук (M4A). Качается только нужный кусок, без пережатия, поэтому быстро и без потери качества.",
+                "Saves a piece of a YouTube video on the phone — a video with sound (MP4) or the sound only (M4A). Only the needed piece is downloaded, without re-encoding, so it is fast and keeps the quality."),
+            listOf(
+                t("Вход: меню ⋮ на главной → «✂ Откусить видео или аудио», или «Поделиться → Lumen» со ссылкой на видео → «✂ Откусить кусок видео или аудио».",
+                    "Entry: the ⋮ menu on Home → \"✂ Bite a video or audio\", or \"Share → Lumen\" with a video link → \"✂ Bite a piece of video or audio\"."),
+                t("1 Видео: вставьте ссылку или напишите, что искать, и нажмите на найденное видео. Время в ссылке (?t=83) станет началом.",
+                    "1 Video: paste a link or type what to search and tap a found video. A time in the link (?t=83) becomes the start."),
+                t("2 Кусок: кадры по всему видео — тап включает видео с этого места. «⟦ Начало здесь» и «Конец здесь ⟧» берут время плеера; можно ввести вручную (1:23 или 83) или нажать длину 5 с … 1 мин. «▶ Проверить кусок» проигрывает отрезок.",
+                    "2 Piece: frames across the video — a tap plays from there. \"⟦ Start here\" and \"End here ⟧\" take the player's time; you can type it (1:23 or 83) or tap a length 5 s … 1 min. \"▶ Check the piece\" plays it."),
+                t("3 Сохранить: «🎬 Видео со звуком» (качество 360p–1080p) → Галерея, Фильмы/Lumen; «🎵 Только аудио» → Музыка/Lumen. Загрузка идёт в фоне, её видно в уведомлении и в «⚙ Задачах».",
+                    "3 Save: \"🎬 Video with sound\" (360p–1080p) → Gallery, Movies/Lumen; \"🎵 Sound only\" → Music/Lumen. The download runs in the background, shown in the notification and in \"⚙ Tasks\"."),
+                t("«Откушенное» внизу: ▶ открыть, ↗ поделиться, «💾 В папку…» — сохранить копию куда угодно, 🗑 — убрать из списка.",
+                    "\"Bitten\" below: ▶ open, ↗ share, \"💾 To a folder…\" — save a copy anywhere, 🗑 — remove from the list.")
+            ),
+            listOf(
+                t("Видео без пережатия начинается с ключевого кадра — иногда на 1–3 с раньше выбранного начала. Звук отдельно режется точно.",
+                    "Without re-encoding the video starts at a key frame — sometimes 1–3 s before the chosen start. The sound alone is cut exactly."),
+                t("Кусок — до 60 минут. Сохраняйте только то, на что у вас есть права.", "A piece is up to 60 minutes. Save only what you have the rights to.")
             )),
         HelpTopic("insert", t("Редактор: схема или анимация от ИИ", "Editor: AI scheme or animation"),
             t("Помощник вставки Редактора Студии. Вы говорите смыслом — «сравнение», «число-факт», «шаги» — а Lumen сам решает, рисовать это нативной инфосхемой или анимацией (код ИИ по протоколу lumen.anim, заранее отрисованный в кадры). Сделать может встроенный ИИ или любой чат-ИИ: запрос копируется, ответ Lumen берёт из буфера.",

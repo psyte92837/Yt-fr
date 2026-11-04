@@ -136,7 +136,7 @@ object StudioCutsLoad {
         }
     }
 
-    private fun open(url: String, from: Long, to: Long): HttpURLConnection {
+    internal fun open(url: String, from: Long, to: Long): HttpURLConnection {
         val range = if (to >= from && to >= 0) "&range=$from-$to" else if (from > 0) "&range=$from-" else ""
         val c = URL(url + range + "&rn=" + (++rn)).openConnection() as HttpURLConnection
         c.connectTimeout = 20_000
@@ -160,7 +160,7 @@ object StudioCutsLoad {
         return c
     }
 
-    private fun get(url: String, from: Long, to: Long): ByteArray {
+    internal fun get(url: String, from: Long, to: Long): ByteArray {
         val c = open(url, from, to)
         try {
             return c.inputStream.use { it.readBytes() }
@@ -169,7 +169,7 @@ object StudioCutsLoad {
         }
     }
 
-    private fun copy(url: String, from: Long, to: Long, o: OutputStream, cancelled: () -> Boolean, progress: (Int) -> Unit) {
+    internal fun copy(url: String, from: Long, to: Long, o: OutputStream, cancelled: () -> Boolean, progress: (Int) -> Unit) {
         val c = open(url, from, to)
         try {
             val total = if (to >= from) to - from + 1 else c.contentLengthLong

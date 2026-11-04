@@ -73,12 +73,14 @@ jobs:
           PY
           cat dist/update.json
           git tag -f lumen-latest "$GITHUB_SHA"
-          git push -f origin refs/tags/lumen-latest
+          # GitHub sometimes answers 500 for a moment: try again before failing the build
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "retry $i: $*"; sleep $((i * 10)); done; return 1; }
+          retry git push -f origin refs/tags/lumen-latest
           gh release view lumen-latest >/dev/null 2>&1 || gh release create lumen-latest --prerelease --verify-tag \
             --title "Lumen: latest build" --notes "Rolling build of main. The app installs it from Settings → About."
           # APK first, then update.json, then remove older APKs: the feed never points to a missing file
-          gh release upload lumen-latest "$apk" --clobber
-          gh release upload lumen-latest dist/update.json --clobber
+          retry gh release upload lumen-latest "$apk" --clobber
+          retry gh release upload lumen-latest dist/update.json --clobber
           gh release edit lumen-latest --prerelease --title "Lumen: build $BUILD" \
             --notes "Build $BUILD · ${GITHUB_SHA:0:10} · NewPipeExtractor ${EXTRACTOR:0:10}
 

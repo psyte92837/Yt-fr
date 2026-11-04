@@ -1172,6 +1172,7 @@ class StudioEditorActivity : LumenBase() {
                     act("T", t("Надпись", "Caption")) { captionSheet(null) },
                     act("💬", t("Автосубтитры", "Auto captions")) { subsSheet() },
                     act("✍️", t("Схема текстом", "Text scheme")) { textSchemeSheet(null) },
+                    act("📚", t("Готовые схемы", "Ready schemes")) { schemeTemplates() },
                     if (words.isNotEmpty()) act("📝", t("Текст речи", "Speech text")) { textSheet() } else null
                 )
             }
@@ -2063,7 +2064,7 @@ class StudioEditorActivity : LumenBase() {
         "round" -> t("Скругление", "Rounded")
         "card" -> t("Карточка", "Card")
         "circle" -> t("Круг", "Circle")
-        else -> l
+        else -> TextStyles.ofLook(l)?.let { TextStyles.name(it, Settings.lang != "en") } ?: l
     }
 
     private fun animName(a: String) = when (a) {
@@ -2133,6 +2134,7 @@ class StudioEditorActivity : LumenBase() {
             item(t("🌀 Lottie-анимация (.json)", "🌀 Lottie animation (.json)"), t("готовый вектор: LottieFiles и т. п., тексты и цвет темы меняются", "ready vector art: LottieFiles etc., texts and the theme colour change")) { pickLottie() }
             if (words.isNotEmpty()) item(t("🤖 Схемы на весь ролик", "🤖 Schemes for the whole video"), t("ИИ сам выберет места и поставит схемы", "the AI picks the places and puts schemes there")) { autoSchemes() }
             item(t("✍️ Схема своим текстом", "✍️ Scheme from your text"), t("строки «эмодзи Подпись — значение», без ИИ", "lines \"emoji Label — value\", no AI")) { textSchemeSheet(null) }
+            item(t("📚 Готовые схемы (100)", "📚 Ready schemes (100)"), t("SWOT, AIDA, Маслоу, PDCA… — как есть, текстом или ИИ по речи", "SWOT, AIDA, Maslow, PDCA… — as is, as text or AI from the speech")) { schemeTemplates() }
             item(t("🖼 Картинка из галереи", "🖼 Picture from the gallery"), t("фото, скриншот, логотип (PNG с прозрачностью тоже)", "a photo, screenshot or logo (transparent PNG too)")) { pickImage(null) }
             item(t("🌐 Фото по запросу", "🌐 Photo search"), t("бесплатные фото Openverse; запрос может подобрать ИИ", "free Openverse photos; the AI can suggest the query")) { photoSheet(null) }
             item(t("T Надпись", "T Caption"), t("свой текст или варианты от ИИ", "your text or AI suggestions")) { captionSheet(null) }
@@ -2485,22 +2487,24 @@ class StudioEditorActivity : LumenBase() {
         commit(blocks.map { b -> if (b.id in ids) StudioEdit.clampTime(b.copy(startMs = (b.startMs + ms).coerceAtLeast(0)), total) else b })
     }
 
-    private fun textSchemeSheet(old: EBlock?) {
+    private fun textSchemeSheet(old: EBlock?, tpl: SchemeTpl? = null) {
         pause()
         val at = old?.startMs ?: curMs
-        var layout = old?.scheme?.layout ?: "auto"
-        var style = old?.look?.ifEmpty { null } ?: lastStyle
+        val ru = Settings.lang != "en"
+        val fromTpl = tpl?.let { SchemeTemplates.scheme(it, ru) }
+        var layout = old?.scheme?.layout ?: tpl?.layout ?: "auto"
+        var style = old?.look?.ifEmpty { null } ?: tpl?.look ?: lastStyle
         bottomSheet(if (old == null) t("✍️ Схема своим текстом", "✍️ Scheme from your text") else t("✎ Схема", "✎ Scheme")) { dismiss ->
             muted(t("Каждый узел — строка: «эмодзи Подпись — значение». Первая строка с двоеточием в конце — заголовок. 2–7 строк.",
                 "One node per line: \"emoji Label — value\". A first line ending with a colon is the title. 2–7 lines."))
             val e = edit(t("Заголовок:\n🔍 Поиск — 100%\n🛒 Покупка — 5%", "Title:\n🔍 Search — 100%\n🛒 Purchase — 5%"),
-                old?.scheme?.let { StudioEdit.schemeLines(it) }.orEmpty(), multiline = true)
+                old?.scheme?.let { StudioEdit.schemeLines(it) } ?: fromTpl?.let { StudioEdit.schemeLines(it) }.orEmpty(), multiline = true)
             label(this, t("Тип схемы", "Scheme type"))
             add(choiceChips(ctx, listOf("auto" to t("Авто", "Auto")) + StudioScheme.LAYOUTS.map { it to layoutName(it) }, layout) { layout = it })
             label(this, t("Стиль", "Style"))
             add(choiceChips(ctx, styles(), style) { style = it })
             button(if (old == null) t("Вставить", "Insert") else t("Применить", "Apply"), primary = true) {
-                val s = StudioEdit.schemeFromLines(e.text.toString(), layout, old?.scheme?.takeIf { it.layout == layout || layout == "auto" })
+                val s = StudioEdit.schemeFromLines(e.text.toString(), layout, (old?.scheme ?: fromTpl)?.takeIf { it.layout == layout || layout == "auto" })
                     ?: return@button toast(when (layout) {
                         "matrix" -> t("Матрице нужны ровно 4 строки и оси — выберите другой тип или ИИ", "A matrix needs exactly 4 lines and axes — pick another type or the AI")
                         "venn" -> t("Кругам Венна нужно 2–3 строки", "Venn needs 2–3 lines")
@@ -2518,7 +2522,56 @@ class StudioEditorActivity : LumenBase() {
                 dismiss()
                 aiSchemeSheet(old)
             }
+            if (old == null && tpl == null) button(t("📚 Взять готовую схему", "📚 Start from a ready scheme"), style = BtnStyle.TEXT) {
+                dismiss()
+                schemeTemplates()
+            }
         }
+    }
+
+    /** «📚 Готовые схемы»: 100 framework templates with live previews → [templateSheet]. */
+    private fun schemeTemplates() {
+        pause()
+        TplPicker.schemes(this, dir, styleDir) { templateSheet(it) }
+    }
+
+    /** A picked scheme template: insert it as is, fill it from the speech with the AI or edit its lines first. */
+    private fun templateSheet(tpl: SchemeTpl) {
+        val p = project ?: return
+        val ru = Settings.lang != "en"
+        val at = curMs
+        bottomSheet("📚 " + SchemeTemplates.name(tpl, ru)) { dismiss ->
+            muted(SchemeTemplates.use(tpl, ru) + " · " + layoutName(tpl.layout))
+            add(TplPreview(ctx, dir, styleDir, 4200L) { w, h -> TplPicker.schemeBlock(tpl, w, h) }, 8).layoutParams.height = dp(210)
+            button(t("➕ Вставить как есть", "➕ Insert as is"), primary = true) {
+                dismiss()
+                lastStyle = tpl.look
+                addNew("scheme", at, 6000L, schemeRatio(p)) { it.copy(scheme = SchemeTemplates.scheme(tpl, ru), look = tpl.look, animIn = "fade", animOut = "fade") }
+                stage?.refresh()
+                toast(t("Схема вставлена: ✎ у блока — вписать свои подписи", "Scheme inserted: ✎ on the block to write your labels"))
+            }
+            button(t("🤖 Заполнить по речи с ИИ", "🤖 Fill from the speech with AI"), style = BtnStyle.TONAL) {
+                dismiss()
+                lastStyle = tpl.look
+                runAiScheme(p, at, SchemeTemplates.wish(tpl, ru), tpl.layout, 6000L, tpl.look, null)
+            }
+            button(t("✍️ Поправить текстом и вставить", "✍️ Edit the text, then insert"), style = BtnStyle.TEXT) {
+                dismiss()
+                textSchemeSheet(null, tpl)
+            }
+        }
+    }
+
+    /** A built-in caption style on [b] — on every subtitle when [b] is one of them. */
+    private fun applyTextStyle(b: EBlock, st: TextStyle) {
+        val all = EditCaptions.isSub(b)
+        commit(blocks.map {
+            if (it.id != b.id && !(all && EditCaptions.isSub(it))) it
+            else it.copy(look = st.look, animIn = st.anim, motion = if (it.wordMs.isNotEmpty()) st.motion else it.motion,
+                over = it.over?.copy(font = "", accent = null, upper = null)?.takeIf { o -> !o.isEmpty })
+        })
+        stage?.refresh()
+        toast(if (all) t("Стиль «${st.name}» — на всех субтитрах", "Style \"${st.nameEn}\" on all subtitles") else t("Стиль «${st.name}»", "Style \"${st.nameEn}\""))
     }
 
     private fun pickImage(replace: String?) {
@@ -2909,8 +2962,16 @@ class StudioEditorActivity : LumenBase() {
             else -> emptyList()
         }
         if (opts.isEmpty()) return
-        var chosen = b.look.takeIf { l -> opts.any { it.first == l } } ?: opts.first().first
+        var chosen = b.look.takeIf { l -> opts.any { it.first == l } || (b.kind == "text" && TextStyles.isStyle(l)) } ?: opts.first().first
         bottomSheet(t("🎨 Вид", "🎨 Look")) { dismiss ->
+            if (b.kind == "text") {
+                TextStyles.ofLook(b.look)?.let { st -> muted(t("Готовый стиль: ", "Ready style: ") + TextStyles.name(st, Settings.lang != "en")) }
+                button(t("🎨 Готовые стили (100)", "🎨 Ready styles (100)"), style = BtnStyle.TONAL) {
+                    dismiss()
+                    TplPicker.texts(this@StudioEditorActivity, dir, styleDir, TextStyles.ofLook(b.look)?.id.orEmpty()) { st -> applyTextStyle(b, st) }
+                }
+                label(this, t("Или простой вид", "Or a plain look"))
+            }
             add(choiceChips(ctx, opts, chosen) { v ->
                 chosen = v
                 change(b.id) { it.copy(look = v) }
@@ -3410,16 +3471,45 @@ class StudioEditorActivity : LumenBase() {
         var anim = prefs.getString("studio_subs_anim", "pop").takeIf { it in StudioEdit.ANIMS } ?: "pop"
         var motion = prefs.getString("studio_subs_motion", "karaoke").takeIf { it in EditCaptions.MOTIONS } ?: ""
         var font = prefs.getString("studio_subs_font", "lf:montserrat").takeIf { it != null && (it.isEmpty() || LumenFonts.of(it) != null) } ?: ""
+        // the same built-in style as «Поверх видео» of the Studio until one is chosen here
+        var tpl = (prefs.getString("studio_subs_tpl", null) ?: StudioPrefs.over.subStyle).takeIf { TextStyles.of(it) != null }.orEmpty()
         val has = blocks.count { EditCaptions.isSub(it) }
+        fun keep() = prefs.edit().putInt("studio_subs_words", size).putString("studio_subs_look", look).putInt("studio_subs_place", place)
+            .putString("studio_subs_anim", anim).putString("studio_subs_motion", motion).putString("studio_subs_font", font).putString("studio_subs_tpl", tpl).apply()
         bottomSheet(t("💬 Автосубтитры", "💬 Auto subtitles")) { dismiss ->
             muted(if (words.isEmpty()) t("Речь ролика ещё не распознана: распознаю на телефоне (Android 13+), затем поставлю субтитры.",
                 "The speech is not recognised yet: it is recognised on the phone (Android 13+), then the subtitles are put in.")
             else t("Речь уже есть (${words.size} слов): субтитры встанут точно по словам. Каждый — обычная надпись, её можно править.",
                 "The speech is there (${words.size} words): subtitles follow the words exactly. Each one is an ordinary caption you can edit."))
+            label(this, t("Готовый стиль", "Ready style"))
+            val cur = TextStyles.of(tpl)
+            if (cur != null) {
+                add(TplPreview(ctx, dir, styleDir, 2800L) { w, h -> TplPicker.textBlock(cur, w, h) }, 4).layoutParams.height = dp(84)
+                muted(TextStyles.name(cur, Settings.lang != "en") + " · " + TextStyles.areaName(cur.area, Settings.lang != "en"))
+            }
+            button(if (cur != null) t("🎨 Сменить стиль (100 готовых)", "🎨 Change the style (100 ready)") else t("🎨 Выбрать из 100 готовых стилей", "🎨 Pick one of 100 ready styles"),
+                style = BtnStyle.TONAL) {
+                keep()
+                dismiss()
+                TplPicker.texts(this@StudioEditorActivity, dir, styleDir, tpl) { st ->
+                    val words = when { st.words <= 1 -> 1; st.words <= 3 -> 3; else -> 6 }
+                    prefs.edit().putString("studio_subs_tpl", st.id).putString("studio_subs_motion", st.motion).putString("studio_subs_anim", st.anim)
+                        .putString("studio_subs_font", "").putInt("studio_subs_words", words).apply()
+                    subsSheet()
+                }
+            }
+            if (cur != null) button(t("✕ Без готового стиля", "✕ No ready style"), style = BtnStyle.TEXT) {
+                tpl = ""
+                keep()
+                dismiss()
+                subsSheet()
+            }
             label(this, t("Слов в строке", "Words per caption"))
             add(choiceChips(ctx, listOf(1 to t("1 — крупно, как в TikTok", "1 — big, TikTok style"), 3 to t("до 3", "up to 3"), 6 to t("до 6", "up to 6")), size) { size = it })
-            label(this, t("Стиль", "Style"))
-            add(choiceChips(ctx, StudioEdit.TEXT_LOOKS.map { it to lookName(it) }, look) { look = it })
+            if (cur == null) {
+                label(this, t("Стиль", "Style"))
+                add(choiceChips(ctx, StudioEdit.TEXT_LOOKS.map { it to lookName(it) }, look) { look = it })
+            }
             label(this, t("Где", "Where"))
             add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("По центру", "Middle"), 2 to t("Вверху", "Top")), place) { place = it })
             label(this, t("Появление", "Entrance"))
@@ -3429,10 +3519,9 @@ class StudioEditorActivity : LumenBase() {
             label(this, t("Шрифт", "Font"))
             add(LumenFonts.chips(ctx, font) { font = it })
             button(if (has > 0) t("Пересоздать субтитры", "Re-make the subtitles") else t("Создать субтитры", "Make subtitles"), primary = true) {
-                prefs.edit().putInt("studio_subs_words", size).putString("studio_subs_look", look).putInt("studio_subs_place", place)
-                    .putString("studio_subs_anim", anim).putString("studio_subs_motion", motion).putString("studio_subs_font", font).apply()
+                keep()
                 dismiss()
-                val go = { makeSubs(size, look, EditCaptions.PLACES[place], anim, motion, font) }
+                val go = { makeSubs(size, if (tpl.isNotEmpty()) TextStyles.LOOK + tpl else look, EditCaptions.PLACES[place], anim, motion, font) }
                 if (words.isEmpty()) recognizeSpeech(p, go) else go()
             }
             if (has > 0) button(t("Убрать субтитры ($has)", "Remove the subtitles ($has)"), style = BtnStyle.TEXT) {

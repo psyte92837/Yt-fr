@@ -61,7 +61,7 @@ object StudioOverlayUi {
         else -> t("Обычно", "Normal")
     }
 
-    private fun lookName(id: String): String = SchemeStyles.PRESETS.firstOrNull { it.id == id }?.let { p ->
+    private fun lookName(id: String): String = SchemeStyles.BUILT_IN.firstOrNull { it.id == id }?.let { p ->
         if (t("ru", "en") == "ru") p.name else when (p.id) {
             SchemeStyles.AUTO -> "Auto"
             "clean" -> "Clean"
@@ -71,16 +71,20 @@ object StudioOverlayUi {
             "bold" -> "Bold"
             "soft" -> "Soft"
             "news" -> "News"
-            else -> "Minimal"
+            "minimal" -> "Minimal"
+            else -> p.id.replaceFirstChar { it.uppercase() }
         }
     } ?: id
 
+    private fun subName(ov: StudioOverlay): String = TextStyles.of(ov.subStyle)?.let { TextStyles.name(it, Settings.lang != "en") }
+        ?: t("как в стиле ролика", "as the video style")
+
     /** One line under the choice: what the viewer will see. */
     fun summary(ov: StudioOverlay, w: Where): String {
-        if (!ov.schemes) return t("Только субтитры под голос: без схем, заголовков и стикеров.", "Subtitles with the voice only: no schemes, headlines or stickers.")
+        if (!ov.schemes) return t("Только субтитры под голос: без схем, заголовков и стикеров. Стиль: ", "Subtitles with the voice only: no schemes, headlines or stickers. Style: ") + subName(ov) + "."
         val parts = mutableListOf<String>()
         parts += if (w.schemes > 0) t("схем: ${w.schemes}", "schemes: ${w.schemes}") else t("ИИ составит схемы сам", "the AI composes the schemes")
-        parts += if (ov.subsToo) t("субтитры внизу", "subtitles below") else t("без субтитров", "no subtitles")
+        parts += if (ov.subsToo) t("субтитры: ", "subtitles: ") + subName(ov) else t("без субтитров", "no subtitles")
         if (w.video) {
             parts += lookName(ov.look)
             parts += placeLabel(ov.place).lowercase()
@@ -98,6 +102,7 @@ object StudioOverlayUi {
             set(ov.copy(mode = StudioOverlay.MODES[it]))
         }, 4)
         muted(summary(ov, w))
+        if (ov.subs) (ctx as? LumenBase)?.let { host -> subStyleRow(this, host, ov, set) }
         if (!ov.schemes) return@with
         add(text(ctx, t("Фон блоков", "Block background"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
         chips(StudioOverlay.BGS.map { b -> chip(ctx, bgLabel(b), ov.bg == b) { if (ov.bg != b) set(ov.copy(bg = b)) } })
@@ -109,6 +114,32 @@ object StudioOverlayUi {
             muted(fullHint(ov.full))
         }
         if (!w.working) button(t("⚙ Опции схем", "⚙ Scheme options"), style = BtnStyle.TEXT) { options() }
+    }
+
+    /**
+     * «🎨 Стиль субтитров»: one of the 100 built-in caption styles (the same as in the Editor) with its live preview, or
+     * the subtitles of the video style.
+     */
+    fun subStyleRow(c: Col, host: LumenBase, ov: StudioOverlay, set: (StudioOverlay) -> Unit): Unit = with(c) {
+        val cur = TextStyles.of(ov.subStyle)
+        if (cur != null) add(TplPreview(ctx, ctx.cacheDir, StudioEditStore.styleDir(ctx), 2800L) { pw, ph -> TplPicker.textBlock(cur, pw, ph) }, 6)
+            .layoutParams.height = ctx.dp(72)
+        val pick = btn(ctx, if (cur != null) t("🎨 Сменить стиль субтитров", "🎨 Change the subtitle style") else t("🎨 Стиль субтитров (100 готовых)", "🎨 Subtitle style (100 ready)"),
+            false, BtnStyle.TONAL) {
+            TplPicker.texts(host, ctx.cacheDir, StudioEditStore.styleDir(ctx), ov.subStyle, t("🎨 Стиль субтитров", "🎨 Subtitle style")) { st -> set(ov.copy(subStyle = st.id)) }
+        }
+        if (cur == null) add(pick, 4)
+        else row(pick, btn(ctx, t("✕ Как в стиле", "✕ As the style"), false, BtnStyle.TEXT) { set(ov.copy(subStyle = "")) })
+    }
+
+    /** «📚 Готовая схема»: a framework template turned into the wish for the AI that composes the schemes ([wish] field). */
+    fun templateWish(c: Col, host: LumenBase, wish: android.widget.EditText): Unit = with(c) {
+        button(t("📚 Взять за основу готовую схему (100)", "📚 Base it on a ready scheme (100)"), style = BtnStyle.TEXT) {
+            TplPicker.schemes(host, host.cacheDir, StudioEditStore.styleDir(host)) { tpl ->
+                wish.setText(SchemeTemplates.studioWish(tpl, Settings.lang != "en"))
+                host.toast(t("Шаблон «${tpl.name}» в пожелании — составьте схемы", "Template \"${tpl.nameEn}\" is in the wish — compose the schemes"))
+            }
+        }
     }
 
     /**
@@ -133,7 +164,7 @@ object StudioOverlayUi {
                     chips(StudioOverlay.BGS.map { b -> chip(ctx, bgLabel(b), ov.bg == b) { change(ov.copy(bg = b)) { fill() } } })
                     if (w.video) {
                         label(t("Оформление", "Look"))
-                        chips(SchemeStyles.PRESETS.map { p -> chip(ctx, lookName(p.id), ov.look == p.id) { change(ov.copy(look = p.id)) { fill() } } })
+                        chips(SchemeStyles.BUILT_IN.map { p -> chip(ctx, lookName(p.id), ov.look == p.id) { change(ov.copy(look = p.id)) { fill() } } })
                         muted(t("Авто — цвета ролика. Остальные — готовые наборы цветов, шрифта и появления; фон блоков выбирается выше.",
                             "Auto — the colours of the video. The rest are ready sets of colours, font and entrance; the background is chosen above."))
                         label(t("Где", "Where"))

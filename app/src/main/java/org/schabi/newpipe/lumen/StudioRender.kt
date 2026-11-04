@@ -90,7 +90,9 @@ class StudioPlan(
     /** Background of the blocks (schemes, tiles, cards): solid, glass or clear ([StudioOverlay.BGS]). */
     val blockBg: String = "solid",
     /** What the scenes show that would cover the video with a full-screen scheme ([StudioOverlay.FULLS]). */
-    val fullMode: String = StudioOverlay.FULL
+    val fullMode: String = StudioOverlay.FULL,
+    /** A built-in caption style ([TextStyles]) for the subtitles of every video style; null = the style's own subtitles. */
+    val captionStyle: TextStyle? = null
 ) {
     val subs get() = layers.subs
     val graphics get() = layers.graphics
@@ -144,17 +146,18 @@ class StudioPlan(
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
             templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.8f,
             schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto",
-            toonSchemes: String = "board", blockBg: String = "solid", fullMode: String = StudioOverlay.FULL
+            toonSchemes: String = "board", blockBg: String = "solid", fullMode: String = StudioOverlay.FULL, captionStyle: TextStyle? = null
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
             val times = Studio.sceneTimes(words, ranges, totalMs)
             val single = style != StudioStyle.DARK && style != StudioStyle.EXPLAIN && cast == null
             val caps = ranges.map {
-                if (style == StudioStyle.EXPLAIN && cast == null) Studio.captions(words, it, StudioExplain.CAPTION_WORDS, StudioExplain.CAPTION_CHARS)
+                if (captionStyle != null) Studio.captions(words, it, maxWords = captionStyle.words, maxChars = if (captionStyle.words <= 2) 18 else 30)
+                else if (style == StudioStyle.EXPLAIN && cast == null) Studio.captions(words, it, StudioExplain.CAPTION_WORDS, StudioExplain.CAPTION_CHARS)
                 else Studio.captions(words, it, maxWords = if (single) 1 else 4)
             }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes), blockBg, fullMode)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes), blockBg, fullMode, captionStyle)
         }
     }
 }
@@ -786,6 +789,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** 1–3 words at a time low on the screen; the word being said in the accent colour, a soft shadow under all. */
     private fun shortCaption(c: Canvas, scene: Int, tMs: Long, a: Float) {
+        if (styledSub(c, scene, tMs, a)) return
         if (!plan.subs || a <= 0f) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
@@ -1116,6 +1120,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** One word on the video: white bold with a shadow and an accent underline; [force] — even with subtitles off. */
     private fun spokenWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float, force: Boolean = false) {
+        if (styledSub(c, scene, tMs, a, force)) return
         if (!plan.subs && !force) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
@@ -1146,8 +1151,43 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     // ---------- captions ----------
 
+    private val caps by lazy { CaptionPaint { f -> face(f, true) } }
+
+    /**
+     * The subtitles in a built-in style ([StudioPlan.captionStyle]) instead of the style's own ones: the word group being
+     * said, its words animated by their times, a bit above the bottom (the interface of Shorts covers the lowest part).
+     * False = no built-in style, the caller draws its own subtitles.
+     */
+    private fun styledSub(c: Canvas, scene: Int, tMs: Long, a: Float, force: Boolean = false): Boolean {
+        val st = plan.captionStyle ?: return false
+        if (!(plan.subs || force) || a <= 0f) return true
+        val groups = plan.captions.getOrNull(scene) ?: return true
+        val g = groups.lastOrNull { plan.words[it.first].startMs - 90 <= tMs } ?: return true
+        if (tMs > plan.words[g.last].endMs + 900) return true
+        val t0 = plan.words[g.first].startMs - 90
+        val p = Studio.appear(tMs, t0, if (st.anim == "none") 1L else 180L)
+        val alpha = (255 * p * a).toInt().coerceIn(0, 255)
+        if (alpha <= 2) return true
+        val wide = w > h
+        val cy = h * (if (wide) 0.82f else 0.70f)
+        val bw = w * (if (wide) 0.80f else 0.88f)
+        val bh = h * (if (wide) 0.17f else 0.12f) * (if (g.count() <= 1) 1.2f else 1f)
+        val box = RectF(w / 2f - bw / 2, cy - bh / 2, w / 2f + bw / 2, cy + bh / 2)
+        val layered = alpha < 253
+        if (layered) c.saveLayerAlpha(RectF(0f, box.top - bh, w.toFloat(), box.bottom + bh), alpha) else c.save()
+        if (st.anim == "pop" || st.anim == "zoom") {
+            val k = 0.86f + 0.14f * p
+            c.scale(k, k, box.centerX(), box.centerY())
+        } else if (st.anim == "slide") c.translate(-w * 0.06f * (1 - p), 0f)
+        caps.styled(c, box, g.joinToString(" ") { plan.words[it].text.trim() }, st, st.hot ?: accent,
+            wordMs = g.map { plan.words[it].startMs - t0 }, at = tMs - t0)
+        c.restore()
+        return true
+    }
+
     /** Word group with each word blurring in when it is spoken (DARK style). */
     private fun caption(c: Canvas, scene: Int, tMs: Long, a: Float, top: Float, size: Float, maxW: Float = w * 0.84f) {
+        if (styledSub(c, scene, tMs, a)) return
         if (!plan.subs) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 90 <= tMs } ?: return
@@ -1180,6 +1220,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** One big word at a time, italic serif in capitals (LIGHT style). */
     private fun singleWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float) {
+        if (styledSub(c, scene, tMs, a)) return
         if (!plan.subs) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return

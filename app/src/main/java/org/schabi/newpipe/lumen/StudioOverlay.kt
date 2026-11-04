@@ -29,7 +29,9 @@ data class StudioOverlay(
     val place: String = "auto",
     val toon: String = "board",
     val amount: String = "norm",
-    val full: String = FULL
+    val full: String = FULL,
+    /** A built-in caption style for the subtitles ([TextStyles] id), shared with the Editor; "" = the subtitles of the video style. */
+    val subStyle: String = ""
 ) {
     val schemes get() = mode == SCHEMES
     val subs get() = mode == SUBS || subsToo
@@ -71,7 +73,7 @@ data class StudioOverlay(
     }
 
     fun toJson(): JSONObject = JSONObject().put("v", 1).put("mode", mode).put("subs", subsToo).put("bg", bg).put("look", look)
-        .put("size", size).put("place", place).put("toon", toon).put("amount", amount).put("full", full)
+        .put("size", size).put("place", place).put("toon", toon).put("amount", amount).put("full", full).put("sub", subStyle)
 
     /**
      * What a scene that would be a full-screen scheme insert shows under [full]: [insert] — the insert itself
@@ -105,10 +107,11 @@ data class StudioOverlay(
             return StudioOverlay(
                 mode = one(o.optString("mode"), MODES, d.mode), subsToo = o.optBoolean("subs", d.subsToo),
                 bg = one(o.optString("bg"), BGS, d.bg),
-                look = o.optString("look").trim().let { SchemeStyles.alias(it) }.takeIf { id -> SchemeStyles.PRESETS.any { it.id == id } } ?: d.look,
+                look = o.optString("look").trim().let { SchemeStyles.alias(it) }.takeIf { id -> SchemeStyles.BUILT_IN.any { it.id == id } } ?: d.look,
                 size = one(o.optString("size"), SIZES, d.size), place = one(o.optString("place"), PLACES, d.place),
                 toon = one(o.optString("toon"), TOONS, d.toon), amount = one(o.optString("amount"), AMOUNTS, d.amount),
-                full = one(o.optString("full"), FULLS, d.full)
+                full = one(o.optString("full"), FULLS, d.full),
+                subStyle = o.optString("sub").trim().takeIf { TextStyles.of(it) != null }.orEmpty()
             )
         }
 
@@ -130,7 +133,7 @@ data class StudioOverlay(
                 mode = if (l.graphics) SCHEMES else SUBS,
                 subsToo = l.subs || !l.graphics,
                 bg = bg,
-                look = st.takeIf { id -> SchemeStyles.PRESETS.any { it.id == id } } ?: SchemeStyles.AUTO,
+                look = st.takeIf { id -> SchemeStyles.BUILT_IN.any { it.id == id } } ?: SchemeStyles.AUTO,
                 size = when {
                     overSize < 75 -> "s"
                     overSize > 90 -> "l"

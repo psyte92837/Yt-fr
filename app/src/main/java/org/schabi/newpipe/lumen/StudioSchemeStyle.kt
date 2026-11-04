@@ -70,6 +70,77 @@ object SchemeStyles {
             fill = "solid", radius = 0.12f, border = 0.6f, font = "sans", textScale = 0.96f, enter = "fade", dur = 400, builtIn = true)
     )
 
+    /**
+     * More built-in looks for the ready scheme templates ([SchemeTemplates]) and the Editor: modern styles of
+     * different fields (bento, neo-brutalism, glass 2.0, Swiss, blueprint, chalkboard, terminal, editorial…).
+     * Not in the simple Studio choice ([PRESETS]), but found by id everywhere.
+     */
+    val EXTRA = listOf(
+        // light grey tiles with big corners, no lines: product, SaaS, Apple-like keynotes
+        SchemeStyle("bento", "Бенто", card = 0xFFF2F3F5.toInt(), ink = 0xFF111318.toInt(), muted = 0xFF5F6673.toInt(), accent = 0xFF2F6BFF.toInt(),
+            line = 0xFFE1E4EA.toInt(), fill = "solid", radius = 0.30f, border = 0f, shadow = false, font = "sans", enter = "pop", builtIn = true),
+        // white, black frames 3 px, hard shadow, capitals: startups, bold statements
+        SchemeStyle("brutal", "Брутализм", card = 0xFFFFFFFF.toInt(), ink = 0xFF000000.toInt(), muted = 0xFF222222.toInt(), accent = 0xFFE64100.toInt(),
+            line = 0xFF000000.toInt(), fill = "solid", radius = 0.02f, border = 3f, font = "condensed", upper = true, enter = "slide", dur = 240, builtIn = true),
+        // violet glass with a light edge: AI, crypto, future
+        SchemeStyle("aurora", "Аврора", card = 0xCC1B1240.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFD9CCFF.toInt(), accent = 0xFFB18CFF.toInt(),
+            line = 0x80D9CCFF.toInt(), fill = "glass", radius = 0.24f, border = 1f, font = "sans", enter = "fade", dur = 380, builtIn = true),
+        // white, red accent, square corners, capitals: design, architecture, clear facts
+        SchemeStyle("swiss", "Швейцарский", card = 0xFFFFFFFF.toInt(), ink = 0xFF111111.toInt(), muted = 0xFF4D4D4D.toInt(), accent = 0xFFE30613.toInt(),
+            line = 0xFF111111.toInt(), fill = "solid", radius = 0f, border = 0f, shadow = false, font = "condensed", upper = true, enter = "slide", builtIn = true),
+        // blue sheet, white thin lines, mono: engineering, how things work
+        SchemeStyle("blueprint", "Чертёж", card = 0xFF0D3B66.toInt(), ink = 0xFFEAF4FF.toInt(), muted = 0xFFB8D4EE.toInt(), accent = 0xFF7FDBFF.toInt(),
+            line = 0xCCE8F4FF.toInt(), fill = "solid", radius = 0.04f, border = 1.2f, shadow = false, font = "mono", enter = "draw", dur = 420, builtIn = true),
+        // green board, chalk handwriting: school, lessons, explanations
+        SchemeStyle("chalk", "Мел", card = 0xFF233B2E.toInt(), ink = 0xFFF4F1E8.toInt(), muted = 0xFFCFD8CC.toInt(), accent = 0xFFFFD166.toInt(),
+            line = 0xCCF4F1E8.toInt(), fill = "solid", radius = 0.08f, border = 1.4f, font = "lf:caveat", textScale = 1.12f, enter = "draw", builtIn = true),
+        // black screen, green mono: code, hacking, data
+        SchemeStyle("terminal", "Терминал", card = 0xFF0A0F0A.toInt(), ink = 0xFF39FF14.toInt(), muted = 0xFF9BE89B.toInt(), accent = 0xFF39FF14.toInt(),
+            line = 0xFF2E7D32.toInt(), fill = "solid", radius = 0.03f, border = 1f, font = "mono", enter = "draw", dur = 300, builtIn = true),
+        // peach cards, rounded letters: lifestyle, wellbeing, family
+        SchemeStyle("pastel", "Пастель", card = 0xFFFFE9E1.toInt(), ink = 0xFF3A2A2A.toInt(), muted = 0xFF6E5555.toInt(), accent = 0xFFE5532E.toInt(),
+            line = 0xFFF5CFC2.toInt(), fill = "solid", radius = 0.40f, border = 0f, font = "rounded", enter = "pop", dur = 380, builtIn = true),
+        // black and gold serif: luxury, premium, personal brand
+        SchemeStyle("luxury", "Люкс", card = 0xFF111111.toInt(), ink = 0xFFF5E6C8.toInt(), muted = 0xFFCDBB94.toInt(), accent = 0xFFC9A45C.toInt(),
+            line = 0xFFC9A45C.toInt(), fill = "solid", radius = 0.06f, border = 0.8f, font = "serif", upper = true, enter = "fade", dur = 460, builtIn = true),
+        // mint and green: health, ecology, growth
+        SchemeStyle("mint", "Мята", card = 0xFFE6F7F1.toInt(), ink = 0xFF0E3B2E.toInt(), muted = 0xFF3F6B5C.toInt(), accent = 0xFF0E8F62.toInt(),
+            line = 0xFFBFE6D6.toInt(), fill = "solid", radius = 0.22f, border = 0f, font = "sans", enter = "pop", builtIn = true),
+        // deep blue, cyan accent: science, sea, calm tech
+        SchemeStyle("ocean", "Океан", card = 0xFF0B2545.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFB9CCE4.toInt(), accent = 0xFF4CC9F0.toInt(),
+            line = 0x994CC9F0.toInt(), fill = "solid", radius = 0.18f, border = 1f, font = "sans", enter = "fade", builtIn = true),
+        // cream cards with dark frames: retro, history, craft
+        SchemeStyle("retro", "Ретро", card = 0xFFF4E1C1.toInt(), ink = 0xFF2B1D0E.toInt(), muted = 0xFF5C4630.toInt(), accent = 0xFFB8401C.toInt(),
+            line = 0xFF2B1D0E.toInt(), fill = "solid", radius = 0.14f, border = 2f, font = "lf:russoone", upper = true, enter = "pop", builtIn = true),
+        // white with thick black frames, yellow accent: comics, kids, fun facts
+        SchemeStyle("comic", "Комикс", card = 0xFFFFFFFF.toInt(), ink = 0xFF111111.toInt(), muted = 0xFF333333.toInt(), accent = 0xFFD84315.toInt(),
+            line = 0xFF111111.toInt(), fill = "solid", radius = 0.12f, border = 2.6f, font = "lf:daysone", enter = "pop", dur = 260, builtIn = true),
+        // lemon cards, round letters: children, school, games
+        SchemeStyle("kids", "Детский", card = 0xFFFFF3B0.toInt(), ink = 0xFF2D2A6E.toInt(), muted = 0xFF4E4A8C.toInt(), accent = 0xFFD81B60.toInt(),
+            line = 0xFFFFE066.toInt(), fill = "solid", radius = 0.45f, border = 0f, font = "lf:comfortaa", enter = "pop", dur = 400, builtIn = true),
+        // dark with pixels: retro games
+        SchemeStyle("pixel", "Пиксель", card = 0xFF1B1B2F.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFC8C8E0.toInt(), accent = 0xFFFFDD00.toInt(),
+            line = 0xFFFFDD00.toInt(), fill = "solid", radius = 0f, border = 2f, font = "lf:pressstart2p", textScale = 0.8f, enter = "pop", dur = 200, builtIn = true),
+        // warm paper, display serif, blue accent: essays, analysis, culture
+        SchemeStyle("editorial", "Журнальный", card = 0xFFF7F5F0.toInt(), ink = 0xFF1A1A1A.toInt(), muted = 0xFF555048.toInt(), accent = 0xFF0047FF.toInt(),
+            line = 0xFF1A1A1A.toInt(), fill = "solid", radius = 0.03f, border = 0.8f, shadow = false, font = "lf:yesevaone", enter = "fade", dur = 420, builtIn = true),
+        // white and teal: medicine, health care, safety
+        SchemeStyle("medical", "Медицина", card = 0xFFFFFFFF.toInt(), ink = 0xFF0B2540.toInt(), muted = 0xFF3D5670.toInt(), accent = 0xFF00838F.toInt(),
+            line = 0xFFB2DFE3.toInt(), fill = "solid", radius = 0.16f, border = 1f, font = "sans", enter = "fade", builtIn = true),
+        // slate dashboard with green: finance, markets, metrics
+        SchemeStyle("finance", "Финансы", card = 0xFF0F172A.toInt(), ink = 0xFFE2E8F0.toInt(), muted = 0xFF94A3B8.toInt(), accent = 0xFF22C55E.toInt(),
+            line = 0xFF334155.toInt(), fill = "solid", radius = 0.10f, border = 1f, font = "condensed", enter = "slide", dur = 280, builtIn = true),
+        // black and red, sport capitals: sport, fitness, competition
+        SchemeStyle("sport", "Спорт", card = 0xFF111111.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFD0D0D0.toInt(), accent = 0xFFFF3B30.toInt(),
+            line = 0xFFFF3B30.toInt(), fill = "solid", radius = 0.06f, border = 0f, font = "lf:russoone", upper = true, enter = "slide", dur = 220, builtIn = true),
+        // dark cards with a pink-orange edge: creators, music, events
+        SchemeStyle("sunset", "Закат", card = 0xFF22142E.toInt(), ink = 0xFFFFFFFF.toInt(), muted = 0xFFF3C6D9.toInt(), accent = 0xFFFF7A59.toInt(),
+            line = 0xCCFF5C8A.toInt(), fill = "solid", radius = 0.20f, border = 1.4f, font = "lf:unbounded", textScale = 0.92f, enter = "pop", builtIn = true)
+    )
+
+    /** Every built-in look: the simple choice first, then [EXTRA]. */
+    val BUILT_IN: List<SchemeStyle> = PRESETS + EXTRA
+
     /** Ids of the old built-in looks → the new ones (saved projects and settings keep working). */
     fun alias(id: String): String = when (id) {
         "podcast_side", "podcast_pip" -> "glass"
@@ -249,10 +320,10 @@ object SchemeStyles {
 
     // ---------- store ----------
 
-    fun list(dir: File): List<SchemeStyle> = PRESETS + (dir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedBy { it.lastModified() }
+    fun list(dir: File): List<SchemeStyle> = BUILT_IN + (dir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedBy { it.lastModified() }
         .mapNotNull { f -> fromJson(f.readText(), f.name.removeSuffix(".json")) })
 
-    fun find(dir: File, id: String): SchemeStyle? = PRESETS.firstOrNull { it.id == alias(id) } ?: File(dir, "$id.json").takeIf { it.exists() }?.let { fromJson(it.readText(), id) }
+    fun find(dir: File, id: String): SchemeStyle? = BUILT_IN.firstOrNull { it.id == alias(id) } ?: File(dir, "$id.json").takeIf { it.exists() }?.let { fromJson(it.readText(), id) }
 
     fun save(dir: File, s: SchemeStyle) {
         dir.mkdirs()
@@ -260,7 +331,7 @@ object SchemeStyles {
     }
 
     fun delete(dir: File, id: String) {
-        if (PRESETS.none { it.id == id }) File(dir, "$id.json").delete()
+        if (BUILT_IN.none { it.id == id }) File(dir, "$id.json").delete()
     }
 
     /** Free id from a name: latin letters and digits, unique among [taken]. */
@@ -268,7 +339,7 @@ object SchemeStyles {
         val base = name.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }.take(16).ifEmpty { "style" }
         var id = base
         var k = 2
-        while (id in taken || PRESETS.any { it.id == id }) id = base + k++
+        while (id in taken || BUILT_IN.any { it.id == id }) id = base + k++
         return id
     }
 }

@@ -393,9 +393,64 @@ object EditCaptions {
     /**
      * Motion of a caption by the spoken words: karaoke (said words in the accent), word (words appear as said),
      * bounce (the word being said jumps up larger), box (a plate of the accent under the word being said),
-     * wave (each word rises into place as it is said).
+     * wave (each word rises into place as it is said); pop (a word pops in larger as said), stamp (it slams in from
+     * big), marker (a highlighter runs behind the said words), type (letters typed as said), slide (words slide in from
+     * the left), glow (the word being said glows), shake (it shakes), underline (a bar grows under it), focus (it is
+     * larger, the rest dimmed).
      */
-    val MOTIONS = listOf("", "karaoke", "word", "bounce", "box", "wave")
+    val MOTIONS = listOf("", "karaoke", "word", "bounce", "box", "wave", "pop", "stamp", "marker", "type", "slide", "glow", "shake", "underline", "focus")
+
+    /** Motions that make sense with one word a caption. */
+    val SINGLE = setOf("bounce", "pop", "stamp", "type", "slide", "glow", "shake")
+
+    /**
+     * How one word of a caption looks now: opacity, shift ([dx], [dy] in letter sizes), scale, turn (degrees), in the
+     * accent ([hot]), on an accent plate ([box]), how far the highlighter ([marker]) and the bar under it ([underline])
+     * have run (0..1), glowing, the share of its letters shown ([chars]) and whether it is still to be said ([pending]).
+     */
+    data class WordFx(
+        val alpha: Float = 1f, val dx: Float = 0f, val dy: Float = 0f, val scale: Float = 1f, val rot: Float = 0f,
+        val hot: Boolean = false, val box: Boolean = false, val marker: Float = 0f, val underline: Float = 0f,
+        val glow: Boolean = false, val chars: Float = 1f, val pending: Boolean = false
+    )
+
+    private fun backOut(p: Float): Float {
+        val c1 = 1.70158f
+        val q = p - 1f
+        return 1f + (c1 + 1f) * q * q * q + c1 * q * q
+    }
+
+    private fun easeOut(p: Float): Float = 1f - (1f - p) * (1f - p)
+
+    /**
+     * The look of word [i] with [motion] when word [cur] is being said (−1 = none yet) and [p] (0..1) is how far word
+     * [i] is into its entrance. "" (or an unknown motion) = every word as it is.
+     */
+    fun fx(motion: String, i: Int, cur: Int, p: Float): WordFx {
+        val said = cur >= 0 && i <= cur
+        val now = i == cur
+        val hidden = WordFx(alpha = 0f, pending = true)
+        return when (motion) {
+            "karaoke" -> WordFx(hot = said, pending = !said)
+            "word" -> if (said) WordFx(alpha = 0.25f + 0.75f * p) else hidden
+            "wave" -> if (said) WordFx(alpha = p, dy = 0.4f * (1f - p)) else hidden
+            "bounce" -> if (now) {
+                val s = kotlin.math.sin(Math.PI * p).toFloat()
+                WordFx(dy = -0.16f * s, scale = 1.12f + 0.12f * s, hot = true)
+            } else WordFx()
+            "box" -> WordFx(box = now)
+            "pop" -> if (said) WordFx(alpha = (p * 2.5f).coerceAtMost(1f), scale = 0.45f + 0.55f * backOut(p), hot = now) else hidden
+            "stamp" -> if (said) WordFx(alpha = (p * 3f).coerceAtMost(1f), scale = 1f + 0.7f * (1f - p) * (1f - p), hot = now) else hidden
+            "marker" -> WordFx(marker = if (said) easeOut(p) else 0f, pending = !said)
+            "type" -> if (said) WordFx(chars = p) else hidden
+            "slide" -> if (said) WordFx(alpha = p, dx = -0.6f * (1f - easeOut(p))) else hidden
+            "glow" -> WordFx(glow = now, hot = now, alpha = if (said) 1f else 0.55f, pending = !said)
+            "shake" -> if (now) WordFx(rot = 8f * kotlin.math.sin(p * Math.PI * 4).toFloat() * (1f - p), hot = true) else WordFx()
+            "underline" -> WordFx(underline = if (now) easeOut(p) else 0f)
+            "focus" -> if (now) WordFx(scale = 1f + 0.1f * easeOut(p), hot = true) else WordFx(alpha = 0.4f)
+            else -> WordFx()
+        }
+    }
 
     /** Index of the word said at [tMs] of block [b] (−1 before the first one); −1 without word times. */
     fun wordAt(b: EBlock, tMs: Long): Int {
@@ -427,7 +482,7 @@ object EditCaptions {
             list += StudioEdit.clampTime(EBlock("b" + next++, "text", c.startMs, maxOf(StudioEdit.MIN_MS, c.endMs - c.startMs), x = 0.5f, y = y, w = w,
                 ratio = ratio, animIn = if (motion.isNotEmpty() && size > 1) "fade" else anim, animOut = "none", look = look, text = text, ask = TAG,
                 over = if (font.isNotEmpty()) BlockLook(font = font) else null,
-                motion = if (size > 1 || motion == "bounce") motion else "", wordMs = c.wordStarts.map { it - c.startMs }), totalMs)
+                motion = if (size > 1 || motion in SINGLE) motion else "", wordMs = c.wordStarts.map { it - c.startMs }), totalMs)
         }
         return list
     }

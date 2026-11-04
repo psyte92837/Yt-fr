@@ -88,7 +88,10 @@ object LumenFonts {
     /** Motion styles of captions with names, for chips. */
     fun motions(): List<Pair<String, String>> = listOf(
         "" to t("Нет", "None"), "karaoke" to t("🎤 Караоке", "🎤 Karaoke"), "word" to t("По слову", "Word by word"),
-        "bounce" to t("⤴ Прыжок", "⤴ Bounce"), "box" to t("▮ Плашка под словом", "▮ Box under the word"), "wave" to t("〰 Волна", "〰 Wave")
+        "bounce" to t("⤴ Прыжок", "⤴ Bounce"), "box" to t("▮ Плашка под словом", "▮ Box under the word"), "wave" to t("〰 Волна", "〰 Wave"),
+        "pop" to t("✨ Выпрыгивание", "✨ Pop in"), "stamp" to t("💥 Удар", "💥 Stamp"), "marker" to t("🖍 Маркер", "🖍 Highlighter"),
+        "type" to t("⌨ Печать", "⌨ Typing"), "slide" to t("➡ Выезд", "➡ Slide in"), "glow" to t("💡 Свечение", "💡 Glow"),
+        "shake" to t("〽 Тряска", "〽 Shake"), "underline" to t("▁ Подчёркивание", "▁ Underline"), "focus" to t("🔍 Фокус", "🔍 Focus")
     )
 
     private val cache = HashMap<String, Typeface?>()

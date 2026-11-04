@@ -466,7 +466,7 @@ class StudioEditPainter(
     // ---------- captions and emoji ----------
 
     /** Largest text size whose wrapped lines fit [maxW]×[maxH]. */
-    private fun fit(text: String, maxW: Float, maxH: Float): Pair<Float, List<String>> = fits.also { if (it.size > 300) it.clear() }.getOrPut("$text|${maxW.toInt()}|${maxH.toInt()}") {
+    private fun fit(text: String, maxW: Float, maxH: Float): Pair<Float, List<String>> = fits.also { if (it.size > 300) it.clear() }.getOrPut("$text|${maxW.toInt()}|${maxH.toInt()}|${System.identityHashCode(textP.typeface)}|${textP.letterSpacing}") {
         var lo = 6f
         var hi = max(8f, maxH)
         var best = lo to wrap(text, maxW, lo)
@@ -502,6 +502,7 @@ class StudioEditPainter(
 
     private fun caption(c: Canvas, b: EBlock, box: RectF, reveal: Float = 1f, tMs: Long = -1) {
         if (b.text.isBlank()) return
+        TextStyles.ofLook(b.look)?.let { return styled(c, b, box, it, reveal, tMs) }
         val o = b.over
         val accent = o?.accent ?: this.accent
         val oldFace = textP.typeface
@@ -513,80 +514,12 @@ class StudioEditPainter(
         }
     }
 
-    /**
-     * A caption drawn word by word by the times its words are said ([EBlock.motion], [EditCaptions.MOTIONS]):
-     * karaoke, word, bounce, box, wave. The words stand where the whole caption would stand.
-     */
-    private fun captionWords(c: Canvas, b: EBlock, box: RectF, lines: List<String>, size: Float, ink: Int, accent: Int, tMs: Long) {
-        textP.textSize = size
-        val step = size * 1.18f
-        val fm = textP.fontMetrics
-        var y = box.centerY() - step * lines.size / 2 + step / 2 - (fm.ascent + fm.descent) / 2
-        val words = lines.map { l -> l.split(' ').filter { it.isNotEmpty() } }
-        val total = words.sumOf { it.size }
-        val n = b.wordMs.size
-        val cur = EditCaptions.wordAt(b, tMs)
-        val space = textP.measureText(" ")
-        // the said words of an accent plate stay in the ink (the accent would vanish on it)
-        val hot = if (b.look == "accent") ink else accent
-        textP.textAlign = Paint.Align.LEFT
-        var k = 0
-        for (ws in words) {
-            val widths = ws.map { textP.measureText(it) }
-            var x = box.centerX() - (widths.sum() + space * (ws.size - 1).coerceAtLeast(0)) / 2
-            for ((j, w) in ws.withIndex()) {
-                // the words of the text and the said words may differ in number (an edited caption): spread evenly
-                val i = if (total == n) k else (k.toLong() * n / total.coerceAtLeast(1)).toInt()
-                k++
-                val said = i <= cur
-                val p = if (said) EditCaptions.wordIn(b, i, tMs) else 0f
-                val ww = widths[j]
-                var color = ink
-                var alpha = 1f
-                c.save()
-                when (b.motion) {
-                    "karaoke" -> if (said) color = hot else if (b.look == "accent") alpha = 0.55f
-                    "word" -> alpha = if (said) 0.25f + 0.75f * p else 0f
-                    "wave" -> if (said) {
-                        alpha = p
-                        c.translate(0f, size * 0.4f * (1f - p))
-                    } else alpha = 0f
-                    "bounce" -> if (i == cur) {
-                        val s = kotlin.math.sin(Math.PI * p).toFloat()
-                        c.translate(0f, -size * 0.16f * s)
-                        val k2 = 1.12f + 0.12f * s
-                        c.scale(k2, k2, x + ww / 2, y + (fm.ascent + fm.descent) / 2)
-                        color = hot
-                    }
-                    "box" -> if (i == cur) {
-                        val pad = size * 0.14f
-                        fill.color = accent
-                        c.drawRoundRect(x - pad, y + fm.ascent * 0.92f, x + ww + pad, y + fm.descent * 1.1f, size * 0.2f, size * 0.2f, fill)
-                        color = if (light(accent)) 0xFF14161B.toInt() else Color.WHITE
-                    }
-                }
-                if (alpha > 0.01f) {
-                    val a = (alpha * 255).roundToInt().coerceIn(0, 255)
-                    if (b.look == "shadow" && !(b.motion == "box" && i == cur)) {
-                        textP.style = Paint.Style.STROKE
-                        textP.strokeWidth = size * 0.14f
-                        textP.strokeJoin = Paint.Join.ROUND
-                        textP.color = 0xE6000000.toInt()
-                        textP.alpha = (0xE6 * alpha).roundToInt()
-                        c.drawText(w, x, y, textP)
-                        textP.style = Paint.Style.FILL
-                    }
-                    textP.color = color
-                    textP.alpha = a
-                    c.drawText(w, x, y, textP)
-                }
-                c.restore()
-                x += ww + space
-            }
-            y += step
-        }
-        textP.alpha = 255
-        textP.textAlign = Paint.Align.CENTER
+    private val caps = CaptionPaint { f -> face(f, 900) }
+
+    /** A caption in a built-in style ([TextStyles]). */
+    private fun styled(c: Canvas, b: EBlock, box: RectF, st: TextStyle, reveal: Float, tMs: Long) {
+        val o = b.over
+        caps.styled(c, box, b.text, st, o?.accent ?: st.hot ?: accent, o?.font.orEmpty(), o?.upper, b.motion, b.wordMs, if (tMs >= 0) tMs - b.startMs else -1, reveal)
     }
 
     private fun captionText(c: Canvas, b: EBlock, box: RectF, reveal: Float, accent: Int, text: String, tMs: Long = -1) {
@@ -609,7 +542,13 @@ class StudioEditPainter(
                 ink = Color.WHITE
             }
         }
-        if (b.motion.isNotEmpty() && b.wordMs.isNotEmpty() && tMs >= 0) return captionWords(c, b, box, lines, size, ink, accent, tMs)
+        if (b.motion.isNotEmpty() && b.wordMs.isNotEmpty() && tMs >= 0) {
+            caps.textP.typeface = textP.typeface
+            caps.textP.letterSpacing = 0f
+            // the said words of an accent plate stay in the ink (the accent would vanish on it)
+            return caps.words(c, box, lines, size, CaptionPaint.CapInk(ink, if (b.look == "accent") ink else accent, accent, if (b.look == "shadow") 0.14f else 0f,
+                dimPending = b.look == "accent"), b.motion, b.wordMs, tMs - b.startMs)
+        }
         textP.textSize = size
         val step = size * 1.18f
         val fm = textP.fontMetrics

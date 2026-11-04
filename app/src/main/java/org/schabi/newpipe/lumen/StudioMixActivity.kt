@@ -1278,6 +1278,8 @@ class StudioMixActivity : LumenBase() {
         var plate = p.getInt("studio_mix_look_plate", -1)
         var font = p.getString("studio_mix_look_font", "") ?: ""
         var motion = p.getString("studio_mix_look_motion", "karaoke") ?: ""
+        // the same built-in caption style as «Поверх видео» unless one was chosen here
+        var tstyle = p.getString("studio_mix_look_tpl", null)?.takeIf { it.isEmpty() || TextStyles.of(it) != null } ?: over().subStyle
         add(text(ctx, t("Тема", "Theme"), Type.LABEL, bold = true, color = Palette.MUTED), 0)
         add(choiceChips(ctx, EditThemes.PRESETS.map { it.id to it.name }, theme) { theme = it }, 4)
         add(text(ctx, t("Субтитры", "Subtitles"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -1287,6 +1289,18 @@ class StudioMixActivity : LumenBase() {
             add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("Центр", "Centre"), 2 to t("Вверху", "Top")), place) { place = it }, 4)
             add(text(ctx, t("Движение по словам", "Motion by the words"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             add(choiceChips(ctx, LumenFonts.motions(), motion) { motion = it }, 4)
+            fun styleText() = TextStyles.of(tstyle)?.let { t("Готовый стиль: ", "Ready style: ") + TextStyles.name(it, Settings.lang != "en") + t(" (его шрифт и движение)", " (its font and motion)") }
+                ?: t("Готовый стиль: нет — тема, шрифт и движение выше", "Ready style: none — the theme, font and motion above")
+            val info = add(text(ctx, styleText(), 13f, color = Palette.MUTED), 8)
+            add(rowOf(ctx, btn(ctx, t("🎨 Готовые стили (100)", "🎨 Ready styles (100)"), false, BtnStyle.TONAL) {
+                TplPicker.texts(this@StudioMixActivity, cacheDir, StudioEditStore.styleDir(this@StudioMixActivity), tstyle) { st ->
+                    tstyle = st.id
+                    info.text = styleText()
+                }
+            }, btn(ctx, "✕", false, BtnStyle.TEXT) {
+                tstyle = ""
+                info.text = styleText()
+            }), 4)
         }
         add(text(ctx, t("Шрифт", "Font"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         add(LumenFonts.chips(ctx, font) { font = it }, 4)
@@ -1294,7 +1308,8 @@ class StudioMixActivity : LumenBase() {
         add(choiceChips(ctx, listOf(-1 to t("Как в теме", "As the theme"), 0 to t("Нет", "None"), 40 to t("Лёгкие", "Light"), 70 to t("Средние", "Medium"), 100 to t("Плотные", "Solid")), plate) { plate = it }, 4)
         button(t("✨ Открыть оформленным", "✨ Open styled"), primary = true) {
             p.edit().putString("studio_mix_look_theme", theme).putInt("studio_mix_look_subs", subs).putInt("studio_mix_look_place", place)
-                .putInt("studio_mix_look_plate", plate).putString("studio_mix_look_font", font).putString("studio_mix_look_motion", motion).apply()
+                .putInt("studio_mix_look_plate", plate).putString("studio_mix_look_font", font).putString("studio_mix_look_motion", motion)
+                .putString("studio_mix_look_tpl", tstyle).apply()
             dismiss()
             val ws = words
             val app = applicationContext
@@ -1308,7 +1323,12 @@ class StudioMixActivity : LumenBase() {
                 var blocks = pr.blocks
                 if (subs > 0 && ws.isNotEmpty()) blocks = EditCaptions.withSubs(blocks, ws, subs, if (th.plate == "none") "shadow" else "plate",
                     EditCaptions.PLACES[place], if (subs == 1) "pop" else "fade", fw, fh, pr.durMs, motion, th.font.takeIf { LumenFonts.isBuiltIn(it) }.orEmpty())
-                pr = pr.copy(blocks = EditThemes.apply(blocks, th), theme = EditThemes.json(th).toString())
+                blocks = EditThemes.apply(blocks, th)
+                // a built-in caption style goes over the theme on the subtitles (its own font, colours and motion)
+                TextStyles.of(tstyle)?.let { st ->
+                    blocks = blocks.map { b -> if (EditCaptions.isSub(b)) b.copy(look = st.look, over = null, animIn = st.anim, motion = if (b.wordMs.isNotEmpty()) st.motion else b.motion) else b }
+                }
+                pr = pr.copy(blocks = blocks, theme = EditThemes.json(th).toString())
                 StudioEditStore.save(app, pr)
                 pr
             }, { e -> if (!isDestroyed) err(e) }) { pr -> if (!isDestroyed) StudioEditorActivity.openProject(this@StudioMixActivity, pr.id) }
@@ -1409,7 +1429,8 @@ class StudioMixActivity : LumenBase() {
         val chosen = StudioMix.chosen(items, Prefs.onlyMarked).toSet()
         val ov = over()
         val subs = ov.subs && words.isNotEmpty()
-        val caps = ranges.mapIndexed { i, r -> if (subs && i in chosen && !r.isEmpty()) Studio.captions(words, r, maxWords = 1) else emptyList() }
+        val words1 = TextStyles.of(ov.subStyle)?.words ?: 1
+        val caps = ranges.mapIndexed { i, r -> if (subs && i in chosen && !r.isEmpty()) Studio.captions(words, r, maxWords = words1) else emptyList() }
         val notes = notes()
         val scenes = items.mapIndexed { i, it ->
             val say = if (!ranges[i].isEmpty()) ranges[i].joinToString(" ") { k -> words[k].text } else notes[it.clipId].orEmpty()
@@ -1419,8 +1440,8 @@ class StudioMixActivity : LumenBase() {
             script = SScript("", scenes), words = words, times = times, captions = caps, totalMs = StudioMix.totalMs(items),
             style = StudioStyle.VIDEO, accent = StudioPrefs.accent, overlay = ov.overlay(), zooms = false, transitions = false,
             clipScenes = items.indices.toSet(), layers = if (ov.schemes) StudioLayers.ALL else StudioLayers.SUBS, overScale = ov.overScale(),
-            schemeStyle = SchemeStyles.PRESETS.firstOrNull { it.id == ov.look && it.id != SchemeStyles.AUTO }?.let { StudioOverlay.style(it, ov.bg, ov.schemePlace()) },
-            schemePlace = ov.schemePlace(), blockBg = ov.bg, fullMode = ov.fullMode()
+            schemeStyle = SchemeStyles.BUILT_IN.firstOrNull { it.id == ov.look && it.id != SchemeStyles.AUTO }?.let { StudioOverlay.style(it, ov.bg, ov.schemePlace()) },
+            schemePlace = ov.schemePlace(), blockBg = ov.bg, fullMode = ov.fullMode(), captionStyle = TextStyles.of(ov.subStyle)
         )
     }
 
@@ -1976,6 +1997,7 @@ class StudioMixActivity : LumenBase() {
             if (items.any { it.marked }) check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
             add(text(ctx, t("Пожелание к схемам (необязательно)", "A wish for the schemes (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val wish = edit(t("например: больше сравнений, без пирамид", "e.g. more comparisons, no pyramids"), StudioPrefs.schemeWish)
+            StudioOverlayUi.templateWish(this, this@StudioMixActivity, wish)
             if (hasAi() && items.isNotEmpty()) button(if (have > 0) t("🔄 Составить схемы заново", "🔄 Compose the schemes again") else t("🧩 Составить схемы", "🧩 Compose the schemes"),
                 style = BtnStyle.TONAL) {
                 StudioPrefs.schemeWish = wish.text.toString().trim()

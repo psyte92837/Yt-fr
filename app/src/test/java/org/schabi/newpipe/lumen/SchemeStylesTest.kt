@@ -84,7 +84,7 @@ class SchemeStylesTest {
     @Test
     fun store() {
         val dir = Files.createTempDirectory("styles").toFile()
-        val n = SchemeStyles.PRESETS.size
+        val n = SchemeStyles.BUILT_IN.size
         assertEquals(n, SchemeStyles.list(dir).size)
         val id = SchemeStyles.freeId("Neon Mint!", setOf("neonmint"))
         assertEquals("neonmint2", id)
@@ -92,6 +92,8 @@ class SchemeStylesTest {
         assertEquals(n + 1, SchemeStyles.list(dir).size)
         assertEquals("Neon Mint", SchemeStyles.find(dir, id)?.name)
         SchemeStyles.delete(dir, "glass") // a preset stays
+        SchemeStyles.delete(dir, "bento")
+        assertNotNull(SchemeStyles.find(dir, "bento"))
         SchemeStyles.delete(dir, id)
         assertEquals(n, SchemeStyles.list(dir).size)
         assertNotNull(SchemeStyles.find(dir, "glass"))

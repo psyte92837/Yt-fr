@@ -2169,7 +2169,7 @@ class StudioActivity : LumenBase() {
             if (StudioPrefs.liveEmoji) emojiDir else null,
             clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls,
             ov.layers(), ov.overScale(), schemeStyleOf(ov, style), if (style == StudioStyle.VIDEO) ov.schemePlace() else "overlay", "auto",
-            ov.toon, ov.bg, ov.fullMode())
+            ov.toon, ov.bg, ov.fullMode(), TextStyles.of(ov.subStyle))
     }
 
     private val emojiDir get() = File(dir, "emoji")
@@ -3063,7 +3063,7 @@ class StudioActivity : LumenBase() {
     /** Look of the schemes in a montage (null = the colours of the video style, "auto"). */
     private fun schemeStyleOf(ov: StudioOverlay, style: StudioStyle): SchemeStyle? {
         if (style != StudioStyle.VIDEO || ov.look == SchemeStyles.AUTO) return null
-        val look = SchemeStyles.PRESETS.firstOrNull { it.id == ov.look } ?: return null
+        val look = SchemeStyles.BUILT_IN.firstOrNull { it.id == ov.look } ?: return null
         return StudioOverlay.style(look, ov.bg, ov.schemePlace())
     }
 
@@ -3094,6 +3094,7 @@ class StudioActivity : LumenBase() {
         }) { dismiss ->
             add(text(ctx, t("Пожелание к схемам (необязательно)", "A wish for the schemes (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val wish = edit(t("например: больше сравнений, без пирамид", "e.g. more comparisons, no pyramids"), StudioPrefs.schemeWish)
+            StudioOverlayUi.templateWish(this, this@StudioActivity, wish)
             if (script != null && hasAi()) button(if (have > 0) t("🔄 Составить схемы заново", "🔄 Compose the schemes again") else t("🧩 Составить схемы", "🧩 Compose the schemes"),
                 style = BtnStyle.TONAL) {
                 StudioPrefs.schemeWish = wish.text.toString().trim()

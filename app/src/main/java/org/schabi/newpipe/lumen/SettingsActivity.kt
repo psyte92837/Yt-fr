@@ -186,7 +186,7 @@ class SettingsActivity : LumenBase() {
             }
         }
         c.h2(t("Работа", "Behaviour"))
-        c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер NewPipe", "Analytics + NewPipe player")), Settings.mode) {
+        c.spinner(t("Режим", "Mode"), listOf("analytics" to t("Только аналитика", "Analytics only"), "player" to t("Аналитика + плеер", "Analytics + player")), Settings.mode) {
             Settings.mode = it
         }
         c.h2(t("Отчёты", "Reports"))
@@ -439,6 +439,7 @@ class SettingsActivity : LumenBase() {
         k.startsWith("langgame") -> t("Языковая игра · ", "Language game · ")
         k.startsWith("predict") -> t("Предсказания · ", "Predictions · ")
         k.startsWith("bot") -> t("Боты · ", "Bots · ")
+        k.startsWith("player") -> t("Плеер · ", "Player · ")
         else -> ""
     } + k
 

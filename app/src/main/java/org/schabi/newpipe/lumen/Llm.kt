@@ -477,6 +477,7 @@ object Prompts {
         defaults.putAll(COMMENT_DIGEST_PROMPTS)
         defaults.putAll(PREDICT_PROMPTS)
         defaults.putAll(VOC_PROMPTS)
+        defaults.putAll(PLAYER_PROMPTS)
     }
 
     fun get(key: String): String = Lumen.prefs.getString("prompt_$key", null) ?: defaults[key].orEmpty()

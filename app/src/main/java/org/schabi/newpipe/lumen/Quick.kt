@@ -489,6 +489,7 @@ fun Activity.chooseLinkAction(text: String, onDone: () -> Unit = {}) {
         t("😣 Боли и кейсы зрителей канала", "😣 Pains and cases of the channel's viewers") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },
         t("📺 Только похожие каналы по теме", "📺 Only similar channels on the topic") to { harvestSetup(link.url, "channels", onDone) }
     ) else listOf(
+        t("▶ Смотреть в плеере Lumen", "▶ Watch in the Lumen player") to { PlayerActivity.open(this, link.url); onDone() },
         t("💬 Сводка комментариев + чат с AI", "💬 Comment digest + AI chat") to { QuickAnalysis.start(this, link.url, CommentDigest.MODE); onDone() },
         t("📊 Полный анализ", "📊 Full analysis") to { QuickAnalysis.start(this, link.url); onDone() },
         t("😣 Боли и кейсы людей (отчёт)", "😣 Pains and cases of people (report)") to { QuickAnalysis.start(this, link.url, "pains"); onDone() },

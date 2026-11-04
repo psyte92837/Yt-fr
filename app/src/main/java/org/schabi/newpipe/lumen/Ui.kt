@@ -267,12 +267,11 @@ fun Context.openUrl(url: String) {
     }
 }
 
-/** Opens a video in the NewPipe player (player mode) or in an external app. */
+/** Opens a video in the Lumen player (player mode) or in an external app. */
 fun Context.openVideo(url: String) {
-    if (Settings.mode == "player") {
+    if (Settings.mode == "player" && YtQuery.videoIdFromUrl(url) != null) {
         try {
-            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url)).setClassName(packageName, "org.schabi.newpipe.RouterActivity")
-            startActivity(i)
+            PlayerActivity.open(this, url)
             return
         } catch (e: Exception) {
             // fall back to external app
@@ -294,7 +293,7 @@ fun ripple(ctx: Context, content: Drawable, onColor: Int): RippleDrawable {
 }
 
 /** Line icons for the top app bar, drawn in code on a 24-unit grid (Material Symbols Outlined look). */
-enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER, HOME, LIST, CHART, SPARK, SEARCH, HELP, MOVIE }
+enum class Ic { BACK, MORE, ADD, SETTINGS, BUG, SHARE, OPEN, FIT, COPY, DELETE, JOURNAL, WEB, SPEAKER, HOME, LIST, CHART, SPARK, SEARCH, HELP, MOVIE, PLAY }
 
 /** App-bar actions are passed as short glyphs; this maps them to an icon (null = draw the glyph as text). */
 fun glyphIcon(glyph: String): Ic? = when (glyph) {
@@ -334,6 +333,7 @@ fun glyphLabel(glyph: String): String = when (glyphIcon(glyph)) {
     Ic.SPEAKER -> t("Озвучить текст", "Read text aloud")
     Ic.HELP -> t("Справка", "Help")
     Ic.MOVIE -> "Lumen Studio"
+    Ic.PLAY -> t("Плеер", "Player")
     Ic.SEARCH -> t("Поиск", "Search")
     Ic.HOME, Ic.LIST, Ic.CHART, Ic.SPARK -> glyph
     null -> if (glyph == "🗺") t("Карта знаний", "Knowledge map") else glyph
@@ -473,6 +473,10 @@ class IconDrawable(private val ic: Ic, color: Int) : Drawable() {
                 line(8f, 6.9f, 10f, 9.5f)
                 line(14f, 5.5f, 16f, 8.2f)
                 line(10f, 11f, 10f, 17f, 15f, 14f, 10f, 11f)
+            }
+            Ic.PLAY -> {
+                canvas.drawRoundRect(RectF(3f, 5f, 21f, 19f), 4f, 4f, stroke)
+                line(10f, 9f, 10f, 15f, 15.5f, 12f, 10f, 9f)
             }
         }
         canvas.restore()

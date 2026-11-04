@@ -134,6 +134,7 @@ class SearchActivity : LumenBase() {
             SearchIndex.Item("screen", t("🎬 Lumen Studio", "🎬 Lumen Studio"), t("ролики Shorts, видео, озвучка, нарезка", "Shorts, videos, voice-over, cuts"), "studio", "studio shorts видео ролик"),
             SearchIndex.Item("screen", t("✏️ Редактор видео", "✏️ Video editor"), t("монтаж, схемы, надписи, эмодзи", "editing, schemes, captions, emoji"), "editor", "монтаж edit editor capcut"),
             SearchIndex.Item("screen", t("🔀 Микс", "🔀 Mix"), t("нарезка чужих роликов под озвучку", "cuts of videos under a voice-over"), "mix", "mix микс нарезка"),
+            SearchIndex.Item("screen", t("▶ Плеер YouTube", "▶ YouTube player"), t("поиск с фильтрами, ИИ-отбор, фон, прошлые поиски", "search with filters, AI picks, background, past searches"), "player", "плеер player смотреть слушать фон поиск youtube видео музыка background"),
             SearchIndex.Item("screen", t("✂ Откусить видео или аудио", "✂ Bite a video or audio"), t("кусок видео или звук с YouTube на телефон", "a piece of a YouTube video or its sound to the phone"), "bite", "откусить вырезать скачать кусок аудио звук mp3 m4a bite cut download"),
             SearchIndex.Item("screen", t("🔊 Озвучка текста", "🔊 Read aloud"), t("голоса, MP3", "voices, MP3"), "tts", "tts голос озвучка mp3 voice"),
             SearchIndex.Item("screen", t("🌐 Браузер", "🌐 Browser"), "", "browser", "browser браузер web"),
@@ -157,6 +158,7 @@ class SearchActivity : LumenBase() {
                 "editor" -> StudioEditorActivity.open(ctx)
                 "mix" -> StudioMixActivity.open(ctx)
                 "bite" -> BiteActivity.open(ctx)
+                "player" -> PlayerActivity.open(ctx)
                 "tts" -> TtsActivity.open(ctx)
                 "browser" -> BrowserActivity.open(ctx)
                 "bots" -> BotsActivity.open(ctx)
@@ -188,6 +190,7 @@ object Shortcuts {
             val list = listOf(
                 item("new_project", t("Новый проект", "New project"), Ic.ADD, Intent(ctx, NewProjectActivity::class.java)),
                 item("search", t("Поиск", "Search"), Ic.SEARCH, Intent(ctx, SearchActivity::class.java)),
+                item("player", t("Плеер", "Player"), Ic.PLAY, Intent(ctx, PlayerActivity::class.java)),
                 item("studio", "Studio", Ic.MOVIE, Intent(ctx, StudioActivity::class.java)),
                 item("tts", t("Озвучка", "Read aloud"), Ic.SPEAKER, Intent(ctx, TtsActivity::class.java))
             ).take((sm.maxShortcutCountPerActivity - 1).coerceAtLeast(1)) +

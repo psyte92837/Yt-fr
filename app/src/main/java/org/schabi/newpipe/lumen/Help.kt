@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "bite", "bots", "bot_posts", "settings"
+        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "bite", "player", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -44,6 +44,7 @@ object HelpMap {
         "StudioMixActivity" to "studio",
         "BiteActivity" to "bite",
         "BiteShareActivity" to "bite",
+        "PlayerActivity" to "player",
         "StudioEditorActivity" to "studio",
         "WebLayerActivity" to "montage",
         "BotsActivity" to "bots",
@@ -332,6 +333,30 @@ object Help {
                     "The layer runs in a WebView without internet: pictures and fonts by link do not load, only system fonts, emoji are fine. The protocol text — the \"📄 Protocol\" button."),
                 t("Галочка «Слой в полном разрешении» делает надписи чётче, но рендер медленнее. Если в видео уже есть субтитры из Студии, ИИ получает указание их не перекрывать.",
                     "The \"Layer at full resolution\" tick makes text sharper but the render slower. If the video already has Studio subtitles, the AI is told not to cover them.")
+            )),
+        HelpTopic("player", t("Плеер YouTube", "YouTube player"),
+            t("Поиск и просмотр YouTube в стиле Lumen: быстрые фильтры, ИИ-отбор по теме, компактный список с действиями, звук в фоне, прошлые поиски без интернета.",
+                "YouTube search and watching in the Lumen style: quick filters, AI picks by topic, a compact list with actions, sound in the background, past searches offline."),
+            listOf(
+                t("Вход: меню ⋮ на главной → «▶ Плеер», ярлык «Плеер» на значке Lumen, «Поделиться → Lumen» со ссылкой → «▶ Смотреть в плеере Lumen». В режиме «Аналитика + плеер» кнопка «Смотреть» везде открывает этот плеер.",
+                    "Entry: the ⋮ menu on Home → \"▶ Player\", the \"Player\" shortcut on the Lumen icon, \"Share → Lumen\" with a link → \"▶ Watch in the Lumen player\". In the \"Analytics + player\" mode the \"Watch\" button opens this player everywhere."),
+                t("Строка поиска: слова или ссылка на видео (сразу откроется), 🎤 — голосом. Подсказки: 🕘 ваши прошлые запросы и 🔍 подсказки YouTube; ↖ — вставить в строку, не ища.",
+                    "Search bar: words or a video link (opens at once), 🎤 — by voice. Suggestions: 🕘 your past queries and 🔍 YouTube's; ↖ — put into the field without searching."),
+                t("Быстрые фильтры под строкой: 📅 период (сегодня, неделя, месяц, год) или год выпуска, 👁 просмотров не меньше, 💬 комментариев не меньше (Lumen считает их у каждого видео — дольше), ⏱ длина, Shorts (все/без/только), ↕ порядок. «✕ Сбросить» — всё по умолчанию. Фильтры запоминаются.",
+                    "Quick filters under the bar: 📅 period (today, week, month, year) or upload year, 👁 at least views, 💬 at least comments (Lumen counts them per video — slower), ⏱ length, Shorts (all/none/only), ↕ order. \"✕ Reset\" — all defaults. Filters are remembered."),
+                t("🧠 Тема и критерии (ИИ, по желанию): выберите область (наука, технологии, бизнес…), критерии (без кликбейта, экспертно, без реакций…), напишите своими словами или возьмите тему своего проекта. ИИ уберёт неподходящее; под списком «🧠 Отброшено ИИ» — раскрыть, причина у каждого, ↩ — вернуть в выдачу.",
+                    "🧠 Topic and criteria (AI, optional): pick an area (science, tech, business…), criteria (no clickbait, expert, no reactions…), write your own words or take your project's topic. The AI removes what does not fit; under the list \"🧠 Dropped by AI\" — open it, each has a reason, ↩ — bring it back."),
+                t("Список: тап — смотреть здесь, 🎧 — слушать в фоне (звук с уведомлением, можно выключить экран), ⋮ или долгое нажатие — очередь фона, окно поверх приложений, скачать аудио/видео, откусить кусок, анализ в Lumen, ещё с канала, поделиться. Сверху — «▶ Смотреть подряд», «🎧 Слушать все в фоне», «＋ Все в очередь». Прокрутка вниз подгружает ещё.",
+                    "List: tap — watch here, 🎧 — listen in background (sound with a notification, the screen can go off), ⋮ or long press — background queue, floating window, download audio/video, bite a piece, analyse in Lumen, more from the channel, share. On top — \"▶ Watch in a row\", \"🎧 Listen to all in background\", \"＋ All to the queue\". Scrolling down loads more."),
+                t("Плеер: тап — показать/скрыть управление, двойной тап слева/справа — на 10 с, в центре — пауза; ⛶ или поворот телефона — весь экран; ⚙ — качество (из того, что есть у видео), скорость ×0.5–×2, следующее видео само, «свернул — слушать в фоне». 🎧 продолжит звук в фоне с того же места; «▶ Сюда» вернёт его на экран.",
+                    "Player: tap — show/hide controls, double-tap left/right — 10 s, centre — pause; ⛶ or turning the phone — full screen; ⚙ — quality (what the video has), speed ×0.5–×2, play next by itself, \"leaving — keep sound in background\". 🎧 continues the sound in the background from the same place; \"▶ Here\" brings it back to the screen."),
+                t("Без поиска на экране — «Продолжить просмотр» (с полосой просмотренного; долгое нажатие — убрать) и «Прошлые поиски»: результаты с фильтрами и отбором ИИ открываются мгновенно, без интернета; ✕ — удалить, ↻ у открытого — обновить. 🗓 — сколько хранить (1, 3, 7, 30 дней или не хранить), старые удаляются сами.",
+                    "With no search on the screen — \"Continue watching\" (with a watched bar; long press — remove) and \"Past searches\": results with filters and AI picks open instantly, offline; ✕ — delete, ↻ on an open one — refresh. 🗓 — how long to keep (1, 3, 7, 30 days or not at all), old ones delete themselves.")
+            ),
+            listOf(
+                t("Фильтры по дате и длине проверяются по данным поиска YouTube; у части видео дата «2 дня назад» приблизительна.", "Date and length filters use YouTube's search data; for some videos \"2 days ago\" is approximate."),
+                t("Фоновое прослушивание и окно идут через плеер NewPipe: управление — в уведомлении. Промпт ИИ-отбора: Настройки → AI → Промпты → player_filter.",
+                    "Background listening and the window use the NewPipe player: controls are in the notification. The AI filter prompt: Settings → AI → Prompts → player_filter.")
             )),
         HelpTopic("bite", t("Откусить видео или аудио", "Bite a video or audio"),
             t("Сохраняет на телефон кусок видео с YouTube — видео со звуком (MP4) или только звук (M4A). Качается только нужный кусок, без пережатия, поэтому быстро и без потери качества.",

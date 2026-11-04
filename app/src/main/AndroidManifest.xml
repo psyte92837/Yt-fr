@@ -445,6 +445,15 @@
             android:exported="false"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <!-- ===== Lumen: "▶ Player" — YouTube search with quick and AI filters, cached searches, built-in player ===== -->
+        <activity
+            android:name=".lumen.PlayerActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:supportsPictureInPicture="false"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- ===== Lumen: "Bite a video or audio" — a piece of a YouTube video saved on the phone ===== -->
         <activity
             android:name=".lumen.BiteActivity"

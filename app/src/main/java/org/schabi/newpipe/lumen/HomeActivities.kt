@@ -353,11 +353,7 @@ class LumenActivity : LumenBase() {
         items.add(t("Задать домен для наблюдения", "Set a domain to watch") to {
             startActivity(Intent(this, NewProjectActivity::class.java).putExtra("watch", true))
         })
-        if (Settings.mode == "player") {
-            items.add(t("Плеер NewPipe", "NewPipe player") to {
-                startActivity(Intent().setClassName(packageName, "org.schabi.newpipe.MainActivity"))
-            })
-        }
+        items.add(t("▶ Плеер YouTube", "▶ YouTube player") to { PlayerActivity.open(this) })
         if (showArchived || archived > 0) {
             items.add((if (showArchived) t("К проектам", "Projects") else t("Архив ($archived)", "Archive ($archived)")) to {
                 showArchived = !showArchived
@@ -648,7 +644,7 @@ class WizardActivity : LumenBase() {
                 c.p(t("Оставить плеер NewPipe (просмотр, фон, скачивание) или только аналитику?",
                     "Keep the NewPipe player (watching, background, downloads) or analytics only?"))
                 choice(c, t("Только аналитика", "Analytics only"), Settings.mode == "analytics") { Settings.mode = "analytics" }
-                choice(c, t("Аналитика + плеер NewPipe", "Analytics + NewPipe player"), Settings.mode == "player") { Settings.mode = "player" }
+                choice(c, t("Аналитика + плеер", "Analytics + player"), Settings.mode == "player") { Settings.mode = "player" }
                 nextButton(c)
             }
             "ai" -> {

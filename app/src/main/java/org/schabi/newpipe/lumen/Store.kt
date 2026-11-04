@@ -272,7 +272,7 @@ object Store {
 
     /** Pure: caches that rebuild themselves are left out of backups (path relative to [root], '/' separated). */
     fun backupSkip(rel: String): Boolean =
-        rel.startsWith("watchnext/") || rel.endsWith(".tmp") ||
+        rel.startsWith("watchnext/") || rel == "player/searches.json" || rel.endsWith(".tmp") ||
             Regex("""(^|/)anim/[^/]+/r_[^/]+/""").containsMatchIn(rel)
 
     /** Pure: already compressed media is stored as is — deflating it only burns CPU. */

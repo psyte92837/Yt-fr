@@ -19,7 +19,19 @@ object Bite {
     const val MIN_MS = 500L
     /** Done bites kept in the list. */
     const val KEEP = 30
-    val QUALITIES = listOf(360, 480, 720, 1080)
+    val QUALITIES = listOf(240, 360, 480, 720, 1080)
+    /** Sound quality: the best AAC (≈128 kbit/s) or the small one (≈48 kbit/s). */
+    const val AUDIO_BEST = "best"
+    const val AUDIO_SMALL = "small"
+    val AUDIO_QUALITIES = listOf(AUDIO_BEST, AUDIO_SMALL)
+
+    fun audioLabel(q: String): String = if (q == AUDIO_SMALL) t("Экономное ~48 кбит/с", "Small ~48 kbit/s") else t("Высокое ~128 кбит/с", "High ~128 kbit/s")
+
+    fun videoLabel(h: Int): String = "${h}p" + when (h) {
+        240 -> t(" · мало места", " · tiny")
+        1080 -> " HD"
+        else -> ""
+    }
     val LENGTHS_S = listOf(5, 10, 15, 30, 60)
 
     /** A piece [fromMs]..[toMs] or the reason why the typed times are not one. */
@@ -68,8 +80,10 @@ object Bite {
     }
 
     /** Download size in MB as a rough guess: bitrate × length (video 360p ≈ 0.7, 720p ≈ 2.5, 1080p ≈ 4.5 Mbit/s; sound 0.13). */
-    fun sizeMb(lenMs: Long, audio: Boolean, height: Int): Double {
-        val mbit = if (audio) 0.13 else 0.13 + when {
+    fun sizeMb(lenMs: Long, audio: Boolean, height: Int, audioQ: String = AUDIO_BEST): Double {
+        val sound = if (audioQ == AUDIO_SMALL) 0.05 else 0.13
+        val mbit = if (audio) sound else sound + when {
+            height <= 240 -> 0.35
             height <= 360 -> 0.7
             height <= 480 -> 1.2
             height <= 720 -> 2.5
@@ -104,5 +118,60 @@ object Bite {
     fun add(list: List<Done>, d: Done): Pair<List<Done>, List<String>> {
         val all = listOf(d) + list.filter { it.file != d.file }
         return all.take(KEEP) to all.drop(KEEP).map { it.file }
+    }
+
+    // ---------- range bar ----------
+
+    /** Step of the range bar: finer on short videos. */
+    fun stepMs(durMs: Long): Long = when {
+        durMs <= 2 * 60_000 -> 100
+        durMs <= 10 * 60_000 -> 500
+        else -> 1000
+    }
+
+    /** [ms] rounded to [step] and kept inside 0..[durMs]. */
+    fun snap(ms: Long, step: Long, durMs: Long): Long {
+        val s = step.coerceAtLeast(1)
+        val v = (ms + s / 2) / s * s
+        return v.coerceIn(0, if (durMs > 0) durMs else Long.MAX_VALUE)
+    }
+
+    /**
+     * New ends after one of them moved: [start] — the start was moved to [ms], otherwise the end. The other end gives
+     * way so the piece stays at least [MIN_MS] long and inside the video.
+     */
+    fun moveEnd(fromMs: Long, toMs: Long, ms: Long, start: Boolean, durMs: Long): Pair<Long, Long> {
+        val d = if (durMs > 0) durMs else Long.MAX_VALUE
+        return if (start) {
+            val a = ms.coerceIn(0, maxOf(0, d - MIN_MS))
+            a to maxOf(toMs, a + MIN_MS).coerceAtMost(d)
+        } else {
+            val b = ms.coerceIn(minOf(MIN_MS, d), d)
+            minOf(fromMs, b - MIN_MS).coerceAtLeast(0) to b
+        }
+    }
+
+    /** The whole piece shifted by [deltaMs], its length kept, inside the video. */
+    fun shift(fromMs: Long, toMs: Long, deltaMs: Long, durMs: Long): Pair<Long, Long> {
+        val len = toMs - fromMs
+        val maxA = if (durMs > 0) maxOf(0, durMs - len) else Long.MAX_VALUE
+        val a = (fromMs + deltaMs).coerceIn(0, maxA)
+        return a to a + len
+    }
+
+    /** Index of the frame (by time) nearest to [ms]; −1 when there are none. */
+    fun nearest(times: List<Long>, ms: Long): Int = times.indices.minByOrNull { kotlin.math.abs(times[it] - ms) } ?: -1
+
+    /** Start and end for a shared link: its ?t= (or 0) and [lenS] seconds after, inside the video. */
+    fun initial(url: String, durMs: Long, lenS: Int = 15): Pair<Long, Long> {
+        val a0 = StudioCuts.startOf(url) ?: 0L
+        val a = if (durMs > 0 && a0 >= durMs) 0L else a0
+        return a to endFor(a, lenS, durMs)
+    }
+
+    /** Overall progress of a bite (0..100): with both tracks the video takes 0–80 and the sound 80–100. */
+    fun overall(p: Int, sound: Boolean, both: Boolean): Int {
+        val q = p.coerceIn(0, 100)
+        return if (!both) q else if (sound) 80 + q * 20 / 100 else q * 80 / 100
     }
 }

@@ -2,6 +2,7 @@
 <resources>
     <string name="lumen_tts_share" translatable="false">Озвучить (Lumen)</string>
     <string name="lumen_tts_listen" translatable="false">Озвучить в Lumen</string>
+    <string name="lumen_bite_share" translatable="false">Откусить и сохранить отрезок</string>
     <string name="lumen_tts_save" translatable="false">Сохранить озвучку (Lumen)</string>
     <string name="lumen_bots_label" translatable="false">Lumen Боты</string>
 </resources>

@@ -124,6 +124,8 @@ object BgTasks {
         @Volatile var cancelled = false
         @Volatile var cancelAt = 0L
         @Volatile var auto = false
+        /** The work posts its own "done"/"failed" notification: the generic one is not shown. */
+        @Volatile var ownReport = false
         /** Above zero while the task waits for the user (review of the data sent to AI). */
         val waiting = AtomicInteger(0)
         internal val closed = AtomicBoolean(false)
@@ -302,6 +304,7 @@ object BgTasks {
             if (outcome == TaskHealth.ERROR) e?.message ?: e?.javaClass?.simpleName ?: "" else "")
         if (task.quiet) return
         changed()
+        if (task.ownReport && !task.auto) return
         if (task.auto) return report(task, e)
         if (visible || e is java.util.concurrent.CancellationException || task.cancelled) return
         // in a chain of steps only the last one (or a failure) is reported

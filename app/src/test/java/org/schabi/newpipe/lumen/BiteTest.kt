@@ -55,4 +55,30 @@ class BiteTest {
         assertEquals(again, back)
         assertTrue(Bite.fromJson("not json").isEmpty())
     }
+
+    @Test
+    fun rangeBarMoves() {
+        assertEquals(100L, Bite.stepMs(60_000))
+        assertEquals(1000L, Bite.stepMs(3_600_000))
+        assertEquals(1_500L, Bite.snap(1_460, 500, 0))
+        assertEquals(60_000L, Bite.snap(70_000, 1000, 60_000))
+        // the start pushes the end so the piece stays at least MIN_MS
+        assertEquals(10_000L to 10_500L, Bite.moveEnd(0, 5_000, 10_000, true, 60_000))
+        assertEquals(59_500L to 60_000L, Bite.moveEnd(0, 5_000, 70_000, true, 60_000))
+        assertEquals(1_500L to 2_000L, Bite.moveEnd(3_000, 9_000, 2_000, false, 60_000))
+        assertEquals(0L to 9_000L, Bite.moveEnd(0, 5_000, 9_000, false, 60_000))
+        assertEquals(55_000L to 60_000L, Bite.shift(10_000, 15_000, 90_000, 60_000))
+        assertEquals(0L to 5_000L, Bite.shift(10_000, 15_000, -90_000, 60_000))
+        assertEquals(1, Bite.nearest(listOf(0, 10_000, 20_000), 12_000))
+        assertEquals(-1, Bite.nearest(emptyList(), 5))
+    }
+
+    @Test
+    fun sharedLinkStartAndProgress() {
+        assertEquals(83_000L to 98_000L, Bite.initial("https://youtu.be/abcdefghijk?t=83", 0))
+        assertEquals(0L to 15_000L, Bite.initial("https://youtu.be/abcdefghijk?t=900", 60_000))
+        assertEquals(40, Bite.overall(50, false, true))
+        assertEquals(90, Bite.overall(50, true, true))
+        assertEquals(50, Bite.overall(50, true, false))
+    }
 }

@@ -25,7 +25,7 @@ import java.io.File
  */
 class BiteActivity : LumenBase() {
     companion object {
-        private const val TASK = "bite:"
+        private const val TASK = BiteJob.PREFIX
         private const val REQ_SAVE = 7451
 
         fun open(ctx: Context, url: String = "") = ctx.startActivity(Intent(ctx, BiteActivity::class.java).apply {
@@ -33,8 +33,7 @@ class BiteActivity : LumenBase() {
         })
     }
 
-    private val dir get() = File(Store.root, "bite").also { it.mkdirs() }
-    private val listFile get() = File(dir, "bites.json")
+    private val dir get() = BiteJob.dir
 
     private var hits: List<CutHit> = emptyList()
     private var searching = false
@@ -51,11 +50,14 @@ class BiteActivity : LumenBase() {
     private var toText = "0:10"
 
     private var audio: Boolean
-        get() = Lumen.prefs.getBoolean("bite_audio", false)
-        set(v) = Lumen.prefs.edit().putBoolean("bite_audio", v).apply()
+        get() = BiteJob.audio
+        set(v) { BiteJob.audio = v }
     private var quality: Int
-        get() = Lumen.prefs.getInt("bite_q", 720)
-        set(v) = Lumen.prefs.edit().putInt("bite_q", v).apply()
+        get() = BiteJob.quality
+        set(v) { BiteJob.quality = v }
+    private var audioQ: String
+        get() = BiteJob.audioQ
+        set(v) { BiteJob.audioQ = v }
 
     private var done: List<Bite.Done> = emptyList()
     private var status: TextView? = null
@@ -128,12 +130,7 @@ class BiteActivity : LumenBase() {
     }
 
     private fun load() {
-        done = if (listFile.exists()) Bite.fromJson(listFile.readText()).filter { File(dir, it.file).exists() } else emptyList()
-    }
-
-    private fun saveList(list: List<Bite.Done>) {
-        done = list
-        runCatching { listFile.writeText(Bite.toJson(list)) }
+        done = BiteJob.list()
     }
 
     // ---------- screen ----------
@@ -293,7 +290,7 @@ class BiteActivity : LumenBase() {
     private fun showLen() {
         val r = Bite.range(fromText, toText, durMs)
         lenText?.text = if (!r.ok) "⚠ " + r.error
-        else t("Длина: ", "Length: ") + StudioCuts.stamp(r.lenMs) + " · ≈ " + "%.1f".format(Bite.sizeMb(r.lenMs, audio, quality)) + t(" МБ", " MB")
+        else t("Длина: ", "Length: ") + StudioCuts.stamp(r.lenMs) + " · ≈ " + "%.1f".format(Bite.sizeMb(r.lenMs, audio, quality, audioQ)) + t(" МБ", " MB")
     }
 
     private fun strip(lk: StudioCutsLoad.Look): View {
@@ -402,54 +399,40 @@ class BiteActivity : LumenBase() {
             render()
         }, 4)
         if (!audio) {
-            spinner(t("Качество видео", "Video quality"), Bite.QUALITIES.map { it to "${it}p" }, Bite.QUALITIES.firstOrNull { it == quality } ?: 720) {
+            spinner(t("Качество видео", "Video quality"), Bite.QUALITIES.map { it to Bite.videoLabel(it) }, quality) {
                 quality = it
                 showLen()
             }
             muted(t("Видео начинается с ближайшего ключевого кадра — бывает на 1–3 с раньше начала. Сохраняется в Галерею → Фильмы/Lumen.",
                 "The video starts at the nearest key frame — sometimes 1–3 s before the start. Saved to Gallery → Movies/Lumen."))
         } else {
-            muted(t("Звук AAC (.m4a) в лучшем качестве, точно по времени. Сохраняется в Музыка/Lumen.",
-                "AAC sound (.m4a) in the best quality, exactly on time. Saved to Music/Lumen."))
+            muted(t("Звук AAC (.m4a), точно по времени. Сохраняется в Музыка/Lumen.", "AAC sound (.m4a), exactly on time. Saved to Music/Lumen."))
         }
-        val task = BgTasks.find(TASK)
-        if (task != null) {
+        spinner(t("Качество звука", "Sound quality"), Bite.AUDIO_QUALITIES.map { it to Bite.audioLabel(it) }, audioQ) {
+            audioQ = it
+            showLen()
+        }
+        val tasks = BgTasks.running().filter { it.key.startsWith(TASK) }
+        status = null
+        for (task in tasks) {
+            muted(task.title)
             val (tv, _) = working(task.message.ifBlank { t("Откусываю…", "Biting…") })
-            status = tv
+            if (status == null) status = tv
             button(t("■ Остановить", "■ Stop"), style = BtnStyle.TEXT) { BgTasks.stop(task) }
-        } else {
-            status = null
-            button(if (audio) t("✂ Откусить аудио и сохранить", "✂ Bite the sound and save") else t("✂ Откусить видео и сохранить", "✂ Bite the video and save"), primary = true) { start() }
         }
+        button(if (audio) t("✂ Откусить аудио и сохранить", "✂ Bite the sound and save") else t("✂ Откусить видео и сохранить", "✂ Bite the video and save"), primary = true) { start() }
     }
 
     private fun start() {
         val r = Bite.range(fromText, toText, durMs)
         if (!r.ok) return toast(r.error)
-        if (BgTasks.has(TASK)) return toast(t("Уже идёт", "Already running"))
         player?.playWhenReady = false
-        val u = url
-        val a = audio
-        val q = quality
-        val name = title
-        BgTasks.run(this, TASK + "save", t("Откусить: ", "Bite: ") + name.ifBlank { u }.take(40), BgTasks.reopen(this), { task ->
-            val res = BiteLoad.bite(u, r.fromMs, r.toMs, a, q, dir, { task.cancelled }) { BgTasks.progress(TASK + "save", it) }
-            BgTasks.progress(TASK + "save", t("Сохранение…", "Saving…"))
-            val saved = runCatching { BiteLoad.save(applicationContext, res.file, a) }.getOrElse { L.w("bite", "save: ${it.message}"); "" }
-            res to saved
-        }, { e ->
-            if (isDestroyed) return@run
-            render()
-            err(e)
-        }) { (res, saved) ->
-            val (list, drop) = Bite.add(if (listFile.exists()) Bite.fromJson(listFile.readText()) else emptyList(),
-                Bite.Done(res.file.name, res.title.ifBlank { name }, u, r.fromMs, r.toMs, a, saved, System.currentTimeMillis()))
-            drop.forEach { File(dir, it).delete() }
-            saveList(list)
-            if (isDestroyed) return@run
+        BiteJob.start(this, url, title, r.fromMs, r.toMs, audio, quality, audioQ) { d, _ ->
+            if (isDestroyed) return@start
             status = null
+            load()
             render()
-            toast(if (saved.isNotEmpty()) t("Сохранено: ", "Saved: ") + saved else t("Готово, но в общую папку не сохранилось — «💾 В папку…»", "Done, but not saved to the shared folder — use \"💾 To a folder…\""))
+            if (d != null) toast(if (d.savedAs.isNotEmpty()) t("Сохранено: ", "Saved: ") + d.savedAs else t("Готово, но в общую папку не сохранилось — «💾 В папку…»", "Done, but not saved to the shared folder — use \"💾 To a folder…\""))
         }
         render()
     }
@@ -502,11 +485,7 @@ class BiteActivity : LumenBase() {
         }, {
             done = before
             render()
-        }) {
-            File(dir, d.file).delete()
-            val now = if (listFile.exists()) Bite.fromJson(listFile.readText()) else emptyList()
-            runCatching { listFile.writeText(Bite.toJson(now.filter { it.file != d.file })) }
-        }
+        }) { BiteJob.remove(d.file) }
     }
 
     @Deprecated("Deprecated in Java")

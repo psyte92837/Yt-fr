@@ -1359,7 +1359,7 @@ class StudioActivity : LumenBase() {
 
     /** Storyboard: a small frame of every scene; a tap shows that scene in the preview. */
     private fun storyboard(c: Col, plan: StudioPlan) {
-        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.layers}:${plan.overScale}:${plan.blockBg}:${plan.schemeStyle?.id}:${plan.schemePlace}:${plan.toonSchemes}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
+        val key = "${plan.style}:${plan.accent}:${plan.overlay}:${plan.layers}:${plan.overScale}:${plan.blockBg}:${plan.fullMode}:${plan.schemeStyle?.id}:${plan.schemePlace}:${plan.toonSchemes}:${plan.zooms}:${plan.times.size}:${plan.totalMs}:${clips().size}:${aspect().id}:" +
             plan.script.scenes.joinToString(",") { it.clip } + ":" + readyIds().joinToString(",")
         if (board.isNotEmpty() && boardKey == key) {
             c.add(text(this, t("Раскадровка", "Storyboard"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -1661,7 +1661,7 @@ class StudioActivity : LumenBase() {
     private fun bgSpec(plan: StudioPlan): StudioBg {
         if (task == StudioTask.CUTS) {
             val ready = readyCuts()
-            val slots = StudioCuts.slots(plan.times, StudioCuts.effectiveClips(plan.script.scenes, ready.map { it.id }.toSet()), ready.associateBy { it.id })
+            val slots = StudioCuts.slots(plan.times, StudioCuts.effectiveClips(plan.script.scenes, ready.map { it.id }.toSet(), all = plan.fullMode != StudioOverlay.FULL), ready.associateBy { it.id })
             return StudioBg(null, null, emptyList(), slots, ready.associate { it.id to File(cutsDir, it.file) })
         }
         return if (videoReady()) StudioBg(sourceFile, cuts, emptyList()) else StudioBg(null, null, clips())
@@ -2169,7 +2169,7 @@ class StudioActivity : LumenBase() {
             if (StudioPrefs.liveEmoji) emojiDir else null,
             clipScenes, if (task == StudioTask.CARTOON) StudioPrefs.cast else null, motionTpls,
             ov.layers(), ov.overScale(), schemeStyleOf(ov, style), if (style == StudioStyle.VIDEO) ov.schemePlace() else "overlay", "auto",
-            ov.toon, ov.bg)
+            ov.toon, ov.bg, ov.fullMode())
     }
 
     private val emojiDir get() = File(dir, "emoji")
@@ -3058,7 +3058,7 @@ class StudioActivity : LumenBase() {
 
     private fun overlayWhere() = StudioOverlayUi.Where(
         video = currentStyle() == StudioStyle.VIDEO, cartoon = task == StudioTask.CARTOON,
-        schemes = script?.scenes?.count { it.scheme != null } ?: 0, working = busy.isNotEmpty())
+        schemes = script?.scenes?.count { it.scheme != null } ?: 0, working = busy.isNotEmpty(), inserts = task == StudioTask.CUTS)
 
     /** Look of the schemes in a montage (null = the colours of the video style, "auto"). */
     private fun schemeStyleOf(ov: StudioOverlay, style: StudioStyle): SchemeStyle? {
@@ -3076,7 +3076,7 @@ class StudioActivity : LumenBase() {
         board = emptyList()
         render()
         // the schemes are chosen: the AI composes them now (once per script), no separate button
-        if (n.schemes && !was.schemes) composeIfNeeded(explicit = true)
+        if (n.anySchemes() && !was.anySchemes()) composeIfNeeded(explicit = true)
     }
 
     private fun overlayBlock(c: Col) {

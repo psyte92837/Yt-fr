@@ -88,7 +88,9 @@ class StudioPlan(
     /** Animation with characters: how schemes are shown ([StudioLayers.TOON_MODES]). */
     val toonSchemes: String = "board",
     /** Background of the blocks (schemes, tiles, cards): solid, glass or clear ([StudioOverlay.BGS]). */
-    val blockBg: String = "solid"
+    val blockBg: String = "solid",
+    /** What the scenes show that would cover the video with a full-screen scheme ([StudioOverlay.FULLS]). */
+    val fullMode: String = StudioOverlay.FULL
 ) {
     val subs get() = layers.subs
     val graphics get() = layers.graphics
@@ -142,7 +144,7 @@ class StudioPlan(
             pulse: FloatArray? = null, emojiDir: File? = null, clipScenes: Set<Int>? = null, cast: List<SChar>? = null,
             templates: Map<String, MotionTpl> = emptyMap(), layers: StudioLayers = StudioLayers.ALL, overScale: Float = 0.8f,
             schemeStyle: SchemeStyle? = null, schemePlace: String = "overlay", schemeAnchor: String = "auto",
-            toonSchemes: String = "board", blockBg: String = "solid"
+            toonSchemes: String = "board", blockBg: String = "solid", fullMode: String = StudioOverlay.FULL
         ): StudioPlan {
             val ranges = ranges?.takeIf { it.size == script.scenes.size }
                 ?: Studio.assignScenes(words.size, script.scenes.map { Studio.tokens(it.say).size })
@@ -152,7 +154,7 @@ class StudioPlan(
                 if (style == StudioStyle.EXPLAIN && cast == null) Studio.captions(words, it, StudioExplain.CAPTION_WORDS, StudioExplain.CAPTION_CHARS)
                 else Studio.captions(words, it, maxWords = if (single) 1 else 4)
             }
-            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes), blockBg)
+            return StudioPlan(script, words, times, caps, totalMs, style, accent, overlay, zooms, transitions, pulse, emojiDir, clipScenes, cast?.takeIf { it.isNotEmpty() }, templates, layers, overScale, schemeStyle, schemePlace, schemeAnchor, StudioLayers.toonMode(toonSchemes), blockBg, fullMode)
         }
     }
 }
@@ -240,13 +242,33 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         return fadeIn * fadeOut
     }
 
-    /** VIDEO style: is scene [i] a full-screen graphic insert (instead of the speaker)? */
-    private fun insert(i: Int): Boolean {
+    /** VIDEO style: is scene [i] a full-screen insert (instead of the speaker)? Veiled scenes ([veiled]) are not. */
+    private fun insert(i: Int): Boolean = fullInsert(i) && !veiled(i)
+
+    /** VIDEO style: would scene [i] be a full-screen insert: a graphic one or a B-roll photo. */
+    private fun fullInsert(i: Int): Boolean {
         if (plan.style != StudioStyle.VIDEO) return false
         plan.clipScenes?.let { return i !in it }
         if (placed(i)) return false
-        return (!plan.overlay && plan.graphics && plan.script.scenes[i].kind != "text") || (plan.script.scenes[i].brollMode != "card" && hasMedia(i))
+        return (!plan.overlay && plan.graphics && plan.script.scenes[i].kind != "text") || brollFull(i)
     }
+
+    private fun brollFull(i: Int): Boolean = plan.script.scenes.getOrNull(i)?.brollMode != "card" && hasMedia(i)
+
+    /** What the full-screen scheme moments show ([StudioPlan.fullMode]). */
+    private val veil = StudioOverlay.fullShow(plan.fullMode)
+
+    /** Background of the blocks being drawn: [StudioPlan.blockBg], or clear for a veiled scene ([veiledScene]). */
+    private var blockBg = plan.blockBg
+
+    /** The chosen look of the schemes without the plate, for veiled scenes. */
+    private val clearLook by lazy { plan.schemeStyle?.let { StudioOverlay.style(it, "clear", it.place) } }
+
+    /**
+     * Scene [i] would cover the video with a full-screen scheme, but the video plays on under it: only the blocks
+     * on a transparent background, only the subtitles, or nothing ([veil]). B-roll photos stay inserts.
+     */
+    private fun veiled(i: Int): Boolean = !veil.insert && fullInsert(i) && !brollFull(i)
 
     /** B-roll photo of scene [i] (null when it has none or it cannot be read). */
     private fun photo(i: Int): Bitmap? {
@@ -1035,6 +1057,10 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             c.restore()
             return
         }
+        if (veiled(i)) {
+            veiledScene(c, sc, i, tMs, a)
+            return
+        }
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
         if (placed(i)) {
             if (a > 0f) {
@@ -1062,9 +1088,35 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         pops(c, i, tMs, a)
     }
 
-    /** One word on the video: white bold with a shadow and an accent underline. */
-    private fun spokenWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float) {
-        if (!plan.subs) return
+    /**
+     * A scene that would be a full-screen scheme, over the playing video ([veiled]): the blocks of its scheme or
+     * visual on a transparent background (text and icons with a soft shadow, the headline in white) and no
+     * subtitles; or the subtitles only; or nothing at all.
+     */
+    private fun veiledScene(c: Canvas, sc: SScene, i: Int, tMs: Long, a: Float) {
+        if (veil.subs) c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bottomShade)
+        if (a <= 0f) return
+        val st = plan.times[i]
+        val local = tMs - st.startMs
+        if (veil.blocks && plan.graphics) {
+            val was = blockBg
+            blockBg = "clear"
+            try {
+                // the headline gets the same soft shadow as the blocks
+                if (sc.title.isNotBlank() && sc.kind !in listOf("stat", "quote", "scheme", "big")) onVideo(c) { cv -> headline(cv, sc.title, h * 0.12f, a, local, 0xFFFFFFFF.toInt()) }
+                overVisual(c, sc, i, local, st.endMs - st.startMs, a, subs = false)
+                shapes(c, i, tMs, a)
+                pops(c, i, tMs, a)
+            } finally {
+                blockBg = was
+            }
+        }
+        if (veil.subs) spokenWord(c, i, tMs, a, h * 0.80f, force = true)
+    }
+
+    /** One word on the video: white bold with a shadow and an accent underline; [force] — even with subtitles off. */
+    private fun spokenWord(c: Canvas, scene: Int, tMs: Long, a: Float, y: Float, force: Boolean = false) {
+        if (!plan.subs && !force) return
         val groups = plan.captions.getOrNull(scene) ?: return
         val g = groups.lastOrNull { plan.words[it.first].startMs - 60 <= tMs } ?: return
         val word = plan.words[g.first]
@@ -1175,10 +1227,10 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
      * A scheme over a background (playing video, clip or photo): scaled to [StudioPlan.overScale], no screen behind it,
      * so the background stays visible around it; the subtitles keep the bottom.
      */
-    private fun overVisual(c: Canvas, sc: SScene, i: Int, local: Long, sceneMs: Long, a: Float) {
+    private fun overVisual(c: Canvas, sc: SScene, i: Int, local: Long, sceneMs: Long, a: Float, subs: Boolean = plan.subs) {
         if (!plan.graphics || a <= 0f || !StudioLayers.hasScheme(sc.kind, sc.items.size)) return
         val k = StudioLayers.readable(plan.overScale, sc.kind, sc.items.size)
-        val cy = h * StudioLayers.overY(k, plan.subs)
+        val cy = h * StudioLayers.overY(k, subs)
         onVideo(c) { cv ->
             cv.save()
             cv.scale(k, k, w / 2f, cy)
@@ -1199,13 +1251,13 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
      * copy of the layer, so they stay readable on any video.
      */
     private fun onVideo(c: Canvas, draw: (Canvas) -> Unit) {
-        if (plan.blockBg == "solid") return draw(c)
+        if (blockBg == "solid") return draw(c)
         val wasDark = dark
         val wasOver = overVideo
         palette(true)
         overVideo = true
         try {
-            if (plan.blockBg != "clear") return draw(c)
+            if (blockBg != "clear") return draw(c)
             val b = layerBmp?.takeIf { !it.isRecycled } ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { layerBmp = it }
             b.eraseColor(0)
             draw(Canvas(b))
@@ -1258,13 +1310,16 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** The style of the schemes: the chosen one, or "auto" built from the colours of the current palette. */
     private fun sstyle(): SchemeStyle {
-        plan.schemeStyle?.let { return it }
+        plan.schemeStyle?.let { st ->
+            // the chosen look made for the blocks of the plan; a veiled scene takes it without the plate
+            return if (blockBg == plan.blockBg) st else clearLook ?: st
+        }
         val base = SchemeStyle(SchemeStyles.AUTO, "", card = card, ink = ink, muted = muted, accent = accent,
             line = stroke, fill = "solid", radius = 0.18f, border = 1f, shadow = true)
         return when {
-            plan.blockBg == "solid" -> base
-            overVideo -> autoStyles.getOrPut(card) { StudioOverlay.style(base, plan.blockBg) }
-            plan.blockBg == "glass" -> base.copy(fill = "glass", card = (card and 0x00FFFFFF) or (0x8C shl 24))
+            blockBg == "solid" -> base
+            overVideo -> autoStyles.getOrPut(card xor blockBg.hashCode()) { StudioOverlay.style(base, blockBg) }
+            blockBg == "glass" -> base.copy(fill = "glass", card = (card and 0x00FFFFFF) or (0x8C shl 24))
             else -> base.copy(fill = "none", border = 0f)
         }
     }
@@ -1578,7 +1633,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** Alpha of the card fill for the background of the blocks: solid, glass or clear. */
-    private val cardK = StudioOverlay.cardAlpha(plan.blockBg)
+    private val cardK get() = StudioOverlay.cardAlpha(blockBg)
 
     private fun cardPaint(alpha: Float) = fill.apply {
         color = card

@@ -92,6 +92,27 @@ class StudioOverlayTest {
     }
 
     @Test
+    fun fullScreenMoments() {
+        val o = StudioOverlay(StudioOverlay.SCHEMES, false, "clear", "neon", "l", "full", "big", "many", StudioOverlay.BLOCKS_ONLY)
+        assertEquals(o, StudioOverlay.parse(o.toJson().toString()))
+        assertEquals(StudioOverlay.FULL, StudioOverlay.parse("""{"full":"moon"}""")!!.full)
+        // old settings without the key keep the full-screen insert
+        assertEquals(StudioOverlay.FULL, StudioOverlay.parse("""{"mode":"schemes","place":"full"}""")!!.full)
+        assertEquals(StudioOverlay.FullShow(true, true, true), StudioOverlay.fullShow(StudioOverlay.FULL))
+        assertEquals(StudioOverlay.FullShow(false, true, false), StudioOverlay.fullShow(StudioOverlay.BLOCKS_ONLY))
+        assertEquals(StudioOverlay.FullShow(false, false, true), StudioOverlay.fullShow(StudioOverlay.SUBS_ONLY))
+        assertEquals(StudioOverlay.FullShow(false, false, false), StudioOverlay.fullShow(StudioOverlay.OFF))
+        // the subtitles mode never covers the video
+        assertEquals(StudioOverlay.SUBS_ONLY, StudioOverlay(mode = StudioOverlay.SUBS, full = StudioOverlay.FULL).fullMode())
+        assertEquals(StudioOverlay.OFF, StudioOverlay(full = StudioOverlay.OFF).fullMode())
+        // every scheme is full screen and those moments show none: nothing to compose
+        assertFalse(StudioOverlay(place = "full", full = StudioOverlay.SUBS_ONLY).anySchemes())
+        assertFalse(StudioOverlay.needCompose(StudioOverlay(place = "full", full = StudioOverlay.OFF), true, 0, "", "k1"))
+        assertTrue(StudioOverlay(place = "full", full = StudioOverlay.BLOCKS_ONLY).anySchemes())
+        assertTrue(StudioOverlay(place = "auto", full = StudioOverlay.SUBS_ONLY).anySchemes())
+    }
+
+    @Test
     fun composesOncePerScript() {
         val on = StudioOverlay(mode = StudioOverlay.SCHEMES)
         assertTrue(StudioOverlay.needCompose(on, true, 0, "", "k1"))

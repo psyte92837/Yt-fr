@@ -264,6 +264,9 @@ class StudioCutsTest {
         // c9 is not downloaded: its scene is bare and continues c1; graphic scenes stay inserts
         assertEquals(listOf("c1", "c1", "c1", "", "c1", "", "c1", "c1"), StudioCuts.effectiveClips(scenes, setOf("c1")))
         assertEquals(List(3) { "" }, StudioCuts.effectiveClips(listOf(text, grid, text), setOf("c1")))
+        // full-screen schemes off: every scene without a clip plays the clip next to it
+        assertEquals(listOf("c1", "c1", "c1", "c1", "c1", "c1", "c1", "c1"), StudioCuts.effectiveClips(scenes, setOf("c1"), all = true))
+        assertEquals(listOf("c1", "c1", "c1"), StudioCuts.effectiveClips(listOf(grid, text.copy(clip = "c1"), stat), setOf("c1"), all = true))
         // continued scenes play on in the clip instead of starting it again
         val slots = StudioCuts.slots(times(0, 1000, 2000, 3000), listOf("c1", "c1", "c1"), mapOf("c1" to SClip("c1", "u", 0, 10_000, file = "f", lenMs = 10_000)))
         assertEquals(listOf(0L, 1000L, 2000L), slots.map { it.offsetMs })

@@ -221,17 +221,18 @@ object StudioCuts {
 
     /**
      * Clip of every scene for the montage: a bare scene ([bare]) without a ready clip of its own continues the clip
-     * before it (the first ones take the next clip), so the video never drops to an empty screen.
+     * before it (the first ones take the next clip), so the video never drops to an empty screen. [all] — every scene
+     * without a clip does so (the full-screen schemes are off: the video plays on under them).
      */
-    fun effectiveClips(scenes: List<SScene>, ready: Set<String>): List<String> {
+    fun effectiveClips(scenes: List<SScene>, ready: Set<String>, all: Boolean = false): List<String> {
         val own = scenes.map { it.clip.takeIf { c -> c in ready } ?: "" }
         val out = own.toMutableList()
         var last = ""
         for (i in scenes.indices) {
-            if (out[i].isNotEmpty()) last = out[i] else if (bare(scenes[i])) out[i] = last
+            if (out[i].isNotEmpty()) last = out[i] else if (all || bare(scenes[i])) out[i] = last
         }
         val first = own.indexOfFirst { it.isNotEmpty() }
-        if (first > 0) for (i in 0 until first) if (out[i].isEmpty() && bare(scenes[i])) out[i] = own[first]
+        if (first > 0) for (i in 0 until first) if (out[i].isEmpty() && (all || bare(scenes[i]))) out[i] = own[first]
         return out
     }
 

@@ -16,6 +16,9 @@ import org.json.JSONObject
  * [look] — a built-in look ([SchemeStyles.PRESETS]). [size] — s/m/l. [place] — auto (over the picture), side
  * (the speaker's frame slides aside), pip (the speaker into a corner) or full (full-screen inserts).
  * [toon] — animation with characters: the scheme on a board or big. [amount] — how many scenes get a scheme.
+ * [full] — what the moments show where a scheme would cover the whole video (place full, or a cut montage scene with
+ * no clip of its own): the full-screen insert, only the blocks on a transparent background over the video, only the
+ * subtitles, or nothing (off: the video plays on clean). See [FullShow].
  */
 data class StudioOverlay(
     val mode: String = SCHEMES,
@@ -25,7 +28,8 @@ data class StudioOverlay(
     val size: String = "m",
     val place: String = "auto",
     val toon: String = "board",
-    val amount: String = "norm"
+    val amount: String = "norm",
+    val full: String = FULL
 ) {
     val schemes get() = mode == SCHEMES
     val subs get() = mode == SUBS || subsToo
@@ -47,6 +51,12 @@ data class StudioOverlay(
     /** Graphics over the picture (video, clip, photo); false = full-screen inserts instead of the picture. */
     fun overlay(): Boolean = place != "full"
 
+    /** What the full-screen moments show; the subtitles mode never covers the video: subtitles only. */
+    fun fullMode(): String = if (schemes) full else SUBS_ONLY
+
+    /** Some scheme reaches the viewer: false when every scheme would be full-screen and those moments show none. */
+    fun anySchemes(): Boolean = schemes && !(place == "full" && !fullShow(full).blocks)
+
     /** [StudioPlan.schemePlace] of the montage. */
     fun schemePlace(): String = when (place) {
         "side", "pip" -> place
@@ -61,7 +71,14 @@ data class StudioOverlay(
     }
 
     fun toJson(): JSONObject = JSONObject().put("v", 1).put("mode", mode).put("subs", subsToo).put("bg", bg).put("look", look)
-        .put("size", size).put("place", place).put("toon", toon).put("amount", amount)
+        .put("size", size).put("place", place).put("toon", toon).put("amount", amount).put("full", full)
+
+    /**
+     * What a scene that would be a full-screen scheme insert shows under [full]: [insert] — the insert itself
+     * (the video is hidden); otherwise the video plays on and gets the [blocks] of the scheme on a transparent
+     * background and/or the [subs].
+     */
+    data class FullShow(val insert: Boolean, val blocks: Boolean, val subs: Boolean)
 
     companion object {
         const val SUBS = "subs"
@@ -73,6 +90,13 @@ data class StudioOverlay(
         val TOONS = listOf("board", "big")
         val AMOUNTS = listOf("few", "norm", "many")
 
+        /** Full-screen moments: the insert as before, blocks only (transparent, no subtitles), subtitles only, off. */
+        const val FULL = "full"
+        const val BLOCKS_ONLY = "blocks"
+        const val SUBS_ONLY = "subs"
+        const val OFF = "off"
+        val FULLS = listOf(FULL, BLOCKS_ONLY, SUBS_ONLY, OFF)
+
         private fun one(v: String?, list: List<String>, def: String) = v?.trim()?.lowercase()?.takeIf { it in list } ?: def
 
         fun fromJson(o: JSONObject?): StudioOverlay {
@@ -83,7 +107,8 @@ data class StudioOverlay(
                 bg = one(o.optString("bg"), BGS, d.bg),
                 look = o.optString("look").trim().let { SchemeStyles.alias(it) }.takeIf { id -> SchemeStyles.PRESETS.any { it.id == id } } ?: d.look,
                 size = one(o.optString("size"), SIZES, d.size), place = one(o.optString("place"), PLACES, d.place),
-                toon = one(o.optString("toon"), TOONS, d.toon), amount = one(o.optString("amount"), AMOUNTS, d.amount)
+                toon = one(o.optString("toon"), TOONS, d.toon), amount = one(o.optString("amount"), AMOUNTS, d.amount),
+                full = one(o.optString("full"), FULLS, d.full)
             )
         }
 
@@ -142,6 +167,13 @@ data class StudioOverlay(
             return SchemeStyles.enforce(s, bare = true).first
         }
 
+        fun fullShow(full: String): FullShow = when (full) {
+            BLOCKS_ONLY -> FullShow(insert = false, blocks = true, subs = false)
+            SUBS_ONLY -> FullShow(insert = false, blocks = false, subs = true)
+            OFF -> FullShow(insert = false, blocks = false, subs = false)
+            else -> FullShow(insert = true, blocks = true, subs = true)
+        }
+
         /** Alpha factor of the card fill of the built-in graphics (tiles, lists, numbers) for [bg]. */
         fun cardAlpha(bg: String): Float = when (bg) {
             "glass" -> 0.55f
@@ -154,6 +186,6 @@ data class StudioOverlay(
          * AI was not already asked for this very script ([tried] = key of the script it was asked for).
          */
         fun needCompose(ov: StudioOverlay, hasAi: Boolean, have: Int, tried: String, key: String): Boolean =
-            ov.schemes && hasAi && have == 0 && tried != key
+            ov.anySchemes() && hasAi && have == 0 && tried != key
     }
 }

@@ -1420,7 +1420,7 @@ class StudioMixActivity : LumenBase() {
             style = StudioStyle.VIDEO, accent = StudioPrefs.accent, overlay = ov.overlay(), zooms = false, transitions = false,
             clipScenes = items.indices.toSet(), layers = if (ov.schemes) StudioLayers.ALL else StudioLayers.SUBS, overScale = ov.overScale(),
             schemeStyle = SchemeStyles.PRESETS.firstOrNull { it.id == ov.look && it.id != SchemeStyles.AUTO }?.let { StudioOverlay.style(it, ov.bg, ov.schemePlace()) },
-            schemePlace = ov.schemePlace(), blockBg = ov.bg
+            schemePlace = ov.schemePlace(), blockBg = ov.bg, fullMode = ov.fullMode()
         )
     }
 
@@ -1952,7 +1952,7 @@ class StudioMixActivity : LumenBase() {
         val was = over()
         Prefs.over = n
         render()
-        if (n.schemes && !was.schemes) composeIfNeeded(true)
+        if (n.anySchemes() && !was.anySchemes()) composeIfNeeded(true)
     }
 
     private fun hasAi() = Provider.active() != null || Relay.mode != "off"

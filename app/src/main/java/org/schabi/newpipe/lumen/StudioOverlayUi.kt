@@ -13,9 +13,28 @@ package org.schabi.newpipe.lumen
 object StudioOverlayUi {
     /**
      * Where the control is: [video] — the picture is a video / clips (look, size and placement matter), [cartoon] —
-     * the animation with characters, [schemes] — how many schemes the scenes have, [working] — the AI composes them.
+     * the animation with characters, [schemes] — how many schemes the scenes have, [working] — the AI composes them,
+     * [inserts] — the montage has full-screen moments by itself (a cut montage: scenes with no clip of their own).
      */
-    class Where(val video: Boolean, val cartoon: Boolean, val schemes: Int, val working: Boolean)
+    class Where(val video: Boolean, val cartoon: Boolean, val schemes: Int, val working: Boolean, val inserts: Boolean = false)
+
+    /** Are there moments where a scheme would cover the whole video: then the choice [StudioOverlay.full] matters. */
+    fun hasFull(ov: StudioOverlay, w: Where) = w.video && ov.schemes && (ov.place == "full" || w.inserts)
+
+    fun fullLabel(f: String) = when (f) {
+        StudioOverlay.BLOCKS_ONLY -> t("🧩 Только инфоблоки", "🧩 Blocks only")
+        StudioOverlay.SUBS_ONLY -> t("💬 Только субтитры", "💬 Subtitles only")
+        StudioOverlay.OFF -> t("✕ Выключить", "✕ Off")
+        else -> t("🖼 На весь экран", "🖼 Full screen")
+    }
+
+    fun fullHint(f: String) = when (f) {
+        StudioOverlay.BLOCKS_ONLY -> t("Видео идёт дальше, поверх — только блоки схемы на прозрачном фоне (текст и значки с тенью), без субтитров.",
+            "The video plays on, with only the blocks of the scheme over it on a transparent background (text and icons with a shadow), no subtitles.")
+        StudioOverlay.SUBS_ONLY -> t("Схема не вставляется: видео идёт дальше, только субтитры.", "No scheme insert: the video plays on, subtitles only.")
+        StudioOverlay.OFF -> t("Ни схемы, ни субтитров: в эти моменты просто видео.", "Neither the scheme nor subtitles: just the video at these moments.")
+        else -> t("Схема вставкой на весь экран, видео под ней не видно.", "The scheme as a full-screen insert, the video is hidden under it.")
+    }
 
     fun bgLabel(bg: String) = when (bg) {
         "glass" -> t("◩ Полупрозрачный", "◩ Semi-transparent")
@@ -66,6 +85,7 @@ object StudioOverlayUi {
             parts += lookName(ov.look)
             parts += placeLabel(ov.place).lowercase()
         }
+        if (hasFull(ov, w) && ov.full != StudioOverlay.FULL) parts += t("на весь экран: ", "full screen: ") + fullLabel(ov.full).substringAfter(' ').lowercase()
         if (w.cartoon) parts += if (ov.toon == "big") t("крупно", "big") else t("на доске", "on a board")
         parts += sizeLabel(ov.size).lowercase()
         return parts.joinToString(" · ")
@@ -83,6 +103,11 @@ object StudioOverlayUi {
         chips(StudioOverlay.BGS.map { b -> chip(ctx, bgLabel(b), ov.bg == b) { if (ov.bg != b) set(ov.copy(bg = b)) } })
         if (ov.bg == "clear") muted(t("Без подложки: только текст и значки с мягкой тенью — видео видно целиком.",
             "No plate: text and icons with a soft shadow only — the whole video stays visible."))
+        if (hasFull(ov, w)) {
+            add(text(ctx, t("Где схема на весь экран", "Where a scheme is full screen"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
+            chips(StudioOverlay.FULLS.map { f -> chip(ctx, fullLabel(f), ov.full == f) { if (ov.full != f) set(ov.copy(full = f)) } })
+            muted(fullHint(ov.full))
+        }
         if (!w.working) button(t("⚙ Опции схем", "⚙ Scheme options"), style = BtnStyle.TEXT) { options() }
     }
 
@@ -116,9 +141,15 @@ object StudioOverlayUi {
                         muted(when (ov.place) {
                             "side" -> t("Кадр со спикером сдвигается, схема рядом — для подкастов и говорящих голов.", "The speaker's frame slides aside, the scheme beside it — for podcasts and talking heads.")
                             "pip" -> t("Спикер уходит в угол, схема занимает кадр.", "The speaker goes into a corner, the scheme takes the frame.")
-                            "full" -> t("Схема вставкой на весь экран вместо видео.", "The scheme as a full-screen insert instead of the video.")
+                            "full" -> t("Схема на весь экран вместо видео; что показывать в эти моменты — ниже.", "The scheme full screen instead of the video; what these moments show — below.")
                             else -> t("Схема поверх видео, видео остаётся видно.", "The scheme over the video, the video stays visible.")
                         })
+                    }
+                    if (hasFull(ov, w)) {
+                        label(t("Где схема на весь экран", "Where a scheme is full screen"))
+                        chips(StudioOverlay.FULLS.map { f -> chip(ctx, fullLabel(f), ov.full == f) { change(ov.copy(full = f)) { fill() } } })
+                        muted(fullHint(ov.full) + if (w.inserts && ov.full != StudioOverlay.FULL)
+                            t(" В нарезке на этих местах продолжается соседний клип.", " In the cut montage the clip next to them plays on there.") else "")
                     }
                     if (w.cartoon) {
                         label(t("В анимации", "In the animation"))

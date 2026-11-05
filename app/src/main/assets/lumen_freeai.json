@@ -1,8 +1,8 @@
 {
  "protocol": "lumen.freeai v1",
- "version": "2026.11.01",
- "upstream": "freellmapi snapshot monthly 2026.11.01",
- "hash": "016e5aa21c142fdc",
+ "version": "2026.11.05",
+ "upstream": "freellmapi snapshot monthly 2026.11.04",
+ "hash": "74227ece91f987fa",
  "providers": [
   {
    "id": "agnes",
@@ -1621,20 +1621,6 @@
    "tools": true
   },
   {
-   "p": "kilo",
-   "id": "liquid/lfm-2.5-2.6b:free",
-   "name": "LFM2.5 2.6B (Kilo)",
-   "intel": 90,
-   "speed": 3,
-   "ctx": 32768,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "openrouter",
    "id": "liquid/lfm-2.5-2.6b:free",
    "name": "LFM2.5 2.6B (free)",
@@ -2220,20 +2206,6 @@
    "tpm": 0,
    "tpd": 0,
    "vision": false,
-   "tools": false
-  },
-  {
-   "p": "kilo",
-   "id": "nvidia/nemotron-3.5-content-safety:free",
-   "name": "Nemotron 3.5 Content Safety (Kilo)",
-   "intel": 103,
-   "speed": 9,
-   "ctx": 128000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
    "tools": false
   },
   {

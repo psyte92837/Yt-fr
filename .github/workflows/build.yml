@@ -42,6 +42,13 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+      - name: Upload Lumen Studio APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: lumen-studio-debug-apk
+          path: studio/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
       # The app checks update.json in the background and offers to install the new APK (Settings → About).
       - name: Publish to the rolling "lumen-latest" release (main only)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
@@ -81,12 +88,19 @@ jobs:
           # APK first, then update.json, then remove older APKs: the feed never points to a missing file
           retry gh release upload lumen-latest "$apk" --clobber
           retry gh release upload lumen-latest dist/update.json --clobber
+          # Lumen Studio (module :studio, no NewPipe) next to it
+          studio="dist/lumen-studio-debug-$BUILD.apk"
+          cp "$(ls studio/build/outputs/apk/debug/*.apk | head -n1)" "$studio"
+          retry gh release upload lumen-latest "$studio" --clobber
           gh release edit lumen-latest --prerelease --title "Lumen: build $BUILD" \
             --notes "Build $BUILD · ${GITHUB_SHA:0:10} · NewPipeExtractor ${EXTRACTOR:0:10}
 
           $NOTES"
           for a in $(gh release view lumen-latest --json assets --jq '.assets[].name'); do
-            case "$a" in lumen-debug-*.apk) [ "$a" != "$APK_NAME" ] && gh release delete-asset lumen-latest "$a" -y ;; esac
+            case "$a" in
+              lumen-debug-*.apk) [ "$a" != "$APK_NAME" ] && gh release delete-asset lumen-latest "$a" -y ;;
+              lumen-studio-debug-*.apk) [ "$a" != "$(basename "$studio")" ] && gh release delete-asset lumen-latest "$a" -y ;;
+            esac
           done
           echo "Published build $BUILD: https://github.com/$GITHUB_REPOSITORY/releases/tag/lumen-latest" >> "$GITHUB_STEP_SUMMARY"
 

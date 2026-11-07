@@ -30,7 +30,7 @@ sealed class NavPlan {
 /** Screens per task, notification taps that bring back the screen they belong to (see HANDOFF, navigation). */
 object Nav {
     const val LUMEN = "org.schabi.newpipe.lumen."
-    val HOME = LUMEN + "LumenActivity"
+    val HOME = LUMEN + if (Flavor.STUDIO) "StudioActivity" else "LumenActivity"
     val BOTS_HOME = LUMEN + "BotsActivity"
     private val BOTS = setOf(BOTS_HOME, LUMEN + "BotActivity", LUMEN + "BotNewActivity")
     /** Screens that open over whatever the user looks at (not tied to one task). */

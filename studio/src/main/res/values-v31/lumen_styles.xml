@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lumen: Material 3 framework theme (colours are refined in code via Palette, incl. Material You) -->
+<resources>
+    <style name="LumenTheme" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@android:color/system_accent1_600</item>
+        <item name="android:colorAccent">@android:color/system_accent1_600</item>
+        <item name="android:colorControlActivated">@android:color/system_accent1_600</item>
+        <item name="android:windowBackground">@android:color/system_neutral1_10</item>
+        <item name="android:statusBarColor">@android:color/system_neutral1_10</item>
+        <item name="android:navigationBarColor">@android:color/system_neutral1_10</item>
+    </style>
+</resources>

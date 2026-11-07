@@ -2451,9 +2451,7 @@ class StudioMixActivity : LumenBase() {
         /** Plays the video from [fromMs] in the mini player. */
         fun play(fromMs: Long) {
             val lk = looks[current]?.takeIf { it.stream.isNotEmpty() } ?: return
-            val src = com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(
-                org.schabi.newpipe.player.datasource.YoutubeHttpDataSource.Factory().setRangeParameterEnabled(false).setRnParameterEnabled(true)
-            ).createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(lk.stream))
+            val src = com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(StudioCutsLoad.dataSource()).createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(lk.stream))
             frame.visibility = View.VISIBLE
             state.text = t("Загрузка…", "Loading…")
             val p = exo()

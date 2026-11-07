@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lumen Studio: the Studio and the video editor of Lumen as a separate app, without NewPipe and YouTube.
+  The Kotlin files come from app/src/main/java/org/schabi/newpipe/lumen (list: studio/shared-files.txt).
+  No install/overlay/special-use permissions: the app is meant for Google Play.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- recording the voice-over -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- saving the videos to Movies on Android 8–9 (MediaStore from Android 10) -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <application
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/lumen_data_extraction_rules"
+        android:fullBackupContent="@xml/lumen_backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/lumen_network_security"
+        android:resizeableActivity="true"
+        android:supportsRtl="true"
+        android:theme="@style/LumenTheme">
+
+        <activity
+            android:name="org.schabi.newpipe.lumen.StudioActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="org.schabi.newpipe.lumen.StudioTemplatesActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.StudioMixActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.StudioEditorActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.WebLayerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.SettingsActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.FreeAiActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.TasksActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.HelpActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.AiJournalActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.SendReviewActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <!-- "Another AI by hand": the answer comes back by clipboard or Share -->
+        <activity
+            android:name="org.schabi.newpipe.lumen.RelayActivity"
+            android:exported="true"
+            android:label="Lumen Studio: ответ ИИ"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="org.schabi.newpipe.lumen.TtsActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name="org.schabi.newpipe.lumen.CrashLogActivity"
+            android:exported="false"
+            android:label="Lumen Studio log"
+            android:process=":crashlog"
+            android:taskAffinity="${applicationId}.crashlog"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+
+        <service
+            android:name="org.schabi.newpipe.lumen.StudioService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
+            android:name="org.schabi.newpipe.lumen.TaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
+            android:name="org.schabi.newpipe.lumen.TtsService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync|mediaPlayback" />
+        <receiver
+            android:name="org.schabi.newpipe.lumen.TaskStopReceiver"
+            android:exported="false" />
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.provider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/studio_provider_paths" />
+        </provider>
+    </application>
+</manifest>

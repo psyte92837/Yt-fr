@@ -221,17 +221,26 @@ class StudioActivity : LumenBase() {
 
         /** Index of the Mix in [tabs]: the Mix is its own screen, the other items are the tasks of this one. */
         const val MIX_TAB = 5
+        /** Lumen Studio only (no YouTube clips or Mix there): the editor and the AI layer take their places. */
+        const val EDITOR_TAB = 6
+        const val LAYER_TAB = 7
+
+        /** Items of the panel by place: Lumen — the five tasks and the Mix; Lumen Studio — without Clips and Mix. */
+        private val tabIds get() = if (Flavor.STUDIO) listOf(0, 1, 2, 4, EDITOR_TAB, LAYER_TAB) else (0..5).toList()
 
         /**
          * The Studio panel: the five tasks and the Mix, in two rows of three so the names fit on a phone
          * (the same panel on the Mix screen, with the Mix selected).
          */
         fun tabs(ctx: Context, selected: Int, onSelect: (Int) -> Unit): View {
-            val labels = listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"),
-                t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix"))
+            val all = listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"),
+                t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix"), t("✏️ Редактор", "✏️ Editor"), t("🎛 Слой ИИ", "🎛 AI layer"))
+            val ids = tabIds
+            val labels = ids.map { all[it] }
+            val at = ids.indexOf(selected)
             return LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                for (r in 0..1) addView(segBar(ctx, labels.subList(r * 3, r * 3 + 3), if (selected / 3 == r) selected % 3 else -1) { onSelect(r * 3 + it) },
+                for (r in 0..1) addView(segBar(ctx, labels.subList(r * 3, r * 3 + 3), if (at >= 0 && at / 3 == r) at % 3 else -1) { onSelect(ids[r * 3 + it]) },
                     LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (r == 1) topMargin = ctx.dp(6) })
             }
         }
@@ -255,7 +264,7 @@ class StudioActivity : LumenBase() {
     }
 
     private val dir by lazy { File(filesDir, "lumen/studio").apply { mkdirs() } }
-    private val task get() = StudioTask.of(StudioPrefs.task)
+    private val task get() = StudioTask.of(StudioPrefs.task).let { if (Flavor.STUDIO && it == StudioTask.CUTS) StudioTask.SHORTS else it }
     /** Take, video and analysis of the current task (Shorts keeps the old place); music and clips are shared. */
     private val tdir get() = (if (task == StudioTask.SHORTS) dir else File(dir, task.id)).apply { mkdirs() }
     private val takeFile get() = File(tdir, "take.wav")
@@ -570,6 +579,10 @@ class StudioActivity : LumenBase() {
         StudioPrefs.topic = topicEdit.text.toString()
     }
 
+    /** Lumen Studio: this screen is the home, settings are reached from its top bar. */
+    private fun appActions(): List<Pair<String, () -> Unit>> =
+        if (Flavor.STUDIO) listOf("⚙" to { startActivity(Intent(this, SettingsActivity::class.java)) }) else emptyList()
+
     private fun lang(): String = Studio.voiceLang(StudioPrefs.voiceLang, EdgeTts.detectLang(scriptEdit.text.toString()), Settings.lang == "en")
 
     // ---------- layout ----------
@@ -579,7 +592,12 @@ class StudioActivity : LumenBase() {
         bars.clear()
         val c = Col(this)
         c.add(tabs(this, task.ordinal) { i ->
-            if (i == MIX_TAB) StudioMixActivity.open(this) else switchTask(StudioTask.entries[i])
+            when (i) {
+                MIX_TAB -> StudioMixActivity.open(this)
+                EDITOR_TAB -> StudioEditorActivity.open(this)
+                LAYER_TAB -> WebLayerActivity.open(this, null, false)
+                else -> switchTask(StudioTask.entries[i])
+            }
         }, 0)
         c.muted(when (task) {
             StudioTask.SHORTS -> t(
@@ -613,14 +631,14 @@ class StudioActivity : LumenBase() {
                 bars["foreign"] = working(BgTasks.find("studio:")?.let { it.title + ": " + it.message } ?: "…")
             }
             otherTools(c)
-            page("Lumen Studio", c.root, keepScroll = true)
+            page("Lumen Studio", c.root, back = !Flavor.STUDIO, actions = appActions(), keepScroll = true)
             return
         }
         val order = cards()
         c.steps(stepNow(order.size), order.size)
         order.forEachIndexed { i, card -> card(c, i + 1) }
         otherTools(c)
-        page("Lumen Studio", c.root, keepScroll = true)
+        page("Lumen Studio", c.root, back = !Flavor.STUDIO, actions = appActions(), keepScroll = true)
     }
 
     /**

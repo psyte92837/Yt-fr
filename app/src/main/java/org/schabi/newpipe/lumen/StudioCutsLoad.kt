@@ -31,6 +31,24 @@ object StudioCutsLoad {
     private val POST_BODY = byteArrayOf(0x78, 0)
     private var rn = 0
 
+    /** What "template from a video" gives the AI: the brief of measurements and speech, storyboard frames, the title. */
+    class VideoBrief(val title: String, val data: String, val durationSec: Long, val frames: List<Pair<Long, android.graphics.Bitmap>>)
+
+    /** Measures a YouTube video (pace, shots, pauses, colours) with its storyboard frames and subtitles. */
+    fun videoBrief(url: String, say: (String) -> Unit): VideoBrief {
+        val vid = YtQuery.videoIdFromUrl(url) ?: error(t("Не понял ссылку", "Cannot read the link"))
+        val v = Video(vid, url)
+        val extra = StyleExtra(12)
+        val m = VideoStyle.measure(null, v, "auto", extra, say)
+        val cues = runCatching { StyleMath.cues(extra.vtt).map { it.startMs to it.text } }.getOrDefault(emptyList())
+        val data = StudioVideoTpl.brief(v.title, v.channel, if (m.duration > 0) m.duration * 1000 else 60_000, m.isShort, m.lines(), extra.cutMs, cues)
+        return VideoBrief(v.title, data, m.duration, extra.frames)
+    }
+
+    /** Data source for watching a YouTube stream in a mini player (like the NewPipe player). */
+    fun dataSource(): com.google.android.exoplayer2.upstream.DataSource.Factory =
+        org.schabi.newpipe.player.datasource.YoutubeHttpDataSource.Factory().setRangeParameterEnabled(false).setRnParameterEnabled(true)
+
     /** Video-only MP4 (H.264) progressive stream of the highest quality up to [maxHeight]. */
     fun pickStream(streams: List<VideoStream>, maxHeight: Int): VideoStream? {
         val ok = streams.filter {

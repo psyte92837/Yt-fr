@@ -103,7 +103,7 @@ class StudioTemplatesActivity : LumenBase() {
                 btn(this, t("✨ Новый по описанию", "✨ New from a description"), style = BtnStyle.TONAL) { ask(null) },
                 btn(this, t("🤖 Через другой ИИ", "🤖 With another AI"), style = BtnStyle.TEXT) { askOther() }
             )
-            c.button(t("🎬 По видео: ссылка на YouTube → подход и моушны", "🎬 From a video: a YouTube link → way and motions"), style = BtnStyle.TONAL) { askVideo(null) }
+            if (!Flavor.STUDIO) c.button(t("🎬 По видео: ссылка на YouTube → подход и моушны", "🎬 From a video: a YouTube link → way and motions"), style = BtnStyle.TONAL) { askVideo(null) }
             c.button(t("📥 Вставить код из буфера", "📥 Paste code from the clipboard"), style = BtnStyle.TEXT) { paste() }
         }
         val list: List<Pair<String, String>> = if (motion) store.motions().map { it.id to it.name } else store.edits().map { it.id to it.name }
@@ -336,36 +336,32 @@ class StudioTemplatesActivity : LumenBase() {
     private fun askVideo(url: String?) {
         val clip = url ?: runCatching {
             getSystemService(android.content.ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(this)?.toString()
-        }.getOrNull()?.let { YtLink.classify(it) }?.takeIf { it.type == "video" }?.url
+        }.getOrNull()?.trim()?.takeIf { YtQuery.videoIdFromUrl(it) != null }
         bottomSheet(t("Шаблон по видео", "Template from a video")) { dismiss ->
             muted(t("Lumen снимет замеры (темп речи, длины планов, паузы, цвета), возьмёт кадры раскадровки и субтитры, а ИИ воссоздаст подход к монтажу и 1–2 моушн-шаблона. Gemini смотрит само видео.",
                 "Lumen measures the video (speech pace, shot lengths, pauses, colours), takes storyboard frames and subtitles, and the AI recreates its way of editing and 1–2 motion templates. Gemini watches the video itself."))
             val link = edit(t("Ссылка на видео YouTube", "YouTube video link"), clip ?: "")
             val wish = edit(t("Пожелания (необязательно): например «только темп и зумы»", "Wishes (optional): e.g. \"only pace and zooms\""), multiline = true)
             button(t("🎬 Разобрать и создать", "🎬 Analyse and create"), primary = true) {
-                val l = YtLink.classify(link.text.toString())
-                if (l.type != "video") {
+                val l = link.text.toString().trim()
+                if (YtQuery.videoIdFromUrl(l) == null) {
                     toast(t("Нужна ссылка на видео", "A video link is needed"))
                     return@button
                 }
                 dismiss()
-                fromVideo(l.url, wish.text.toString().trim())
+                fromVideo(l, wish.text.toString().trim())
             }
         }
     }
 
     /** Measures the video, shows it to the AI and saves the way of editing and the motion templates it returns. */
     private fun fromVideo(url: String, wish: String) = run(t("Разбор видео…", "Analysing the video…"), {
-        val vid = YtQuery.videoIdFromUrl(url) ?: error(t("Не понял ссылку", "Cannot read the link"))
-        val v = Video(vid, url)
-        val extra = StyleExtra(12)
-        val m = VideoStyle.measure(null, v, "auto", extra) { say(it) }
-        val cues = runCatching { StyleMath.cues(extra.vtt).map { it.startMs to it.text } }.getOrDefault(emptyList())
-        val data = StudioVideoTpl.brief(v.title, v.channel, if (m.duration > 0) m.duration * 1000 else 60_000, m.isShort, m.lines(), extra.cutMs, cues)
+        val b = StudioCutsLoad.videoBrief(url) { say(it) }
+        val data = b.data
         val prov = AiTasks.requireProvider()
-        val watch = prov == Provider.GEMINI && m.duration in 1..3600
-        val sheet = if (watch || extra.frames.isEmpty()) null else sheet(extra.frames.map { it.second })
-        extra.frames.forEach { it.second.recycle() }
+        val watch = prov == Provider.GEMINI && b.durationSec in 1..3600
+        val sheet = if (watch || b.frames.isEmpty()) null else sheet(b.frames.map { it.second })
+        b.frames.forEach { it.second.recycle() }
         val mode = when {
             watch -> "Ты видишь само видео: опирайся на то, что видно и слышно, и на замеры."
             sheet != null -> "Видео ты не видишь, но на картинке — кадры раскадровки по порядку слева направо, сверху вниз; плюс замеры и речь."
@@ -395,7 +391,7 @@ class StudioTemplatesActivity : LumenBase() {
             runCatching { checkAndSave(e, null, true, motion = false) }.onSuccess { saved += "🧪 $it" }.onFailure { L.w("studio", "video edit: ${it.message}") }
         }
         if (saved.isEmpty()) error(t("Шаблоны не прошли проверку", "The templates failed the check"))
-        "«${v.title}»\n\n" + saved.joinToString("\n") + (if (parts.notes.isNotBlank()) "\n\n" + parts.notes else "") +
+        "«${b.title}»\n\n" + saved.joinToString("\n") + (if (parts.notes.isNotBlank()) "\n\n" + parts.notes else "") +
             if (watch) t("\n\n👁 Gemini смотрел видео.", "\n\n👁 Gemini watched the video.") else ""
     }) { report ->
         tab = if (report.contains("🧪")) 1 else 0

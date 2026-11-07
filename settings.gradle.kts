@@ -23,6 +23,7 @@ dependencyResolutionManagement {
     }
 }
 include(":app") // androidApp
+include(":studio") // Lumen Studio: the Studio and editor without NewPipe
 include(":desktopApp")
 include("shared")
 

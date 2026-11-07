@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files Lumen Studio shares with other apps (rendered videos, reports, requests to another AI). -->
+<paths>
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+    <external-files-path name="external_files" path="." />
+    <external-cache-path name="external_cache" path="." />
+    <external-path name="external" path="." />
+</paths>

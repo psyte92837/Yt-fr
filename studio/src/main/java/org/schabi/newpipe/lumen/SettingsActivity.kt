@@ -91,6 +91,11 @@ class SettingsActivity : LumenBase() {
                 recreate()
             }
         }
+        if (Settings.lang != "ru" && Settings.lang != "en" && I18n.machine?.supports(Settings.lang) == true && I18n.missing(Settings.lang).isNotEmpty()) {
+            c.button(t("Перевести остальной интерфейс на этом телефоне", "Translate the rest of the interface on this phone"), style = BtnStyle.TEXT) {
+                I18n.runMachine(this) { recreate() }
+            }
+        }
         if (Settings.langChoice == "auto" && I18n.match(I18n.systemTag()) == null) {
             c.muted(t("Языка системы пока нет в Lumen Studio — показан: ", "Your system language is not in Lumen Studio yet — showing: ") +
                 (I18n.lang(I18n.fallback)?.native ?: "English"))

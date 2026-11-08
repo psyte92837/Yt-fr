@@ -41,6 +41,25 @@ class I18nTest {
     }
 
     @Test
+    fun lookupFindsTheCoreOfAText() {
+        val m = mapOf("Save video" to "Guardar vídeo", "Save" to "Guardar", "Delete {0}?" to "¿Eliminar {0}?")
+        assertEquals("Guardar", I18n.lookup(m, "Save"))
+        assertEquals("🎬 Guardar vídeo…", I18n.lookup(m, "🎬 Save video…"))
+        assertEquals("💾 Guardar: ", I18n.lookup(m, "💾 Save: "))
+        assertEquals("¿Eliminar {0}?", I18n.lookup(m, "Delete {0}?"))
+        assertNull(I18n.lookup(m, "{0} Save"))
+        assertNull(I18n.lookup(m, "🎬 Open"))
+        assertNull(I18n.lookup(m, "…"))
+    }
+
+    @Test
+    fun every20thLanguageIsListed() {
+        assertEquals(20, I18n.LANGS.size)
+        assertEquals(20, I18n.LANGS.map { it.code }.toSet().size)
+        assertTrue(I18n.lang("ur")!!.rtl && I18n.lang("ar")!!.rtl)
+    }
+
+    @Test
     fun withoutAppContextRussianIsKept() {
         assertEquals("Привет", t("Привет", "Hello"))
         assertEquals("Сцен: 3", tf("Сцен: 3", "Scenes: {0}", 3))
@@ -51,7 +70,7 @@ class I18nTest {
     fun catalogsKeepPlaceholders() {
         val root = generateSequence(File("").absoluteFile) { it.parentFile }.first { File(it, "studio/shared-files.txt").exists() }
         val dir = File(root, "studio/src/main/assets/lumen_i18n")
-        val files = dir.listFiles().orEmpty().filter { it.name.endsWith(".json") }
+        val files = dir.listFiles().orEmpty().filter { it.name.endsWith(".json") && !it.name.startsWith("_") }
         for (f in files) {
             val code = f.name.removeSuffix(".json")
             assertTrue("$code is not in I18n.LANGS", I18n.lang(code) != null)

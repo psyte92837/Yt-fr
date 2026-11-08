@@ -1,5 +1,8 @@
 # Lumen Studio: interface languages (lumen.i18n v1)
 
+**Scheme (cheapest):** 20 languages; tier 1 = ~330 most visible words translated by hand for all languages (`tier1.py`),
+tier 2 = the rest translated on the phone by ML Kit (one-time ~30 MB model, user agrees, cached). Help articles (Help.kt) stay ru/en.
+
 Source of truth: `t("русский", "English")` in the shared Kotlin files (studio/shared-files.txt) and studio/src.
 Other languages: `studio/src/main/assets/lumen_i18n/<code>.json` — `{"English text": "translation"}`.
 
@@ -20,3 +23,8 @@ Other languages: `studio/src/main/assets/lumen_i18n/<code>.json` — `{"English 
 - **New language**: add it to `I18n.LANGS`, `LANGS` of translate.py and `lumen_locales_config.xml`.
 - Not translated: `t(ru, en)` with variables (tables in EditInsert/UxLogic/EditMotion), names in TextStyles /
   SchemeTemplates (ru/en only), AI answers (follow the voice-over language).
+
+- **Tier 1** (`tools/i18n/tier1.py`): `pick` writes `tier1_keys.json` (cores = texts without emoji/punctuation around them,
+  most used first); `show OFFSET COUNT` prints a slice; `merge file.json` takes `{"core": [18 translations in LANGS order]}`
+  and keeps existing entries. `I18n.lookup` serves every spelling of a core ("🎬 Save", "💾 Save…" → "Save").
+- **Tier 2**: `MlKitTranslator` (studio/src) is found by `I18n.machine`; keys for it are in assets `_keys.json` (made by `kt.sh`).

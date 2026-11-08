@@ -7,6 +7,10 @@
 // The Kotlin sources are the files of app/src/main/java/org/schabi/newpipe/lumen listed in shared-files.txt
 // (copied at build time), plus src/main: Flavor (STUDIO = true), its own settings screen and stubs in place of
 // the YouTube and analysis parts.
+//
+// Here (public CI) only the debug APK is built. The Google Play bundle is built only in the private
+// lumen-context repository (workflow studio-play.yml): it checks this repository out and runs
+// :studio:bundleRelease with -DstudioVersionCode/-DstudioVersionName and the upload key in STUDIO_UPLOAD_*.
 
 import com.android.build.api.dsl.ApplicationExtension
 
@@ -60,11 +64,13 @@ configure<ApplicationExtension> {
         targetSdk {
             version = release(NEWPIPE_VERSION_SDK_TARGET)
         }
-        versionCode = System.getProperty("lumenBuild")?.toIntOrNull()?.takeIf { it > 0 } ?: 1
-        versionName = "1.0"
+        versionCode = System.getProperty("studioVersionCode")?.toIntOrNull()
+            ?: System.getProperty("lumenBuild")?.toIntOrNull()?.takeIf { it > 0 } ?: 1
+        versionName = System.getProperty("studioVersionName") ?: "1.0"
     }
 
-    val lumenKeystore = System.getenv("LUMEN_KEYSTORE_FILE")
+    // Google Play upload key: set only by the private Play workflow (lumen-context)
+    val uploadKeystore = System.getenv("STUDIO_UPLOAD_KEYSTORE_FILE")
     signingConfigs {
         // the same fixed debug key as Lumen, so a newer CI build installs over the old one
         getByName("debug") {
@@ -73,12 +79,12 @@ configure<ApplicationExtension> {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
-        if (lumenKeystore != null) {
-            create("lumenRelease") {
-                storeFile = file(lumenKeystore)
-                storePassword = System.getenv("LUMEN_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("LUMEN_KEY_ALIAS")
-                keyPassword = System.getenv("LUMEN_KEY_PASSWORD")
+        if (uploadKeystore != null) {
+            create("playUpload") {
+                storeFile = file(uploadKeystore)
+                storePassword = System.getenv("STUDIO_UPLOAD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("STUDIO_UPLOAD_KEY_ALIAS")
+                keyPassword = System.getenv("STUDIO_UPLOAD_KEY_PASSWORD")
             }
         }
     }
@@ -89,7 +95,7 @@ configure<ApplicationExtension> {
             resValue("string", "app_name", "Lumen Studio Debug")
         }
         release {
-            if (lumenKeystore != null) signingConfig = signingConfigs.getByName("lumenRelease")
+            if (uploadKeystore != null) signingConfig = signingConfigs.getByName("playUpload")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

@@ -5,3 +5,8 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+-dontwarn javax.annotation.**
+-dontwarn org.checkerframework.**
+-dontwarn com.google.errorprone.**
+-dontwarn org.jetbrains.annotations.**
+-keep class com.google.android.exoplayer2.** { *; }

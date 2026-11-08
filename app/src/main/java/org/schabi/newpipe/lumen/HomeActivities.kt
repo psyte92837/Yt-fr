@@ -149,9 +149,9 @@ class LumenActivity : LumenBase() {
             Lumen.prefs.edit().putBoolean("monitor_any_net", true).apply()
         }
         try {
-            Updates.schedule(this)
+            Updates.cleanupOld(this)
         } catch (e: Exception) {
-            L.w("update", "cannot schedule update check: ${e.message}")
+            L.w("update", "cleanup: ${e.message}")
         }
     }
 
@@ -165,18 +165,6 @@ class LumenActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
-        Updates.available?.takeIf { it.build.toString() != Lumen.prefs.getString("upd_hidden", "") }?.let { u ->
-            val broken = System.currentTimeMillis() - Updates.brokenAt < 3 * 86_400_000L
-            val card = c.card {
-                add(text(ctx, if (broken) t("Готово исправление для YouTube", "A YouTube fix is ready") else t("Доступно обновление", "Update available"), Type.TITLE_M, bold = true), 0)
-                muted(t("Сборка ${u.build}. Нажмите, чтобы посмотреть, что нового, и обновить", "Build ${u.build}. Tap to see what's new and update"))
-                if (!broken) add(btn(ctx, t("Скрыть до следующей сборки", "Hide until the next build"), style = BtnStyle.TEXT) {
-                    Lumen.prefs.edit().putString("upd_hidden", u.build.toString()).apply()
-                    render()
-                }, 4)
-            }
-            card.setOnClickListener { UpdateSheet.show(this, u) }
-        }
         TaskHub.count(this).takeIf { it > 0 }?.let { n ->
             c.card {
                 add(text(ctx, t("⚙ Задач в работе: $n", "⚙ Tasks running: $n"), Type.TITLE_M, bold = true), 0)
@@ -375,8 +363,6 @@ class LumenActivity : LumenBase() {
             startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
         })
         items.add(t("⚙ Задачи", "⚙ Tasks") + TaskHub.count(this).let { if (it > 0) " ($it)" else "" } to { TasksActivity.open(this) })
-        items.add((if (Updates.available != null) t("🔄 Обновить Lumen (сборка ${Updates.available?.build})", "🔄 Update Lumen (build ${Updates.available?.build})")
-            else t("🔄 Проверить обновления", "🔄 Check for updates")) to { UpdateSheet.check(this) })
         items.add(t("Справка и о проекте", "Help and about") to { HelpActivity.open(this, "about") })
         items.add(t("Журнал и отчёт об ошибке", "Logs and bug report") to {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true))

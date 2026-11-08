@@ -18,8 +18,6 @@ jobs:
       contents: write # publish the rolling "lumen-latest" release from main
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 80 # commit list for "what's new" in update.json
 
       - uses: gradle/actions/wrapper-validation@v6
 
@@ -49,7 +47,7 @@ jobs:
           path: studio/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # The app checks update.json in the background and offers to install the new APK (Settings → About).
+      # The APKs are published for manual download; the app does not check for updates.
       - name: Publish to the rolling "lumen-latest" release (main only)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
@@ -60,34 +58,15 @@ jobs:
           apk="dist/lumen-debug-$BUILD.apk"
           cp "$(ls app/build/outputs/apk/debug/*.apk | head -n1)" "$apk"
           export APK_NAME="$(basename "$apk")"
-          export SHA256="$(sha256sum "$apk" | cut -d' ' -f1)"
-          export SIZE="$(stat -c%s "$apk")"
           export EXTRACTOR="$(python3 tools/extractor_update.py current)"
           export NOTES="$(git log -1 --format=%s)"
-          # last commits, newest first: the app shows those newer than the build it runs
-          export CHANGES="$(git log --no-merges -n 60 --format='%H%x1f%s%x1f%cI' || true)"
-          python3 - > dist/update.json <<'PY'
-          import json, os
-          e = os.environ
-          print(json.dumps({
-              "build": int(e["BUILD"]), "commit": e["GITHUB_SHA"], "extractor": e["EXTRACTOR"],
-              "application_id": "org.lumen.analyzer.debug",
-              "apk": "https://github.com/%s/releases/download/lumen-latest/%s" % (e["GITHUB_REPOSITORY"], e["APK_NAME"]),
-              "sha256": e["SHA256"], "size": int(e["SIZE"]), "notes": e["NOTES"][:500],
-              "changes": [dict(zip(("c", "s", "d"), (l.split("\x1f") + ["", "", ""])[:3]))
-                          for l in e.get("CHANGES", "").splitlines() if l.count("\x1f") >= 1],
-              "date": __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime())}, ensure_ascii=False))
-          PY
-          cat dist/update.json
           git tag -f lumen-latest "$GITHUB_SHA"
           # GitHub sometimes answers 500 for a moment: try again before failing the build
           retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "retry $i: $*"; sleep $((i * 10)); done; return 1; }
           retry git push -f origin refs/tags/lumen-latest
           gh release view lumen-latest >/dev/null 2>&1 || gh release create lumen-latest --prerelease --verify-tag \
-            --title "Lumen: latest build" --notes "Rolling build of main. The app installs it from Settings → About."
-          # APK first, then update.json, then remove older APKs: the feed never points to a missing file
+            --title "Lumen: latest build" --notes "Rolling build of main."
           retry gh release upload lumen-latest "$apk" --clobber
-          retry gh release upload lumen-latest dist/update.json --clobber
           # Lumen Studio (module :studio, no NewPipe) next to it
           studio="dist/lumen-studio-debug-$BUILD.apk"
           cp "$(ls studio/build/outputs/apk/debug/*.apk | head -n1)" "$studio"
@@ -98,6 +77,7 @@ jobs:
           $NOTES"
           for a in $(gh release view lumen-latest --json assets --jq '.assets[].name'); do
             case "$a" in
+              update.json) gh release delete-asset lumen-latest "$a" -y ;;
               lumen-debug-*.apk) [ "$a" != "$APK_NAME" ] && gh release delete-asset lumen-latest "$a" -y ;;
               lumen-studio-debug-*.apk) [ "$a" != "$(basename "$studio")" ] && gh release delete-asset lumen-latest "$a" -y ;;
             esac

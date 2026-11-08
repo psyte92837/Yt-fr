@@ -146,7 +146,7 @@ class SearchActivity : LumenBase() {
             SearchIndex.Item("settings", t("Настройки: общие", "Settings: general"), t("язык, тема, оформление, мониторинг, сбор, уведомления", "language, theme, look, monitoring, collection, notifications"), "set_general", "язык тема цвет шрифт размер текста theme language"),
             SearchIndex.Item("settings", t("Настройки: AI и промпты", "Settings: AI and prompts"), t("провайдер, ключ, модель, промпты", "provider, key, model, prompts"), "set_ai", "ai ключ key gemini claude openai промпт prompt модель"),
             SearchIndex.Item("settings", t("Настройки: данные", "Settings: data"), t("резервная копия, журнал, статистика", "backup, logs, statistics"), "set_data", "бэкап backup лог журнал статистика"),
-            SearchIndex.Item("settings", t("Настройки: о приложении", "Settings: about"), t("версия, обновления, проверка YouTube, быстрый анализ", "version, updates, YouTube check, instant analysis"), "set_about", "версия обновление update youtube быстрый анализ"),
+            SearchIndex.Item("settings", t("Настройки: о приложении", "Settings: about"), t("версия, проверка YouTube, быстрый анализ", "version, YouTube check, instant analysis"), "set_about", "версия обновление update youtube быстрый анализ"),
             SearchIndex.Item("settings", t("Настройки: Lumen Studio", "Settings: Lumen Studio"), t("эффекты, B-roll, качество экспорта, другой ИИ", "effects, B-roll, export quality, another AI"), "set_studio", "студия studio broll эффекты экспорт качество relay подсказки"),
             SearchIndex.Item("settings", t("Бесплатные ИИ", "Free AI"), t("ключи бесплатных моделей", "free model keys"), "freeai", "бесплатные free ai ключи")
         )

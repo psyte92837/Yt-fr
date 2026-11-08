@@ -116,7 +116,7 @@ object UpdateLogic {
 
 /**
  * Notices when YouTube changes break NewPipeExtractor (parsing errors, not network or bot checks)
- * so the app can look for a fixed build right away instead of waiting for the next scheduled check.
+ * (used for diagnostics and the YouTube self-test).
  */
 object ExtractorHealth {
     enum class Kind { BOT, NETWORK, BROKEN, CONTENT, OTHER }
@@ -170,7 +170,6 @@ object ExtractorHealth {
             }
             if (alarm) {
                 lastAlarm = now
-                if (LumenEnv.ready) Updates.onExtractorBroken(Lumen.app)
             }
         } catch (t: Throwable) {
             // diagnostics must never break the caller
@@ -178,8 +177,8 @@ object ExtractorHealth {
     }
 
     fun hint(): String = t(
-        "Похоже, YouTube что-то поменял: несколько запросов подряд не удалось разобрать. Lumen проверяет, есть ли исправленная сборка (Настройки → О приложении)",
-        "YouTube seems to have changed something: several requests in a row could not be parsed. Lumen is checking for a fixed build (Settings → About)"
+        "Похоже, YouTube что-то поменял: несколько запросов подряд не удалось разобрать. Исправленная сборка появится на странице релизов",
+        "YouTube seems to have changed something: several requests in a row could not be parsed. A fixed build will appear on the releases page"
     )
 }
 

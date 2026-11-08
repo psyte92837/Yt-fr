@@ -1050,7 +1050,10 @@ abstract class LumenBase : Activity() {
         super.onCreate(savedInstanceState)
         if (Flavor.STUDIO) {
             window.decorView.layoutDirection = if (I18n.rtl) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
-            if (savedInstanceState == null && I18n.needsAsk()) I18n.ask(this)
+            if (savedInstanceState == null) {
+                if (I18n.needsAsk()) I18n.ask(this)
+                else if (I18n.needsMachine()) I18n.offerMachine(this) { recreate() }
+            }
         }
         actionBar?.hide()
         @Suppress("DEPRECATION")

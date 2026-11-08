@@ -26,6 +26,7 @@ OUT = os.path.join(ROOT, "studio/src/main/assets/lumen_i18n")
 
 # keep in step with I18n.LANGS (ru and en live in the sources)
 LANGS = {
+    "bn": "Bengali", "ur": "Urdu", "th": "Thai",
     "es": "Spanish (neutral, Latin America friendly)",
     "pt": "Portuguese (Brazil)",
     "fr": "French",

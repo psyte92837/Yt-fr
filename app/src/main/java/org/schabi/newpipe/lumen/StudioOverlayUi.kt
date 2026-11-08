@@ -76,7 +76,7 @@ object StudioOverlayUi {
         }
     } ?: id
 
-    private fun subName(ov: StudioOverlay): String = TextStyles.of(ov.subStyle)?.let { TextStyles.name(it, Settings.lang != "en") }
+    private fun subName(ov: StudioOverlay): String = TextStyles.of(ov.subStyle)?.let { TextStyles.name(it, I18n.ru) }
         ?: t("как в стиле ролика", "as the video style")
 
     /** One line under the choice: what the viewer will see. */
@@ -136,7 +136,7 @@ object StudioOverlayUi {
     fun templateWish(c: Col, host: LumenBase, wish: android.widget.EditText): Unit = with(c) {
         button(t("📚 Взять за основу готовую схему (100)", "📚 Base it on a ready scheme (100)"), style = BtnStyle.TEXT) {
             TplPicker.schemes(host, host.cacheDir, StudioEditStore.styleDir(host)) { tpl ->
-                wish.setText(SchemeTemplates.studioWish(tpl, Settings.lang != "en"))
+                wish.setText(SchemeTemplates.studioWish(tpl, I18n.ru))
                 host.toast(t("Шаблон «${tpl.name}» в пожелании — составьте схемы", "Template \"${tpl.nameEn}\" is in the wish — compose the schemes"))
             }
         }

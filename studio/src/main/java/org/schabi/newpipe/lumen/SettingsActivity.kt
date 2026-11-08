@@ -82,11 +82,18 @@ class SettingsActivity : LumenBase() {
     }
 
     private fun general(c: Col) {
-        c.spinner(t("Язык интерфейса", "Interface language"), listOf("ru" to "Русский", "en" to "English"), Settings.lang) {
-            if (it != Settings.lang) {
+        val auto = "auto" to t("Как в системе", "System language") + " · " + I18n.systemName()
+        c.spinner(t("Язык интерфейса", "Interface language"), listOf(auto) + I18n.available.map { it.code to it.native },
+            Settings.langChoice) {
+            if (it != Settings.langChoice) {
                 Settings.lang = it
+                if (it == "auto") I18n.asked()
                 recreate()
             }
+        }
+        if (Settings.langChoice == "auto" && I18n.match(I18n.systemTag()) == null) {
+            c.muted(t("Языка системы пока нет в Lumen Studio — показан: ", "Your system language is not in Lumen Studio yet — showing: ") +
+                (I18n.lang(I18n.fallback)?.native ?: "English"))
         }
         c.spinner(t("Тема", "Theme"), listOf("system" to t("Как в системе", "Follow system"), "light" to t("Светлая", "Light"),
             "dark" to t("Тёмная", "Dark"), "black" to t("Чёрная (AMOLED)", "Black (AMOLED)")), Settings.theme) {

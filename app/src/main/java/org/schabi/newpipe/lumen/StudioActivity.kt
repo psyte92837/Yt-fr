@@ -583,7 +583,7 @@ class StudioActivity : LumenBase() {
     private fun appActions(): List<Pair<String, () -> Unit>> =
         if (Flavor.STUDIO) listOf("⚙" to { startActivity(Intent(this, SettingsActivity::class.java)) }) else emptyList()
 
-    private fun lang(): String = Studio.voiceLang(StudioPrefs.voiceLang, EdgeTts.detectLang(scriptEdit.text.toString()), Settings.lang == "en")
+    private fun lang(): String = Studio.voiceLang(StudioPrefs.voiceLang, EdgeTts.detectLang(scriptEdit.text.toString()), Settings.lang)
 
     // ---------- layout ----------
 
@@ -1591,7 +1591,7 @@ class StudioActivity : LumenBase() {
             }
             query = edit(t("Настроение или слова, напр. calm piano", "Mood or words, e.g. calm piano"))
             chips(StudioMusicCatalog.MOODS.map { (label, q) ->
-                chip(ctx, if (Settings.lang == "en") q else label) {
+                chip(ctx, if (!I18n.ru) q else label) {
                     query.setText(q)
                     search(q)
                 }

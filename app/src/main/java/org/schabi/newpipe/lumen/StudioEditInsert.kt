@@ -1200,7 +1200,7 @@ class InsertWizard(private val h: InsertHost) {
             redraw()
         }, 4)
         if (prov != null) {
-            val name = prov.title.let { if (Settings.lang == "en") it.substringAfter(" / ") else it.substringBefore(" / ") }
+            val name = prov.title.let { if (!I18n.ru) it.substringAfter(" / ") else it.substringBefore(" / ") }
             c.add(btn(ui, t("🤖 Встроенный ИИ", "🤖 Built-in AI") + " (" + name + ")", primary = true) { runAi(null, "") }, 8)
             if (manual) c.muted(t("Запрос уйдёт через «другой ИИ вручную» — так настроено в разделе ИИ.", "The request goes through \"another AI by hand\" — as set in the AI settings."))
         } else {

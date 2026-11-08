@@ -27,6 +27,7 @@
         android:fullBackupContent="@xml/lumen_backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:localeConfig="@xml/lumen_locales_config"
         android:networkSecurityConfig="@xml/lumen_network_security"
         android:resizeableActivity="true"
         android:supportsRtl="true"

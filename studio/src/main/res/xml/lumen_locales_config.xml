@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13+ "App language" in the system settings; keep in step with I18n.LANGS. -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="ru" />
+    <locale android:name="es" />
+    <locale android:name="pt" />
+    <locale android:name="fr" />
+    <locale android:name="de" />
+    <locale android:name="it" />
+    <locale android:name="tr" />
+    <locale android:name="pl" />
+    <locale android:name="uk" />
+    <locale android:name="ar" />
+    <locale android:name="hi" />
+    <locale android:name="id" />
+    <locale android:name="vi" />
+    <locale android:name="ja" />
+    <locale android:name="ko" />
+    <locale android:name="zh-CN" />
+</locale-config>

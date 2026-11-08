@@ -22,7 +22,7 @@ kotlin {
     jvmToolchain(21)
 }
 
-/** Copies the shared Lumen files into a generated source folder of this module. */
+/** Copies the shared Lumen files into a generated source folder of this module (templated t() rewritten for i18n). */
 abstract class SharedLumenSources : DefaultTask() {
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.NAME_ONLY)
@@ -36,7 +36,8 @@ abstract class SharedLumenSources : DefaultTask() {
         val out = outputDir.get().asFile.resolve("org/schabi/newpipe/lumen")
         out.deleteRecursively()
         out.mkdirs()
-        sources.files.forEach { it.copyTo(out.resolve(it.name), overwrite = true) }
+        // t("… $x", "… $x") → tf(ru, "… {0}", x): the key of the translation catalogues (buildSrc/LumenI18n.kt)
+        sources.files.forEach { out.resolve(it.name).writeText(LumenI18n.rewrite(it.readText())) }
     }
 }
 

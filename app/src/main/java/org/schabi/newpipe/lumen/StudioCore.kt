@@ -556,7 +556,11 @@ object Studio {
 
     /** Language of the voice-over: the author's [chosen] code, else the script's [detected] one, else by the UI language. */
     fun voiceLang(chosen: String, detected: String?, uiEn: Boolean): String =
-        chosen.trim().lowercase().ifBlank { detected ?: if (uiEn) "en" else "ru" }
+        voiceLang(chosen, detected, if (uiEn) "en" else "ru")
+
+    /** The same with the interface language code (Lumen Studio: any of I18n.LANGS). */
+    fun voiceLang(chosen: String, detected: String?, ui: String): String =
+        chosen.trim().lowercase().ifBlank { detected ?: ui }
 
     /** Name of [lang] in that language, capitalised: "Русский", "English", "Deutsch"; the code if unknown. */
     fun langName(lang: String): String {

@@ -332,7 +332,7 @@ class StudioMixActivity : LumenBase() {
 
     private fun aspect() = StudioAspect.of(Prefs.format)
 
-    private fun lang() = Studio.voiceLang(StudioPrefs.voiceLang, null, Settings.lang == "en")
+    private fun lang() = Studio.voiceLang(StudioPrefs.voiceLang, null, Settings.lang)
 
     private fun notes(): Map<String, String> = clips.associate { it.id to it.note.ifBlank { it.title } }
 
@@ -1289,7 +1289,7 @@ class StudioMixActivity : LumenBase() {
             add(choiceChips(ctx, listOf(0 to t("Внизу", "Bottom"), 1 to t("Центр", "Centre"), 2 to t("Вверху", "Top")), place) { place = it }, 4)
             add(text(ctx, t("Движение по словам", "Motion by the words"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             add(choiceChips(ctx, LumenFonts.motions(), motion) { motion = it }, 4)
-            fun styleText() = TextStyles.of(tstyle)?.let { t("Готовый стиль: ", "Ready style: ") + TextStyles.name(it, Settings.lang != "en") + t(" (его шрифт и движение)", " (its font and motion)") }
+            fun styleText() = TextStyles.of(tstyle)?.let { t("Готовый стиль: ", "Ready style: ") + TextStyles.name(it, I18n.ru) + t(" (его шрифт и движение)", " (its font and motion)") }
                 ?: t("Готовый стиль: нет — тема, шрифт и движение выше", "Ready style: none — the theme, font and motion above")
             val info = add(text(ctx, styleText(), 13f, color = Palette.MUTED), 8)
             add(rowOf(ctx, btn(ctx, t("🎨 Готовые стили (100)", "🎨 Ready styles (100)"), false, BtnStyle.TONAL) {

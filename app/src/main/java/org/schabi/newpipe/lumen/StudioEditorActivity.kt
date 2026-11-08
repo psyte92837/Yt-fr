@@ -2064,7 +2064,7 @@ class StudioEditorActivity : LumenBase() {
         "round" -> t("Скругление", "Rounded")
         "card" -> t("Карточка", "Card")
         "circle" -> t("Круг", "Circle")
-        else -> TextStyles.ofLook(l)?.let { TextStyles.name(it, Settings.lang != "en") } ?: l
+        else -> TextStyles.ofLook(l)?.let { TextStyles.name(it, I18n.ru) } ?: l
     }
 
     private fun animName(a: String) = when (a) {
@@ -2093,7 +2093,7 @@ class StudioEditorActivity : LumenBase() {
     private fun label(c: Col, s: String) = c.add(text(this, s, Type.LABEL, bold = true, color = Palette.MUTED), 12)
 
     private fun lang(): String = Studio.langName(Studio.voiceLang(StudioPrefs.voiceLang,
-        EdgeTts.detectLang(words.take(400).joinToString(" ") { it.text }), Settings.lang == "en"))
+        EdgeTts.detectLang(words.take(400).joinToString(" ") { it.text }), Settings.lang))
 
     /** Shape of a scheme block in the frame of [p] (its format). */
     private fun schemeRatio(p: EProject): Float = EditCanvas.frame(p).let { (w, h) -> StudioEdit.schemeRatio(w, h) }
@@ -2490,7 +2490,7 @@ class StudioEditorActivity : LumenBase() {
     private fun textSchemeSheet(old: EBlock?, tpl: SchemeTpl? = null) {
         pause()
         val at = old?.startMs ?: curMs
-        val ru = Settings.lang != "en"
+        val ru = I18n.ru
         val fromTpl = tpl?.let { SchemeTemplates.scheme(it, ru) }
         var layout = old?.scheme?.layout ?: tpl?.layout ?: "auto"
         var style = old?.look?.ifEmpty { null } ?: tpl?.look ?: lastStyle
@@ -2538,7 +2538,7 @@ class StudioEditorActivity : LumenBase() {
     /** A picked scheme template: insert it as is, fill it from the speech with the AI or edit its lines first. */
     private fun templateSheet(tpl: SchemeTpl) {
         val p = project ?: return
-        val ru = Settings.lang != "en"
+        val ru = I18n.ru
         val at = curMs
         bottomSheet("📚 " + SchemeTemplates.name(tpl, ru)) { dismiss ->
             muted(SchemeTemplates.use(tpl, ru) + " · " + layoutName(tpl.layout))
@@ -2965,7 +2965,7 @@ class StudioEditorActivity : LumenBase() {
         var chosen = b.look.takeIf { l -> opts.any { it.first == l } || (b.kind == "text" && TextStyles.isStyle(l)) } ?: opts.first().first
         bottomSheet(t("🎨 Вид", "🎨 Look")) { dismiss ->
             if (b.kind == "text") {
-                TextStyles.ofLook(b.look)?.let { st -> muted(t("Готовый стиль: ", "Ready style: ") + TextStyles.name(st, Settings.lang != "en")) }
+                TextStyles.ofLook(b.look)?.let { st -> muted(t("Готовый стиль: ", "Ready style: ") + TextStyles.name(st, I18n.ru)) }
                 button(t("🎨 Готовые стили (100)", "🎨 Ready styles (100)"), style = BtnStyle.TONAL) {
                     dismiss()
                     TplPicker.texts(this@StudioEditorActivity, dir, styleDir, TextStyles.ofLook(b.look)?.id.orEmpty()) { st -> applyTextStyle(b, st) }
@@ -3485,7 +3485,7 @@ class StudioEditorActivity : LumenBase() {
             val cur = TextStyles.of(tpl)
             if (cur != null) {
                 add(TplPreview(ctx, dir, styleDir, 2800L) { w, h -> TplPicker.textBlock(cur, w, h) }, 4).layoutParams.height = dp(84)
-                muted(TextStyles.name(cur, Settings.lang != "en") + " · " + TextStyles.areaName(cur.area, Settings.lang != "en"))
+                muted(TextStyles.name(cur, I18n.ru) + " · " + TextStyles.areaName(cur.area, I18n.ru))
             }
             button(if (cur != null) t("🎨 Сменить стиль (100 готовых)", "🎨 Change the style (100 ready)") else t("🎨 Выбрать из 100 готовых стилей", "🎨 Pick one of 100 ready styles"),
                 style = BtnStyle.TONAL) {

@@ -90,9 +90,14 @@ object ChLink {
 object Settings {
     private val p get() = Lumen.prefs
 
+    /** Interface language in use: ru, en or a code of [I18n.LANGS] ("auto" resolved to the system one). */
     var lang: String
-        get() = p.getString("lang", "ru") ?: "ru"
+        get() = langChoice.let { if (it == "auto") I18n.auto() else it }
         set(v) = p.edit().putString("lang", v).apply()
+
+    /** What the user chose: a language code or "auto" (follow the system; the default of Lumen Studio). */
+    val langChoice: String
+        get() = p.getString("lang", null) ?: if (Flavor.STUDIO) "auto" else "ru"
 
     /** Minutes without progress after which a task is stopped (0 = never). */
     /** Reports that mention channels also give a link to the channel. */
@@ -211,7 +216,10 @@ object LumenEnv {
     @Volatile var ready = false
 }
 
-fun t(ru: String, en: String): String = if (LumenEnv.ready && Settings.lang == "en") en else ru
+fun t(ru: String, en: String): String = I18n.pick(ru, en)
+
+/** t() with templates: written by the Lumen Studio build for t("… $x", "… $x") (key = English with {N}). */
+fun tf(ru: String, key: String, vararg args: Any?): String = I18n.pickF(ru, key, args)
 
 object Fmt {
     fun date(ms: Long): String =

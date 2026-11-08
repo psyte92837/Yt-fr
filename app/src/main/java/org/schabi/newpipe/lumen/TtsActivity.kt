@@ -486,7 +486,7 @@ class TtsActivity : LumenBase() {
     }
 
     private fun localeName(tag: String): String {
-        val ui = Locale.forLanguageTag(if (Settings.lang == "en") "en" else "ru")
+        val ui = Locale.forLanguageTag(Settings.lang)
         val name = Locale.forLanguageTag(tag).getDisplayName(ui).replaceFirstChar { it.titlecase(ui) }
         return "$name · $tag"
     }

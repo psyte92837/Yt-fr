@@ -69,7 +69,7 @@ object TplPicker {
     private const val TEXT_LOOP = 2800L
     private const val SCHEME_LOOP = 4200L
 
-    private val ru: Boolean get() = Settings.lang != "en"
+    private val ru: Boolean get() = I18n.ru
 
     /** A caption block that shows [st] on a [w]×[h] preview: a sample phrase whose words are said one by one. */
     fun textBlock(st: TextStyle, w: Int, h: Int, sample: String = ""): EBlock {

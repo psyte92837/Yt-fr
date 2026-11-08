@@ -1026,10 +1026,32 @@ fun Context.shareText(subject: String, body: String) {
  * optional extended FAB for the primary action of the screen.
  */
 abstract class LumenBase : Activity() {
+    /** Lumen Studio: the screen in the chosen interface language (dates, system dialogs, RTL for Arabic). */
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(newBase)
+        if (!Flavor.STUDIO) return
+        try {
+            Lumen.init(newBase)
+            val loc = java.util.Locale.forLanguageTag(Settings.lang)
+            // a delta: Configuration() is all "undefined", so font scale, night mode, orientation stay the system's
+            val cfg = Configuration()
+            cfg.fontScale = 0f
+            cfg.setLocale(loc)
+            cfg.setLayoutDirection(loc)
+            applyOverrideConfiguration(cfg)
+        } catch (e: Exception) {
+            L.w("i18n", "locale: ${e.message}")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Lumen.init(this)
         Palette.init(this)
         super.onCreate(savedInstanceState)
+        if (Flavor.STUDIO) {
+            window.decorView.layoutDirection = if (I18n.rtl) View.LAYOUT_DIRECTION_RTL else View.LAYOUT_DIRECTION_LTR
+            if (savedInstanceState == null && I18n.needsAsk()) I18n.ask(this)
+        }
         actionBar?.hide()
         @Suppress("DEPRECATION")
         window.statusBarColor = android.graphics.Color.TRANSPARENT

@@ -11,6 +11,11 @@ import android.os.Bundle
  * The AI part is the same as in Lumen ([AiSettings]).
  */
 class SettingsActivity : LumenBase() {
+    companion object {
+        /** Public privacy policy (the same link goes to the Google Play listing). */
+        const val PRIVACY_URL = "https://github.com/psyte92837/Yt-fr/blob/main/doc/PRIVACY_LUMEN_STUDIO.md"
+    }
+
     private var section = -1
     private var direct = false
     private val aiUi = AiSettings(this) { render() }
@@ -140,6 +145,7 @@ class SettingsActivity : LumenBase() {
                 "AI works with your own key; projects and keys stay on the device."))
         c.muted(t("Версия ", "Version ") + runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull().orEmpty())
         c.p(t("Свободная программа, лицензия GPL-3.0-or-later. Исходный код открыт.", "Free software, licensed GPL-3.0-or-later. The source code is open."))
+        c.button(t("Политика конфиденциальности ↗", "Privacy policy ↗"), style = BtnStyle.TEXT) { openUrl(PRIVACY_URL) }
         c.button(t("Исходный код ↗", "Source code ↗"), style = BtnStyle.TEXT) { openUrl("https://github.com/psyte92837/Yt-fr") }
         c.button(t("Текст лицензии ↗", "Licence text ↗"), style = BtnStyle.TEXT) { openUrl("https://www.gnu.org/licenses/gpl-3.0.html") }
     }

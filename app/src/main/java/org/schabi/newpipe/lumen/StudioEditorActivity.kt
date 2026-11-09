@@ -1120,7 +1120,8 @@ class StudioEditorActivity : LumenBase() {
                 buildList {
                     add(done { select(null) })
                     add(act("✎", t("Изменить", "Edit")) { edit(b) })
-                    if (b.kind !in setOf("emoji", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                    if (b.kind == "scheme") add(act("🧩", t("Инфоблок", "Info-block")) { infoHub(b) })
+                    else if (b.kind !in setOf("emoji", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
                     if (b.req.isNotEmpty()) {
                         add(act("⧉", t("Запрос ещё раз", "Request again")) { copyRequestOf(b) })
                         add(act("📥", t("Вставить ответ", "Paste answer")) { pasteAnswerTo(b) })
@@ -1237,7 +1238,7 @@ class StudioEditorActivity : LumenBase() {
                     if (words.isNotEmpty()) act("💡", t("Где нужны вставки", "Where inserts")) { hintsSheet() } else null,
                     act("📊", t("Отчёт", "Report")) { reportSheet() },
                     act("🔤", t("Перевести", "Translate")) { translateSheet() },
-                    if (words.isNotEmpty()) act("🧩", t("Инфоблоки на всё", "Info-blocks for all")) { autoSchemes() } else null
+                    act("🧩", t("Инфоблоки", "Info-blocks")) { infoHub() }
                 )
             }
             else -> listOf(
@@ -1246,7 +1247,7 @@ class StudioEditorActivity : LumenBase() {
                 act("🎞", t("Добавить видео", "Add video")) { addClipSheet() },
                 act("🎵", t("Аудио", "Audio")) { openCat("audio") },
                 act("✨", t("Эффекты", "Effects")) { openCat("fx") },
-                act("🧩", t("Инфоблок", "Info-block")) { infoHub() },
+                act("🧩", t("Инфоблоки", "Info-blocks")) { infoHub() },
                 act("T", t("Текст", "Text")) { openCat("text") },
                 act("😀", t("Стикеры", "Stickers")) { emojiSheet(null) },
                 act("🖼", t("Наложение", "Overlay")) { openCat("overlay") },
@@ -2139,23 +2140,23 @@ class StudioEditorActivity : LumenBase() {
     }
 
     /**
-     * The style of an info-block in a sheet: a small live preview with its name, «🎨 Стиль (100)» and «🎛 Настроить»;
-     * an old look is shown as its info-block style.
+     * The style in the text / AI sheets: one line with its name and «🎨» that opens the same style picker as the
+     * «🧩 Инфоблоки» sheet; an old look is shown as its info-block style.
      */
     private fun styleRow(c: Col, spec0: String, onChange: (String) -> Unit) {
-        val box = Col(this, 0)
-        c.add(box.root, 12)
         var spec = if (InfoStyles.isSpec(spec0)) spec0 else InfoStyles.fromOld(spec0).takeIf { InfoStyles.isSpec(it) } ?: lastStyle
         onChange(spec)
-        fun fill() {
-            box.clear()
-            InfoUi.card(box, this, spec, auto = false) { v ->
-                spec = v
-                onChange(v)
-                fill()
-            }
-        }
-        fill()
+        val line = text(this, "", 13f, color = Palette.MUTED)
+        fun show() { line.text = t("Стиль: ", "Style: ") + InfoUi.name(spec) }
+        show()
+        c.add(rowOf(this, line,
+            btn(this, t("🎨 Сменить", "🎨 Change"), false, BtnStyle.TEXT) {
+                InfoUi.picker(this, spec, auto = false) { v ->
+                    spec = v
+                    onChange(v)
+                    show()
+                }
+            }), 12)
     }
 
     private fun label(c: Col, s: String) = c.add(text(this, s, Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -2197,7 +2198,7 @@ class StudioEditorActivity : LumenBase() {
                 muted(sub)
             }
             if (words.isNotEmpty()) item(t("📝 По тексту речи", "📝 From the speech text"), t("выделите фразу — блок встанет ровно на неё", "select a phrase — the block goes exactly on it")) { textSheet() }
-            item(t("🧩 Инфоблок", "🧩 Info-block"), t("карточка, число, список, плитки или схема — 100 моушн-стилей, текстом, по готовому шаблону или ИИ", "a card, number, list, tiles or a scheme — 100 motion styles, from text, a ready template or the AI")) { infoHub() }
+            item(t("🧩 Инфоблоки", "🧩 Info-blocks"), t("карточка, число, список, плитки или схема — 100 моушн-стилей, текстом, по готовому шаблону или ИИ", "a card, number, list, tiles or a scheme — 100 motion styles, from text, a ready template or the AI")) { infoHub() }
             item(t("✨ Анимация от ИИ", "✨ AI animation"), t("помощник: что показать → бриф → без ИИ сразу или ИИ → проверка", "wizard: what to show → brief → at once without AI or the AI → check")) { insert.start() }
             if (words.isNotEmpty()) item(t("💡 Где нужны вставки", "💡 Where inserts are needed"), t("Lumen найдёт по речи числа, перечисления, даты, сравнения", "Lumen finds numbers, lists, dates and comparisons in the speech")) { hintsSheet() }
             item(t("🌀 Lottie-анимация (.json)", "🌀 Lottie animation (.json)"), t("готовый вектор: LottieFiles и т. п., тексты и цвет темы меняются", "ready vector art: LottieFiles etc., texts and the theme colour change")) { pickLottie() }
@@ -2622,7 +2623,7 @@ class StudioEditorActivity : LumenBase() {
             muted(SchemeTemplates.use(tpl, ru) + " · " + layoutName(tpl.layout))
             val look = lastStyle
             add(TplPreview(ctx, dir, styleDir, 4200L) { w, h -> TplPicker.schemeBlock(tpl, w, h, look) }, 8).layoutParams.height = dp(210)
-            muted(t("Стиль: ", "Style: ") + InfoUi.name(look) + t(" — сменить можно у блока «🎨 Вид».", " — change it on the block with «🎨 Look»."))
+            muted(t("Стиль: ", "Style: ") + InfoUi.name(look) + t(" — сменить можно у блока «🧩 Инфоблок».", " — change it on the block with «🧩 Info-block»."))
             button(t("➕ Вставить как есть", "➕ Insert as is"), primary = true) {
                 dismiss()
                 addNew("scheme", at, 6000L, schemeRatio(p)) { it.copy(scheme = SchemeTemplates.scheme(tpl, ru), look = look, animIn = "fade", animOut = "fade") }
@@ -3034,11 +3035,10 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private fun lookSheet(b: EBlock) {
-        if (b.kind == "scheme") return infoLookSheet(b)
+        if (b.kind == "scheme") return infoHub(b)
         val opts = when (b.kind) {
             "text" -> StudioEdit.TEXT_LOOKS.map { it to lookName(it) }
             "image" -> StudioEdit.IMAGE_LOOKS.map { it to lookName(it) }
-            "scheme" -> styles()
             else -> emptyList()
         }
         if (opts.isEmpty()) return
@@ -3092,68 +3092,52 @@ class StudioEditorActivity : LumenBase() {
     // ---------- info-blocks (lumen.info): one entry, one style card ----------
 
     /**
-     * «🧩 Инфоблок»: the style of new info-blocks (live preview, 100 styles, options) and what to show — a card, a
-     * number, a list, tiles, a scheme from text, a ready framework, the AI on this phrase or on the whole video.
+     * «🧩 Инфоблоки» — the same sheet as in the Studio and the Mix ([InfoUi.hub]). Without [b]: the style of new
+     * info-blocks and what to add (card, number, list, tiles, scheme, ready templates) or what the AI does (this
+     * moment, the whole video). With [b] (a picked info-block): its style, edit its text, redo it with the AI.
      */
-    private fun infoHub() {
+    private fun infoHub(b: EBlock? = null) {
         pause()
-        val at = curMs
-        bottomSheet(t("🧩 Инфоблок в ", "🧩 Info-block at ") + StudioEdit.clock(at)) { dismiss ->
-            StudioEdit.momentText(words, at, 1000, 5000).takeIf { it.isNotBlank() }?.let { muted("«" + it.take(160) + "»") }
-            label(this, t("1. Стиль", "1. Style"))
-            styleRow(this, lastStyle) { lastStyle = it }
-            label(this, t("2. Что показать", "2. What to show"))
-            fun tile(icon: String, name: String, sub: String, f: () -> Unit) {
-                add(btn(ctx, "$icon $name", style = BtnStyle.TONAL) {
-                    dismiss()
-                    f()
-                }, 8)
-                muted(sub)
-            }
-            tile("💡", t("Карточка", "Card"), t("одна мысль или факт крупно", "one thought or fact, big")) { textSchemeSheet(null, kind = "card") }
-            tile("🔢", t("Число", "Number"), t("1–3 крупных числа: рост, цена, срок", "1–3 big numbers: growth, price, time")) { textSchemeSheet(null, kind = "stat") }
-            tile("📋", t("Список", "List"), t("шаги или пункты по порядку", "steps or points in order")) { textSchemeSheet(null, kind = "list") }
-            tile("🔲", t("Плитки", "Tiles"), t("2–6 равных блоков: плюсы, варианты", "2–6 equal blocks: pros, options")) { textSchemeSheet(null, kind = "grid") }
-            tile("🔗", t("Схема", "Scheme"), t("цепочка, звезда, дерево, воронка, матрица…", "chain, hub, tree, funnel, matrix…")) { textSchemeSheet(null) }
-            tile("📚", t("Готовые шаблоны (100)", "Ready templates (100)"), t("SWOT, AIDA, Маслоу, PDCA… — как есть, текстом или ИИ по речи", "SWOT, AIDA, Maslow, PDCA… — as is, as text or AI from the speech")) { schemeTemplates() }
-            label(this, t("Или пусть сделает ИИ", "Or let the AI do it"))
-            tile("🤖", t("По этому месту", "For this moment"), t("ИИ прочитает фразу и выберет вид сам", "the AI reads the phrase and picks the kind")) { aiSchemeSheet(null) }
-            if (words.isNotEmpty()) tile("🧩", t("По всему ролику", "For the whole video"), t("ИИ сам расставит инфоблоки по речи", "the AI places info-blocks along the speech")) { autoSchemes() }
-            val n = blocks.count { it.kind == "scheme" }
-            if (n > 0) button(t("🎨 Этот стиль — всем инфоблокам ($n)", "🎨 This style for all info-blocks ($n)"), style = BtnStyle.TEXT) {
-                dismiss()
-                val look = lastStyle
-                commit(blocks.map { if (it.kind == "scheme") it.copy(look = look) else it })
-                stage?.refresh()
-                toast(t("Стиль «${InfoUi.name(look)}» — у всех инфоблоков", "Style \"${InfoUi.name(look)}\" on all info-blocks"))
-            }
-        }
-    }
-
-    /** «🎨 Вид» of an info-block: its style card; the previews show this very block. */
-    private fun infoLookSheet(b: EBlock) {
-        bottomSheet(t("🎨 Стиль инфоблока", "🎨 Info-block style")) { dismiss ->
-            val box = Col(ctx, 0)
-            add(box.root, 0)
-            var spec = b.look.takeIf { InfoStyles.isSpec(it) } ?: InfoStyles.fromOld(b.look).takeIf { InfoStyles.isSpec(it) } ?: lastStyle
-            fun fill() {
-                box.clear()
-                InfoUi.card(box, this@StudioEditorActivity, spec, auto = false) { v ->
-                    spec = v
-                    lastStyle = v
+        val at = b?.startMs ?: curMs
+        var spec = b?.let { bl -> bl.look.takeIf { InfoStyles.isSpec(it) } ?: InfoStyles.fromOld(bl.look).takeIf { InfoStyles.isSpec(it) } } ?: lastStyle
+        val n = blocks.count { it.kind == "scheme" }
+        fun act(icon: String, name: String, sub: String, f: () -> Unit) = InfoUi.Action(icon, name, sub, f)
+        InfoUi.hub(this, spec = { spec }, auto = false,
+            setSpec = { v ->
+                spec = v
+                lastStyle = v
+                if (b != null) {
                     change(b.id) { it.copy(look = v) }
                     stage?.refresh()
-                    fill()
                 }
-            }
-            fill()
-            if (blocks.count { it.kind == "scheme" } > 1) button(t("Применить ко всем инфоблокам", "Apply to all info-blocks"), style = BtnStyle.TEXT) {
-                dismiss()
-                commit(blocks.map { if (it.kind == "scheme") it.copy(look = spec) else it })
-                stage?.refresh()
-            }
-            button(t("Готово", "Done"), primary = true) { dismiss() }
-        }
+            },
+            title = if (b != null) t("🧩 Инфоблок", "🧩 Info-block") else t("🧩 Инфоблоки в ", "🧩 Info-blocks at ") + StudioEdit.clock(at),
+            note = StudioEdit.momentText(words, at, 1000, 5000).takeIf { it.isNotBlank() }?.let { "«" + it.take(160) + "»" }.orEmpty(),
+            add = if (b != null) listOf(
+                act("✎", t("Изменить текст и вид", "Edit the text and kind"), t("строки «эмодзи Подпись — значение»; карточка, число, список, схема…", "lines \"emoji Label — value\"; card, number, list, scheme…")) { textSchemeSheet(b) }
+            ) else listOf(
+                act("💡", t("Карточка", "Card"), t("одна мысль или факт крупно", "one thought or fact, big")) { textSchemeSheet(null, kind = "card") },
+                act("🔢", t("Число", "Number"), t("1–3 крупных числа: рост, цена, срок", "1–3 big numbers: growth, price, time")) { textSchemeSheet(null, kind = "stat") },
+                act("📋", t("Список", "List"), t("шаги или пункты по порядку", "steps or points in order")) { textSchemeSheet(null, kind = "list") },
+                act("🔲", t("Плитки", "Tiles"), t("2–6 равных блоков: плюсы, варианты", "2–6 equal blocks: pros, options")) { textSchemeSheet(null, kind = "grid") },
+                act("🔗", t("Схема", "Scheme"), t("цепочка, звезда, дерево, воронка, матрица…", "chain, hub, tree, funnel, matrix…")) { textSchemeSheet(null) },
+                act("📚", t("Готовые шаблоны (100)", "Ready templates (100)"), t("SWOT, AIDA, Маслоу, PDCA… — как есть, текстом или ИИ по речи", "SWOT, AIDA, Maslow, PDCA… — as is, as text or AI from the speech")) { schemeTemplates() }
+            ),
+            ai = if (b != null) listOf(
+                act("🤖", t("Переделать", "Redo"), t("ИИ составит этот инфоблок заново по фразе", "the AI makes this info-block anew from the phrase")) { aiSchemeSheet(b) }
+            ) else listOfNotNull(
+                act("🤖", t("По этому месту", "For this moment"), t("ИИ прочитает фразу и выберет вид сам", "the AI reads the phrase and picks the kind")) { aiSchemeSheet(null) },
+                if (words.isNotEmpty()) act("🧩", t("По всему ролику", "For the whole video"), t("ИИ сам расставит инфоблоки по речи", "the AI places info-blocks along the speech")) { autoSchemes() } else null
+            ),
+            extra = { dismiss ->
+                if (n > (if (b != null) 1 else 0)) button(t("🎨 Этот стиль — всем инфоблокам ($n)", "🎨 This style for all info-blocks ($n)"), style = BtnStyle.TEXT) {
+                    dismiss()
+                    val look = spec
+                    commit(blocks.map { if (it.kind == "scheme") it.copy(look = look) else it })
+                    stage?.refresh()
+                    toast(t("Стиль «${InfoUi.name(look)}» — у всех инфоблоков", "Style \"${InfoUi.name(look)}\" on all info-blocks"))
+                }
+            })
     }
 
     private fun timingSheet(b: EBlock) {

@@ -15,7 +15,8 @@ import android.widget.SeekBar
 import java.io.File
 
 /**
- * The one way to choose and tune info-blocks everywhere (Studio, Mix, Editor), built like «🎨 Готовые стили» of the
+ * The one way to call, choose and tune info-blocks everywhere (Studio, Mix, Editor): the same [entry] row and the
+ * same [hub] sheet on every screen. Built like «🎨 Готовые стили» of the
  * captions: a card with the live preview of the current style and two buttons — «🎨 Стиль (100)» (areas, search,
  * previews that move as in the video) and «🎛 Настроить» (opacity, plate, entrance, life on screen, speed, cascade,
  * links, text, corners, capitals, shadow, accent, font). The style and its options are one string — the spec
@@ -60,6 +61,92 @@ object InfoUi {
         val pick = btn(ctx, t("🎨 Стиль (100)", "🎨 Style (100)"), false, BtnStyle.TONAL) { picker(host, spec, auto, onPick = onChange) }
         if (InfoStyles.isSpec(spec)) row(pick, btn(ctx, t("🎛 Настроить", "🎛 Tune"), false, BtnStyle.TONAL) { options(host, spec, onChange) })
         else add(pick, 4)
+    }
+
+    /** One action of the info-block sheet: an icon, a name, a hint and what it does (the sheet closes first). */
+    class Action(val icon: String, val name: String, val sub: String, val run: () -> Unit)
+
+    /**
+     * The entry to info-blocks, the same on every screen: a small live preview of the style, «🧩 Инфоблоки · style»,
+     * [sub] (what there is now) and «›»; a tap opens the screen's [hub] sheet.
+     */
+    fun entry(c: Col, spec: String, sub: String, onOpen: () -> Unit): Unit = with(c) {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            val p = ctx.dp(8)
+            setPadding(p, p, p, p)
+            background = ripple(ctx, roundBg(Palette.CARD, 14f, ctx), Palette.ON_SURFACE)
+            addView(preview(ctx, spec), LinearLayout.LayoutParams(ctx.dp(112), ctx.dp(72)))
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(ctx, t("🧩 Инфоблоки", "🧩 Info-blocks"), 14f, bold = true))
+                addView(text(ctx, name(spec), 13f, color = Palette.ACCENT).apply { maxLines = 1 })
+                if (sub.isNotBlank()) addView(text(ctx, sub, 12f, color = Palette.MUTED).apply { maxLines = 3 })
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = ctx.dp(10) })
+            addView(text(ctx, "›", 22f, color = Palette.MUTED))
+            contentDescription = t("Инфоблоки: ", "Info-blocks: ") + name(spec) + ". " + sub
+            setOnClickListener { onOpen() }
+        }
+        add(row, 8)
+    }
+
+    /**
+     * «🧩 Инфоблоки» — the one sheet of every screen (Studio, Mix, Editor, a picked block): 1. the style card (live
+     * preview, 100 styles, tuning), 2. [add] — what to put in by hand, 3. [ai] — what the AI does, 4. [place] — where
+     * and how many (the screen's own controls, redrawn with [place]'s refresh), then [extra] lines of the screen.
+     * [spec] is read anew after every change; [setSpec] stores the new style.
+     */
+    fun hub(
+        host: LumenBase, spec: () -> String, auto: Boolean, setSpec: (String) -> Unit,
+        title: String = t("🧩 Инфоблоки", "🧩 Info-blocks"), note: String = "",
+        add: List<Action> = emptyList(), ai: List<Action> = emptyList(),
+        place: (Col.(refresh: () -> Unit) -> Unit)? = null,
+        extra: (Col.(dismiss: () -> Unit) -> Unit)? = null
+    ) {
+        host.bottomSheet(title) { dismiss ->
+            if (note.isNotBlank()) muted(note)
+            var n = 0
+            fun head(s: String) = add(text(ctx, "${++n}. $s", Type.LABEL, bold = true, color = Palette.MUTED), 14)
+            head(t("Стиль", "Style"))
+            val styleBox = Col(ctx, 0)
+            add(styleBox.root, 0)
+            fun fillStyle() {
+                styleBox.clear()
+                card(styleBox, host, spec(), auto) { v ->
+                    setSpec(v)
+                    fillStyle()
+                }
+            }
+            fillStyle()
+            fun actions(list: List<Action>) = list.forEach { a ->
+                add(btn(ctx, a.icon + " " + a.name, style = BtnStyle.TONAL) {
+                    dismiss()
+                    a.run()
+                }, 6)
+                if (a.sub.isNotBlank()) muted(a.sub)
+            }
+            if (add.isNotEmpty()) {
+                head(t("Добавить", "Add"))
+                actions(add)
+            }
+            if (ai.isNotEmpty()) {
+                head(t("С ИИ", "With the AI"))
+                actions(ai)
+            }
+            if (place != null) {
+                head(t("Где и сколько", "Where and how many"))
+                val placeBox = Col(ctx, 0)
+                add(placeBox.root, 0)
+                fun fillPlace() {
+                    placeBox.clear()
+                    place(placeBox) { fillPlace() }
+                }
+                fillPlace()
+            }
+            extra?.invoke(this, dismiss)
+            button(t("Готово", "Done"), primary = true) { dismiss() }
+        }
     }
 
     private fun tile(ctx: Context, preview: View, title: String, sub: String, selected: Boolean, onClick: () -> Unit): View =

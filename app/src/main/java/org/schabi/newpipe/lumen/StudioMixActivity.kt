@@ -535,6 +535,7 @@ class StudioMixActivity : LumenBase() {
             )
         }
         val todo = clips.count { it !in readyClips() }
+        if (busy.isEmpty()) clipQuality(this, readyClips(), { render() }) { download(again = it) }
         if (todo > 0) button(t("⬇ Скачать ($todo)", "⬇ Download ($todo)"), primary = true) { download() }
     }
 
@@ -2800,14 +2801,14 @@ class StudioMixActivity : LumenBase() {
      * [randomize] first get a new random part of their video (same length). Pieces of new and re-downloaded clips
      * go into an existing storyboard at random places.
      */
-    private fun download(randomize: Set<String> = emptySet()) {
-        val todo = clips.filter { it !in readyClips() || it.id in randomize }
+    private fun download(randomize: Set<String> = emptySet(), again: Set<String> = emptySet()) {
+        val todo = clips.filter { it !in readyClips() || it.id in randomize || it.id in again }
         if (todo.isEmpty()) return
         busy = "dl"
         cancel = false
         render()
         val dirNow = clipsDir
-        val maxH = StudioPrefs.quality
+        val maxH = StudioPrefs.clipCap
         val used = if (usedFile.exists()) StudioMix.usedFromJson(usedFile.readText()) else emptyMap()
         // parts already picked (old ones, all clips, and those picked in this run), so parallel parts never overlap
         val picked = HashMap<String, List<Pair<Long, Long>>>(used)

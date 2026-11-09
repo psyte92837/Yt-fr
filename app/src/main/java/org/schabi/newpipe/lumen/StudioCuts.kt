@@ -31,7 +31,9 @@ data class SClip(
     /** Usable length of the file from [leadMs]. */
     val lenMs: Long = 0,
     /** Length of the whole YouTube video (0 = not known yet): new random moments are picked inside it. */
-    val durMs: Long = 0
+    val durMs: Long = 0,
+    /** Quality cap (short side, px) the file was downloaded with; 0 = not known (older downloads). */
+    val q: Int = 0
 ) {
     val ms: Long get() = toMs - fromMs
 }
@@ -51,6 +53,32 @@ object StudioCuts {
     const val MAX_CLIPS = 40
     /** Without a stream index the whole stream is downloaded, but only up to this size. */
     const val MAX_FULL_BYTES = 80L * 1024 * 1024
+
+    // ---------- download quality ----------
+
+    /** Choices of the download quality (short side of the frame, px; YouTube gives H.264 up to 1080p); 0 = as the export quality. */
+    val QUALITIES = listOf(0, 360, 480, 720, 1080)
+
+    /** Short side of a [w]×[h] frame (the known one when the other is 0): 1080 for both 1920×1080 and 1080×1920. */
+    fun shortSide(w: Int, h: Int): Int = if (w > 0 && h > 0) minOf(w, h) else maxOf(w, h, 0)
+
+    /** The cap actually used: [want] (0 = [export]). */
+    fun capOf(want: Int, export: Int): Int = if (want > 0) want else export
+
+    /**
+     * Index of the best of [sizes] (w to h) whose short side is at most [max]; when all are bigger — the smallest of
+     * them (not the worst quality), −1 for an empty list. Vertical videos are compared by their short side too.
+     */
+    fun bestSize(sizes: List<Pair<Int, Int>>, max: Int): Int {
+        if (sizes.isEmpty()) return -1
+        val sides = sizes.map { shortSide(it.first, it.second) }
+        val under = sides.indices.filter { sides[it] in 1..max }
+        if (under.isNotEmpty()) return under.maxBy { sides[it] }
+        return sides.indices.minBy { if (sides[it] > 0) sides[it] else Int.MAX_VALUE }
+    }
+
+    /** Downloaded clips of [clips] taken with a lower cap than [cap] (or an unknown one) — worth downloading again. */
+    fun belowCap(clips: List<SClip>, cap: Int): List<SClip> = clips.filter { it.file.isNotEmpty() && it.q < cap }
 
     // ---------- time ----------
 
@@ -106,7 +134,7 @@ object StudioCuts {
     fun toJson(clips: List<SClip>): String = JSONArray().apply {
         clips.forEach {
             put(JSONObject().put("id", it.id).put("url", it.url).put("from", it.fromMs).put("to", it.toMs).put("note", it.note)
-                .put("title", it.title).put("file", it.file).put("lead", it.leadMs).put("len", it.lenMs).put("dur", it.durMs))
+                .put("title", it.title).put("file", it.file).put("lead", it.leadMs).put("len", it.lenMs).put("dur", it.durMs).apply { if (it.q > 0) put("q", it.q) })
         }
     }.toString()
 
@@ -118,7 +146,7 @@ object StudioCuts {
             val url = o.optString("url").trim()
             if (id.isEmpty() || url.isEmpty()) return@mapNotNull null
             SClip(id, url, o.optLong("from"), o.optLong("to"), o.optString("note"), o.optString("title"), o.optString("file"),
-                o.optLong("lead"), o.optLong("len"), o.optLong("dur"))
+                o.optLong("lead"), o.optLong("len"), o.optLong("dur"), o.optInt("q"))
         }
     }.getOrDefault(emptyList())
 

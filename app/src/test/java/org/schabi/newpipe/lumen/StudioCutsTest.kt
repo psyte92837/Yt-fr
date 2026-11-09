@@ -299,4 +299,25 @@ class StudioCutsTest {
         val b = listOf(CutHit("u2", "b1"), CutHit("u4", "b2"))
         assertEquals(listOf("u1", "u2", "u4", "u3"), StudioCuts.mergeHits(listOf(a, b)).map { it.url })
     }
+
+    @Test
+    fun downloadQualityByShortSide() {
+        // a vertical Short: 1080×1920 is 1080p, not skipped for a 1080 cap (the old check fell back to 144p)
+        val vertical = listOf(144 to 256, 360 to 640, 720 to 1280, 1080 to 1920)
+        assertEquals(3, StudioCuts.bestSize(vertical, 1080))
+        assertEquals(2, StudioCuts.bestSize(vertical, 720))
+        val wide = listOf(1920 to 1080, 640 to 360, 1280 to 720)
+        assertEquals(2, StudioCuts.bestSize(wide, 720))
+        // all bigger than the cap: the nearest, not the worst
+        assertEquals(1, StudioCuts.bestSize(listOf(1920 to 1080, 1280 to 720), 480))
+        assertEquals(-1, StudioCuts.bestSize(emptyList(), 720))
+        assertEquals(1080, StudioCuts.shortSide(0, 1080))
+        assertEquals(720, StudioCuts.capOf(0, 720))
+        assertEquals(1080, StudioCuts.capOf(1080, 720))
+        val old = SClip("c1", "u", 0, 5000, file = "c1.mp4", lenMs = 5000)
+        val hq = old.copy(id = "c2", q = 1080)
+        val none = old.copy(id = "c3", file = "")
+        assertEquals(listOf("c1"), StudioCuts.belowCap(listOf(old, hq, none), 1080).map { it.id })
+        assertEquals(1080, StudioCuts.fromJson(StudioCuts.toJson(listOf(hq))).single().q)
+    }
 }

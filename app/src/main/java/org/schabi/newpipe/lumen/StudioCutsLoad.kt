@@ -49,13 +49,16 @@ object StudioCutsLoad {
     fun dataSource(): com.google.android.exoplayer2.upstream.DataSource.Factory =
         org.schabi.newpipe.player.datasource.YoutubeHttpDataSource.Factory().setRangeParameterEnabled(false).setRnParameterEnabled(true)
 
-    /** Video-only MP4 (H.264) progressive stream of the highest quality up to [maxHeight]. */
+    /**
+     * Video-only MP4 (H.264) progressive stream of the highest quality whose short side is up to [maxHeight] (so a
+     * vertical 1080×1920 video counts as 1080p); when all are bigger — the nearest bigger one.
+     */
     fun pickStream(streams: List<VideoStream>, maxHeight: Int): VideoStream? {
         val ok = streams.filter {
             it.isVideoOnly && it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP &&
                 it.format == NpFormat.MPEG_4 && it.codec.orEmpty().startsWith("avc")
         }
-        return ok.filter { it.height in 1..maxHeight }.maxByOrNull { it.height } ?: ok.minByOrNull { it.height }
+        return ok.getOrNull(StudioCuts.bestSize(ok.map { it.width to it.height }, maxHeight))
     }
 
     /** A quick look at a found video: the stream to play ("" when there is none) and frames of its storyboard with their times. */
@@ -148,7 +151,7 @@ object StudioCutsLoad {
             val (leadUs, lenUs) = cut(part, out, fromUs, toUs, segStartUs)
             if (lenUs <= 0) error(t("${c.id}: в отрезке нет кадров", "${c.id}: no frames in the piece"))
             return c.copy(file = out.name, leadMs = leadUs / 1000, lenMs = lenUs / 1000, title = c.title.ifBlank { info.name.orEmpty() },
-                durMs = if (info.duration > 0) info.duration * 1000 else c.durMs)
+                durMs = if (info.duration > 0) info.duration * 1000 else c.durMs, q = maxHeight)
         } finally {
             part.delete()
         }

@@ -74,6 +74,12 @@ object StudioPrefs {
     var quality: Int
         get() = p.getInt("studio_quality", if (height >= 1920) 1080 else 720)
         set(v) = p.edit().putInt("studio_quality", v).apply()
+    /** Quality cap of downloaded YouTube clips (short side, px; 0 = as [quality]): Studio clips and Mix. */
+    var clipQ: Int
+        get() = p.getInt("studio_clip_q", 1080)
+        set(v) = p.edit().putInt("studio_clip_q", v).apply()
+    /** The cap clips are downloaded with now. */
+    val clipCap: Int get() = StudioCuts.capOf(clipQ, quality)
     /** Sound effects of the AI director. */
     var sfx: Boolean
         get() = p.getBoolean("studio_sfx", true)
@@ -1844,6 +1850,7 @@ class StudioActivity : LumenBase() {
         val addBtn = btn(ctx, t("＋ Клип по ссылке", "＋ Clip by link"), style = BtnStyle.TONAL) { editClip(null) }
         val findBtn = btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findClips() }
         row(addBtn, findBtn)
+        clipQuality(this, readyCuts(), { render() }) { downloadCuts(it) }
         if (cutClips.any { it !in readyCuts() }) button(t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() }
         val ready = readyCuts()
         if (ready.isNotEmpty()) {
@@ -2145,15 +2152,15 @@ class StudioActivity : LumenBase() {
     }
 
     /** Downloads every clip that is not ready yet, one after another; a failed one is reported and skipped. */
-    private fun downloadCuts() {
-        val todo = cutClips.filter { it !in readyCuts() }
+    private fun downloadCuts(again: Set<String> = emptySet()) {
+        val todo = cutClips.filter { it !in readyCuts() || it.id in again }
         if (todo.isEmpty()) return
         busy = "cuts"
         cancel = false
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         render()
         val dirNow = cutsDir
-        val maxH = StudioPrefs.quality
+        val maxH = StudioPrefs.clipCap
         job("cuts", {
             val done = java.util.concurrent.ConcurrentHashMap<String, SClip>()
             val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -3485,4 +3492,27 @@ class StudioActivity : LumenBase() {
             ReportKit.share(this, f, false, f.name, "video/mp4")
         }
     }
+}
+
+
+/**
+ * "Clip quality" chips of every screen that downloads YouTube clips, and "⟳ Download again" for the [ready] clips
+ * taken with a lower cap; [refresh] redraws the screen, [again] gets the ids to download again.
+ */
+internal fun clipQuality(c: Col, ready: List<SClip>, refresh: () -> Unit, again: (Set<String>) -> Unit) {
+    val ctx = c.ctx
+    val now = StudioPrefs.clipQ
+    c.add(text(ctx, t("Качество клипов", "Clip quality"), Type.LABEL, bold = true, color = Palette.MUTED), 10)
+    c.chips(StudioCuts.QUALITIES.map { q ->
+        val label = if (q == 0) t("как экспорт (${StudioPrefs.quality}p)", "as export (${StudioPrefs.quality}p)") else if (q >= 1080) t("${q}p — лучшее", "${q}p — best") else "${q}p"
+        chip(ctx, label, q == now) {
+            if (q != now) {
+                StudioPrefs.clipQ = q
+                refresh()
+            }
+        }
+    }, 99)
+    val low = StudioCuts.belowCap(ready, StudioPrefs.clipCap)
+    if (low.isNotEmpty()) c.button(t("⟳ Перекачать в ${StudioPrefs.clipCap}p (${low.size})", "⟳ Download again in ${StudioPrefs.clipCap}p (${low.size})"),
+        style = BtnStyle.TEXT) { again(low.map { it.id }.toSet()) }
 }

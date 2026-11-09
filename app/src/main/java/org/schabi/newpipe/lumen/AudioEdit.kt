@@ -62,6 +62,14 @@ data class ATrack(
 
 data class AMarker(val at: Long, val name: String)
 
+/**
+ * An effect layer, like the effect tracks of the video editor ([EditFx]): [fx] of [EditSound] on everything heard
+ * from [at] for [len] ms at strength [k], fading in and out over [AudioEdit.FX_RAMP_MS].
+ */
+data class AFx(val id: Int, val fx: String, val at: Long, val len: Long, val k: Float = 1f) {
+    val end: Long get() = at + len
+}
+
 /** An imported or recorded file, kept as raw 16-bit stereo PCM at the project's rate. */
 data class ASource(val id: String, val name: String, val ms: Long)
 
@@ -72,6 +80,7 @@ data class AProject(
     val tracks: List<ATrack> = emptyList(),
     val sources: List<ASource> = emptyList(),
     val markers: List<AMarker> = emptyList(),
+    val fx: List<AFx> = emptyList(),
     val gain: Float = 1f,
     val nextId: Int = 1,
     val created: Long = 0L,
@@ -101,6 +110,11 @@ object AudioEdit {
     const val MAX_TRACKS = 8
     const val MIN_SPEED = 0.25f
     const val MAX_SPEED = 4f
+    /** Effect layers fade in and out this fast (no clicks at their edges). */
+    const val FX_RAMP_MS = 30L
+    /** Length of a new effect layer at the cursor. */
+    const val FX_DEFAULT_MS = 3000L
+    const val FX_MIN_MS = 100L
 
     fun empty(id: String, name: String, now: Long = 0L, trackName: String = "1"): AProject =
         AProject(id, name, tracks = listOf(ATrack(1, trackName)), nextId = 2, created = now, updated = now)
@@ -177,7 +191,8 @@ object AudioEdit {
                 else -> m.copy(at = m.at - d)
             }
         } else p.markers
-        return p.copy(tracks = ts, nextId = next, markers = marks)
+        val layers = if (ripple && tracks == null) p.fx.mapNotNull { f -> fxCut(f, a, b) } else p.fx
+        return p.copy(tracks = ts, nextId = next, markers = marks, fx = layers)
     }
 
     /** Keeps only [a]..[b] of every track, moved to the start. */
@@ -185,7 +200,12 @@ object AudioEdit {
         if (b - a < MIN_MS) return p
         val ts = p.tracks.map { t -> t.copy(clips = sorted(t.clips.mapNotNull { c -> cut(c, a, b)?.let { it.copy(at = it.at - a) } })) }
         val marks = p.markers.filter { it.at in a..b }.map { it.copy(at = it.at - a) }
-        return p.copy(tracks = ts, markers = marks)
+        val layers = p.fx.mapNotNull { f ->
+            val s = max(f.at, a)
+            val e = min(f.end, b)
+            if (e - s < FX_MIN_MS) null else f.copy(at = s - a, len = e - s)
+        }
+        return p.copy(tracks = ts, markers = marks, fx = layers)
     }
 
     /** A gap of [len] ms at [at] on the chosen tracks (a clip there is split, the rest moves right). */
@@ -196,7 +216,9 @@ object AudioEdit {
             if (!picked(t, tracks)) t else t.copy(clips = t.clips.map { c -> if (c.at >= at - 1 && c.end > at) c.copy(at = c.at + len) else c })
         }
         val marks = if (tracks == null) s.markers.map { if (it.at >= at) it.copy(at = it.at + len) else it } else s.markers
-        return s.copy(tracks = ts, markers = marks)
+        // a layer that starts after the gap moves; one across it stretches over it
+        val layers = if (tracks == null) s.fx.map { f -> when { f.at >= at -> f.copy(at = f.at + len); f.end > at -> f.copy(len = f.len + len); else -> f } } else s.fx
+        return s.copy(tracks = ts, markers = marks, fx = layers)
     }
 
     /** The clips of [a]..[b] on the chosen tracks, relative to [a]. */
@@ -365,6 +387,66 @@ object AudioEdit {
     fun removeRanges(p: AProject, ranges: List<LongRange>): AProject =
         ranges.sortedByDescending { it.first }.fold(p) { q, r -> deleteRange(q, r.first, r.last, null, true) }
 
+    // ---------- effect layers ----------
+
+    /** A layer after [a]..[b] was cut out (closing the gap); null when nothing of it is left. */
+    fun fxCut(f: AFx, a: Long, b: Long): AFx? {
+        val d = b - a
+        return when {
+            f.end <= a -> f
+            f.at >= b -> f.copy(at = f.at - d)
+            else -> {
+                val keep = max(0L, a - f.at) + max(0L, f.end - b)
+                if (keep < FX_MIN_MS) null else f.copy(at = min(f.at, a), len = keep)
+            }
+        }
+    }
+
+    /** A new layer of [fx] over [at]..[at]+[len], kept inside the project (at least [FX_MIN_MS]). */
+    fun addFx(p: AProject, fx: String, at: Long, len: Long, k: Float = 1f): Pair<AProject, Int> {
+        val total = max(p.length, FX_MIN_MS)
+        val l = len.coerceIn(FX_MIN_MS, total)
+        val s = at.coerceIn(0L, max(0L, total - l))
+        val f = AFx(p.nextId, fx, s, l, k.coerceIn(0f, 1f))
+        return p.copy(fx = p.fx + f, nextId = p.nextId + 1) to f.id
+    }
+
+    fun fxOf(p: AProject, id: Int): AFx? = p.fx.firstOrNull { it.id == id }
+
+    /** [f] on layer [id], its time kept inside the project. */
+    fun updateFx(p: AProject, id: Int, f: (AFx) -> AFx): AProject = p.copy(fx = p.fx.map { x ->
+        if (x.id != id) x else {
+            val n = f(x)
+            val total = max(p.length, FX_MIN_MS)
+            val len = n.len.coerceIn(FX_MIN_MS, total)
+            n.copy(id = id, len = len, at = n.at.coerceIn(0L, max(0L, total - len)), k = n.k.coerceIn(0f, 1f))
+        }
+    })
+
+    fun removeFx(p: AProject, id: Int): AProject = p.copy(fx = p.fx.filter { it.id != id })
+
+    /** A layer that changes nothing: no known effect or no strength. */
+    fun fxEmpty(f: AFx): Boolean = f.k <= 0f || !EditSound.isKnown(f.fx)
+
+    /** How much of layer [f] is heard at [ms]: 0 outside, ramps of [FX_RAMP_MS] at its edges. */
+    fun fxWeight(f: AFx, ms: Double): Float {
+        if (ms < f.at || ms >= f.end) return 0f
+        val r = min(FX_RAMP_MS.toDouble(), f.len / 2.0)
+        return min(1.0, min(ms - f.at, f.end - ms) / r).toFloat()
+    }
+
+    /** Rows for drawing the layers: overlapping layers go to separate rows. */
+    fun fxRows(layers: List<AFx>): Map<Int, Int> {
+        val ends = ArrayList<Long>()
+        val out = HashMap<Int, Int>()
+        for (f in layers.sortedWith(compareBy({ it.at }, { it.id }))) {
+            var row = ends.indexOfFirst { it <= f.at }
+            if (row < 0) { ends += f.end; row = ends.size - 1 } else ends[row] = f.end
+            out[f.id] = row
+        }
+        return out
+    }
+
     // ---------- tracks ----------
 
     fun addTrack(p: AProject, name: String): AProject {
@@ -444,7 +526,8 @@ object AudioEdit {
     fun removeMarker(p: AProject, at: Long): AProject = p.copy(markers = p.markers.filter { abs(it.at - at) > 5 })
 
     /** Places worth sticking to: 0, the clip edges and the markers. */
-    fun snapPoints(p: AProject): List<Long> = (listOf(0L) + p.clips.flatMap { listOf(it.at, it.end) } + p.markers.map { it.at }).distinct().sorted()
+    fun snapPoints(p: AProject): List<Long> = (listOf(0L, p.length) + p.clips.flatMap { listOf(it.at, it.end) } + p.markers.map { it.at } +
+        p.fx.flatMap { listOf(it.at, it.end) }).distinct().sorted()
 
     /** [ms] moved to the nearest of [points] closer than [tol], else as is. */
     fun snap(ms: Long, points: List<Long>, tol: Long): Long = points.minByOrNull { abs(it - ms) }?.takeIf { abs(it - ms) <= tol } ?: ms
@@ -496,6 +579,9 @@ object AudioEdit {
         put("updated", p.updated)
         put("sources", JSONArray().apply { p.sources.forEach { s -> put(JSONObject().put("id", s.id).put("name", s.name).put("ms", s.ms)) } })
         put("markers", JSONArray().apply { p.markers.forEach { m -> put(JSONObject().put("at", m.at).put("name", m.name)) } })
+        if (p.fx.isNotEmpty()) put("fxl", JSONArray().apply {
+            p.fx.forEach { f -> put(JSONObject().put("id", f.id).put("fx", f.fx).put("at", f.at).put("len", f.len).put("k", f.k.toDouble())) }
+        })
         put("tracks", JSONArray().apply {
             p.tracks.forEach { t ->
                 put(JSONObject().apply {
@@ -556,13 +642,16 @@ object AudioEdit {
                 t.f("gain", 1f), t.f("pan", 0f), t.optBoolean("mute"), t.optBoolean("solo")
             )
         }
-        val maxId = (tracks.map { it.id } + tracks.flatMap { t -> t.clips.map { it.id } }).maxOrNull() ?: 0
+        val fl = o.optJSONArray("fxl") ?: JSONArray()
+        val layers = (0 until fl.length()).map { fl.getJSONObject(it) }.map { f -> AFx(f.getInt("id"), f.optString("fx"), f.optLong("at"), f.optLong("len"), f.f("k", 1f)) }
+            .filter { it.len > 0 }
+        val maxId = (tracks.map { it.id } + tracks.flatMap { t -> t.clips.map { it.id } } + layers.map { it.id }).maxOrNull() ?: 0
         return AProject(
             o.getString("id"), o.optString("name"), o.optInt("rate", 44_100),
             tracks.ifEmpty { listOf(ATrack(maxId + 1, "1")) },
             (0 until srcs.length()).map { srcs.getJSONObject(it).let { s -> ASource(s.getString("id"), s.optString("name"), s.optLong("ms")) } },
             (0 until marks.length()).map { marks.getJSONObject(it).let { m -> AMarker(m.getLong("at"), m.optString("name")) } },
-            o.f("gain", 1f), max(o.optInt("next", 1), maxId + 1), o.optLong("created"), o.optLong("updated")
+            layers, o.f("gain", 1f), max(o.optInt("next", 1), maxId + 1), o.optLong("created"), o.optLong("updated")
         )
     }
 

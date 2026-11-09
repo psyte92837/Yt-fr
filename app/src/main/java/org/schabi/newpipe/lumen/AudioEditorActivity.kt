@@ -917,33 +917,145 @@ class AudioEditorActivity : LumenBase() {
     // ---------- ✨ effects ----------
 
     private fun effectTools(c: Col, q: AProject) {
-        c.muted(t("Применяется к: ", "Applies to: ") + targetName())
+        c.muted(t("Звук-эффект — отдельная дорожка «✨» под волной, как в видеоредакторе: он действует на всё, что звучит в это время. Тяните её за края, чтобы растянуть или сжать, или за середину — чтобы сдвинуть.",
+            "A sound effect is a track of its own \"✨\" under the wave, as in the video editor: it changes everything heard while it lasts. Drag its edges to stretch or shrink it, its middle to move it."))
         grid(c, listOf(
-            Triple("🪄", t("Улучшить голос", "Enhance voice")) { enhanceVoice() },
+            Triple("🎚", t("Звук-эффект", "Sound FX")) { addLayer("") },
+            Triple("☰", t("Все эффекты (${q.fx.size})", "All effects (${q.fx.size})")) { layersSheet() },
+            Triple("🪄", t("Улучшить голос", "Enhance voice")) { enhanceVoice() }
+        ))
+        c.add(text(this, t("Быстро: эффект на ", "Quick: an effect on ") + layerSpanName(q), Type.LABEL, bold = true, color = Palette.MUTED), 16)
+        var group = Lumen.prefs.getString("audio_fx_group", EditSound.GROUPS[0].id) ?: EditSound.GROUPS[0].id
+        c.add(chipRow(this, EditSound.GROUPS.map { gr ->
+            chip(this, gr.name, gr.id == group) { Lumen.prefs.edit().putString("audio_fx_group", gr.id).apply(); render() }
+        }, collapseAfter = 20), 6)
+        c.add(chipRow(this, EditSound.of(group).map { f -> chip(this, "${f.emoji} ${f.name}") { addLayer(f.id) } }, collapseAfter = 20), 8)
+        c.add(text(this, t("Обработка: ", "Processing: ") + targetName(), Type.LABEL, bold = true, color = Palette.MUTED), 20)
+        grid(c, listOf(
             Triple("🧹", t("Убрать шум", "Remove noise")) { denoiseSheet() },
             Triple("🎛", t("Эквалайзер", "Equalizer")) { eqSheet() },
             Triple("⏩", t("Скорость", "Speed")) { speedSheet() },
             Triple("🎵", t("Высота тона", "Pitch")) { pitchSheet() },
-            Triple("↺", t("Задом наперёд", "Reverse")) { commit(applyTo(q) { it.copy(reverse = !it.reverse) }) }
+            Triple("↺", t("Задом наперёд", "Reverse")) { commit(applyTo(q) { it.copy(reverse = !it.reverse) }) },
+            Triple("✕", t("Сбросить обработку", "Reset processing")) { commit(applyTo(q) { it.copy(fx = "", lo = 0f, mid = 0f, hi = 0f, pitch = 0f) }) }
         ))
-        c.add(text(this, t("Эффекты (${EditSound.ALL.size})", "Effects (${EditSound.ALL.size})"), Type.TITLE_M, bold = true), 20)
-        c.muted(t("Тап — слушать с эффектом и подобрать силу.", "Tap — hear it with the effect and set the strength."))
-        EditSound.GROUPS.forEach { g ->
-            c.add(text(this, g.name, Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            c.add(FlowLayout(this, dp(6), dp(6)).apply {
-                EditSound.of(g.id).forEach { fx -> addView(chip(this@AudioEditorActivity, fx.emoji + " " + fx.name) { fxSheet(fx.id) }) }
-            }, 4)
-        }
-        c.button(t("✕ Убрать эффекты", "✕ Remove effects"), style = BtnStyle.TEXT) { commit(applyTo(q) { it.copy(fx = "") }) }
     }
 
-    private fun fxSheet(id: String) {
-        val fx = EditSound.find(id) ?: return
-        var k = 1f
-        tryOut(fx.emoji + " " + fx.name) { set ->
-            muted(fx.hint)
-            set { it.copy(fx = id, fxK = k) }
-            slider(t("Сила", "Strength"), 1f, 0.1f, 1f, { "${(it * 100).roundToInt()} %" }) { v -> k = v; set { it.copy(fx = id, fxK = k) } }
+    /** Where a new effect layer goes: the selection, else the chosen piece, else 3 s from the cursor. */
+    private fun layerSpan(q: AProject): Pair<Long, Long> {
+        sel?.let { return it.first to (it.last - it.first) }
+        q.clip(selClip)?.let { return it.at to it.len }
+        val len = min(AudioEdit.FX_DEFAULT_MS, max(AudioEdit.FX_MIN_MS, q.length))
+        return cursor.coerceIn(0L, max(0L, q.length - len)) to len
+    }
+
+    private fun layerSpanName(q: AProject): String = when {
+        sel != null -> t("выделенное", "the selection")
+        q.clip(selClip) != null -> t("кусок", "the piece")
+        else -> t("3 с от курсора", "3 s from the cursor")
+    }
+
+    private fun addLayer(fx: String) {
+        val q = p ?: return
+        if (q.length <= 0) return toast(t("Сначала добавьте звук", "Add some sound first"))
+        val (at, len) = layerSpan(q)
+        val (n, id) = AudioEdit.addFx(q, fx, at, len)
+        live { n }
+        layerSheet(id, q)
+    }
+
+    /**
+     * Effect layer [id], like the editor's effect sheet: groups and the 50 effects, strength, the layer's time;
+     * heard at once in a loop; one undo step on closing ([before] — the state before a new layer was added).
+     */
+    private fun layerSheet(id: Int, before: AProject? = null) {
+        val base = before ?: p ?: return
+        if (before == null) liveBase = base
+        val f0 = AudioEdit.fxOf(p ?: return, id) ?: return
+        var cur = f0
+        fun show(n: AFx) {
+            live { q -> AudioEdit.updateFx(q, id) { n } }
+            cur = AudioEdit.fxOf(p ?: return, id) ?: n
+            wave?.invalidate()
+        }
+        fun playIt() = playRange(cur.at..cur.end)
+        bottomSheet(t("🎚 Звук-эффект", "🎚 Sound effect"), onDismiss = {
+            stopPlay()
+            val live = p
+            val now = live?.let { AudioEdit.fxOf(it, id) }
+            val empty = now == null || AudioEdit.fxEmpty(now)
+            val b = liveBase ?: base
+            liveBase = null
+            if (live != null) {
+                p = b
+                // an empty layer goes away; nothing changed — no undo step
+                if ((before == null && now == f0) || (before != null && empty)) set(if (empty) AudioEdit.removeFx(b, id) else b)
+                else commit(if (empty) AudioEdit.removeFx(live, id) else live)
+            }
+        }) { dismiss ->
+            val span = text(ctx, "", 13f, color = Palette.MUTED)
+            fun showSpan() { span.text = t("Дорожка эффекта: ", "Effect track: ") + AudioEdit.time(cur.at) + " – " + AudioEdit.time(cur.end) + " (" + trim(cur.len / 1000f) + t(" с)", " s)") }
+            showSpan()
+            add(span, 0)
+            var group = EditSound.find(cur.fx)?.group ?: Lumen.prefs.getString("audio_fx_group", EditSound.GROUPS[0].id) ?: EditSound.GROUPS[0].id
+            val now = text(ctx, "", 14f)
+            val groups = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            fun showNow() {
+                now.text = EditSound.find(cur.fx)?.let { "${it.emoji} ${it.name} — ${it.hint}" } ?: t("Выберите эффект", "Pick an effect")
+            }
+            lateinit var fill: () -> Unit
+            fill = {
+                groups.removeAllViews()
+                groups.addView(chipRow(ctx, EditSound.GROUPS.map { gr ->
+                    chip(ctx, gr.name + (if (EditSound.find(cur.fx)?.group == gr.id) " •" else ""), gr.id == group) { group = gr.id; fill() }
+                }, collapseAfter = 20))
+                list.removeAllViews()
+                list.addView(chipRow(ctx, EditSound.of(group).map { f ->
+                    chip(ctx, "${f.emoji} ${f.name}", f.id == cur.fx) {
+                        show(cur.copy(fx = f.id))
+                        showNow()
+                        fill()
+                        playIt()
+                    }
+                }, collapseAfter = 20))
+            }
+            add(groups, 8)
+            add(list, 8)
+            fill()
+            showNow()
+            add(now, 8)
+            slider(t("Сила", "Strength"), cur.k, 0f, 1f, { "${(it * 100).roundToInt()} %" }) { v -> show(cur.copy(k = v)) }
+            add(text(ctx, t("Длина дорожки", "Track length"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val q0 = p ?: return@bottomSheet
+            add(FlowLayout(ctx, dp(6), dp(6)).apply {
+                addView(chip(ctx, t("↔ На весь проект", "↔ Whole project")) { show(cur.copy(at = 0, len = (p ?: q0).length)); showSpan() })
+                sel?.let { r -> addView(chip(ctx, t("⟦⟧ По выделению", "⟦⟧ To the selection")) { show(cur.copy(at = r.first, len = r.last - r.first)); showSpan() }) }
+                q0.clip(selClip)?.let { c -> addView(chip(ctx, t("▭ По куску", "▭ To the piece")) { show(cur.copy(at = c.at, len = c.len)); showSpan() }) }
+                addView(chip(ctx, "⇤ " + t("с курсора", "from cursor")) { show(cur.copy(at = cursor, len = max(AudioEdit.FX_MIN_MS, cur.end - cursor))); showSpan() })
+                addView(chip(ctx, "−1 " + t("с", "s")) { show(cur.copy(len = cur.len - 1000)); showSpan() })
+                addView(chip(ctx, "＋1 " + t("с", "s")) { show(cur.copy(len = cur.len + 1000)); showSpan() })
+            }, 6)
+            button(t("▶ Послушать с эффектом", "▶ Listen with the effect"), style = BtnStyle.TONAL) { if (player.playing) stopPlay() else playIt() }
+            row(btn(ctx, t("🗑 Убрать", "🗑 Remove"), style = BtnStyle.TEXT) { show(cur.copy(k = 0f)); dismiss() },
+                btn(ctx, t("Готово", "Done"), primary = true) { dismiss() })
+        }
+    }
+
+    private fun layersSheet() {
+        val q = p ?: return
+        bottomSheet(t("☰ Звук-эффекты", "☰ Sound effects")) { dismiss ->
+            if (q.fx.isEmpty()) muted(t("Эффектов пока нет: «🎚 Звук-эффект» поставит первый.", "No effects yet: \"🎚 Sound FX\" adds the first one."))
+            q.fx.sortedBy { it.at }.forEach { f ->
+                val r = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                r.addView(text(ctx, EditSound.label(f.fx).ifEmpty { "?" } + " · " + AudioEdit.time(f.at) + "–" + AudioEdit.time(f.end) + " · " + (f.k * 100).roundToInt() + "%", 14f).apply {
+                    setOnClickListener { dismiss(); layerSheet(f.id) }
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                r.addView(iconBtn(ctx, "▶") { playRange(f.at..f.end) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+                r.addView(iconBtn(ctx, "🗑") { dismiss(); commit(AudioEdit.removeFx(p ?: q, f.id)) }, LinearLayout.LayoutParams(dp(44), dp(44)))
+                add(r, 4)
+            }
+            button(t("＋ Звук-эффект", "＋ Sound FX"), style = BtnStyle.TONAL) { dismiss(); addLayer("") }
         }
     }
 
@@ -1048,6 +1160,12 @@ class AudioEditorActivity : LumenBase() {
     // ---------- 🎵 sounds ----------
 
     private fun soundTools(c: Col, q: AProject) {
+        val tab = Lumen.prefs.getInt("audio_snd_tab", 0)
+        c.add(segBar(this, listOf(t("🌿 Атмосфера (${AudioAmb.SOUNDS.size})", "🌿 Ambience (${AudioAmb.SOUNDS.size})"), t("🔔 Короткие звуки", "🔔 Short sounds")), tab) {
+            Lumen.prefs.edit().putInt("audio_snd_tab", it).apply()
+            render()
+        }, 0)
+        if (tab == 0) return ambTools(c, q)
         c.muted(t("Тап — послушать. Звук ляжет в курсор на свободную дорожку и смешается с остальным.", "Tap — listen. The sound goes to the cursor on a free track and mixes in."))
         AudioGen.GROUPS.forEach { g ->
             c.add(text(this, g.name, Type.LABEL, bold = true, color = Palette.MUTED), 12)
@@ -1069,6 +1187,66 @@ class AudioEditorActivity : LumenBase() {
             Triple("🌫", t("Шум", "Noise")) { noiseSheet() },
             Triple("🤐", t("Запикать выделенное", "Bleep the selection")) { bleep() }
         ))
+    }
+
+    private var pendingAmb = ""
+
+    /** 100 ambience sounds: a group, a sound (tap — listen 4 s), how long, then onto a free track at the cursor. */
+    private fun ambTools(c: Col, q: AProject) {
+        c.muted(t("Фоны и события: океан, дождь, гроза, туман, лес, костёр, город, кафе, космос… Тап — послушать 4 с. Звук ляжет поверх, на свободную дорожку, и смешается с остальным; громкость — в «🎚 Дорожки».",
+            "Beds and events: ocean, rain, thunderstorm, fog, forest, campfire, city, café, space… Tap — listen for 4 s. The sound goes over, on a free track, mixed with the rest; its volume is in \"🎚 Tracks\"."))
+        val group = Lumen.prefs.getString("audio_amb_group", AudioAmb.GROUPS[0].id) ?: AudioAmb.GROUPS[0].id
+        c.add(chipRow(this, AudioAmb.GROUPS.map { g ->
+            chip(this, g.name, g.id == group) { Lumen.prefs.edit().putString("audio_amb_group", g.id).apply(); render() }
+        }, collapseAfter = 20), 10)
+        c.add(FlowLayout(this, dp(6), dp(6)).apply {
+            AudioAmb.of(group).forEach { s ->
+                addView(chip(this@AudioEditorActivity, s.emoji + " " + s.name + if (s.oneShotMs > 0) " ·" else "", pendingAmb == s.id) {
+                    pendingAmb = s.id
+                    previewAmb(s.id, q.rate)
+                    render()
+                })
+            }
+        }, 10)
+        c.add(text(this, t("· — одиночное событие своей длины; остальные — фон любой длины.", "· — a single event of its own length; the rest are beds of any length."), 11f, color = Palette.MUTED), 4)
+        val s = AudioAmb.find(pendingAmb) ?: return
+        val at = sel?.first ?: cursor
+        if (s.oneShotMs <= 0) {
+            val opts = ArrayList<Pair<Long, String>>()
+            listOf(5_000L, 10_000L, 30_000L, 60_000L, 180_000L, 600_000L).forEach { opts += it to (if (it < 60_000) "${it / 1000} " + t("с", "s") else "${it / 60_000} " + t("мин", "min")) }
+            sel?.let { r -> opts += -1L to t("⟦⟧ По выделению", "⟦⟧ The selection") + " " + AudioEdit.time(r.last - r.first) }
+            if (q.length - at > 1000) opts += -2L to t("⇥ До конца", "⇥ To the end") + " " + AudioEdit.time(q.length - at)
+            val cur = Lumen.prefs.getLong("audio_amb_len", 30_000L).let { v -> if (opts.any { it.first == v }) v else 30_000L }
+            c.add(text(this, t("Длина", "Length"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            c.add(choiceChips(this, opts, cur) { Lumen.prefs.edit().putLong("audio_amb_len", it).apply() }, 4)
+        }
+        c.button(t("＋ Добавить «${s.name}» в ", "＋ Add \"${s.name}\" at ") + AudioEdit.time(at), primary = true) { addAmb(s) }
+    }
+
+    private fun previewAmb(id: String, rate: Int) {
+        AudioPreview.stop()
+        Thread {
+            runCatching { AudioAmb.render(id, rate, 4000, seed = System.nanoTime() % 1000) }.getOrNull()?.let { AudioPreview.playStereo(it, rate) }
+        }.start()
+    }
+
+    private fun addAmb(s: AudioAmb.Sound) {
+        val q = p ?: return
+        val at = sel?.first ?: cursor
+        val pick = Lumen.prefs.getLong("audio_amb_len", 30_000L)
+        val ms = when {
+            s.oneShotMs > 0 -> s.oneShotMs
+            pick == -1L -> sel?.let { it.last - it.first } ?: 30_000L
+            pick == -2L -> (q.length - at).takeIf { it > 1000 } ?: 30_000L
+            else -> pick
+        }.coerceIn(1000L, 600_000L)
+        val name = s.emoji + " " + s.name
+        AudioPreview.stop()
+        job(t("Создаю «${s.name}»", "Making \"${s.name}\""), { cancelled, progress -> AudioImport.writeAmbient(q, s.id, name, ms, cancelled, progress) }) { src ->
+            val cur = p ?: return@job
+            commit(AudioEdit.overlay(cur, src, at, t("Атмосфера", "Ambience"), name))
+            snack(t("Добавлено: ${s.name}, ${AudioEdit.time(src.ms)}", "Added: ${s.name}, ${AudioEdit.time(src.ms)}"))
+        }
     }
 
     private fun placeGenerated(name: String, mono: FloatArray, insert: Boolean = false) {
@@ -1532,8 +1710,29 @@ class AudioEditorActivity : LumenBase() {
         private var dragDx = 0f
         private var dragLane = -1
         private var scaling = false
+        // effect layers: the one under the finger, how it is dragged (1 move, 2 left edge, 3 right edge) and how far
+        private var fxDrag = -1
+        private var fxMode = 0
+        private var fxDx = 0f
+        private val fxRowH = dp(26)
 
-        fun wantedHeight(q: AProject): Int = ruler + q.tracks.size.coerceAtLeast(1) * laneH(q) + dp(4)
+        fun wantedHeight(q: AProject): Int = ruler + q.tracks.size.coerceAtLeast(1) * laneH(q) + fxLaneH(q) + dp(4)
+
+        private fun fxLaneH(q: AProject): Int = if (q.fx.isEmpty()) 0 else ((AudioEdit.fxRows(q.fx).values.maxOrNull() ?: 0) + 1) * fxRowH + dp(6)
+
+        private fun fxTop(q: AProject): Int = ruler + q.tracks.size.coerceAtLeast(1) * laneH(q)
+
+        private fun inFx(y: Float): Boolean = p?.let { q -> q.fx.isNotEmpty() && y >= fxTop(q) } ?: false
+
+        /** The layer under (x, y) in the effects lane. */
+        private fun fxAt(x: Float, y: Float): AFx? {
+            val q = p ?: return null
+            if (!inFx(y)) return null
+            val rows = AudioEdit.fxRows(q.fx)
+            val row = ((y - fxTop(q) - dp(3)) / fxRowH).toInt()
+            val ms = msAt(x)
+            return q.fx.lastOrNull { rows[it.id] == row && ms >= it.at - dp(12) / pxPerMs && ms <= it.end + dp(12) / pxPerMs }
+        }
 
         private fun laneH(q: AProject): Int = when (q.tracks.size) {
             0, 1 -> dp(120)
@@ -1547,7 +1746,7 @@ class AudioEditorActivity : LumenBase() {
 
         private fun laneAt(y: Float): Int {
             val q = p ?: return -1
-            if (y < ruler) return -1
+            if (y < ruler || inFx(y)) return -1
             return ((y - ruler) / laneH(q)).toInt().coerceIn(0, q.tracks.size - 1)
         }
 
@@ -1606,6 +1805,21 @@ class AudioEditorActivity : LumenBase() {
         private val gestures = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
                 edge = 0
+                fxDrag = -1
+                fxDx = 0f
+                fxAt(e.x, e.y)?.let { f ->
+                    fxDrag = f.id
+                    val x0 = xOf(f.at)
+                    val x1 = xOf(f.end)
+                    fxMode = when {
+                        abs(e.x - x0) < dp(16) && x1 - x0 > dp(40) -> 2
+                        abs(e.x - x1) < dp(16) && x1 - x0 > dp(40) -> 3
+                        e.x < x0 -> 2
+                        e.x > x1 -> 3
+                        else -> 1
+                    }
+                    return true
+                }
                 val r = sel
                 if (r != null && e.y >= ruler) {
                     if (abs(e.x - xOf(r.first)) < dp(20)) edge = 1 else if (abs(e.x - xOf(r.last)) < dp(20)) edge = 2
@@ -1622,6 +1836,10 @@ class AudioEditorActivity : LumenBase() {
                 if (scaling) return true
                 val ms = msAt(e2.x)
                 when {
+                    fxDrag >= 0 -> {
+                        fxDx -= dx
+                        edgeScroll(e2.x)
+                    }
                     edge != 0 -> {
                         val r = sel ?: return true
                         val v = snapped(ms)
@@ -1630,7 +1848,7 @@ class AudioEditorActivity : LumenBase() {
                     }
                     dragClip >= 0 -> {
                         dragDx -= dx
-                        dragLane = laneAt(e2.y)
+                        dragLane = laneAt(e2.y).let { if (it < 0) dragLane else it }
                         edgeScroll(e2.x)
                     }
                     selecting -> {
@@ -1649,6 +1867,13 @@ class AudioEditorActivity : LumenBase() {
 
             override fun onSingleTapUp(e: MotionEvent): Boolean {
                 val q = p ?: return true
+                if (fxDrag >= 0) {
+                    val id = fxDrag
+                    fxDrag = -1
+                    layerSheet(id)
+                    return true
+                }
+                if (inFx(e.y)) return true
                 val ms = msAt(e.x).coerceAtMost(q.length)
                 cursor = if (e.y < ruler) ms else snapped(ms)
                 if (e.y >= ruler) {
@@ -1663,6 +1888,7 @@ class AudioEditorActivity : LumenBase() {
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 val q = p ?: return true
+                if (inFx(e.y)) return true
                 val lane = laneAt(e.y)
                 val c = clipAt(lane, msAt(e.x))
                 if (c != null) {
@@ -1678,7 +1904,7 @@ class AudioEditorActivity : LumenBase() {
             }
 
             override fun onLongPress(e: MotionEvent) {
-                if (scaling || edge != 0 || selecting || e.y < ruler) return
+                if (scaling || edge != 0 || selecting || e.y < ruler || fxDrag >= 0 || inFx(e.y)) return
                 val lane = laneAt(e.y)
                 val c = clipAt(lane, msAt(e.x))
                 performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
@@ -1716,7 +1942,26 @@ class AudioEditorActivity : LumenBase() {
             gestures.onTouchEvent(e)
             if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
                 val q = p
-                if (dragClip >= 0 && q != null) {
+                if (fxDrag >= 0 && q != null) {
+                    val f = AudioEdit.fxOf(q, fxDrag)
+                    if (f != null && abs(fxDx) > dp(3)) {
+                        val d = (fxDx / pxPerMs).roundToLong()
+                        val pts = AudioEdit.snapPoints(q.copy(fx = q.fx.filter { it.id != f.id })) + cursor
+                        val n = when (fxMode) {
+                            2 -> { val a = AudioEdit.snap(f.at + d, pts, snapTol()).coerceIn(0L, f.end - AudioEdit.FX_MIN_MS); f.copy(at = a, len = f.end - a) }
+                            3 -> { val b = AudioEdit.snap(f.end + d, pts, snapTol()).coerceAtLeast(f.at + AudioEdit.FX_MIN_MS); f.copy(len = b - f.at) }
+                            else -> {
+                                val a1 = AudioEdit.snap(f.at + d, pts, snapTol())
+                                val a2 = AudioEdit.snap(f.end + d, pts, snapTol()) - f.len
+                                f.copy(at = if (a1 != f.at + d) a1 else if (a2 != f.at + d) a2 else f.at + d)
+                            }
+                        }
+                        commit(AudioEdit.updateFx(q, f.id) { n })
+                    }
+                    fxDrag = -1
+                    fxDx = 0f
+                    invalidate()
+                } else if (dragClip >= 0 && q != null) {
                     val c = q.clip(dragClip)
                     val lane = dragLane.coerceIn(0, q.tracks.size - 1)
                     if (c != null && (abs(dragDx) > dp(4) || q.trackOf(c.id)?.id != q.tracks[lane].id)) {
@@ -1772,6 +2017,7 @@ class AudioEditorActivity : LumenBase() {
                 val i = q.tracks.indexOfFirst { t -> t.clips.any { it.id == dragClip } }
                 if (c != null && i >= 0) drawClip(cv, q, c, q.tracks[i], i, TRACK_COLORS[i % TRACK_COLORS.size], false, dragDx, dragLane.coerceIn(0, q.tracks.size - 1), lifted = true)
             }
+            drawFx(cv, q, night)
             // selection
             sel?.let { r ->
                 val x0 = xOf(r.first)
@@ -1819,6 +2065,49 @@ class AudioEditorActivity : LumenBase() {
                 paint.color = 0xFFEF4444.toInt()
                 val px = xOf(playMs)
                 cv.drawLine(px, 0f, px, height.toFloat(), paint)
+            }
+        }
+
+        private fun drawFx(cv: Canvas, q: AProject, night: Boolean) {
+            if (q.fx.isEmpty()) return
+            val top = fxTop(q).toFloat()
+            paint.style = Paint.Style.FILL
+            paint.color = if (night) 0xFF1E1A26.toInt() else 0xFFF0ECF8.toInt()
+            cv.drawRect(0f, top, width.toFloat(), top + fxLaneH(q), paint)
+            val rows = AudioEdit.fxRows(q.fx)
+            val violet = 0xFF8B5CF6.toInt()
+            for (f in q.fx) {
+                var a = f.at.toFloat()
+                var b = f.end.toFloat()
+                if (f.id == fxDrag) {
+                    val d = fxDx / pxPerMs
+                    when (fxMode) { 2 -> a += d; 3 -> b += d; else -> { a += d; b += d } }
+                }
+                val x0 = (a - scrollMs) * pxPerMs
+                val x1 = (b - scrollMs) * pxPerMs
+                if (x1 < 0 || x0 > width) continue
+                val y0 = top + dp(3) + (rows[f.id] ?: 0) * fxRowH
+                rect.set(x0, y0, max(x0 + dp(4), x1), y0 + fxRowH - dp(4))
+                val empty = AudioEdit.fxEmpty(f)
+                paint.style = Paint.Style.FILL
+                paint.color = (violet and 0x00FFFFFF) or ((if (empty) 0x30 else 0x30 + (0x70 * f.k).toInt()) shl 24)
+                cv.drawRoundRect(rect, dp(6).toFloat(), dp(6).toFloat(), paint)
+                if (f.id == fxDrag) {
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = dp(2).toFloat()
+                    paint.color = violet
+                    cv.drawRoundRect(rect, dp(6).toFloat(), dp(6).toFloat(), paint)
+                    paint.style = Paint.Style.FILL
+                }
+                // edge grips
+                paint.color = if (night) 0xCCFFFFFF.toInt() else 0x99000000.toInt()
+                cv.drawRect(rect.left + dp(2), rect.top + dp(6), rect.left + dp(4), rect.bottom - dp(6), paint)
+                cv.drawRect(rect.right - dp(4), rect.top + dp(6), rect.right - dp(2), rect.bottom - dp(6), paint)
+                txt.color = if (night) 0xFFEDE9FE.toInt() else 0xFF3B2A6B.toInt()
+                cv.save()
+                cv.clipRect(max(rect.left, 0f), rect.top, min(rect.right, width.toFloat()), rect.bottom)
+                cv.drawText(EditSound.label(f.fx).ifEmpty { "🎚 " + t("эффект?", "effect?") }, max(rect.left, 0f) + dp(7), rect.top + dp(14), txt)
+                cv.restore()
             }
         }
 

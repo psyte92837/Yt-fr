@@ -149,4 +149,56 @@ class EditSoundTest {
         assertEquals("", EditTrack.clean(c.copy(sfx = "unknown")).sfx)
         assertTrue(EditTrack.from(EditTrack.json(listOf(VClip("c2", 0, 10)))).single().soundPlain)
     }
+
+    /** Speech-like: a 120 Hz glottal pulse train through three formants, syllables at 3.5 Hz, a pause every 3 s; −18 dBFS. */
+    private fun speech(secs: Float): FloatArray {
+        val n = (rate * secs).toInt()
+        val out = FloatArray(n * 2)
+        val rnd = java.util.Random(3)
+        class Res(f: Double, bw: Double) {
+            val r = kotlin.math.exp(-PI * bw / rate)
+            val c = 2 * r * kotlin.math.cos(2 * PI * f / rate)
+            var y1 = 0.0
+            var y2 = 0.0
+            fun run(x: Double): Double { val y = x + c * y1 - r * r * y2; y2 = y1; y1 = y; return y * (1 - r) }
+        }
+        val f1 = Res(700.0, 110.0)
+        val f2 = Res(1220.0, 120.0)
+        val f3 = Res(2600.0, 160.0)
+        var ph = 0.0
+        for (i in 0 until n) {
+            val t = i.toDouble() / rate
+            ph += (120 + 15 * sin(2 * PI * 0.7 * t)) / rate
+            val src = (if (ph >= 1) { ph -= 1; 1.0 } else 0.0) + rnd.nextGaussian() * 0.02
+            val env = maxOf(0.0, sin(2 * PI * 3.5 * t)) * (if (t % 3.0 < 2.2) 1.0 else 0.0)
+            val v = ((f1.run(src) + f2.run(src) * 0.6 + f3.run(src) * 0.3) * env).toFloat()
+            out[2 * i] = v
+            out[2 * i + 1] = v
+        }
+        val g = 0.126f / EditSound.rms(out)
+        for (i in out.indices) out[i] *= g
+        return out
+    }
+
+    @Test
+    fun presetsKeepTheLevelAndHaveNoOffset() {
+        val inp = speech(4f)
+        val dry = EditSound.rms(inp)
+        val want = mapOf("distance" to -3.0, "next_room" to -6.0)
+        for (f in EditSound.ALL) {
+            val a = inp.copyOf()
+            val c = EditSound.chain(f.id, rate, 2, 1f, 1L)!!
+            var off = 0
+            while (off < a.size) {
+                val n = minOf(8192, a.size - off)
+                val part = a.copyOfRange(off, off + n)
+                c.process(part, n)
+                System.arraycopy(part, 0, a, off, n)
+                off += n
+            }
+            val db = 20 * kotlin.math.log10(EditSound.rms(a) / dry.toDouble())
+            assertEquals(f.id, want[f.id] ?: 0.0, db, 1.5)
+            assertTrue(f.id + " offset", abs(a.average()) < 0.002)
+        }
+    }
 }

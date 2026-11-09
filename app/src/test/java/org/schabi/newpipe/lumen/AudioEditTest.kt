@@ -206,4 +206,80 @@ class AudioEditTest {
         }
         assertEquals(40, AudioGen.resampleToStereo(ShortArray(10) { 100 }, 1000, 2000).size)
     }
+
+    @Test
+    fun effectLayersFollowTheEditsAndFadeAtTheirEdges() {
+        var p = joined()
+        val (q, id) = AudioEdit.addFx(p, "radio_old", 9_000, 3_000, 0.8f)
+        p = q
+        assertEquals(9_000L, AudioEdit.fxOf(p, id)!!.at)
+        // cutting 2..4 s closes the gap: the layer moves left
+        assertEquals(7_000L, AudioEdit.fxOf(AudioEdit.deleteRange(p, 2_000, 4_000), id)!!.at)
+        // cutting across it shortens it
+        val cut = AudioEdit.fxOf(AudioEdit.deleteRange(p, 10_000, 11_000), id)!!
+        assertEquals(9_000L to 2_000L, cut.at to cut.len)
+        // a gap inside stretches it, a gap before moves it
+        assertEquals(3_500L, AudioEdit.fxOf(AudioEdit.insertGap(p, 10_000, 500), id)!!.len)
+        assertEquals(9_500L, AudioEdit.fxOf(AudioEdit.insertGap(p, 1_000, 500), id)!!.at)
+        // crop keeps the part inside
+        assertEquals(0L to 1_000L, AudioEdit.fxOf(AudioEdit.cropTo(p, 11_000, 13_000), id)!!.let { it.at to it.len })
+        // kept inside the project, never shorter than the minimum
+        val moved = AudioEdit.fxOf(AudioEdit.updateFx(p, id) { it.copy(at = 20_000, len = 10) }, id)!!
+        assertEquals(AudioEdit.FX_MIN_MS, moved.len)
+        assertEquals(14_000L - AudioEdit.FX_MIN_MS, moved.at)
+        val f = AudioEdit.fxOf(p, id)!!
+        assertEquals(0f, AudioEdit.fxWeight(f, 8_999.0), 0f)
+        assertEquals(0.5f, AudioEdit.fxWeight(f, 9_015.0), 1e-3f)
+        assertEquals(1f, AudioEdit.fxWeight(f, 10_000.0), 0f)
+        assertTrue(AudioEdit.fxEmpty(f.copy(fx = "nope")) && AudioEdit.fxEmpty(f.copy(k = 0f)))
+        // overlapping layers get rows; JSON keeps them
+        val (p2, id2) = AudioEdit.addFx(p, "echo", 10_000, 1_000)
+        assertEquals(setOf(0, 1), AudioEdit.fxRows(p2.fx).values.toSet())
+        val back = AudioEdit.fromJson(JSONObject(AudioEdit.toJson(p2).toString()))
+        assertEquals(p2.fx, back.fx)
+        assertTrue(back.nextId > id2)
+    }
+
+    @Test
+    fun mixerAppliesALayerOnlyWhereItLasts() {
+        val rate = 8000
+        val pcm = ShortArray(rate * 2 * 2) { (8000 * sin(2 * PI * 80 * (it / 2) / rate)).toInt().toShort() }
+        var p = AudioEdit.empty("p", "x").copy(rate = rate)
+        p = AudioEdit.append(p, 1, ASource("t", "tone", 2000))
+        val dry = FloatArray(rate * 2 * 2)
+        AMixer { MemSrc(pcm) }.render(p, 0, dry, rate * 2)
+        p = AudioEdit.addFx(p, "phone", 1000, 1000).first
+        val wet = FloatArray(rate * 2 * 2)
+        AMixer { MemSrc(pcm) }.render(p, 0, wet, rate * 2)
+        // before the layer: identical; inside it the phone band cuts the 80 Hz tone
+        for (i in 0 until rate) assertEquals(dry[i], wet[i], 1e-6f)
+        fun rms(a: FloatArray, from: Int, to: Int) = sqrt((from until to).sumOf { (a[it] * a[it]).toDouble() } / (to - from))
+        assertTrue(rms(wet, rate * 2 + 2000, rate * 4) < rms(dry, rate * 2 + 2000, rate * 4) * 0.7)
+    }
+
+    @Test
+    fun hundredAmbiencesAreMadeLevelledAndWide() {
+        assertEquals(100, AudioAmb.SOUNDS.size)
+        assertEquals(100, AudioAmb.SOUNDS.map { it.id }.toSet().size)
+        AudioAmb.GROUPS.forEach { assertEquals(it.id, 10, AudioAmb.of(it.id).size) }
+        var wide = 0
+        for (s in AudioAmb.SOUNDS) {
+            val x = AudioAmb.render(s.id, 16_000, 3_000)!!
+            assertTrue(s.id, x.isNotEmpty() && x.none { it.isNaN() } && x.all { it in -1f..1f })
+            val frames = x.size / 2
+            if (s.oneShotMs == 0L) assertEquals(s.id, 3 * 16_000, frames)
+            var e = 0.0
+            var lr = 0.0
+            for (i in 0 until frames) { e += (x[2 * i] * x[2 * i] + x[2 * i + 1] * x[2 * i + 1]) / 2.0; lr += x[2 * i] * x[2 * i + 1] }
+            val db = 10 * kotlin.math.log10(e / frames + 1e-12)
+            assertTrue("${s.id} $db dB", db > -40 && db < -8)
+            if (lr / e < 0.9) wide++
+        }
+        assertTrue("wide $wide", wide > 50)
+        // different pieces of a long bed are not copies of each other
+        val a = AudioAmb.render("rain", 16_000, 2_000, seed = 1)!!
+        val b = AudioAmb.render("rain", 16_000, 2_000, seed = 2)!!
+        assertTrue(a.indices.count { a[it] != b[it] } > a.size / 2)
+        assertEquals(6_000L, AudioAmb.lengthOf("car_pass", 60_000))
+    }
 }

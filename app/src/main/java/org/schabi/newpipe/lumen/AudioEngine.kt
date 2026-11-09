@@ -336,6 +336,59 @@ object AudioImport {
         }
     }
 
+    /**
+     * Ambience [id] of [ms] as a new source: made in pieces of [AudioAmb.CHUNK_MS] (each with its own randomness,
+     * overlapped by [AudioAmb.JOIN_MS] with an equal-power crossfade), so 10 minutes need no more memory than 20 s.
+     */
+    fun writeAmbient(p: AProject, id: String, name: String, ms: Long, cancelled: () -> Boolean, progress: (Int) -> Unit): ASource {
+        val rate = p.rate
+        val total = AudioAmb.lengthOf(id, ms)
+        val sid = AudioStore.newId("s")
+        val w = SrcWriter(AudioStore.pcm(p.id, sid), AudioStore.peaks(p.id, sid))
+        try {
+            if ((AudioAmb.find(id)?.oneShotMs ?: 0L) > 0L || total <= AudioAmb.CHUNK_MS + AudioAmb.JOIN_MS) {
+                val x = AudioAmb.render(id, rate, total) ?: error("unknown sound $id")
+                for (i in 0 until x.size / 2) w.frame(x[2 * i], x[2 * i + 1])
+            } else {
+                val totalF = total * rate / 1000
+                val joinF = (AudioAmb.JOIN_MS * rate / 1000).toInt()
+                val edgeF = (rate * 0.4).toInt()
+                var tail: FloatArray? = null
+                var done = 0L
+                var k = 0L
+                while (done < totalF) {
+                    if (cancelled()) throw CancellationException()
+                    val x = AudioAmb.render(id, rate, AudioAmb.CHUNK_MS + AudioAmb.JOIN_MS, seed = k + 1, edges = false) ?: error("unknown sound $id")
+                    val n = x.size / 2
+                    val keep = n - joinF
+                    for (i in 0 until keep) {
+                        if (done >= totalF) break
+                        var l = x[2 * i]
+                        var r = x[2 * i + 1]
+                        val prev = tail
+                        if (prev != null && i < joinF) {
+                            val a = (i + 0.5f) / joinF * (Math.PI.toFloat() / 2)
+                            l = l * kotlin.math.sin(a) + prev[2 * i] * kotlin.math.cos(a)
+                            r = r * kotlin.math.sin(a) + prev[2 * i + 1] * kotlin.math.cos(a)
+                        }
+                        // soft start and end of the whole
+                        val g = min(1f, min(done.toFloat() / edgeF, (totalF - 1 - done).toFloat() / edgeF)).coerceAtLeast(0f)
+                        w.frame(l * g, r * g)
+                        done++
+                    }
+                    tail = x.copyOfRange(keep * 2, n * 2)
+                    k++
+                    progress((done * 100 / totalF).toInt())
+                }
+            }
+            val frames = w.finish()
+            return ASource(sid, name, frames * 1000 / rate)
+        } catch (e: Throwable) {
+            w.abort()
+            throw e
+        }
+    }
+
     /** A library sound at the project's rate. */
     fun sound(id: String, rate: Int): FloatArray = AudioGen.synth(id, rate) ?: StudioSfx.synth(id, rate)
 }
@@ -478,10 +531,14 @@ class AudioPlayer {
 object AudioPreview {
     @Volatile private var track: AudioTrack? = null
 
-    fun play(mono: FloatArray, rate: Int) {
+    fun play(mono: FloatArray, rate: Int) = playShorts(AudioGen.stereo(mono), rate)
+
+    /** Interleaved stereo floats. */
+    fun playStereo(st: FloatArray, rate: Int) = playShorts(ShortArray(st.size) { (st[it] * 32767f).roundToInt().coerceIn(-32768, 32767).toShort() }, rate)
+
+    private fun playShorts(sh: ShortArray, rate: Int) {
         stop()
-        if (mono.isEmpty()) return
-        val sh = AudioGen.stereo(mono)
+        if (sh.isEmpty()) return
         Thread {
             try {
                 val tr = AudioTrack.Builder()

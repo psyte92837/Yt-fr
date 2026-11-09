@@ -47,6 +47,9 @@ class AMixer(private val open: (String) -> ASrc?) {
     private class Run(val clip: AClip, val stages: List<EditSound.Stage>, val chain: EditSound.Chain?, var next: Long)
 
     private val runs = HashMap<Int, Run>()
+    private class FxRun(val f: AFx, val chain: EditSound.Chain, var next: Long)
+    private val fxRuns = HashMap<Int, FxRun>()
+    private var wet = FloatArray(0)
     private val srcs = HashMap<String, ASrc?>()
     private var lastP: AProject? = null
     private var seamBefore = HashSet<Int>()
@@ -55,7 +58,10 @@ class AMixer(private val open: (String) -> ASrc?) {
     private var buf = FloatArray(0)
 
     /** Forget effect states (a jump in time does it by itself). */
-    fun reset() = runs.clear()
+    fun reset() {
+        runs.clear()
+        fxRuns.clear()
+    }
 
     private fun prepare(p: AProject) {
         lastP = p
@@ -69,6 +75,7 @@ class AMixer(private val open: (String) -> ASrc?) {
         seamAfter = after
         val ids = p.clips.map { it.id }.toSet()
         runs.keys.retainAll(ids)
+        fxRuns.keys.retainAll(p.fx.map { it.id }.toSet())
         val used = p.sources.map { it.id }.toSet()
         srcs.keys.retainAll(used)
     }
@@ -84,6 +91,7 @@ class AMixer(private val open: (String) -> ASrc?) {
             val pr = (if (t.pan < 0f) 1f + t.pan else 1f) * t.gain
             for (c in t.clips) clip(p.rate, c, start, out, frames, pl, pr)
         }
+        for (f in p.fx) layer(p.rate, f, start, out, frames)
         val g = p.gain
         for (i in 0 until frames * 2) out[i] = EditSound.soft(out[i] * g)
     }
@@ -99,6 +107,33 @@ class AMixer(private val open: (String) -> ASrc?) {
         if (abs(c.semis) > 0.01f) st += EditSound.Pitch(r, 2, c.semis)
         val chain = if (c.fx.isNotEmpty()) EditSound.chain(c.fx, rate, 2, c.fxK, c.id.toLong()) else null
         return Run(c, st, chain, at)
+    }
+
+    /** Effect layer [f] over the mix: the processed sound blends in by [AudioEdit.fxWeight] (30 ms ramps at its edges). */
+    private fun layer(rate: Int, f: AFx, start: Long, out: FloatArray, frames: Int) {
+        if (AudioEdit.fxEmpty(f)) return
+        val i0 = max(start, fr(f.at, rate))
+        val i1 = min(start + frames, fr(f.end, rate))
+        if (i1 <= i0) return
+        var run = fxRuns[f.id]
+        if (run == null || run.f != f || run.next != i0) {
+            val ch = EditSound.chain(f.fx, rate, 2, f.k, f.id.toLong()) ?: return
+            run = FxRun(f, ch, i0)
+            fxRuns[f.id] = run
+        }
+        val m = (i1 - i0).toInt()
+        val o = ((i0 - start) * 2).toInt()
+        if (wet.size < m * 2) wet = FloatArray(m * 2)
+        System.arraycopy(out, o, wet, 0, m * 2)
+        run.chain.process(wet, m * 2)
+        for (k in 0 until m) {
+            val w = AudioEdit.fxWeight(f, (i0 + k) * 1000.0 / rate)
+            if (w <= 0f) continue
+            val a = o + 2 * k
+            out[a] += (wet[2 * k] - out[a]) * w
+            out[a + 1] += (wet[2 * k + 1] - out[a + 1]) * w
+        }
+        run.next = i1
     }
 
     private fun clip(rate: Int, c: AClip, start: Long, out: FloatArray, frames: Int, pl: Float, pr: Float) {

@@ -123,9 +123,28 @@ object EditSound {
     /** A ready chain of effect [id] for PCM at [rate] Hz with [ch] channels; [k] 0..1 is the strength. Null for "" or an unknown id. */
     fun chain(id: String, rate: Int, ch: Int, k: Float = 1f, seed: Long = 1L): Chain? {
         if (k <= 0f) return null
-        val st = stages(id, rate.coerceAtLeast(8000).toFloat(), max(1, ch), seed) ?: return null
-        return Chain(st, max(1, ch), k.coerceIn(0f, 1f))
+        val r = rate.coerceAtLeast(8000).toFloat()
+        val c = max(1, ch)
+        val st = stages(id, r, c, seed) ?: return null
+        // a DC blocker first (reverbs and drives pile up any offset), the level match last: the effect sounds as loud as the dry sound
+        val trim = TRIM[id] ?: 0f
+        return Chain(listOf(DcBlock(c)) + st + DcBlock(c) + (if (trim != 0f) listOf(Gain(trim)) else emptyList()), c, k.coerceIn(0f, 1f))
     }
+
+    /**
+     * Level match per preset in dB, measured on speech at −18 dBFS (EditSoundTest.presetsKeepTheLevel checks it):
+     * every effect comes out within about ±1.5 dB of the dry sound, "far away" and "behind a wall" a little quieter on purpose.
+     */
+    internal val TRIM: Map<String, Float> = mapOf(
+        "radio_old" to 1.6f, "radio_war" to 1.3f, "gramophone" to -1.9f, "vinyl" to 0.5f, "film_old" to 1.3f,
+        "tv_old" to -3.0f, "next_room" to 7.0f, "small_room" to -0.9f, "bathroom" to -2.8f, "hall" to -3.4f,
+        "church" to -5.6f, "cave" to -3.1f, "stadium" to -7.1f, "station" to -6.7f, "underwater" to 2.2f,
+        "phone" to 4.1f, "walkie" to 4.1f, "megaphone" to -3.1f, "intercom" to -3.4f, "broken" to -0.8f,
+        "smartphone" to 3.0f, "clear" to 2.3f, "podcast" to 0.8f, "radio_host" to 2.9f, "deeper" to 1.4f,
+        "higher" to 1.4f, "chipmunk" to 1.5f, "robot" to 1.6f, "alien" to 1.1f, "ghost" to -3.7f, "chorus" to 3.1f,
+        "flanger" to -1.7f, "phaser" to -1.0f, "tremolo" to 3.3f, "wah" to -4.8f, "pan8d" to -0.8f, "glitch" to 1.4f,
+        "dream" to -2.6f, "horror" to -5.1f, "space" to -5.8f, "bass" to 2.7f, "trailer" to 2.6f
+    )
 
     // ---------- presets ----------
 
@@ -221,30 +240,26 @@ object EditSound {
 
         /** [n] shorts of [a] (interleaved, [ch] channels) processed in place. */
         fun process(a: ShortArray, n: Int) {
+            val len = n / ch * ch
+            if (len <= 0) return
+            if (buf.size < len) buf = FloatArray(len)
+            for (i in 0 until len) buf[i] = a[i] / 32768f
+            process(buf, len)
+            for (i in 0 until len) a[i] = (buf[i] * 32767f).roundToInt().coerceIn(-32768, 32767).toShort()
+        }
+
+        /** Same on floats in -1..1, in place and without rounding to 16 bits (the audio editor's mixer, tests). */
+        fun process(f: FloatArray, n: Int) {
             val frames = n / ch
             val len = frames * ch
             if (len <= 0) return
-            if (buf.size < len) {
-                buf = FloatArray(len)
-                dry = FloatArray(len)
-            }
+            if (dry.size < len) dry = FloatArray(len)
+            System.arraycopy(f, 0, dry, 0, len)
+            for (s in stages) s.run(f, frames, ch)
             for (i in 0 until len) {
-                val v = a[i] / 32768f
-                buf[i] = v
-                dry[i] = v
+                val v = f[i]
+                f[i] = soft(dry[i] + ((if (v.isNaN()) 0f else v) - dry[i]) * k)
             }
-            for (s in stages) s.run(buf, frames, ch)
-            for (i in 0 until len) {
-                val v = dry[i] + (buf[i] - dry[i]) * k
-                a[i] = (soft(v) * 32767f).roundToInt().coerceIn(-32768, 32767).toShort()
-            }
-        }
-
-        /** Same on floats in -1..1 (tests, analysis). */
-        fun process(f: FloatArray, n: Int) {
-            val sh = ShortArray(n) { (f[it] * 32767f).roundToInt().coerceIn(-32768, 32767).toShort() }
-            process(sh, n)
-            for (i in 0 until n) f[i] = sh[i] / 32768f
         }
     }
 
@@ -261,6 +276,23 @@ object EditSound {
     /** One step of a chain over [frames] interleaved frames of [ch] channels. */
     abstract class Stage {
         abstract fun run(b: FloatArray, frames: Int, ch: Int)
+    }
+
+    /** Removes a constant offset (a one-pole high-pass at ~7 Hz). */
+    class DcBlock(ch: Int) : Stage() {
+        private val x1 = FloatArray(ch)
+        private val y1 = FloatArray(ch)
+        override fun run(b: FloatArray, frames: Int, ch: Int) {
+            val cc = min(ch, x1.size)
+            for (f in 0 until frames) for (c in 0 until cc) {
+                val i = f * ch + c
+                val x = b[i]
+                val y = x - x1[c] + 0.999f * y1[c]
+                x1[c] = x
+                y1[c] = if (abs(y) < 1e-20f) 0f else y
+                b[i] = y
+            }
+        }
     }
 
     class Gain(db: Float) : Stage() {
@@ -773,8 +805,10 @@ object EditSound {
                 ph += step
                 ph -= floor(ph)
                 val p2 = (ph + 0.5f) - floor(ph + 0.5f)
-                val g1 = 1f - abs(2f * ph - 1f)
-                val g2 = 1f - abs(2f * p2 - 1f)
+                // sin² windows half a grain apart sum to exactly 1 and fade smoother than triangles
+                val s1 = sin(PI.toFloat() * ph)
+                val g1 = s1 * s1
+                val g2 = 1f - g1
                 for (c in 0 until cc) {
                     val i = f * ch + c
                     lines[c].push(b[i])

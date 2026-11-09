@@ -40,7 +40,7 @@ data class SClip(
 data class ClipSlot(val startMs: Long, val endMs: Long, val id: String, val leadMs: Long, val lenMs: Long, val offsetMs: Long = 0)
 
 /** A video found by title in the Cuts search. */
-data class CutHit(val url: String, val title: String, val channel: String = "", val durationMs: Long = 0, val thumb: String = "")
+data class CutHit(val url: String, val title: String, val channel: String = "", val durationMs: Long = 0, val thumb: String = "", val topic: String = "")
 
 /** A fragment of a DASH stream from its sidx box: where its bytes are and what time it covers. */
 data class DashSeg(val offset: Long, val size: Long, val startUs: Long, val durUs: Long)
@@ -363,6 +363,37 @@ object StudioCuts {
      * Adds the marked videos as clips from [fromMs] (default length); a video already in the list is skipped,
      * at most [MAX_CLIPS] in all. The note is the AI note or the title.
      */
+    /** Most topics one search runs. */
+    const val MAX_TOPICS = 10
+
+    /**
+     * Search topics from the text of the search field: one per line (list marks "-", "•", "1." are dropped),
+     * blank lines and repeats (any case) skipped, at most [MAX_TOPICS].
+     */
+    fun topics(text: String): List<String> {
+        val seen = HashSet<String>()
+        return text.lines()
+            .map { it.trim().replace(Regex("^(?:[-•*·]+|\\d{1,2}[.)])\\s*"), "").trim() }
+            .filter { it.isNotEmpty() && seen.add(it.lowercase()) }
+            .take(MAX_TOPICS)
+    }
+
+    /** Results per topic: one topic gets [total], several share it, but each gets [min]..[max]. */
+    fun perTopic(n: Int, total: Int = 30, min: Int = 8, max: Int = 20): Int =
+        if (n <= 1) total else (total * 2 / n).coerceIn(min, max)
+
+    /** Results of several topics one by one (first of each, then second…), a video found twice is kept once. */
+    fun mergeHits(groups: List<List<CutHit>>): List<CutHit> {
+        val out = ArrayList<CutHit>()
+        val have = HashSet<String>()
+        val longest = groups.maxOfOrNull { it.size } ?: 0
+        for (i in 0 until longest) for (g in groups) {
+            val h = g.getOrNull(i) ?: continue
+            if (have.add(h.url)) out += h
+        }
+        return out
+    }
+
     fun addHits(clips: List<SClip>, hits: List<CutHit>, notes: Map<String, String> = emptyMap(), fromMs: Long = 0): List<SClip> {
         val out = clips.toMutableList()
         val have = clips.map { it.url }.toMutableSet()

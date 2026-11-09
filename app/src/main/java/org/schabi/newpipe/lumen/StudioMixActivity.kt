@@ -2658,7 +2658,7 @@ class StudioMixActivity : LumenBase() {
             (look.view.parent as? ViewGroup)?.removeView(look.view)
             val have = clips.map { it.url }.toSet()
             for (h in hits) {
-                val sub = listOf(h.channel, if (h.durationMs > 0) StudioCuts.stamp(h.durationMs) else "").filter { it.isNotBlank() }.joinToString(" · ")
+                val sub = listOf(if (h.topic.isNotEmpty()) "🔎 ${h.topic}" else "", h.channel, if (h.durationMs > 0) StudioCuts.stamp(h.durationMs) else "").filter { it.isNotBlank() }.joinToString(" · ")
                 val label = (if (h.url in have) "✅ " else "") + h.title + if (sub.isNotEmpty()) "\n$sub" else ""
                 val line = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -2686,30 +2686,42 @@ class StudioMixActivity : LumenBase() {
         }
         fillRef = { fill() }
 
-        fun search(q: String) {
-            if (q.isBlank()) return
+        fun search(text: String) {
+            val topics = StudioCuts.topics(text)
+            if (topics.isEmpty()) return
+            val each = StudioCuts.perTopic(topics.size)
             info.text = t("Поиск…", "Searching…")
             Lumen.async({
-                YouTube.search(listOf(q), SearchFilters(limit = 30)).map {
-                    CutHit(it.url, it.title, it.channel, if (it.duration > 0) it.duration * 1000 else 0,
-                        // a light 320×180 picture is enough for the list
-                        YtQuery.videoIdFromUrl(it.url)?.let { id -> "https://i.ytimg.com/vi/$id/mqdefault.jpg" } ?: it.thumb)
+                val groups = topics.mapIndexed { i, q ->
+                    if (topics.size > 1) runOnUiThread { info.text = t("Поиск ${i + 1}/${topics.size}: $q…", "Searching ${i + 1}/${topics.size}: $q…") }
+                    runCatching {
+                        YouTube.search(listOf(q), SearchFilters(limit = each)).take(each).map {
+                            CutHit(it.url, it.title, it.channel, if (it.duration > 0) it.duration * 1000 else 0,
+                                // a light 320×180 picture is enough for the list
+                                YtQuery.videoIdFromUrl(it.url)?.let { id -> "https://i.ytimg.com/vi/$id/mqdefault.jpg" } ?: it.thumb,
+                                topic = if (topics.size > 1) q else "")
+                        }
+                    }.getOrElse { e -> if (topics.size == 1) throw e else emptyList() }
                 }
-            }, { e -> info.text = (e.message ?: e.javaClass.simpleName).take(200) }) { found ->
+                Pair(StudioCuts.mergeHits(groups), topics.zip(groups).filter { it.second.isEmpty() }.map { it.first })
+            }, { e -> info.text = (e.message ?: e.javaClass.simpleName).take(200) }) { (found, empty) ->
                 hits = found
                 marked.clear()
                 watching = ""
                 look.stop()
                 info.text = if (found.isEmpty()) t("Ничего не нашлось. Попробуйте другие слова.", "Nothing found. Try other words.")
-                else t("Найдено: ${found.size}. Отметьте нужные.", "Found: ${found.size}. Tick the ones you need.")
+                else t("Найдено: ${found.size}", "Found: ${found.size}") +
+                    (if (topics.size > 1) t(" по темам: ${topics.size}", " for ${topics.size} topics") else "") +
+                    (if (empty.isNotEmpty()) t(". Пусто: ${empty.joinToString(", ")}", ". Nothing for: ${empty.joinToString(", ")}") else "") +
+                    t(". Отметьте нужные.", ". Tick the ones you need.")
                 fill()
             }
         }
 
         bottomSheet(t("Найти видео для микса", "Find videos for the mix"), onDismiss = { look.release() }) { _ ->
-            muted(t("Поиск по названию на YouTube. Картинка или ▾ — кадры по всему видео; тап по кадру — видео с этого места в низком качестве. Отмеченные добавятся с 0:00 на 5 с; отрезок задайте кнопкой «⏱ Отрезок». Можно искать снова и добавлять ещё.",
-                "Search YouTube by title. The picture or ▾ shows frames across the video; tap a frame to watch from there in low quality. Ticked ones are added from 0:00 for 5 s; set the piece with \"⏱ Piece\". You can search again and add more."))
-            val query = edit(t("Что искать", "What to search"))
+            muted(t("Поиск по названию на YouTube. Несколько тем — каждая с новой строки: Lumen найдёт видео по каждой и покажет вперемешку. Картинка или ▾ — кадры по всему видео; тап по кадру — видео с этого места в низком качестве. Отмеченные добавятся с 0:00 на 5 с; отрезок задайте кнопкой «⏱ Отрезок». Можно искать снова и добавлять ещё.",
+                "Search YouTube by title. Several topics — one per line: Lumen searches each and shows the results together. The picture or ▾ shows frames across the video; tap a frame to watch from there in low quality. Ticked ones are added from 0:00 for 5 s; set the piece with \"⏱ Piece\". You can search again and add more."))
+            val query = edit(t("Что искать (темы — с новой строки)", "What to search (topics — one per line)"), multiline = true)
             button(t("🔎 Искать", "🔎 Search"), style = BtnStyle.TONAL) { search(query.text.toString().trim()) }
             info = add(text(ctx, "", 13f, color = Palette.MUTED), 4)
             button(t("▶ Пролистать найденное", "▶ Flip through the results"), style = BtnStyle.TEXT) {

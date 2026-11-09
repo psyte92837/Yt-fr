@@ -286,4 +286,17 @@ class StudioCutsTest {
         assertEquals(3_000L, s[2].offsetMs)
         assertTrue(s.all { it.offsetMs + (it.endMs - it.startMs) <= it.lenMs })
     }
+
+    @Test
+    fun severalSearchTopicsOnePerLine() {
+        assertEquals(listOf("кошки", "1080p dogs", "горы"),
+            StudioCuts.topics("  - кошки\n\n1) 1080p dogs\nКОШКИ\n• горы\n"))
+        assertEquals(StudioCuts.MAX_TOPICS, StudioCuts.topics((1..15).joinToString("\n") { "t$it" }).size)
+        assertEquals(30, StudioCuts.perTopic(1))
+        assertEquals(20, StudioCuts.perTopic(3))
+        assertEquals(8, StudioCuts.perTopic(10))
+        val a = listOf(CutHit("u1", "a1"), CutHit("u2", "a2"), CutHit("u3", "a3"))
+        val b = listOf(CutHit("u2", "b1"), CutHit("u4", "b2"))
+        assertEquals(listOf("u1", "u2", "u4", "u3"), StudioCuts.mergeHits(listOf(a, b)).map { it.url })
+    }
 }

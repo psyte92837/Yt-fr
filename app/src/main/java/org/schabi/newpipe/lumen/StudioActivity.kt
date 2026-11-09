@@ -240,9 +240,11 @@ class StudioActivity : LumenBase() {
         const val LAYER_TAB = 7
         /** "📋 Tasks": the author's task board (its own screen) — in both apps. */
         const val TASKS_TAB = 8
+        /** "🎧 Audio editor": its own screen — in both apps. */
+        const val AUDIO_TAB = 9
 
         /** Items of the panel by place: Lumen — the five tasks and the Mix; Lumen Studio — without Clips and Mix. */
-        private val tabIds get() = if (Flavor.STUDIO) listOf(0, 1, 2, 4, EDITOR_TAB, LAYER_TAB, TASKS_TAB) else (0..5).toList() + TASKS_TAB
+        private val tabIds get() = if (Flavor.STUDIO) listOf(0, 1, 2, 4, EDITOR_TAB, LAYER_TAB, TASKS_TAB, AUDIO_TAB) else (0..5).toList() + TASKS_TAB + AUDIO_TAB
 
         /**
          * The Studio panel: the five tasks and the Mix, in two rows of three so the names fit on a phone
@@ -251,19 +253,31 @@ class StudioActivity : LumenBase() {
         fun tabs(ctx: Context, selected: Int, onSelect: (Int) -> Unit): View {
             val all = listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"),
                 t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix"), t("✏️ Редактор", "✏️ Editor"), t("🎛 Слой ИИ", "🎛 AI layer"),
-                t("📋 Задачи: доска, планы, сроки", "📋 Tasks: board, plans, dates"))
+                t("📋 Задачи", "📋 Tasks"), t("🎧 Аудиоредактор", "🎧 Audio editor"))
             val ids = tabIds
             val labels = ids.map { all[it] }
             val at = ids.indexOf(selected)
             return LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                // rows of three; the rest (the Tasks) gets a full-width row of its own
+                // rows of three; the rest (Tasks, Audio editor) share the last row
                 for (r in 0..(labels.size - 1) / 3) {
                     val from = r * 3
                     val to = minOf(from + 3, labels.size)
                     addView(segBar(ctx, labels.subList(from, to), if (at in from until to) at - from else -1) { onSelect(ids[from + it]) },
                         LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (r > 0) topMargin = ctx.dp(6) })
                 }
+            }
+        }
+
+        /** Opens panel item [i] from a screen of its own (the Mix, Tasks, the audio editor). */
+        fun openTab(ctx: Context, i: Int) {
+            when (i) {
+                MIX_TAB -> StudioMixActivity.open(ctx)
+                EDITOR_TAB -> StudioEditorActivity.open(ctx)
+                LAYER_TAB -> WebLayerActivity.open(ctx, null, false)
+                TASKS_TAB -> BoardActivity.open(ctx)
+                AUDIO_TAB -> AudioEditorActivity.open(ctx)
+                else -> openTask(ctx, StudioTask.entries[i])
             }
         }
 
@@ -619,6 +633,7 @@ class StudioActivity : LumenBase() {
                 EDITOR_TAB -> StudioEditorActivity.open(this)
                 LAYER_TAB -> WebLayerActivity.open(this, null, false)
                 TASKS_TAB -> BoardActivity.open(this)
+                AUDIO_TAB -> AudioEditorActivity.open(this)
                 else -> switchTask(StudioTask.entries[i])
             }
         }, 0)

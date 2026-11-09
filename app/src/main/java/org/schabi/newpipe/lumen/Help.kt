@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "board", "bite", "player", "bots", "bot_posts", "settings"
+        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "board", "audio", "bite", "player", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -48,6 +48,7 @@ object HelpMap {
         "StudioEditorActivity" to "studio",
         "WebLayerActivity" to "montage",
         "BoardActivity" to "board",
+        "AudioEditorActivity" to "audio",
         "BotsActivity" to "bots",
         "BotNewActivity" to "bots",
         "BotActivity" to "bots",
@@ -379,6 +380,36 @@ object Help {
             listOf(
                 t("🔍 ищет по словам и ключу (LUM-12); чипы сверху фильтруют по плану, приоритету, типу и меткам.", "🔍 searches words and keys (LUM-12); the chips on top filter by plan, priority, type and labels."),
                 t("⋮ → поделиться списком (Markdown), сменить префикс ключей, убрать старые готовые.", "⋮ → share the list (Markdown), change the key prefix, remove old done tasks.")
+            )
+        ),
+        HelpTopic("audio", t("Аудиоредактор", "Audio editor"),
+            t("Редактор звука на телефоне: обрезка, склейка, несколько дорожек, громкость, шумоподавление, эффекты, звуки и запись. Исходные файлы не меняются — правки хранятся в проекте.",
+                "A sound editor on the phone: trim, join, several tracks, volume, noise removal, effects, sounds and recording. The original files stay as they are — edits live in the project."),
+            listOf(
+                t("Вход: панель Студии → «🎧 Аудиоредактор», поиск «аудио» или из любого приложения «Поделиться» → «Аудиоредактор» (несколько файлов склеятся по порядку). Ещё — «Открыть с помощью» у аудиофайла.",
+                    "Entry: the Studio panel → \"🎧 Audio editor\", search \"audio\" or \"Share\" → \"Audio editor\" from any app (several files are joined in order). Also \"Open with\" on an audio file."),
+                t("Волна: тап — курсор и выбор куска, двойной тап — выделить кусок, удержание на пустом месте или кнопка ⟦⟧ — выделение (края тянутся), удержание куска — перетащить его по времени или на другую дорожку, щипок — масштаб, ⤢ — весь проект. Края и метки «примагничивают».",
+                    "Wave: tap — cursor and pick a piece, double tap — select a piece, hold an empty spot or ⟦⟧ — selection (drag its edges), hold a piece — drag it in time or to another track, pinch — zoom, ⤢ — fit. Edges and markers snap."),
+                t("✂ Правка: разрезать в курсоре, удалить выделенное (со сдвигом или оставив паузу), копировать/вырезать/вставить (в курсор или поверх), оставить только выделенное, вставить тишину, 🧹 убрать паузы автоматически, метки, плавные стыки (кроссфейд).",
+                    "✂ Edit: split at the cursor, delete the selection (closing the gap or leaving it), copy/cut/paste (at the cursor or over), crop, insert silence, 🧹 remove pauses automatically, markers, crossfades."),
+                t("🔊 Громкость: громкость, нарастание и затухание по выделению или краям куска, нормализация пика −1 дБ, громкость для приложений (−14/−16/−19/−23 LUFS), заглушить, общая громкость, 🦆 приглушение музыки под голосом.",
+                    "🔊 Volume: volume, fade in and out over the selection or a piece's edges, peak normalising to −1 dB, loudness for apps (−14/−16/−19/−23 LUFS), mute, master volume, 🦆 ducking music under the voice."),
+                t("✨ Эффекты: 🪄 улучшить голос одним нажатием, 🧹 шумоподавление (изучает тихие места файла), эквалайзер на 3 полосы, скорость с сохранением высоты голоса или как плёнка, высота тона, задом наперёд и 50 эффектов (радио, телефон, зал, робот, эхо, 8D…). Лист эффекта сразу играет результат по кругу; «✓ Применить» — оставить, закрыть — вернуть как было.",
+                    "✨ Effects: 🪄 enhance a voice in one tap, 🧹 noise removal (learns the quiet places of the file), a 3-band EQ, speed keeping the voice pitch or like tape, pitch, reverse and 50 effects (radio, phone, hall, robot, echo, 8D…). An effect sheet plays the result in a loop; \"✓ Apply\" keeps it, closing puts it back."),
+                t("Что меняется: выделенный участок; если его нет — выбранный кусок; если ничего не выбрано — весь проект. При нескольких дорожках чипы над действиями сужают выделение до одной.",
+                    "What changes: the selection; without it — the chosen piece; with nothing chosen — the whole project. With several tracks the chips above narrow the selection to one."),
+                t("🎵 Звуки: библиотека (переходы, интерфейс, ударные, атмосфера, забавные) — тап слушает, «＋» кладёт в курсор на свободную дорожку; генераторы тона и шума; 🤐 запикать выделенное.",
+                    "🎵 Sounds: a library (transitions, interface, drums, ambience, fun) — tap to listen, \"＋\" puts it at the cursor on a free track; tone and noise generators; 🤐 bleep the selection."),
+                t("🎚 Дорожки: добавить аудиофайлы или звук из видео (в конец — склеить, в курсор — вставить, поверх — смешать), запись с микрофона (можно слушать проект в наушниках), громкость, панорама, 🔇 и 🎧 соло, переименовать, удалить.",
+                    "🎚 Tracks: add audio files or the sound of a video (at the end — join, at the cursor — insert, over — mix), microphone recording (you can hear the project in headphones), volume, pan, 🔇 and 🎧 solo, rename, delete."),
+                t("💾 Сохранить: M4A (AAC 192 кбит/с) или WAV, весь проект или выделенное, с выравниванием громкости — в Музыка/Lumen, «Поделиться» или в любую папку.",
+                    "💾 Save: M4A (AAC 192 kbit/s) or WAV, the whole project or the selection, optionally levelled — to Music/Lumen, \"Share\" or any folder.")
+            ),
+            listOf(
+                t("↶ ↷ отменяют и повторяют до 60 шагов. Проекты — внизу экрана «Аудиоредактор»; удержание — удалить. Файл длиннее 30 минут обрезается.",
+                    "↶ ↷ undo and redo up to 60 steps. Projects are listed on the \"Audio editor\" screen; hold — delete. A file longer than 30 minutes is cut."),
+                t("Шумоподавление и «Улучшить голос» обрабатывают файл целиком (все куски из него) и создают его копию — оригинал остаётся до закрытия проекта, отмена работает.",
+                    "Noise removal and \"Enhance voice\" process the whole file (all pieces made of it) into a copy — the original stays until the project is closed, undo works.")
             )
         ),
         HelpTopic("bite", t("Откусить видео или аудио", "Bite a video or audio"),

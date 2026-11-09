@@ -6,4 +6,5 @@
     <string name="lumen_tts_save" translatable="false">Сохранить озвучку (Lumen)</string>
     <string name="lumen_bots_label" translatable="false">Lumen Боты</string>
     <string name="lumen_edit_share" translatable="false">Открыть в Редакторе Lumen</string>
+    <string name="lumen_audio_share" translatable="false">Аудиоредактор Lumen</string>
 </resources>

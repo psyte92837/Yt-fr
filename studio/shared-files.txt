@@ -93,3 +93,7 @@ WebLayer.kt
 WebLayerActivity.kt
 Board.kt
 BoardActivity.kt
+AudioEdit.kt
+AudioDsp.kt
+AudioEngine.kt
+AudioEditorActivity.kt

@@ -210,6 +210,40 @@ object StudioCuts {
     }
 
     /**
+     * Like [slots], but a scene longer than what is left of its clip goes on with other clips instead of looping
+     * it: every clip keeps a cursor (the next unused moment), the scene's clip starts at its cursor, and the rest
+     * of the scene takes the clip with the most unused time. Clips repeat only when all of them are used up.
+     */
+    fun fillSlots(times: List<SceneTime>, sceneClips: List<String>, clips: Map<String, SClip>): List<ClipSlot> {
+        val ready = clips.filterValues { it.lenMs > 0 && it.file.isNotEmpty() }
+        if (ready.isEmpty()) return emptyList()
+        val cursor = HashMap<String, Long>()
+        fun left(id: String) = ready.getValue(id).lenMs - (cursor[id] ?: 0)
+        val out = mutableListOf<ClipSlot>()
+        for (st in times) {
+            var id = sceneClips.getOrNull(st.scene)?.takeIf { it in ready } ?: continue
+            var at = st.startMs
+            var guard = 0
+            while (at < st.endMs - MIN_SLOT_MS / 2 && guard++ < 200) {
+                if (left(id) < MIN_SLOT_MS) {
+                    val next = ready.keys.filter { left(it) >= MIN_SLOT_MS }.maxByOrNull { left(it) * 2 + if (it == id) 0 else 1 }
+                    if (next == null) ready.keys.forEach { cursor[it] = 0 } else id = next
+                }
+                val c = ready.getValue(id)
+                val pos = cursor[id] ?: 0
+                val end = if (st.endMs - at - (c.lenMs - pos) < MIN_SLOT_MS) st.endMs else at + (c.lenMs - pos)
+                out += ClipSlot(at, end, id, c.leadMs, c.lenMs, pos)
+                cursor[id] = minOf(c.lenMs, pos + (end - at))
+                at = end
+            }
+        }
+        return out
+    }
+
+    /** A clip piece shorter than this is not worth a cut: the scene keeps the clip a little longer instead. */
+    const val MIN_SLOT_MS = 400L
+
+    /**
      * Does scene [sc] have nothing to show on its own? Plain words, or a lone icon without a title: on a
      * light insert such a scene is an empty screen with one word, so it keeps the clip playing instead.
      */

@@ -186,6 +186,14 @@ object StudioPrefs {
     var bgClips: String
         get() = p.getString("studio_bg_clips", "") ?: ""
         set(v) = p.edit().putString("studio_bg_clips", v).apply()
+    /** Background clips cut into pieces of this length that fill the voice-over (0 = whole clips in a loop). */
+    var bgPiece: Long
+        get() = p.getLong("studio_bg_piece", 0)
+        set(v) = p.edit().putLong("studio_bg_piece", v).apply()
+    /** Cuts task: a scene longer than its clip goes on with other clips (false = the clip loops). */
+    var cutsFill: Boolean
+        get() = p.getBoolean("studio_cuts_fill", true)
+        set(v) = p.edit().putBoolean("studio_cuts_fill", v).apply()
     /** The take follows the script (teleprompter); otherwise it is recognised. */
     var readScript: Boolean
         get() = p.getBoolean("studio_read_script", true)
@@ -1679,8 +1687,16 @@ class StudioActivity : LumenBase() {
     private fun bgSpec(plan: StudioPlan): StudioBg {
         if (task == StudioTask.CUTS) {
             val ready = readyCuts()
-            val slots = StudioCuts.slots(plan.times, StudioCuts.effectiveClips(plan.script.scenes, ready.map { it.id }.toSet(), all = plan.fullMode != StudioOverlay.FULL), ready.associateBy { it.id })
+            val sceneClips = StudioCuts.effectiveClips(plan.script.scenes, ready.map { it.id }.toSet(), all = plan.fullMode != StudioOverlay.FULL)
+            val slots = if (StudioPrefs.cutsFill) StudioCuts.fillSlots(plan.times, sceneClips, ready.associateBy { it.id })
+                else StudioCuts.slots(plan.times, sceneClips, ready.associateBy { it.id })
             return StudioBg(null, null, emptyList(), slots, ready.associate { it.id to File(cutsDir, it.file) })
+        }
+        if (!videoReady() && StudioPrefs.bgPiece > 0) {
+            // background clips cut into pieces that fill the whole voice-over
+            val list = clips()
+            val slots = StudioMix.bgSlots(list.map { it.first.name to it.second }, plan.totalMs, StudioPrefs.bgPiece, StudioPrefs.bgClips.hashCode().toLong())
+            if (slots.isNotEmpty()) return StudioBg(null, null, emptyList(), slots, list.associate { it.first.name to it.first })
         }
         return if (videoReady()) StudioBg(sourceFile, cuts, emptyList()) else StudioBg(null, null, clips())
     }
@@ -1713,6 +1729,22 @@ class StudioActivity : LumenBase() {
                     }
                 )
             }
+        }
+        if (list.isNotEmpty()) {
+            c.add(text(this, t("Как заполнить озвучку", "How to fill the voice-over"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val piece = StudioPrefs.bgPiece
+            c.add(choiceChips(this, listOf(0L to t("🔁 Клипы целиком по кругу", "🔁 Whole clips in a loop")) +
+                listOf(1_000L, 2_000L, 3_000L, 5_000L).map { it to t("🧩 Куски по ", "🧩 Pieces of ") + StudioMix.pieceLabel(it) }, piece) { v ->
+                StudioPrefs.bgPiece = v
+                board = emptyList()
+                render()
+            }, 4)
+            val voice = pcm?.ms ?: 0L
+            val total = list.sumOf { it.second }
+            if (piece > 0) c.muted(t("Клипы режутся на куски по ${StudioMix.pieceLabel(piece)}, куски разных клипов идут вперемешку, пока не заполнят всю озвучку; повтор — только когда кончатся все куски.",
+                "The clips are cut into pieces of ${StudioMix.pieceLabel(piece)}; pieces of different clips take turns until they fill the whole voice-over; they repeat only when all pieces are used.") +
+                if (voice > 0 && total < voice) t(" Сейчас клипов на ${Studio.clock(total)} из ${Studio.clock(voice)} — добавьте ещё, чтобы не было повторов.",
+                    " Now the clips last ${Studio.clock(total)} of ${Studio.clock(voice)} — add more to avoid repeats.") else "")
         }
         c.progress("bg", t("Копирование клипа…", "Copying the clip…"))
         if (busy != "bg") c.button(t("＋ Добавить клипы", "＋ Add clips"), style = BtnStyle.TONAL) {
@@ -1804,6 +1836,33 @@ class StudioActivity : LumenBase() {
         val findBtn = btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findClips() }
         row(addBtn, findBtn)
         if (cutClips.any { it !in readyCuts() }) button(t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() }
+        val ready = readyCuts()
+        if (ready.isNotEmpty()) {
+            add(text(ctx, t("Сцена длиннее клипа", "A scene longer than its clip"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            add(choiceChips(ctx, listOf(true to t("🧩 Продолжить другими клипами", "🧩 Go on with other clips"),
+                false to t("🔁 Повторить клип", "🔁 Repeat the clip")), StudioPrefs.cutsFill) { v ->
+                StudioPrefs.cutsFill = v
+                board = emptyList()
+                render()
+            }, 4)
+            val voice = pcm?.ms ?: 0L
+            val have = ready.sumOf { it.lenMs }
+            val lack = voice - have
+            if (StudioPrefs.cutsFill && voice > 0 && lack > 1_000) {
+                muted(t("Клипов на ${Studio.clock(have)} из ${Studio.clock(voice)} озвучки: без новых отрезков часть кадров повторится.",
+                    "Clips last ${Studio.clock(have)} of the ${Studio.clock(voice)} voice-over: without new parts some shots repeat."))
+                button(t("🧩 Добрать отрезки из тех же видео (${Studio.clock(lack)})", "🧩 Take more parts of the same videos (${Studio.clock(lack)})"),
+                    style = BtnStyle.TONAL) {
+                    val extra = StudioMix.extraParts(ready, lack, StudioCuts.MAX_CLIPS - cutClips.size)
+                    if (extra.isEmpty()) toast(t("Больше нечего добрать: видео закончились или ${StudioCuts.MAX_CLIPS} клипов", "Nothing more to take: the videos ended or ${StudioCuts.MAX_CLIPS} clips"))
+                    else {
+                        saveCuts(cutClips + extra)
+                        toast(t("Добавлено отрезков: ${extra.size} — качаю", "Parts added: ${extra.size} — downloading"))
+                        downloadCuts()
+                    }
+                }
+            }
+        }
     }
 
     // ---------- cartoon characters ----------

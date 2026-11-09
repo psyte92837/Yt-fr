@@ -472,8 +472,8 @@ object StudioMix {
      * New parts of the same videos to download when the clips are not enough for [needMs]: the videos take turns,
      * each part is long enough that together they cover the need with a margin (5–30 s), at most [room] parts;
      * a video whose known length ([SClip.durMs]) is already used up (by its clips and [used] parts) gives no more.
-     * The parts keep the place of their source clip: the download picks a fresh moment for them
-     * ([freshStart]). Empty when there is nothing left to take.
+     * A part goes right after the last part of its video, or at a fresh moment ([freshStart]) when the video ends
+     * there (the Mix download may still move it). Empty when there is nothing left to take.
      */
     fun extraParts(clips: List<SClip>, needMs: Long, room: Int, used: Map<String, List<Pair<Long, Long>>> = emptyMap()): List<SClip> {
         if (needMs <= 0 || room <= 0) return emptyList()
@@ -495,12 +495,34 @@ object StudioMix {
             val u = urls[k % urls.size]
             val src = byUrl.getValue(u).first()
             val dur = byUrl.getValue(u).maxOf { it.durMs }
-            out += SClip(StudioCuts.newId(clips + out), u, src.fromMs, src.fromMs + len, src.note, src.title, durMs = dur)
+            // right after the last part of this video when it fits, else a fresh moment inside it
+            val parts = byUrl.getValue(u).map { it.fromMs to it.toMs } + out.filter { it.url == u }.map { it.fromMs to it.toMs }
+            val after = parts.maxOf { it.second }
+            val from = if (dur <= 0 || after + len <= dur - dur / 10) after
+                else freshStart(dur, len, parts + used[u].orEmpty(), (u.hashCode() * 31L + out.size))
+            out += SClip(StudioCuts.newId(clips + out), u, from, from + len, src.note, src.title, durMs = dur)
             sum += len
             taken[u] = taken.getValue(u) + len
             if (!hasRoom(u)) urls.remove(u) else k++
         }
         return out
+    }
+
+    /**
+     * Background clips ([clips]: id to length) cut into pieces of [pieceMs] that fill [totalMs] (the voice-over):
+     * pieces of different clips in turn, every clip kept; whole clips repeat only when all pieces together are
+     * shorter. As slots for the renderer (file time = piece start + time inside the slot).
+     */
+    fun bgSlots(clips: List<Pair<String, Long>>, totalMs: Long, pieceMs: Long, seed: Long): List<ClipSlot> {
+        if (clips.isEmpty() || totalMs <= 0 || pieceMs <= 0) return emptyList()
+        val pool = mix(clips, pieceMs, seed)
+        if (pool.isEmpty()) return emptyList()
+        val row = if (totalMs(pool) >= totalMs) fillTo(pool, totalMs, emptyList(), seed) else loopTo(pool, totalMs)
+        val caps = clips.toMap()
+        var at = 0L
+        return row.map { p ->
+            ClipSlot(at, at + p.lenMs, p.clipId, 0, caps[p.clipId] ?: (p.fromMs + p.lenMs), p.fromMs).also { at += p.lenMs }
+        }
     }
 
     /**

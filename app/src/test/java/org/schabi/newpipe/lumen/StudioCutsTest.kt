@@ -271,4 +271,19 @@ class StudioCutsTest {
         val slots = StudioCuts.slots(times(0, 1000, 2000, 3000), listOf("c1", "c1", "c1"), mapOf("c1" to SClip("c1", "u", 0, 10_000, file = "f", lenMs = 10_000)))
         assertEquals(listOf(0L, 1000L, 2000L), slots.map { it.offsetMs })
     }
+
+    @Test
+    fun longScenesGoOnWithOtherClipsInsteadOfLooping() {
+        val clips = mapOf("c1" to SClip("c1", "u1", 0, 4_000, file = "c1.mp4", lenMs = 4_000),
+            "c2" to SClip("c2", "u2", 0, 6_000, file = "c2.mp4", lenMs = 6_000))
+        val times = listOf(SceneTime(0, 0, 7_000, IntRange.EMPTY), SceneTime(1, 7_000, 9_000, IntRange.EMPTY))
+        val s = StudioCuts.fillSlots(times, listOf("c1", "c1"), clips)
+        assertEquals(0L, s.first().startMs)
+        assertEquals(9_000L, s.last().endMs)
+        assertTrue(s.zipWithNext().all { (a, b) -> a.endMs == b.startMs })
+        // c1 runs out after 4 s, the scene goes on with c2; scene 2 asks c1 again but it is used up → c2 goes on
+        assertEquals(listOf("c1", "c2", "c2"), s.map { it.id })
+        assertEquals(3_000L, s[2].offsetMs)
+        assertTrue(s.all { it.offsetMs + (it.endMs - it.startMs) <= it.lenMs })
+    }
 }

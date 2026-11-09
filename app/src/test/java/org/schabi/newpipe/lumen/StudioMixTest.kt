@@ -393,4 +393,18 @@ class StudioMixTest {
         // a short video already used up gives nothing
         assertTrue(StudioMix.extraParts(listOf(SClip("c1", "u1", 0, 10_000, durMs = 12_000)), 20_000, 10).isEmpty())
     }
+
+    @Test
+    fun backgroundClipsCutIntoPiecesFillTheVoiceOver() {
+        val clips = listOf("a.mp4" to 10_000L, "b.mp4" to 10_000L)
+        val slots = StudioMix.bgSlots(clips, 12_000, 2_000, 5)
+        assertEquals(0L, slots.first().startMs)
+        assertEquals(12_000L, slots.last().endMs)
+        assertTrue(slots.zipWithNext().all { (x, y) -> x.endMs == y.startMs && x.id != y.id })
+        // every piece is a different moment: nothing repeats while the clips last
+        assertEquals(slots.size, slots.map { it.id to it.offsetMs }.toSet().size)
+        assertTrue(slots.all { it.offsetMs + (it.endMs - it.startMs) <= 10_000 })
+        // too short: repeats fill the rest
+        assertEquals(30_000L, StudioMix.bgSlots(clips, 30_000, 2_000, 5).last().endMs)
+    }
 }

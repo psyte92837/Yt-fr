@@ -58,6 +58,25 @@
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name="org.schabi.newpipe.lumen.EditShareActivity"
+            android:exported="true"
+            android:label="@string/lumen_edit_share"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+        <activity
             android:name="org.schabi.newpipe.lumen.StudioEditorActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"

@@ -5,4 +5,5 @@
     <string name="lumen_bite_share" translatable="false">Откусить и сохранить отрезок</string>
     <string name="lumen_tts_save" translatable="false">Сохранить озвучку (Lumen)</string>
     <string name="lumen_bots_label" translatable="false">Lumen Боты</string>
+    <string name="lumen_edit_share" translatable="false">Открыть в Редакторе Lumen</string>
 </resources>

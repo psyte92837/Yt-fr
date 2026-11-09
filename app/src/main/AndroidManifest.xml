@@ -259,6 +259,26 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
+        <!-- ===== Lumen: share a video from the gallery straight into the editor ===== -->
+        <activity
+            android:name=".lumen.EditShareActivity"
+            android:exported="true"
+            android:label="@string/lumen_edit_share"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.EDIT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".lumen.StudioEditorActivity"
             android:exported="false"

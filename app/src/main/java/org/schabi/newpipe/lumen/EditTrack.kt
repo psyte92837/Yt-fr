@@ -310,7 +310,32 @@ object EditTrack {
         }
     }
 
-    /** The words of the voice (source times) in output time; cut-out words are gone, repeated pieces repeat them. */
+        /**
+     * The video as numbered shots for a voice-over prompt: one per piece of the main track (long ones in ~[stepMs]
+     * parts), each "N. 0:00.0–0:06.0: speech; captions", or "no speech" ([notes] — time and text of on-screen captions).
+     */
+    fun shots(clips: List<VClip>, words: List<SWord>, notes: List<Pair<Long, String>>, stepMs: Long = 6000, maxShots: Int = 30): String {
+        if (clips.isEmpty()) return ""
+        val st = starts(clips)
+        val spans = ArrayList<Pair<Long, Long>>()
+        clips.forEachIndexed { i, c ->
+            val a = st[i]
+            val b = a + c.outMs
+            val n = max(1L, (c.outMs + stepMs / 2) / stepMs)
+            for (k in 0 until n) spans += (a + (b - a) * k / n) to (a + (b - a) * (k + 1) / n)
+        }
+        val step = max(1, (spans.size + maxShots - 1) / maxShots)
+        val merged = spans.chunked(step).map { it.first().first to it.last().second }
+        return merged.mapIndexed { i, (a, b) ->
+            val said = words.filter { it.startMs in a until b }.joinToString(" ") { it.text }.take(200)
+            val shown = notes.filter { it.first in a until b }.map { it.second.replace('\n', ' ').trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" / ").take(120)
+            val what = listOfNotNull(said.takeIf { it.isNotBlank() }?.let { "речь: $it" }, shown.takeIf { it.isNotEmpty() }?.let { "на экране: $it" })
+                .joinToString("; ").ifEmpty { "без речи" }
+            "${i + 1}. ${StudioEdit.clock(a)}–${StudioEdit.clock(b)}: $what"
+        }.joinToString("\n")
+    }
+
+/** The words of the voice (source times) in output time; cut-out words are gone, repeated pieces repeat them. */
     fun words(src: List<SWord>, clips: List<VClip>, durMs: Long): List<SWord> {
         if (src.isEmpty() || plain(clips, durMs)) return src
         val out = ArrayList<SWord>()

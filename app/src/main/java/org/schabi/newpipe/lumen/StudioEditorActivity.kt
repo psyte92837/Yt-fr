@@ -58,6 +58,7 @@ class StudioEditorActivity : LumenBase() {
     companion object {
         private const val EXTRA_FILE = "file"
         private const val EXTRA_PROJECT = "project"
+        internal const val EXTRA_SHARED = "shared"
         private const val REQ_IMAGE = 7711
         private const val REQ_VIDEO = 7712
         private const val REQ_SPLIT = 7713
@@ -128,6 +129,8 @@ class StudioEditorActivity : LumenBase() {
     private var resumed = false
     private var pickFor: String? = null
     private var pickAt = 0L
+    /** The next audio picked is the author's own voice-over (named so, no fade-out). */
+    private var pickVoice = false
     private var lastStyle = SchemeStyles.AUTO
     @Volatile private var cancelExport = false
 
@@ -287,7 +290,10 @@ class StudioEditorActivity : LumenBase() {
         val pid = intent.getStringExtra(EXTRA_PROJECT)
         val file = intent.getStringExtra(EXTRA_FILE)?.let { File(it) }
         val stored = pid?.let { StudioEditStore.load(StudioEditStore.dir(this, it)) }
+        // a video shared from the gallery ([EditShareActivity]): copied into a new project
+        val shared = intent.data?.takeIf { intent.getBooleanExtra(EXTRA_SHARED, false) }
         when {
+            shared != null && savedInstanceState == null -> importVideo(shared)
             stored != null -> start(stored)
             file != null && file.exists() -> openFile(file)
             else -> chooser()
@@ -3505,31 +3511,149 @@ class StudioEditorActivity : LumenBase() {
     private var recording = false
     private var recMute = true
 
+    /** The text the author reads for the voice-over (shown by the teleprompter while recording). */
+    private val voiceScriptFile: File get() = File(dir, "voice_script.txt")
+    private fun voiceScript(): String = runCatching { voiceScriptFile.takeIf { it.exists() }?.readText() }.getOrNull().orEmpty().trim()
+    private fun saveVoiceScript(s: String) {
+        runCatching { voiceScriptFile.apply { parentFile?.mkdirs() }.writeText(s.trim()) }.onFailure { err(it) }
+    }
+
+    /** "🎙 Voice-over": own audio file, or the microphone while the video plays with the teleprompter under it. */
     private fun voiceSheet() {
-        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            runCatching { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 3) }
-            return toast(t("Разрешите микрофон и нажмите «🎙 Озвучка» ещё раз", "Allow the microphone and tap \"🎙 Voice-over\" again"))
-        }
-        if (project == null) return
+        val p = project ?: return
         pause()
         val at0 = curMs
         var keep = true
         recMute = Lumen.prefs.getBoolean("studio_rec_mute", true)
-        bottomSheet(t("🎙 Озвучка", "🎙 Voice-over"), onDismiss = { finishVoice(at0, keep) }) { dismiss ->
-            muted(t("Видео играет с ${StudioEdit.clock(at0)}, вы говорите в микрофон. «⏹ Готово» — запись встанет звуковой дорожкой с этого места. Лучше в наушниках.",
-                "The video plays from ${StudioEdit.clock(at0)} while you speak. \"⏹ Done\" puts the recording in as a sound track from there. Headphones work best."))
-            check(t("Без звука видео во время записи", "Mute the video while recording"), recMute) {
+        val script = voiceScript()
+        val lines = if (StudioPrefs.prompter) StudioMix.scriptLines(script) else emptyList()
+        val clock = lines.flatten().takeIf { it.isNotEmpty() }?.let { PrompterClock(it, StudioPrefs.prompterWpm) }
+        val (pBody, pRanges) = StudioPrompter.layout(lines)
+        var pText: TextView? = null
+        var pScroll: android.widget.ScrollView? = null
+        var pSpeed: TextView? = null
+        var recMs = 0L
+
+        fun paint() {
+            val c = clock ?: return
+            pSpeed?.text = t("${c.wpm} сл/мин", "${c.wpm} wpm") + if (c.paused) t(" · пауза", " · paused") else ""
+            val tv = pText ?: return
+            val r = pRanges.getOrNull(c.index) ?: return run { tv.text = pBody }
+            val sp = android.text.SpannableString(pBody)
+            if (r.first > 0) sp.setSpan(android.text.style.ForegroundColorSpan(Palette.MUTED), 0, r.first, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sp.setSpan(android.text.style.BackgroundColorSpan(Palette.ACCENT), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            sp.setSpan(android.text.style.ForegroundColorSpan(Palette.ON_ACCENT), r.first, r.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            tv.text = sp
+            val sv = pScroll ?: return
+            tv.post {
+                val lay = tv.layout ?: return@post
+                val y = lay.getLineTop(lay.getLineForOffset(r.first)) + tv.paddingTop
+                sv.smoothScrollTo(0, (y - sv.height / 3).coerceAtLeast(0))
+            }
+        }
+
+        bottomSheet(t("🎙 Озвучка", "🎙 Voice-over"), onDismiss = { finishVoice(at0, keep, clock) }) { dismiss ->
+            // the video above stays bright: the sheet does not dim the screen
+            root.post {
+                val w = root.rootView
+                (w.layoutParams as? WindowManager.LayoutParams)?.let { lp ->
+                    lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_DIM_BEHIND.inv()
+                    lp.dimAmount = 0f
+                    runCatching { windowManager.updateViewLayout(w, lp) }
+                }
+            }
+            val setup = Col(ctx, 0)
+            setup.muted(t("Своя озвучка — файлом или микрофоном: видео играет с ${StudioEdit.clock(at0)}, суфлёр показывает текст под ним. «⏹ Готово» — запись встанет звуковой дорожкой с этого места. Лучше в наушниках.",
+                "Your own voice-over — a file or the microphone: the video plays from ${StudioEdit.clock(at0)}, the teleprompter shows the text under it. \"⏹ Done\" puts the recording in as a sound track from there. Headphones work best."))
+            setup.button(t("📎 Своя озвучка из файла", "📎 Own voice-over from a file"), style = BtnStyle.TONAL) {
+                keep = false
+                dismiss()
+                pickAudio(null, voice = true)
+            }
+            label(setup, t("Текст озвучки", "Voice-over text"))
+            if (script.isEmpty()) setup.muted(t("Текста нет: напишите его сами или попросите ИИ — суфлёр подсветит слова при записи, а субтитры встанут по ним без распознавания.",
+                "No text yet: write it or ask the AI — the teleprompter lights the words while recording, and subtitles follow them with no recognition."))
+            else {
+                val n = Studio.tokens(script).size
+                val readMs = n * 60_000L / StudioPrefs.prompterWpm.coerceAtLeast(1)
+                setup.add(text(ctx, script.take(400) + if (script.length > 400) "…" else "", 14f).apply { maxLines = 6; ellipsize = android.text.TextUtils.TruncateAt.END }, 4)
+                setup.muted(t("$n слов · ≈${StudioEdit.clock(readMs)} чтения · ролик ${StudioEdit.clock(outLen(p))}",
+                    "$n words · ≈${StudioEdit.clock(readMs)} to read · video ${StudioEdit.clock(outLen(p))}"))
+            }
+            setup.row(
+                btn(ctx, if (script.isEmpty()) t("✎ Написать", "✎ Write") else t("✎ Править", "✎ Edit"), style = BtnStyle.TONAL) {
+                    keep = false
+                    dismiss()
+                    voiceTextSheet()
+                },
+                btn(ctx, t("✨ Составить с ИИ", "✨ Compose with AI"), style = BtnStyle.TONAL) {
+                    keep = false
+                    dismiss()
+                    aiVoiceSheet()
+                }
+            )
+            setup.check(t("Суфлёр: показывать текст при записи", "Teleprompter: show the text while recording"), StudioPrefs.prompter) {
+                StudioPrefs.prompter = it
+                keep = false
+                dismiss()
+                voiceSheet()
+            }
+            setup.check(t("Без звука видео во время записи", "Mute the video while recording"), recMute) {
                 recMute = it
                 Lumen.prefs.edit().putBoolean("studio_rec_mute", it).apply()
             }
+            add(setup.root, 0)
             val level = text(ctx, "", 18f, bold = true, color = Palette.ACCENT).apply { typeface = Typeface.MONOSPACE }
-            add(level, 12)
+            add(level, 8)
+            if (clock != null) {
+                pSpeed = text(ctx, "", 14f, bold = true).apply { gravity = Gravity.CENTER }
+                fun speed(d: Int) {
+                    clock.tick(recMs)
+                    clock.wpm += d
+                    StudioPrefs.prompterWpm = clock.wpm
+                    paint()
+                }
+                val pause = btn(ctx, "⏸", style = BtnStyle.TONAL) {}
+                pause.setOnClickListener {
+                    clock.togglePause(recMs)
+                    pause.text = if (clock.paused) "▶" else "⏸"
+                    paint()
+                }
+                pause.contentDescription = t("Пауза суфлёра", "Pause the teleprompter")
+                row(
+                    btn(ctx, "−", style = BtnStyle.TONAL) { speed(-StudioPrompter.STEP_WPM) }.apply { contentDescription = t("Медленнее", "Slower") },
+                    pSpeed!!,
+                    btn(ctx, "＋", style = BtnStyle.TONAL) { speed(StudioPrompter.STEP_WPM) }.apply { contentDescription = t("Быстрее", "Faster") },
+                    pause
+                )
+                val tv = text(ctx, pBody, 22f, bold = true).apply { setPadding(dp(16), dp(24), dp(16), dp(120)) }
+                // tap on a word: the reader is there now
+                tv.setOnTouchListener { v, e ->
+                    if (e.action == android.view.MotionEvent.ACTION_UP && recorder != null) {
+                        val i = StudioPrompter.wordAt(pRanges, (v as TextView).getOffsetForPosition(e.x, e.y))
+                        if (i >= 0 && clock.jump(i, recMs)) paint()
+                        v.performClick()
+                    }
+                    true
+                }
+                pText = tv
+                // a third of the screen: the video above stays in sight
+                pScroll = android.widget.ScrollView(ctx).apply { addView(tv) }
+                add(pScroll!!, 4).layoutParams.height = (resources.displayMetrics.heightPixels * 0.3f).toInt()
+                paint()
+            }
             lateinit var go: android.widget.Button
             go = btn(ctx, t("● Начать запись", "● Start recording"), primary = true) {
                 if (recorder == null) {
+                    if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                        runCatching { requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 3) }
+                        return@btn toast(t("Разрешите микрофон и нажмите «● Начать запись» ещё раз", "Allow the microphone and tap \"● Start recording\" again"))
+                    }
                     val rec = StudioRecorder { lvl, ms ->
+                        recMs = ms
                         val bars = (lvl.coerceIn(0f, 1f) * 12).roundToInt()
                         level.text = "● " + StudioEdit.clock(ms) + "  " + "▮".repeat(bars) + "▯".repeat(12 - bars)
+                        if (clock != null && clock.tick(ms)) paint()
                     }
                     try {
                         rec.start()
@@ -3538,6 +3662,9 @@ class StudioEditorActivity : LumenBase() {
                     }
                     recorder = rec
                     recording = true
+                    setup.root.visibility = View.GONE
+                    clock?.tick(0)
+                    paint()
                     play()
                     go.text = t("⏹ Готово", "⏹ Done")
                 } else dismiss()
@@ -3550,8 +3677,81 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    /** The end of a voice-over: the recording as a sound block from [at] (or thrown away). */
-    private fun finishVoice(at: Long, keep: Boolean) {
+    private fun voiceTextSheet() = bottomSheet(t("📝 Текст озвучки", "📝 Voice-over text")) { dismiss ->
+        muted(t("Абзац на мысль. Что и когда подсветил суфлёр, станет таймингом слов озвучки.",
+            "A paragraph per thought. What the teleprompter lit up and when times the voice-over words."))
+        val e = edit(t("Текст, который вы прочитаете", "The text you will read"), voiceScript(), multiline = true)
+        e.minLines = 6
+        e.maxLines = 14
+        button(t("💾 Сохранить", "💾 Save"), primary = true) {
+            saveVoiceScript(e.text.toString())
+            dismiss()
+            voiceSheet()
+        }
+        button(t("✨ Составить с ИИ", "✨ Compose with AI"), style = BtnStyle.TEXT) {
+            saveVoiceScript(e.text.toString())
+            dismiss()
+            aiVoiceSheet()
+        }
+    }
+
+    private fun aiVoiceSheet() {
+        val p = project ?: return
+        val len = outLen(p)
+        bottomSheet(t("✨ Текст озвучки с ИИ", "✨ Voice-over text with AI")) { dismiss ->
+            muted(t("ИИ напишет текст на ${StudioEdit.clock(len)} по кускам ролика (речь, надписи, названия), язык — ${lang()}.",
+                "The AI writes ${StudioEdit.clock(len)} of text by the pieces of the video (speech, captions, titles), language — ${lang()}."))
+            val prefs = Lumen.prefs
+            val topicE = edit(t("О чём ролик (тема, идея)", "What the video is about (topic, idea)"), prefs.getString("studio_edit_script_topic", "") ?: "", multiline = true)
+            val wishE = edit(t("Пожелание: тон, призыв, что упомянуть", "Wish: tone, call to action, what to mention"), prefs.getString("studio_edit_script_wish", "") ?: "", multiline = true)
+            val old = voiceScript()
+            if (old.isNotEmpty()) muted(t("Текущий текст будет учтён как черновик.", "The current text is used as a draft."))
+            button(t("✨ Составить", "✨ Compose"), primary = true) {
+                prefs.edit().putString("studio_edit_script_topic", topicE.text.toString().trim())
+                    .putString("studio_edit_script_wish", wishE.text.toString().trim()).apply()
+                dismiss()
+                writeVoiceScript(old)
+            }
+        }
+    }
+
+    /** The AI writes the voice-over text by the pieces of the main track; the old text (if any) is its draft. */
+    private fun writeVoiceScript(draft: String) {
+        val p = project ?: return
+        val total = outLen(p)
+        val sec = ((total + 500) / 1000).toInt().coerceAtLeast(3)
+        val prefs = Lumen.prefs
+        val topic = prefs.getString("studio_edit_script_topic", "").orEmpty()
+        val wish = prefs.getString("studio_edit_script_wish", "").orEmpty()
+        val shots = EditTrack.shots(clips, words, blocks.filter { it.kind == "text" && it.text.isNotBlank() }.map { it.startMs to it.text })
+        val (fw, fh) = EditCanvas.frame(p)
+        val format = if (fh > fw) t("вертикального видео 9:16 (Shorts / Reels)", "a 9:16 vertical video (Shorts / Reels)")
+        else t("горизонтального видео", "a horizontal video")
+        val vars = mapOf(
+            "lang" to lang(), "format" to format, "seconds" to sec.toString(),
+            "words" to (sec * StudioPrefs.prompterWpm / 60).coerceAtLeast(5).toString(),
+            "shots" to shots.ifBlank { "—" },
+            "topic" to topic.let { if (it.isNotEmpty()) "Тема: $it\n" else "" },
+            "wish" to (wish.let { if (it.isNotEmpty()) "Пожелание автора: $it\n" else "" } +
+                if (draft.isNotEmpty()) "Черновик автора, сохрани его мысли:\n${draft.take(3000)}\n" else "")
+        )
+        toast(t("ИИ пишет текст озвучки…", "The AI writes the voice-over text…"))
+        val pid = p.id
+        BgTasks.run(this, TASK_AI, t("Редактор: ИИ пишет текст озвучки", "Editor: the AI writes the voice-over text"), BgTasks.reopen(this), {
+            val prov = AiTasks.requireProvider()
+            val r = Llm.complete(prov, prov.smartModel, "You write voice-over texts for short videos. Answer with the text only.",
+                Prompts.fill("studio_mix_script", vars), maxTokens = 400 + sec * 12, task = "studio_mix_script", pid = "studio")
+            StudioMix.cleanScript(r.text).ifBlank { throw LlmException(t("ИИ не вернул текст", "AI returned no text"), r.text) }
+        }, { e -> if (!isDestroyed) err(e) }) { text ->
+            if (isDestroyed || project?.id != pid) return@run
+            saveVoiceScript(text)
+            toast(t("Текст готов: проверьте и запишите озвучку с суфлёром", "The text is ready: check it and record with the teleprompter"))
+            voiceSheet()
+        }
+    }
+
+    /** The end of a voice-over: the recording as a sound block from [at] (or thrown away); the teleprompter log times its words. */
+    private fun finishVoice(at: Long, keep: Boolean, clock: PrompterClock? = null) {
         val rec = recorder ?: return
         recorder = null
         recording = false
@@ -3561,6 +3761,7 @@ class StudioEditorActivity : LumenBase() {
         if (!keep || pcm.size < rate / 4) return
         val p = project ?: return
         val d = dir
+        val log = clock?.log?.toList().orEmpty()
         Lumen.async({
             val name = "img/r${System.currentTimeMillis()}.wav"
             val f = File(d, name).apply { parentFile?.mkdirs() }
@@ -3570,15 +3771,29 @@ class StudioEditorActivity : LumenBase() {
                 it.write(Studio.wavHeader(pcm.size * 2, rate))
                 it.write(data.array())
             }
-            name
-        }, { e -> if (!isDestroyed) err(e) }) { file ->
+            // read by the teleprompter: the words of the take with times (from the start of the take)
+            val ws = if (clock != null && log.isNotEmpty()) runCatching {
+                StudioPrompter.words(clock.tokens, log, Studio.speechSpans(pcm, rate), Studio.durationMs(pcm.size, rate))
+            }.getOrDefault(emptyList()) else emptyList()
+            if (ws.isNotEmpty()) runCatching { File(f.path + ".words.json").writeText(StudioMix.wordsJson(ws)) }
+            name to ws
+        }, { e -> if (!isDestroyed) err(e) }) { (file, ws) ->
             if (project?.id != p.id) return@async
             val len = Studio.durationMs(pcm.size, rate)
             addNew(EditMusic.KIND, at, max(StudioEdit.MIN_MS, len), 1f) {
                 it.copy(file = file, text = t("🎙 Озвучка", "🎙 Voice-over"), x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "none")
             }
             musicFile = ""
-            toast(t("Озвучка добавлена", "Voice-over added"))
+            // a video with no speech of its own and an untouched track: the voice-over words become its speech (for subtitles)
+            val cur = project
+            if (ws.isNotEmpty() && words.isEmpty() && cur != null && EditTrack.plain(clips, cur.durMs)) {
+                val shifted = ws.map { w -> w.copy(startMs = w.startMs + at, endMs = w.endMs + at) }
+                runCatching { File(dir, StudioEditStore.WORDS).writeText(StudioMix.wordsJson(shifted)) }
+                srcWords = shifted
+                words = EditTrack.words(shifted, clips, cur.durMs)
+                timeline?.words = words
+                toast(t("Озвучка добавлена, слова суфлёра — для 💬 автосубтитров", "Voice-over added, the teleprompter words are ready for 💬 auto subtitles"))
+            } else toast(t("Озвучка добавлена", "Voice-over added"))
         }
     }
     /** Speech recognition for subtitles: its progress line (null = not running) and the stop flag. */
@@ -3767,8 +3982,9 @@ class StudioEditorActivity : LumenBase() {
         }
     }
 
-    private fun pickAudio(replace: String?) {
+    private fun pickAudio(replace: String?, voice: Boolean = false) {
         pause()
+        pickVoice = voice
         pickFor = replace
         pickAt = curMs
         @Suppress("DEPRECATION")
@@ -3780,6 +3996,8 @@ class StudioEditorActivity : LumenBase() {
         val p = project ?: return
         val replace = pickFor
         val at = pickAt
+        val voice = pickVoice
+        pickVoice = false
         val d = dir
         val cr = applicationContext.contentResolver
         toast(t("Копирую звук…", "Copying the sound…"))
@@ -3811,7 +4029,8 @@ class StudioEditorActivity : LumenBase() {
             else {
                 val len = min(dur, max(StudioEdit.MIN_MS, outLen(p) - at)).coerceAtLeast(StudioEdit.MIN_MS)
                 addNew(EditMusic.KIND, at, len, 1f) {
-                    it.copy(file = file, text = title, x = 0.5f, y = 0.5f, w = 1f, animIn = "none", animOut = "fade")
+                    it.copy(file = file, text = if (voice) t("🎙 Озвучка", "🎙 Voice-over") else title, x = 0.5f, y = 0.5f, w = 1f,
+                        animIn = "none", animOut = if (voice) "none" else "fade")
                 }
             }
             musicFile = ""
@@ -4661,5 +4880,29 @@ class StudioEditorActivity : LumenBase() {
                 toast(t("Скопировано", "Copied"))
             }
         }
+    }
+}
+
+/**
+ * "Share → Lumen: editor" from the gallery or any app: hands the video over to [StudioEditorActivity]
+ * (which is not exported, so other apps cannot pass it file paths) with the read grant, then closes.
+ */
+class EditShareActivity : android.app.Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val uri = when (intent?.action) {
+            Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") (intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
+            Intent.ACTION_VIEW, Intent.ACTION_EDIT -> intent.data
+            else -> null
+        } ?: intent?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+        if (uri != null) runCatching {
+            startActivity(Intent(this, StudioEditorActivity::class.java)
+                .setDataAndType(uri, intent.type ?: "video/*")
+                .putExtra(StudioEditorActivity.EXTRA_SHARED, true)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        }.onFailure { android.widget.Toast.makeText(this, it.message ?: "Lumen", android.widget.Toast.LENGTH_LONG).show() }
+        else android.widget.Toast.makeText(this, if (I18n.ru) "Видео не передано" else "No video was shared", android.widget.Toast.LENGTH_LONG).show()
+        finish()
     }
 }

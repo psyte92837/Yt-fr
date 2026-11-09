@@ -216,4 +216,20 @@ class EditTrackTest {
         assertTrue(EditSplit.PIP_SHAPES.all { EditSplit.isPip(b.copy(look = it)) })
         assertFalse(EditSplit.isPip(b.copy(look = "lr")))
     }
+
+    @Test
+    fun shotsForVoiceOverText() {
+        val clips = listOf(VClip("a", 0, 4000), VClip("b", 10_000, 22_000))
+        val words = listOf(SWord("привет", 500, 900), SWord("мир", 5000, 5400))
+        val s = EditTrack.shots(clips, words, listOf(1000L to "Заголовок\nдва"))
+        val lines = s.lines()
+        // 4 s piece → 1 shot, 12 s piece → 2 shots of 6 s
+        assertEquals(3, lines.size)
+        assertTrue(lines[0].startsWith("1. 0:00.0–0:04.0: речь: привет; на экране: Заголовок два"))
+        assertTrue(lines[1].contains("речь: мир"))
+        assertTrue(lines[2].endsWith("без речи"))
+        assertEquals("", EditTrack.shots(emptyList(), words, emptyList()))
+        // long videos stay within the limit
+        assertTrue(EditTrack.shots(listOf(VClip("c", 0, 600_000)), emptyList(), emptyList(), maxShots = 30).lines().size <= 30)
+    }
 }

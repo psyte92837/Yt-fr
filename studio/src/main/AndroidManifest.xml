@@ -83,6 +83,12 @@
             android:theme="@style/LumenTheme"
             android:windowSoftInputMode="adjustResize" />
         <activity
+            android:name="org.schabi.newpipe.lumen.BoardActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
             android:name="org.schabi.newpipe.lumen.WebLayerActivity"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"

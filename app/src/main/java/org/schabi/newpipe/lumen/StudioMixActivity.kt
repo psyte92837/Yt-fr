@@ -422,6 +422,7 @@ class StudioMixActivity : LumenBase() {
         selBox = null
         val c = Col(this)
         c.add(StudioActivity.tabs(this, StudioActivity.MIX_TAB) { i ->
+            if (i == StudioActivity.TASKS_TAB) return@tabs BoardActivity.open(this)
             StudioActivity.openTask(this, StudioTask.entries[i])
             finish()
         }, 0)

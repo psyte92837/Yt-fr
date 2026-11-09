@@ -1362,6 +1362,17 @@ val STUDIO_PROMPTS = linkedMapOf(
         "YouTube search queries in {lang} to find footage for each need (what is seen, not what is said). Needs: {needs}. " +
             "Reply JSON [[need,\"query\"]], one short query each."
         ),
+    "studio_board_plan" to (
+        "Разбей цель автора видео на конкретные задачи для его доски задач. Цель: «{goal}».\n" +
+            "Уже на доске (не повторяй): \n{board}\n" +
+            "Язык: {lang}. 3–12 задач по порядку выполнения, каждая — одно действие, которое можно закончить за 1–2 дня (глагол в начале). " +
+            "type: task|video|bug|idea|epic; prio: highest|high|medium|low|lowest; points: 1,2,3,5 или 8 (усилие); due_days — через сколько дней от сегодня срок (0 = сегодня), " +
+            "checks — 0–5 коротких шагов. Верни строго JSON: {\"tasks\":[{\"title\":\"...\",\"type\":\"task\",\"prio\":\"medium\",\"points\":2,\"due_days\":1,\"labels\":[\"...\"],\"checks\":[\"...\"]}]}"
+        ),
+    "studio_board_steps" to (
+        "Разбей задачу автора видео на 3–8 коротких шагов-чекбоксов по порядку выполнения. Задача: «{task}». {desc}\n" +
+            "Язык: {lang}. Шаг — до 8 слов, начинается с глагола, без нумерации. Верни строго JSON: {\"steps\":[\"...\"]}"
+        ),
     "studio_mix_script" to (
         "Напиши текст закадровой озвучки на языке {lang} для {format} длиной {seconds} с — около {words} слов (столько читается спокойно). " +
             "Планы по порядку (время и что видно):\n{shots}\n{topic}{wish}" +

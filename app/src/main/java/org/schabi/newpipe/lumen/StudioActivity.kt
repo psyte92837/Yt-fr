@@ -232,9 +232,11 @@ class StudioActivity : LumenBase() {
         /** Lumen Studio only (no YouTube clips or Mix there): the editor and the AI layer take their places. */
         const val EDITOR_TAB = 6
         const val LAYER_TAB = 7
+        /** "📋 Tasks": the author's task board (its own screen) — in both apps. */
+        const val TASKS_TAB = 8
 
         /** Items of the panel by place: Lumen — the five tasks and the Mix; Lumen Studio — without Clips and Mix. */
-        private val tabIds get() = if (Flavor.STUDIO) listOf(0, 1, 2, 4, EDITOR_TAB, LAYER_TAB) else (0..5).toList()
+        private val tabIds get() = if (Flavor.STUDIO) listOf(0, 1, 2, 4, EDITOR_TAB, LAYER_TAB, TASKS_TAB) else (0..5).toList() + TASKS_TAB
 
         /**
          * The Studio panel: the five tasks and the Mix, in two rows of three so the names fit on a phone
@@ -242,14 +244,20 @@ class StudioActivity : LumenBase() {
          */
         fun tabs(ctx: Context, selected: Int, onSelect: (Int) -> Unit): View {
             val all = listOf("📱 Shorts", t("🎬 Видео", "🎬 Video"), t("🎙 Озвучка", "🎙 Voice-over"),
-                t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix"), t("✏️ Редактор", "✏️ Editor"), t("🎛 Слой ИИ", "🎛 AI layer"))
+                t("🎞 Клипы", "🎞 Clips"), t("🎨 Анимация", "🎨 Animation"), t("🔀 Микс", "🔀 Mix"), t("✏️ Редактор", "✏️ Editor"), t("🎛 Слой ИИ", "🎛 AI layer"),
+                t("📋 Задачи: доска, планы, сроки", "📋 Tasks: board, plans, dates"))
             val ids = tabIds
             val labels = ids.map { all[it] }
             val at = ids.indexOf(selected)
             return LinearLayout(ctx).apply {
                 orientation = LinearLayout.VERTICAL
-                for (r in 0..1) addView(segBar(ctx, labels.subList(r * 3, r * 3 + 3), if (at >= 0 && at / 3 == r) at % 3 else -1) { onSelect(ids[r * 3 + it]) },
-                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (r == 1) topMargin = ctx.dp(6) })
+                // rows of three; the rest (the Tasks) gets a full-width row of its own
+                for (r in 0..(labels.size - 1) / 3) {
+                    val from = r * 3
+                    val to = minOf(from + 3, labels.size)
+                    addView(segBar(ctx, labels.subList(from, to), if (at in from until to) at - from else -1) { onSelect(ids[from + it]) },
+                        LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { if (r > 0) topMargin = ctx.dp(6) })
+                }
             }
         }
 
@@ -604,6 +612,7 @@ class StudioActivity : LumenBase() {
                 MIX_TAB -> StudioMixActivity.open(this)
                 EDITOR_TAB -> StudioEditorActivity.open(this)
                 LAYER_TAB -> WebLayerActivity.open(this, null, false)
+                TASKS_TAB -> BoardActivity.open(this)
                 else -> switchTask(StudioTask.entries[i])
             }
         }, 0)

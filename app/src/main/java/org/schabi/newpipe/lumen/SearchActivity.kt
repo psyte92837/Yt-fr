@@ -132,6 +132,7 @@ class SearchActivity : LumenBase() {
         /** Screens and settings sections reachable from search (key → [destinationOpen]). */
         fun destinations(ctx: Context): List<SearchIndex.Item> = listOf(
             SearchIndex.Item("screen", t("🎬 Lumen Studio", "🎬 Lumen Studio"), t("ролики Shorts, видео, озвучка, нарезка", "Shorts, videos, voice-over, cuts"), "studio", "studio shorts видео ролик"),
+            SearchIndex.Item("screen", t("📋 Задачи Студии", "📋 Studio tasks"), t("доска, планы, сроки, чек-листы", "board, plans, dates, checklists"), "board", "задачи доска канбан спринт план jira trello todo tasks board kanban sprint"),
             SearchIndex.Item("screen", t("✏️ Редактор видео", "✏️ Video editor"), t("монтаж, схемы, надписи, эмодзи", "editing, schemes, captions, emoji"), "editor", "монтаж edit editor capcut"),
             SearchIndex.Item("screen", t("🔀 Микс", "🔀 Mix"), t("нарезка чужих роликов под озвучку", "cuts of videos under a voice-over"), "mix", "mix микс нарезка"),
             SearchIndex.Item("screen", t("▶ Плеер YouTube", "▶ YouTube player"), t("поиск с фильтрами, ИИ-отбор, фон, прошлые поиски", "search with filters, AI picks, background, past searches"), "player", "плеер player смотреть слушать фон поиск youtube видео музыка background"),
@@ -156,6 +157,7 @@ class SearchActivity : LumenBase() {
             when (key) {
                 "studio" -> StudioActivity.open(ctx)
                 "editor" -> StudioEditorActivity.open(ctx)
+                "board" -> BoardActivity.open(ctx)
                 "mix" -> StudioMixActivity.open(ctx)
                 "bite" -> BiteActivity.open(ctx)
                 "player" -> PlayerActivity.open(ctx)

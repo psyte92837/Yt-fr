@@ -13,7 +13,7 @@ object HelpMap {
     /** Topic ids in the order of the help screen. */
     val ids = listOf(
         "about", "home", "wizard", "new_project", "project", "kmap", "video", "channel", "quick", "graph", "audit",
-        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "bite", "player", "bots", "bot_posts", "settings"
+        "seo", "diagram", "journal", "send_review", "relay", "browser", "tts", "studio", "montage", "insert", "board", "bite", "player", "bots", "bot_posts", "settings"
     )
 
     private val screens = mapOf(
@@ -47,6 +47,7 @@ object HelpMap {
         "PlayerActivity" to "player",
         "StudioEditorActivity" to "studio",
         "WebLayerActivity" to "montage",
+        "BoardActivity" to "board",
         "BotsActivity" to "bots",
         "BotNewActivity" to "bots",
         "BotActivity" to "bots",
@@ -358,6 +359,28 @@ object Help {
                 t("Фоновое прослушивание и окно идут через плеер NewPipe: управление — в уведомлении. Промпт ИИ-отбора: Настройки → AI → Промпты → player_filter.",
                     "Background listening and the window use the NewPipe player: controls are in the notification. The AI filter prompt: Settings → AI → Prompts → player_filter.")
             )),
+        HelpTopic("board", t("Задачи: доска, планы, сроки", "Tasks: board, plans, dates"),
+            t("Доска задач автора, как в Jira: что снять, смонтировать, исправить, опубликовать. Всё хранится только на телефоне.",
+                "The author's task board, like Jira: what to shoot, edit, fix, publish. Everything stays on the phone."),
+            listOf(
+                t("Вход: панель Студии → «📋 Задачи». Сверху — сводка: идущий план с прогрессом или число открытых задач по статусам.",
+                    "Entry: the Studio panel → \"📋 Tasks\". On top — a summary: the running plan with progress or open tasks by status."),
+                t("Быстрая строка: «Смонтировать интро !high #монтаж @пт ~3» — ! приоритет (!, !!, !!!, !1…!5), # метка, @ срок (@сегодня, @завтра, @пт, @+3, @12.11), ~ очки оценки; «баг:», «идея:», «ролик:», «эпик:» в начале — тип.",
+                    "Quick line: \"Edit the intro !high #editing @fri ~3\" — ! priority (!, !!, !!!, !1…!5), # label, @ due (@today, @tomorrow, @fri, @+3, @12.11), ~ estimate points; \"bug:\", \"idea:\", \"video:\", \"epic:\" first — the type."),
+                t("▦ Доска: колонки Бэклог → К работе → В работе → Проверка → Готово, листаются вбок. ‹ › на карточке двигают её по статусам, ✓ закрывает, долгое нажатие — перенести, выше/ниже, план, дубль, удалить.",
+                    "▦ Board: columns Backlog → To do → In progress → Review → Done, swipe sideways. ‹ › on a card move it by status, ✓ closes, long press — move, up/down, plan, duplicate, delete."),
+                t("☰ Список — задачи по статусам и приоритету, галочка закрывает. 🗓 Сроки — неделя вперёд и группы: просрочено, сегодня, завтра, на неделе, позже.",
+                    "☰ List — tasks by status and priority, the tick closes. 🗓 Dates — the week ahead and groups: overdue, today, tomorrow, this week, later."),
+                t("🏁 Планы (спринты): отрезок 3 дня – 4 недели с целью. «▶ Начать» — план идёт, график сгорания показывает, успеваете ли. «✓ Завершить» — недоделанное уходит в бэклог или в следующий план. «→» у задачи бэклога берёт её в план.",
+                    "🏁 Plans (sprints): a time box of 3 days – 4 weeks with a goal. \"▶ Start\" runs it, the burndown shows whether you keep up. \"✓ Complete\" moves unfinished work to the backlog or the next plan. \"→\" on a backlog task takes it into the plan."),
+                t("Задача: статус, тип, приоритет, срок, оценка, метки, план, эпик, описание, шаги-чекбоксы, комментарии и история изменений. «✨ Разбить на шаги с ИИ» и «✨ План с ИИ» (цель → задачи со сроками) — через выбранный ИИ.",
+                    "A task: status, type, priority, due date, estimate, labels, plan, epic, description, checklist steps, comments and change history. \"✨ Break into steps with AI\" and \"✨ Plan with AI\" (goal → tasks with dates) use the chosen AI.")
+            ),
+            listOf(
+                t("🔍 ищет по словам и ключу (LUM-12); чипы сверху фильтруют по плану, приоритету, типу и меткам.", "🔍 searches words and keys (LUM-12); the chips on top filter by plan, priority, type and labels."),
+                t("⋮ → поделиться списком (Markdown), сменить префикс ключей, убрать старые готовые.", "⋮ → share the list (Markdown), change the key prefix, remove old done tasks.")
+            )
+        ),
         HelpTopic("bite", t("Откусить видео или аудио", "Bite a video or audio"),
             t("Сохраняет на телефон кусок видео с YouTube — видео со звуком (MP4) или только звук (M4A). Качается только нужный кусок, без пережатия, поэтому быстро и без потери качества.",
                 "Saves a piece of a YouTube video on the phone — a video with sound (MP4) or the sound only (M4A). Only the needed piece is downloaded, without re-encoding, so it is fast and keeps the quality."),

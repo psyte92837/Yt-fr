@@ -306,6 +306,13 @@
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
             android:exported="false"
             android:theme="@style/LumenTheme" />
+        <!-- ===== Lumen: Studio tasks — board, plans, dates ===== -->
+        <activity
+            android:name=".lumen.BoardActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            android:theme="@style/LumenTheme"
+            android:windowSoftInputMode="adjustResize" />
         <!-- ===== Lumen: JS layer — the second renderer (lumen.canvas, WebView without network) ===== -->
         <activity
             android:name=".lumen.WebLayerActivity"

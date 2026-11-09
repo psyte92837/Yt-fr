@@ -118,6 +118,10 @@ class StudioMixActivity : LumenBase() {
         var targetMs: Long
             get() = p.getLong("studio_mix_target", 0)
             set(v) = p.edit().putLong("studio_mix_target", v).apply()
+        /** What fills the set length when the pieces are not enough: new pieces (default) or stretching and repeats. */
+        var fill: MixFill
+            get() = MixFill.of(p.getString("studio_mix_fill", null))
+            set(v) = p.edit().putString("studio_mix_fill", v.id).apply()
         /** Settings of the AI search of moments (⚙ in the assistant): what the app does with the timecodes. */
         var bounds: StudioMixAssist.Bounds
             get() = StudioMixAssist.Bounds(
@@ -192,6 +196,9 @@ class StudioMixActivity : LumenBase() {
     /** Running work of this screen: "dl", "schemes", "subs", "script" or "". */
     private var busy = ""
     @Volatile private var cancel = false
+    /** Length the downloading new parts must fill (0 = no top-up running) and how many rounds it took. */
+    private var topUpTarget = 0L
+    private var topUpRound = 0
     private var status: Pair<TextView, ProgressBar>? = null
     private var renderBar: Pair<TextView, ProgressBar>? = null
     private var boardInfo: TextView? = null
@@ -308,7 +315,51 @@ class StudioMixActivity : LumenBase() {
 
     /** The storyboard made as long as set in "2. Cutting" (not when a voice-over sets the length). */
     private fun fitted(list: List<MixItem>): List<MixItem> =
-        if (Prefs.targetMs > 0 && !voiceFile.exists() && list.isNotEmpty()) StudioMix.fitTo(list, Prefs.targetMs, clipCaps()) else list
+        if (Prefs.targetMs <= 0 || voiceFile.exists() || list.isEmpty()) list
+        else if (Prefs.fill == MixFill.PIECES) filled(list, Prefs.targetMs)
+        else StudioMix.fitTo(list, Prefs.targetMs, clipCaps())
+
+    /** [list] filled to [target] by whole pieces: unused places of the downloaded clips join, nothing is stretched. */
+    private fun filled(list: List<MixItem>, target: Long): List<MixItem> =
+        StudioMix.fillTo(list, target, StudioMix.spare(list, specs(), Prefs.pieceMs), Prefs.seed)
+
+    /**
+     * The storyboard filled to [target] by new pieces: first unused places of the clips, then, when they are not
+     * enough, new parts of the same videos are downloaded (fresh moments) and cut — up to 3 rounds on its own.
+     */
+    private fun topUp(target: Long, round: Int = 1) {
+        if (target <= 0 || readyClips().isEmpty()) return
+        if (busy.isNotEmpty() || rendering()) return toast(t("Дождитесь конца задачи", "Wait for the task to end"))
+        val next = filled(items, target)
+        if (next != items) change(next)
+        val lack = StudioMix.lackMs(next, target)
+        if (lack <= FIT_TOL_MS) {
+            topUpTarget = 0
+            if (round > 1) toast(t("Ролик заполнен новыми кусками: ${StudioCuts.stamp(StudioMix.totalMs(next))}",
+                "The video is filled with new pieces: ${StudioCuts.stamp(StudioMix.totalMs(next))}"))
+            return
+        }
+        val used = if (usedFile.exists()) StudioMix.usedFromJson(usedFile.readText()) else emptyMap()
+        val extra = StudioMix.extraParts(readyClips(), lack, StudioCuts.MAX_CLIPS - clips.size, used)
+        if (extra.isEmpty()) {
+            topUpTarget = 0
+            return toast(t("Не хватает ${StudioCuts.stamp(lack)}: больше нечего добрать (видео закончились или ${StudioCuts.MAX_CLIPS} клипов). Добавьте видео в «1. Клипы»",
+                "${StudioCuts.stamp(lack)} short: nothing more to take (the videos ended or ${StudioCuts.MAX_CLIPS} clips). Add videos in \"1. Clips\""))
+        }
+        topUpTarget = target
+        topUpRound = round
+        saveClips(clips + extra)
+        toast(t("Не хватает ${StudioCuts.stamp(lack)}: качаю новые отрезки (${extra.size}) из тех же видео…",
+            "${StudioCuts.stamp(lack)} short: downloading new parts (${extra.size}) of the same videos…"))
+        download(extra.map { it.id }.toSet())
+    }
+
+    /** After a cut to the set length: what the downloads lack is taken from the videos on its own. */
+    private fun autoTopUp() {
+        val target = Prefs.targetMs
+        if (target > 0 && Prefs.fill == MixFill.PIECES && !voiceFile.exists() && items.isNotEmpty() &&
+            StudioMix.lackMs(items, target) > FIT_TOL_MS) topUp(target)
+    }
 
     /** Pieces of clip [id] cut again by its settings and put back at random places. */
     private fun recutClip(id: String): List<MixItem> {
@@ -510,9 +561,30 @@ class StudioMixActivity : LumenBase() {
                     if (ms == null) toast(t("Нужно время: 45 или 0:45", "A time is needed: 45 or 0:45")) else applyTarget(ms)
                 }
             })
-            muted(if (target > 0) t("Куски прореживаются или растягиваются ровно до ${StudioCuts.stamp(target)}; не хватает — повторяются.",
-                "Pieces are thinned out or stretched to exactly ${StudioCuts.stamp(target)}; when short, they repeat.")
-            else t("Ролик длиной со все куски.", "The video is as long as all the pieces."))
+            if (target > 0) {
+                add(choiceChips(ctx, listOf(MixFill.PIECES to t("🧩 Добирать новые куски", "🧩 Take new pieces"),
+                    MixFill.STRETCH to t("⇔ Растягивать и повторять", "⇔ Stretch and repeat")), Prefs.fill) { m ->
+                    if (busy.isEmpty() && m != Prefs.fill) {
+                        Prefs.fill = m
+                        if (items.isEmpty()) render() else {
+                            recut(if (m == MixFill.PIECES) t("Ролик заполняется новыми кусками", "The video is filled with new pieces")
+                            else t("Куски растянуты до ${StudioCuts.stamp(target)}", "Pieces stretched to ${StudioCuts.stamp(target)}"))
+                            autoTopUp()
+                        }
+                    }
+                }, 4)
+                muted(if (Prefs.fill == MixFill.PIECES) t("Куски берутся из клипов, пока не заполнят ${StudioCuts.stamp(target)}: лишние убираются, не хватает — режутся другие места клипов и докачиваются новые отрезки тех же видео. Длина куска не меняется.",
+                    "Pieces are taken from the clips until they fill ${StudioCuts.stamp(target)}: extra ones go, when short — other places of the clips are cut and new parts of the same videos are downloaded. The piece length stays.")
+                else t("Куски прореживаются или растягиваются ровно до ${StudioCuts.stamp(target)}; не хватает — повторяются.",
+                    "Pieces are thinned out or stretched to exactly ${StudioCuts.stamp(target)}; when short, they repeat."))
+                val lack = StudioMix.lackMs(items, target)
+                if (busy.isEmpty() && items.isNotEmpty() && lack > FIT_TOL_MS) {
+                    add(text(ctx, t("⚠ Не хватает ${StudioCuts.stamp(lack)} до ${StudioCuts.stamp(target)}", "⚠ ${StudioCuts.stamp(lack)} short of ${StudioCuts.stamp(target)}"),
+                        14f, bold = true, color = Palette.ACCENT), 6)
+                    button(t("🧩 Добрать кусков из видео", "🧩 Take more pieces of the videos"), style = BtnStyle.TONAL) { topUp(target) }
+                }
+            } else muted(t("Ролик длиной со все куски. Задайте длину — куски будут подбираться, пока не заполнят её.",
+                "The video is as long as all the pieces. Set a length — pieces are picked until they fill it."))
         }
         add(text(ctx, t("Где резать", "Where to cut"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         add(choiceChips(ctx, listOf(MixCut.EVEN to t("▦ Подряд", "▦ In a row"), MixCut.RANDOM to t("🎲 Случайно", "🎲 Random")),
@@ -538,6 +610,7 @@ class StudioMixActivity : LumenBase() {
         Prefs.targetMs = ms
         if (items.isEmpty()) return render()
         recut(if (ms > 0) t("Ролик ${StudioCuts.stamp(ms)}", "Video ${StudioCuts.stamp(ms)}") else t("Длина — по кускам", "Length by the pieces"))
+        autoTopUp()
     }
 
     /** New piece length: every clip is cut again at once; ↶ or "Undo" brings the old storyboard back. */
@@ -559,6 +632,7 @@ class StudioMixActivity : LumenBase() {
         if (readyClips().isEmpty()) return
         Prefs.seed = System.nanoTime()
         recut(null)
+        autoTopUp()
     }
 
     /** The same pieces in a new row; pinned ones keep their places. */
@@ -1371,6 +1445,8 @@ class StudioMixActivity : LumenBase() {
                 btn(ctx, if (diff < 0) t("⇔ Сжать куски", "⇔ Squeeze pieces") else t("⇔ Растянуть куски", "⇔ Stretch pieces"), style = BtnStyle.TONAL) { fitVoice(true) },
                 btn(ctx, if (diff < 0) t("✂ Обрезать конец", "✂ Cut the end") else t("＋ Дополнить повтором", "＋ Continue by repeats"), style = BtnStyle.TEXT) { fitVoice(false) }
             )
+            if (diff > 0) button(t("🧩 Добрать новыми кусками до ${StudioCuts.stamp(voice)}", "🧩 Fill with new pieces up to ${StudioCuts.stamp(voice)}"),
+                style = BtnStyle.TONAL) { topUp(voice) }
         } else muted(t("✓ Длина ролика совпадает с озвучкой", "✓ The video length matches the voice-over"))
         if (items.size > 1 && words.isNotEmpty()) {
             val on = StudioMix.seamsOnWords(items, words)
@@ -2720,6 +2796,9 @@ class StudioMixActivity : LumenBase() {
         val dirNow = clipsDir
         val maxH = StudioPrefs.quality
         val used = if (usedFile.exists()) StudioMix.usedFromJson(usedFile.readText()) else emptyMap()
+        // parts already picked (old ones, all clips, and those picked in this run), so parallel parts never overlap
+        val picked = HashMap<String, List<Pair<Long, Long>>>(used)
+        for (cl in clips) if (cl.id !in randomize) picked[cl.url] = picked[cl.url].orEmpty() + (cl.fromMs to cl.toMs)
         val key = TASK + "dl"
         BgTasks.run(this, key, t("Микс: загрузка клипов", "Mix: downloading clips"), BgTasks.reopen(this), {
             val done = java.util.concurrent.ConcurrentHashMap<String, SClip>()
@@ -2731,8 +2810,10 @@ class StudioMixActivity : LumenBase() {
                     var cl = cl0
                     if (cl.id in randomize) {
                         val dur = cl.durMs.takeIf { it > 0 } ?: StudioCutsLoad.durationMs(cl.url)
-                        val at = StudioMix.freshStart(dur, cl.ms, (used[cl.url].orEmpty()) + (cl.fromMs to cl.toMs), System.nanoTime() + i)
-                        val (a, b) = StudioCuts.span(at, at + cl.ms)
+                        val (a, b) = synchronized(picked) {
+                            val at = StudioMix.freshStart(dur, cl.ms, picked[cl.url].orEmpty() + (cl.fromMs to cl.toMs), System.nanoTime() + i)
+                            StudioCuts.span(at, at + cl.ms).also { picked[cl.url] = picked[cl.url].orEmpty() + it }
+                        }
                         cl = cl.copy(fromMs = a, toMs = b, durMs = dur)
                     }
                     done[cl.id] = StudioCutsLoad.fetch(cl, dirNow, maxH, { cancel }) { BgTasks.progress(key, it) }
@@ -2747,6 +2828,7 @@ class StudioMixActivity : LumenBase() {
             HashMap(done) to errors.toList()
         }, { e ->
             busy = ""
+            topUpTarget = 0
             if (isDestroyed) return@run
             render()
             err(e)
@@ -2775,8 +2857,8 @@ class StudioMixActivity : LumenBase() {
                         list = StudioMix.replaceClip(list, id, StudioMix.cut(spec, Prefs.pieceMs, Prefs.mode, Prefs.cutSeed), System.nanoTime())
                     }
                 }
-                if (randomize.isNotEmpty()) list = StudioMix.rearrange(list, MixOrder.SHUFFLE, Prefs.seed)
-                if (list != items) list = fitted(list)
+                if (randomize.isNotEmpty() && topUpTarget <= 0) list = StudioMix.rearrange(list, MixOrder.SHUFFLE, Prefs.seed)
+                if (list != items) list = if (topUpTarget > 0) filled(list, topUpTarget) else fitted(list)
             }
             if (isDestroyed) {
                 if (list != items) saveItems(StudioMix.unique(list))
@@ -2784,6 +2866,18 @@ class StudioMixActivity : LumenBase() {
             }
             val joined = list != items
             if (joined) change(list) else render()
+            // filling the set length: one more round while the new parts still fall short (at most 3 in all)
+            val target = topUpTarget
+            topUpTarget = 0
+            if (target > 0 && planned == null) {
+                val lack = StudioMix.lackMs(items, target)
+                if (lack > FIT_TOL_MS && done.isNotEmpty() && topUpRound < 3) return@run topUp(target, topUpRound + 1)
+                if (errors.isEmpty()) return@run toast(if (lack > FIT_TOL_MS)
+                    t("Добрано, но не хватает ${StudioCuts.stamp(lack)} — нажмите «🧩 Добрать» ещё раз или добавьте видео",
+                        "Filled up, but ${StudioCuts.stamp(lack)} short — tap \"🧩 Take more\" again or add videos")
+                else t("Ролик заполнен: ${StudioCuts.stamp(StudioMix.totalMs(items))}, кусков ${items.size}",
+                    "The video is filled: ${StudioCuts.stamp(StudioMix.totalMs(items))}, ${items.size} pieces"))
+            }
             if (errors.isNotEmpty()) showText(t("Не все клипы скачались", "Some clips failed"), errors.joinToString("\n"))
             else if (planned != null) toast(t("Раскадровка по плану: ${planned.size} кусков, ${StudioCuts.stamp(StudioMix.totalMs(planned))}",
                 "Storyboard by the plan: ${planned.size} pieces, ${StudioCuts.stamp(StudioMix.totalMs(planned))}"))

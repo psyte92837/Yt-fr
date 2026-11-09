@@ -41,6 +41,18 @@ enum class MixCut(val id: String) {
     }
 }
 
+/**
+ * How the storyboard reaches the set video length when the pieces are not enough: new pieces are taken (other
+ * places of the clips, then new parts of the same videos are downloaded), or the pieces are stretched and repeated.
+ */
+enum class MixFill(val id: String) {
+    PIECES("pieces"), STRETCH("stretch");
+
+    companion object {
+        fun of(id: String?): MixFill = values().firstOrNull { it.id == id } ?: PIECES
+    }
+}
+
 /** How the pieces are put in a row: shuffled (no two of one clip in a row), clip after clip, or clips in turn. */
 enum class MixOrder { SHUFFLE, ORDER, ROUND }
 
@@ -402,6 +414,93 @@ object StudioMix {
         next = scaleTo(next, targetMs, clipMs)
         if (totalMs(next) != targetMs) next = loopTo(next, targetMs)
         return next
+    }
+
+    /**
+     * Pieces of the clips that the storyboard has not used yet: the free gaps of every clip ([specs]) between its
+     * pieces on the storyboard, cut evenly by its piece length (its own or [pieceMs]). They fill a short storyboard.
+     */
+    fun spare(items: List<MixItem>, specs: List<MixSpec>, pieceMs: Long): List<MixItem> = specs.flatMap { spec ->
+        val p = spec.cut.pieceMs.takeIf { it > 0 } ?: pieceMs
+        val on = items.filter { it.clipId == spec.id }.map { it.fromMs to it.fromMs + it.lenMs }.sortedBy { it.first }
+        // free gaps of the clip, each cut evenly; a gap shorter than half a piece is not worth it
+        val gaps = mutableListOf<Pair<Long, Long>>()
+        var at = 0L
+        for ((a, b) in on) {
+            if (a > at) gaps += at to a
+            at = maxOf(at, b)
+        }
+        if (spec.ms > at) gaps += at to spec.ms
+        gaps.filter { (a, b) -> b - a >= maxOf(MIN_PIECE_MS, p / 2) }
+            .flatMap { (a, b) -> pieces(spec.id, b - a, p).map { it.copy(fromMs = a + it.fromMs) } }
+    }
+
+    /**
+     * The storyboard filled to [targetMs] by whole pieces of their own length (nothing stretched or repeated):
+     * too many pieces are thinned out ([thinTo]) and the end is cut; too few — [spare] pieces join, always from the
+     * clip with the fewest pieces on the storyboard, at places between other clips, until the time is filled.
+     * It stays shorter only when the material has ended ([lackMs] says by how much).
+     */
+    fun fillTo(items: List<MixItem>, targetMs: Long, spare: List<MixItem>, seed: Long): List<MixItem> {
+        if (targetMs <= 0 || items.isEmpty() && spare.isEmpty()) return items
+        var out = if (totalMs(items) > targetMs) thinTo(items, targetMs) else items
+        if (totalMs(out) < targetMs) {
+            // pieces the thinning dropped can come back to fill the last gap
+            val dropped = items.filter { it !in out }.map { it.copy(marked = false, locked = false) }
+            val left = (spare + dropped).groupBy { it.clipId }.mapValues { (_, l) -> l.toMutableList() }.toMutableMap()
+            val rnd = Random(seed)
+            val add = mutableListOf<MixItem>()
+            var total = totalMs(out)
+            while (total < targetMs && left.isNotEmpty()) {
+                val count = (out + add).groupingBy { it.clipId }.eachCount()
+                val id = left.keys.minWith(compareBy<String>({ count[it] ?: 0 }, { it }))
+                val pool = left.getValue(id)
+                val p = pool.removeAt(rnd.nextInt(pool.size))
+                if (pool.isEmpty()) left.remove(id)
+                add += p
+                total += p.lenMs
+            }
+            if (add.isNotEmpty()) out = addPieces(out, add, seed)
+        }
+        return unique(trimTo(out, targetMs))
+    }
+
+    /** How much of [targetMs] the storyboard still lacks (0 when it is long enough). */
+    fun lackMs(items: List<MixItem>, targetMs: Long): Long = (targetMs - totalMs(items)).coerceAtLeast(0)
+
+    /**
+     * New parts of the same videos to download when the clips are not enough for [needMs]: the videos take turns,
+     * each part is long enough that together they cover the need with a margin (5–30 s), at most [room] parts;
+     * a video whose known length ([SClip.durMs]) is already used up (by its clips and [used] parts) gives no more.
+     * The parts keep the place of their source clip: the download picks a fresh moment for them
+     * ([freshStart]). Empty when there is nothing left to take.
+     */
+    fun extraParts(clips: List<SClip>, needMs: Long, room: Int, used: Map<String, List<Pair<Long, Long>>> = emptyMap()): List<SClip> {
+        if (needMs <= 0 || room <= 0) return emptyList()
+        val byUrl = clips.filter { it.url.isNotBlank() }.groupBy { it.url }
+        if (byUrl.isEmpty()) return emptyList()
+        val want = needMs * 5 / 4
+        val len = (want / byUrl.size).coerceIn(StudioCuts.DEFAULT_CLIP_MS, StudioCuts.MAX_CLIP_MS)
+        val taken = byUrl.mapValues { (u, l) -> l.sumOf { it.ms } + used[u].orEmpty().sumOf { (a, b) -> (b - a).coerceAtLeast(0) } }.toMutableMap()
+        // a video gives parts while its usable middle (without the intro and the end screen) has room
+        fun hasRoom(u: String): Boolean {
+            val dur = byUrl.getValue(u).maxOf { it.durMs }
+            return dur <= 0 || dur * 85 / 100 - taken.getValue(u) >= len
+        }
+        val urls = byUrl.keys.filter { hasRoom(it) }.toMutableList()
+        val out = mutableListOf<SClip>()
+        var sum = 0L
+        var k = 0
+        while (sum < want && out.size < room && urls.isNotEmpty()) {
+            val u = urls[k % urls.size]
+            val src = byUrl.getValue(u).first()
+            val dur = byUrl.getValue(u).maxOf { it.durMs }
+            out += SClip(StudioCuts.newId(clips + out), u, src.fromMs, src.fromMs + len, src.note, src.title, durMs = dur)
+            sum += len
+            taken[u] = taken.getValue(u) + len
+            if (!hasRoom(u)) urls.remove(u) else k++
+        }
+        return out
     }
 
     /**

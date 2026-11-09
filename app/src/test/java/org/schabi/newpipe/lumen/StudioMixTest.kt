@@ -359,4 +359,38 @@ class StudioMixTest {
         assertEquals("Вот кот гуляет.\n\nА тут ничего.", clean)
         assertEquals(listOf(listOf("Вот", "кот", "гуляет."), listOf("А", "тут", "ничего.")), StudioMix.scriptLines(clean))
     }
+
+    @Test
+    fun fillsTheSetLengthWithWholePieces() {
+        val specs = listOf(MixSpec("c1", 10_000), MixSpec("c2", 10_000))
+        // a thinned storyboard: the unused places of the clips fill it back, nothing is stretched
+        val board = StudioMix.fillTo(StudioMix.build(specs, 2_000, MixCut.EVEN, 0, 7), 6_000, emptyList(), 1)
+        assertEquals(6_000L, StudioMix.totalMs(board))
+        val spare = StudioMix.spare(board, specs, 2_000)
+        assertTrue(spare.all { p -> board.none { it.clipId == p.clipId && p.fromMs < it.fromMs + it.lenMs && it.fromMs < p.fromMs + p.lenMs } })
+        val full = StudioMix.fillTo(board, 16_000, spare, 1)
+        assertEquals(16_000L, StudioMix.totalMs(full))
+        assertTrue(full.all { it.lenMs <= 2_000 })
+        assertEquals(full.size, full.map { it.key }.toSet().size)
+        assertTrue(StudioMix.spare(StudioMix.build(specs, 2_000, MixCut.EVEN, 0, 7), specs, 2_000).isEmpty())
+        // too long: pieces dropped and the end cut, every clip stays
+        val short = StudioMix.fillTo(StudioMix.mix(listOf("c1" to 10_000L, "c2" to 10_000L), 2_000, 3), 7_000, emptyList(), 1)
+        assertEquals(7_000L, StudioMix.totalMs(short))
+        assertEquals(setOf("c1", "c2"), short.map { it.clipId }.toSet())
+        // material ends: shorter, and lackMs says by how much
+        val lack = StudioMix.fillTo(StudioMix.mix(listOf("c1" to 4_000L), 2_000, 3), 10_000, emptyList(), 1)
+        assertEquals(6_000L, StudioMix.lackMs(lack, 10_000))
+    }
+
+    @Test
+    fun extraPartsOfTheSameVideosCoverTheLack() {
+        val clips = listOf(SClip("c1", "u1", 0, 10_000, durMs = 600_000), SClip("c2", "u2", 5_000, 15_000, durMs = 0))
+        val extra = StudioMix.extraParts(clips, 20_000, 10)
+        assertTrue(extra.sumOf { it.ms } >= 20_000)
+        assertEquals(setOf("u1", "u2"), extra.map { it.url }.toSet())
+        assertEquals(extra.size, (clips + extra).map { it.id }.toSet().size - clips.size)
+        assertTrue(StudioMix.extraParts(clips, 20_000, 0).isEmpty())
+        // a short video already used up gives nothing
+        assertTrue(StudioMix.extraParts(listOf(SClip("c1", "u1", 0, 10_000, durMs = 12_000)), 20_000, 10).isEmpty())
+    }
 }

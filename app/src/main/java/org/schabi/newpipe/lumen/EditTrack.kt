@@ -41,15 +41,18 @@ data class VClip(
     /** The video this piece is cut from: "" = the base video of the project, else a file inside the project folder. */
     val src: String = "",
     /** Turned clockwise by 0, 90, 180 or 270 degrees. */
-    val rot: Int = 0
+    val rot: Int = 0,
+    /** Sound effect of the piece ([EditSound.ALL], "" = none) and its strength 0..1. */
+    val sfx: String = "",
+    val sfxK: Float = 1f
 ) {
     val isHold: Boolean get() = holdMs > 0
     val outMs: Long get() = if (holdMs > 0) holdMs else max(1L, ((toMs - fromMs) / speed.toDouble()).roundToLong())
     val hasColor: Boolean get() = (filter.isNotEmpty() && filterK > 0f) || bright != 0f || contrast != 0f || sat != 0f || warm != 0f
     /** Nothing changed in this piece (its place and length aside). */
-    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty() && src.isEmpty() && rot == 0
+    val looksPlain: Boolean get() = speed == 1f && volume == 1f && !mirror && zoom == 1f && holdMs == 0L && !hasColor && trans.isEmpty() && src.isEmpty() && rot == 0 && sfx.isEmpty()
     /** Its sound is as recorded. */
-    val soundPlain: Boolean get() = speed == 1f && volume == 1f && holdMs == 0L && src.isEmpty()
+    val soundPlain: Boolean get() = speed == 1f && volume == 1f && holdMs == 0L && src.isEmpty() && sfx.isEmpty()
 }
 
 /**
@@ -227,7 +230,9 @@ object EditTrack {
         trans = c.trans.takeIf { it in EditColor.TRANSITIONS } ?: "",
         transMs = c.transMs.coerceIn(100L, 3000L),
         src = safeSrc(c.src),
-        rot = ((c.rot / 90 * 90) % 360 + 360) % 360
+        rot = ((c.rot / 90 * 90) % 360 + 360) % 360,
+        sfx = c.sfx.takeIf { EditSound.isKnown(it) } ?: "",
+        sfxK = c.sfxK.coerceIn(0f, 1f)
     )
 
     /** A file name inside the project folder, or "" (no absolute paths, no way out of the folder). */
@@ -340,6 +345,7 @@ object EditTrack {
         if (c.zoom > 1.001f) append("🔍 ")
         if (c.hasColor) append("🎨 ")
         if (c.rot != 0) append("⟳ ")
+        if (!c.isHold && c.sfx.isNotEmpty()) append(EditSound.find(c.sfx)?.emoji ?: "🎚").append(' ')
     }.trim()
 
     fun json(clips: List<VClip>): JSONArray = JSONArray().apply {
@@ -355,6 +361,7 @@ object EditTrack {
                     if (c.trans.isNotEmpty()) put("trans", c.trans).put("transMs", c.transMs)
                     if (c.src.isNotEmpty()) put("src", c.src)
                     if (c.rot != 0) put("rot", c.rot)
+                    if (c.sfx.isNotEmpty()) put("sfx", c.sfx).put("sfxK", c.sfxK.toDouble())
                 })
         }
     }
@@ -368,7 +375,7 @@ object EditTrack {
         fun f(k: String, d: Double = 0.0) = o.optDouble(k, d).toFloat().takeIf { !it.isNaN() } ?: d.toFloat()
         clean(VClip(id, from, to, f("speed", 1.0), f("volume", 1.0), o.optBoolean("mirror"), f("zoom", 1.0), o.optLong("hold"),
             o.optString("filter"), f("filterK", 1.0), f("bright"), f("contrast"), f("sat"), f("warm"),
-            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS), o.optString("src"), o.optInt("rot")))
+            o.optString("trans"), o.optLong("transMs", EditColor.DEFAULT_TRANS_MS), o.optString("src"), o.optInt("rot"), o.optString("sfx"), f("sfxK", 1.0)))
     }
 }
 

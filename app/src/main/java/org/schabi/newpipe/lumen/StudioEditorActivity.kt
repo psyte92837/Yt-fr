@@ -118,6 +118,10 @@ class StudioEditorActivity : LumenBase() {
     /** Blocks before the gesture now going on (for undo). */
     private var gestureBase: String? = null
     private var player: ExoPlayer? = null
+    /** The sound effect of the current piece in the preview. */
+    private val soundFx = EditSoundProcessor()
+    /** The piece with the effect being tried in the sheet (heard instead of the saved one). */
+    private var fxTry: VClip? = null
     private var curMs = 0L
     private var lastSeekAt = 0L
     private var resumed = false
@@ -1131,6 +1135,7 @@ class StudioEditorActivity : LumenBase() {
                     else {
                         add(act("⏩", t("Скорость", "Speed"), on = c.speed != 1f) { speedSheet(ci) })
                         add(act(if (c.volume > 0f) "🔊" else "🔇", t("Громкость", "Volume"), on = c.volume != 1f) { volumeSheet(ci) })
+                        add(act(EditSound.find(c.sfx)?.emoji ?: "🎚", t("Звук-эффект", "Sound FX"), on = c.sfx.isNotEmpty()) { soundFxSheet(ci) })
                     }
                     add(act("🌈", t("Фильтры", "Filters"), on = c.filter.isNotEmpty()) { filterSheet(ci) })
                     add(act("☀", t("Настройка", "Adjust"), on = c.bright != 0f || c.contrast != 0f || c.sat != 0f || c.warm != 0f) { adjustSheet(ci) })
@@ -1223,7 +1228,7 @@ class StudioEditorActivity : LumenBase() {
     private fun ensurePlayer() {
         val p = project ?: return
         val tv = texture ?: return
-        val ex = player ?: ExoPlayer.Builder(this).build().also { ex ->
+        val ex = player ?: ExoPlayer.Builder(this, EditSoundRenderers(this, soundFx)).build().also { ex ->
             player = ex
             ex.setSeekParameters(SeekParameters.EXACT)
             ex.addListener(object : Player.Listener {
@@ -1277,6 +1282,8 @@ class StudioEditorActivity : LumenBase() {
             if (ex.playbackParameters.speed != c.speed) ex.setPlaybackParameters(PlaybackParameters(c.speed))
             ex.volume = c.volume.coerceIn(0f, 1f)
         }
+        val fc = fxTry?.takeIf { it.id == c.id } ?: c
+        soundFx.set(if (c.isHold) "" else fc.sfx, fc.sfxK)
         texture?.let { tv ->
             tv.scaleX = if (c.mirror) -c.zoom else c.zoom
             tv.scaleY = c.zoom
@@ -1959,6 +1966,90 @@ class StudioEditorActivity : LumenBase() {
                 clipUpdate(i) { it.copy(volume = v / 100f) }
                 dismiss()
             })
+        }
+    }
+
+    /** Sound effects of piece [i]: groups, 50 presets, strength; heard at once while the piece plays (kept on closing). */
+    private fun soundFxSheet(i: Int) {
+        val c0 = clips.getOrNull(i) ?: return
+        pause()
+        focusClip(i)
+        var cur = c0
+        var group = EditSound.find(c0.sfx)?.group ?: EditSound.GROUPS[0].id
+        fun hear() {
+            fxTry = cur
+            soundFx.set(cur.sfx, cur.sfxK)
+        }
+        hear()
+        bottomSheet(t("🎚 Звук-эффект куска", "🎚 Sound effect of the piece"), onDismiss = {
+            pause()
+            fxTry = null
+            val c = clips.getOrNull(i)
+            if (c != null && c.id == cur.id && (c.sfx != cur.sfx || c.sfxK != cur.sfxK)) clipSet(i) { it.copy(sfx = cur.sfx, sfxK = cur.sfxK) }
+            else applyClip(curClip)
+        }) { dismiss ->
+            muted(t("Кусок ${i + 1} из ${clips.size}. Тап по эффекту — сразу слышно при ▶. В готовом ролике звучит так же.",
+                "Piece ${i + 1} of ${clips.size}. Tap an effect — heard at once with ▶. The exported video sounds the same."))
+            val now = text(ctx, "", 14f)
+            val list = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            var groups: ViewGroup? = null
+            var power: SeekBar? = null
+            fun showNow() {
+                now.text = EditSound.find(cur.sfx)?.let { "${it.emoji} ${it.name} — ${it.hint}" } ?: t("Без эффекта", "No effect")
+            }
+            lateinit var fill: () -> Unit
+            fill = {
+                list.removeAllViews()
+                list.addView(chipRow(ctx, EditSound.of(group).map { f ->
+                    chip(ctx, "${f.emoji} ${f.name}", f.id == cur.sfx) {
+                        cur = cur.copy(sfx = if (cur.sfx == f.id) "" else f.id, sfxK = if (cur.sfxK > 0f) cur.sfxK else 1f)
+                        power?.progress = (cur.sfxK * 1000).roundToInt()
+                        hear()
+                        showNow()
+                        fill()
+                        if (!playing) play()
+                    }
+                }, collapseAfter = 20))
+                groups?.let { g ->
+                    g.removeAllViews()
+                    g.addView(chipRow(ctx, EditSound.GROUPS.map { gr ->
+                        chip(ctx, gr.name + (if (EditSound.find(cur.sfx)?.group == gr.id) " •" else ""), gr.id == group) {
+                            group = gr.id
+                            fill()
+                        }
+                    }, collapseAfter = 20))
+                }
+            }
+            groups = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+            add(groups!!, 8)
+            add(list, 8)
+            fill()
+            showNow()
+            add(now, 8)
+            power = slider(t("Сила", "Strength"), cur.sfxK, 0f, 1f, { "${(it * 100).roundToInt()} %" }) { v, _ ->
+                cur = cur.copy(sfxK = v)
+                hear()
+            }
+            add(rowOf(ctx,
+                chip(ctx, t("▶ Послушать кусок", "▶ Play the piece")) {
+                    val st = EditTrack.starts(clips).getOrNull(i) ?: 0L
+                    seekTo(st)
+                    play()
+                },
+                chip(ctx, t("✕ Без эффекта", "✕ No effect")) {
+                    cur = cur.copy(sfx = "")
+                    hear()
+                    showNow()
+                    fill()
+                }), 8)
+            if (clips.size > 1) button(t("Применить ко всем кускам", "Apply to all pieces"), style = BtnStyle.TEXT) {
+                val tried = cur
+                commitClips(clips.map { if (it.isHold) it else it.copy(sfx = tried.sfx, sfxK = tried.sfxK) })
+                cur = clips.getOrNull(i) ?: tried
+                dismiss()
+                toast(t("Звук-эффект на всём ролике", "Sound effect on the whole video"))
+            }
+            button(t("Готово", "Done"), primary = true) { dismiss() }
         }
     }
 

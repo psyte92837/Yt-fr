@@ -21,7 +21,7 @@ import kotlin.math.roundToLong
 
 /**
  * The sound of a cut main track (see [EditTrack]), encoded once into AAC packets: the pieces in their order, each
- * at its speed (the pitch follows the speed, like a tape) and volume; freeze frames are silent.
+ * at its speed (the pitch follows the speed, like a tape), volume and sound effect ([EditSound]); freeze frames are silent.
  * Several exports of the same track (GPU, then CPU) can write it through [out].
  */
 internal class EditAudio private constructor(private val format: MediaFormat, private val packets: List<Packet>) {
@@ -145,9 +145,15 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                     progress(t("Звук: кусок ${i + 1}/${clips.size}", "Sound: piece ${i + 1}/${clips.size}"))
                     val need = (c.outMs * rate / 1000.0).roundToLong()
                     val rm = if (c.isHold || c.volume <= 0f) null else remixOf(c.src)
+                    // the sound effect of the piece (EditSound), at the output rate and the piece's own channels
+                    val fx = if (rm == null) null else EditSound.chain(c.sfx, rate, rm.outCh, c.sfxK, i + 1L)
                     if (rm == null) w.silence(need)
-                    else if (rm.outCh == outCh) rm.piece(c, need, rate, { a, n -> w.feed(a, n) }, cancelled)
+                    else if (rm.outCh == outCh) rm.piece(c, need, rate, { a, n ->
+                        fx?.process(a, n)
+                        w.feed(a, n)
+                    }, cancelled)
                     else rm.piece(c, need, rate, { a, n ->
+                        fx?.process(a, n)
                         val m = channels(a, n, rm.outCh, outCh)
                         w.feed(m, m.size)
                     }, cancelled)

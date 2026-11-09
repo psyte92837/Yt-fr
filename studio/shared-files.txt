@@ -15,6 +15,8 @@ EditInsert.kt
 EditLook.kt
 EditLottie.kt
 EditMotion.kt
+EditSound.kt
+EditSoundPreview.kt
 EditSuggest.kt
 EditTheme.kt
 EditTrack.kt

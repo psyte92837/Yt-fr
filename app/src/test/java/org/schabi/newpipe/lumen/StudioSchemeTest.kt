@@ -78,7 +78,8 @@ class StudioSchemeTest {
         val cases = StudioScheme.LAYOUTS.map { l ->
             when (l) {
                 "matrix" -> SScheme(l, nodes = n4, axes = listOf("X", "Y"))
-                "venn" -> SScheme(l, nodes = n5.take(3))
+                "venn", "stat" -> SScheme(l, nodes = n5.take(3))
+                "card" -> SScheme(l, nodes = n5.take(1))
                 else -> SScheme(l, nodes = n5)
             }
         }

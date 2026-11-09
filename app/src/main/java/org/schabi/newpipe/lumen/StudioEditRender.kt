@@ -443,6 +443,8 @@ class StudioEditPainter(
         // the look of the block may set the plate: none, its opacity or its kind
         val o = b.over
         val alpha = when {
+            // an info-block style has its own plate (or none on purpose): no extra panel unless the block asks for one
+            InfoStyles.isSpec(b.look) && (o == null || (o.bgAlpha < 0 && o.fill.isEmpty())) -> 0f
             o == null -> Color.alpha(panel) / 255f
             o.bgAlpha >= 0 -> o.bgAlpha / 100f
             o.fill.isNotEmpty() -> EditInsert.alphaOf(o.fill, -1)

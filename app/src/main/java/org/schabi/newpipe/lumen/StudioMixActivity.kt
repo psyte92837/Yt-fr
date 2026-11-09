@@ -1053,8 +1053,8 @@ class StudioMixActivity : LumenBase() {
         if (items.isEmpty()) return
         val player = MixPlayer()
         bottomSheet(t("▶ Просмотр раскадровки", "▶ Storyboard preview"), onDismiss = { player.release() }) { dismiss ->
-            muted(t("Куски идут подряд, как в готовом видео. Схем, субтитров и озвучки здесь нет — их добавит сборка.",
-                "The pieces go one after another as in the built video. Schemes, subtitles and the voice-over come with the build."))
+            muted(t("Куски идут подряд, как в готовом видео. Инфоблоков, субтитров и озвучки здесь нет — их добавит сборка.",
+                "The pieces go one after another as in the built video. Info-blocks, subtitles and the voice-over come with the build."))
             add(player.view(), 8)
             val info = add(text(ctx, "", 14f, bold = true), 8)
             lateinit var playB: Button
@@ -1294,7 +1294,7 @@ class StudioMixActivity : LumenBase() {
         val ov = over()
         if (busy.isEmpty() && !rendering()) StudioOverlayUi.block(this, ov, mixWhere(), { setOver(it) }) { overSheet() }
         else muted(StudioOverlayUi.summary(ov, mixWhere()))
-        progress("schemes", t("ИИ составляет схемы…", "AI composes schemes…"))
+        progress("schemes", t("ИИ составляет инфоблоки…", "AI composes info-blocks…"))
         progress("subs", t("Распознавание речи…", "Recognising speech…"))
         progress("script", t("ИИ пишет текст озвучки…", "AI writes the voice-over text…"))
         if (rendering()) {
@@ -1516,7 +1516,7 @@ class StudioMixActivity : LumenBase() {
             script = SScript("", scenes), words = words, times = times, captions = caps, totalMs = StudioMix.totalMs(items),
             style = StudioStyle.VIDEO, accent = StudioPrefs.accent, overlay = ov.overlay(), zooms = false, transitions = false,
             clipScenes = items.indices.toSet(), layers = if (ov.schemes) StudioLayers.ALL else StudioLayers.SUBS, overScale = ov.overScale(),
-            schemeStyle = SchemeStyles.BUILT_IN.firstOrNull { it.id == ov.look && it.id != SchemeStyles.AUTO }?.let { StudioOverlay.style(it, ov.bg, ov.schemePlace()) },
+            schemeStyle = StudioOverlay.schemeLook(ov),
             schemePlace = ov.schemePlace(), blockBg = ov.bg, fullMode = ov.fullMode(), captionStyle = TextStyles.of(ov.subStyle)
         )
     }
@@ -2002,7 +2002,7 @@ class StudioMixActivity : LumenBase() {
         busy = "schemes"
         cancel = false
         render()
-        BgTasks.run(this, TASK + "schemes", t("Микс: ИИ составляет схемы", "Mix: AI composes schemes"), BgTasks.reopen(this), {
+        BgTasks.run(this, TASK + "schemes", t("Микс: ИИ составляет инфоблоки", "Mix: AI composes info-blocks"), BgTasks.reopen(this), {
             val prov = AiTasks.requireProvider()
             val r = Llm.complete(prov, prov.smartModel, "You are an infographic designer for videos. Answer with JSON only.",
                 Prompts.fill("studio_schemes", vars), json = true, maxTokens = 900 + sel.size * 300, task = "studio_schemes", pid = "studio")
@@ -2030,8 +2030,8 @@ class StudioMixActivity : LumenBase() {
             busy = ""
             if (isDestroyed) return@run
             render()
-            toast(if (found.isEmpty()) t("ИИ не нашёл, что показать схемой", "AI found nothing to show as a scheme")
-            else if (then != null) t("Схем: ${found.size}", "Schemes: ${found.size}") else t("Схем: ${found.size}. Соберите видео", "Schemes: ${found.size}. Build the video"))
+            toast(if (found.isEmpty()) t("ИИ не нашёл, что показать инфоблоком", "AI found nothing to show as an info-block")
+            else if (then != null) t("Инфоблоков: ${found.size}", "Info-blocks: ${found.size}") else t("Инфоблоков: ${found.size}. Соберите видео", "Info-blocks: ${found.size}. Build the video"))
             then?.invoke()
         }
     }
@@ -2070,21 +2070,21 @@ class StudioMixActivity : LumenBase() {
             Prefs.over = n
             render()
         }) { dismiss ->
-            if (items.any { it.marked }) check(t("Схемы и субтитры — только на отмеченных кусках", "Schemes and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
-            add(text(ctx, t("Пожелание к схемам (необязательно)", "A wish for the schemes (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val wish = edit(t("например: больше сравнений, без пирамид", "e.g. more comparisons, no pyramids"), StudioPrefs.schemeWish)
+            if (items.any { it.marked }) check(t("Инфоблоки и субтитры — только на отмеченных кусках", "Info-blocks and subtitles only on ticked pieces"), Prefs.onlyMarked) { Prefs.onlyMarked = it }
+            add(text(ctx, t("Пожелание к инфоблокам (необязательно)", "A wish for the info-blocks (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val wish = edit(t("например: больше чисел и сравнений, без пирамид", "e.g. more numbers and comparisons, no pyramids"), StudioPrefs.schemeWish)
             StudioOverlayUi.templateWish(this, this@StudioMixActivity, wish)
-            if (hasAi() && items.isNotEmpty()) button(if (have > 0) t("🔄 Составить схемы заново", "🔄 Compose the schemes again") else t("🧩 Составить схемы", "🧩 Compose the schemes"),
+            if (hasAi() && items.isNotEmpty()) button(if (have > 0) t("🔄 Составить инфоблоки заново", "🔄 Compose the info-blocks again") else t("🧩 Составить инфоблоки", "🧩 Compose the info-blocks"),
                 style = BtnStyle.TONAL) {
                 StudioPrefs.schemeWish = wish.text.toString().trim()
                 dismiss()
                 Prefs.schemesTried = StudioMix.signature(items, Prefs.format)
                 addSchemes()
             }
-            if (have > 0) button(t("Убрать схемы ИИ ($have)", "Remove the AI schemes ($have)"), style = BtnStyle.TEXT) {
+            if (have > 0) button(t("Убрать инфоблоки ИИ ($have)", "Remove the AI info-blocks ($have)"), style = BtnStyle.TEXT) {
                 StudioPrefs.schemeWish = wish.text.toString().trim()
                 dismiss()
-                change(items.map { it.copy(scheme = null) }, t("Схемы убраны", "Schemes removed"))
+                change(items.map { it.copy(scheme = null) }, t("Инфоблоки убраны", "Info-blocks removed"))
             }
         }
     }

@@ -25,8 +25,21 @@ data class SchemeStyle(
     val enter: String = "pop", val dur: Int = 320,
     val place: String = "overlay", val anchor: String = "auto", val size: Int = 0, val dim: Float = 0.45f,
     /** Built in (cannot be deleted) or made by the user / the AI. */
-    val builtIn: Boolean = false
-)
+    val builtIn: Boolean = false,
+    /**
+     * Info-block motion ([InfoStyles], lumen.info v1): how every block comes in ("" = [enter]), how it lives on screen
+     * ([idle]: none float pulse breathe wiggle shine glow), how the blocks are linked ([link]: arrow line dash dots none),
+     * the least gap between the blocks coming in ([stagger], ms) and the opacity of the whole block ([alpha]).
+     */
+    val motion: String = "",
+    val idle: String = "none",
+    val link: String = "arrow",
+    val stagger: Int = 0,
+    val alpha: Float = 1f
+) {
+    /** The entrance of the blocks: the info-block motion, else the old four. */
+    val move: String get() = motion.ifEmpty { enter }
+}
 
 object SchemeStyles {
     val FILLS = listOf("solid", "glass", "outline", "none")
@@ -323,7 +336,7 @@ object SchemeStyles {
     fun list(dir: File): List<SchemeStyle> = BUILT_IN + (dir.listFiles { f -> f.name.endsWith(".json") }.orEmpty().sortedBy { it.lastModified() }
         .mapNotNull { f -> fromJson(f.readText(), f.name.removeSuffix(".json")) })
 
-    fun find(dir: File, id: String): SchemeStyle? = BUILT_IN.firstOrNull { it.id == alias(id) } ?: File(dir, "$id.json").takeIf { it.exists() }?.let { fromJson(it.readText(), id) }
+    fun find(dir: File, id: String): SchemeStyle? = InfoStyles.look(id) ?: BUILT_IN.firstOrNull { it.id == alias(id) } ?: File(dir, "$id.json").takeIf { it.exists() }?.let { fromJson(it.readText(), id) }
 
     fun save(dir: File, s: SchemeStyle) {
         dir.mkdirs()

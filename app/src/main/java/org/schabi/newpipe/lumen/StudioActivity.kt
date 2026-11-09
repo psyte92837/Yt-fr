@@ -691,7 +691,7 @@ class StudioActivity : LumenBase() {
         "analyse" -> t("озвучка и разметка", "voice and timing")
         "ai_direct" -> t("ИИ-режиссёр", "AI director")
         "broll" -> t("поиск B-roll", "finding B-roll")
-        "schemes" -> t("ИИ составляет инфосхемы", "AI composes info-schemes")
+        "schemes" -> t("ИИ составляет инфоблоки", "AI composes info-blocks")
         "board" -> t("раскадровка", "storyboard")
         "music" -> t("музыка", "music")
         "bg" -> t("клипы фона", "background clips")
@@ -1204,7 +1204,7 @@ class StudioActivity : LumenBase() {
                 "zooms $zooms · stickers $pops · sounds $sounds · shapes $figures" + (if (asked > 0) " · photos $got of $asked" else "")) +
                 sc.scenes.count { StudioStock.isVideo(it.media) }.let { n -> if (n > 0) t(" (клипов $n)", " ($n clips)") else "" })
             if (busy.isEmpty() && got < asked) button(t("🖼 Подобрать B-roll", "🖼 Find B-roll"), style = BtnStyle.TEXT) { fetchBroll() }
-            progress("schemes", t("ИИ составляет инфосхемы…", "AI composes info-schemes…"))
+            progress("schemes", t("ИИ составляет инфоблоки…", "AI composes info-blocks…"))
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
             val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
@@ -1251,7 +1251,7 @@ class StudioActivity : LumenBase() {
         "quote" -> t("цитата", "quote")
         "chart" -> t("диаграмма", "chart")
         "compare" -> t("сравнение", "compare")
-        "scheme" -> t("🧩 инфосхема", "🧩 info-scheme")
+        "scheme" -> t("🧩 инфоблок", "🧩 info-block")
         else -> t("текст", "text")
     }
 
@@ -1360,7 +1360,7 @@ class StudioActivity : LumenBase() {
                 btn(ctx, t("▶ Открыть", "▶ Open"), primary = true) { openFile(f) },
                 btn(ctx, t("↗ Поделиться", "↗ Share"), style = BtnStyle.TONAL) { ReportKit.share(this@StudioActivity, f, false, f.name, "video/mp4") }
             )
-            button(t("✏️ Доработать в Редакторе: схемы, картинки, надписи", "✏️ Finish in the Editor: schemes, pictures, captions"), style = BtnStyle.TONAL) {
+            button(t("✏️ Доработать в Редакторе: инфоблоки, картинки, надписи", "✏️ Finish in the Editor: info-blocks, pictures, captions"), style = BtnStyle.TONAL) {
                 StudioEditorActivity.open(this@StudioActivity, f, plan.words)
             }
             val authors = StudioDirector.authors(if (musicFile.exists()) StudioPrefs.musicCredit else "", script?.let { StudioDirector.credits(it) }.orEmpty())
@@ -2615,7 +2615,7 @@ class StudioActivity : LumenBase() {
             runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
         }
         if (moved) toast(t("Прежняя работа — в «Черновиках»", "The previous work is in Drafts"))
-        if (Provider.active() == null) toast(t("ИИ не подключён: монтаж будет по правилам, без инфосхем", "No AI connected: rule-based edit, no info-schemes"))
+        if (Provider.active() == null) toast(t("ИИ не подключён: монтаж будет по правилам, без инфоблоков", "No AI connected: rule-based edit, no info-blocks"))
         podcastAuto = true
         busy = "import"
         cancel = false
@@ -3139,9 +3139,10 @@ class StudioActivity : LumenBase() {
 
     /** Look of the schemes in a montage (null = the colours of the video style, "auto"). */
     private fun schemeStyleOf(ov: StudioOverlay, style: StudioStyle): SchemeStyle? {
-        if (style != StudioStyle.VIDEO || ov.look == SchemeStyles.AUTO) return null
-        val look = SchemeStyles.BUILT_IN.firstOrNull { it.id == ov.look } ?: return null
-        return StudioOverlay.style(look, ov.bg, ov.schemePlace())
+        if (ov.look == SchemeStyles.AUTO) return null
+        // an info-block style works in every video style; the old looks only in the montage
+        InfoStyles.look(ov.look, ov.schemePlace())?.let { return it }
+        return if (style != StudioStyle.VIDEO) null else StudioOverlay.schemeLook(ov)
     }
 
     /** Key of the current script for [StudioPrefs.schemesTried]. */
@@ -3159,7 +3160,7 @@ class StudioActivity : LumenBase() {
     private fun overlayBlock(c: Col) {
         val w = overlayWhere()
         StudioOverlayUi.block(c, StudioPrefs.over, w, { setOverlay(it) }) { overlaySheet() }
-        c.progress("schemes", t("ИИ составляет инфосхемы…", "AI composes info-schemes…"))
+        c.progress("schemes", t("ИИ составляет инфоблоки…", "AI composes info-blocks…"))
     }
 
     private fun overlaySheet() {
@@ -3169,16 +3170,16 @@ class StudioActivity : LumenBase() {
             board = emptyList()
             render()
         }) { dismiss ->
-            add(text(ctx, t("Пожелание к схемам (необязательно)", "A wish for the schemes (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val wish = edit(t("например: больше сравнений, без пирамид", "e.g. more comparisons, no pyramids"), StudioPrefs.schemeWish)
+            add(text(ctx, t("Пожелание к инфоблокам (необязательно)", "A wish for the info-blocks (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            val wish = edit(t("например: больше чисел и сравнений, без пирамид", "e.g. more numbers and comparisons, no pyramids"), StudioPrefs.schemeWish)
             StudioOverlayUi.templateWish(this, this@StudioActivity, wish)
-            if (script != null && hasAi()) button(if (have > 0) t("🔄 Составить схемы заново", "🔄 Compose the schemes again") else t("🧩 Составить схемы", "🧩 Compose the schemes"),
+            if (script != null && hasAi()) button(if (have > 0) t("🔄 Составить инфоблоки заново", "🔄 Compose the info-blocks again") else t("🧩 Составить инфоблоки", "🧩 Compose the info-blocks"),
                 style = BtnStyle.TONAL) {
                 StudioPrefs.schemeWish = wish.text.toString().trim()
                 dismiss()
                 composeSchemes(StudioPrefs.schemeWish)
             }
-            if (have > 0) button(t("Убрать схемы ИИ ($have)", "Remove the AI schemes ($have)"), style = BtnStyle.TEXT) {
+            if (have > 0) button(t("Убрать инфоблоки ИИ ($have)", "Remove the AI info-blocks ($have)"), style = BtnStyle.TEXT) {
                 StudioPrefs.schemeWish = wish.text.toString().trim()
                 dismiss()
                 removeSchemes()
@@ -3251,7 +3252,7 @@ class StudioActivity : LumenBase() {
             }
             take(aiJson("studio_schemes", vars, system, 900 + sc0.scenes.size * 80) { StudioScheme.parseAnswer(it) })
             if (bad.isNotEmpty() && !cancel) {
-                report("schemes", t("Исправляю схемы: ${bad.size}", "Fixing schemes: ${bad.size}"))
+                report("schemes", t("Исправляю инфоблоки: ${bad.size}", "Fixing info-blocks: ${bad.size}"))
                 val errors = bad.joinToString("\n") { (o, pr) -> "Сцена ${o.optInt("scene")}: " + pr.joinToString("; ") }
                 val json = org.json.JSONArray().apply { bad.forEach { put(it.first) } }.toString()
                 runCatching {
@@ -3276,8 +3277,8 @@ class StudioActivity : LumenBase() {
             }
             board = emptyList()
             render()
-            toast(if (found.isEmpty()) t("ИИ не нашёл сцен для схем", "AI found no scenes for schemes")
-            else t("Инфосхем: ${found.size}", "Info-schemes: ${found.size}") + if (failed > 0) t(" · не удалось: $failed", " · failed: $failed") else "")
+            toast(if (found.isEmpty()) t("ИИ не нашёл сцен для инфоблоков", "AI found no scenes for info-blocks")
+            else t("Инфоблоков: ${found.size}", "Info-blocks: ${found.size}") + if (failed > 0) t(" · не удалось: $failed", " · failed: $failed") else "")
             then?.invoke()
         }
     }

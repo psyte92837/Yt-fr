@@ -476,8 +476,14 @@ object StudioEdit {
             SchNode("n${i + 1}", icon, parts[0].trim(), parts.getOrNull(1)?.trim().orEmpty())
         }
         val n = nodes.size
-        if (n < 2) return null
-        val lay = layout.takeIf { it in StudioScheme.LAYOUTS && it != "auto" } ?: if (n <= 5) "chain" else "hub"
+        if (n < 1) return null
+        val lay0 = layout.takeIf { it in StudioScheme.LAYOUTS && it != "auto" } ?: when {
+            n == 1 -> "card"
+            n <= 5 -> "chain"
+            else -> "hub"
+        }
+        // more lines than a card or the numbers hold: equal tiles instead of losing lines
+        val lay = if (lay0 == "card" && n > 1 || lay0 == "stat" && n > 3) (if (n <= 6) "grid" else "list") else lay0
         val fixed = when (lay) {
             "tree" -> nodes.mapIndexed { i, nd -> if (i == 0) nd else nd.copy(parent = "n1") }
             else -> nodes

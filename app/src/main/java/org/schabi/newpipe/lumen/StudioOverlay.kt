@@ -72,6 +72,16 @@ data class StudioOverlay(
         else -> StudioScheme.maxSchemes(scenes)
     }
 
+    /** The info-block options of [look] (defaults for auto). */
+    val info: InfoOpts get() = InfoStyles.opts(look)
+
+    /** With the info-block [spec] (or auto): the plate of the built-in graphics follows its options. */
+    fun withInfo(spec: String): StudioOverlay {
+        if (!InfoStyles.isSpec(spec)) return copy(look = SchemeStyles.AUTO)
+        val o = InfoStyles.opts(spec)
+        return copy(look = spec, bg = bgOf(o, InfoStyles.of(spec)?.look))
+    }
+
     fun toJson(): JSONObject = JSONObject().put("v", 1).put("mode", mode).put("subs", subsToo).put("bg", bg).put("look", look)
         .put("size", size).put("place", place).put("toon", toon).put("amount", amount).put("full", full).put("sub", subStyle)
 
@@ -107,13 +117,39 @@ data class StudioOverlay(
             return StudioOverlay(
                 mode = one(o.optString("mode"), MODES, d.mode), subsToo = o.optBoolean("subs", d.subsToo),
                 bg = one(o.optString("bg"), BGS, d.bg),
-                look = o.optString("look").trim().let { SchemeStyles.alias(it) }.takeIf { id -> SchemeStyles.BUILT_IN.any { it.id == id } } ?: d.look,
+                look = lookOf(o.optString("look").trim()),
                 size = one(o.optString("size"), SIZES, d.size), place = one(o.optString("place"), PLACES, d.place),
                 toon = one(o.optString("toon"), TOONS, d.toon), amount = one(o.optString("amount"), AMOUNTS, d.amount),
                 full = one(o.optString("full"), FULLS, d.full),
                 subStyle = o.optString("sub").trim().takeIf { TextStyles.of(it) != null }.orEmpty()
             )
         }
+
+        /** A stored look: an info-block spec as is, an old scheme look → its info-block style, else auto. */
+        fun lookOf(v: String?): String = when {
+            v.isNullOrBlank() || v == SchemeStyles.AUTO -> SchemeStyles.AUTO
+            InfoStyles.isSpec(v) -> v
+            else -> InfoStyles.fromOld(v)
+        }
+
+        /** The plate of the built-in graphics (tiles, lists) for the plate option of an info-block spec. */
+        fun bgOf(o: InfoOpts, style: SchemeStyle? = null): String = when (o.bg) {
+            "glass" -> "glass"
+            "clear", "outline" -> "clear"
+            "solid" -> "solid"
+            else -> when (style?.fill) {
+                "glass" -> "glass"
+                "none", "outline" -> "clear"
+                else -> "solid"
+            }
+        }
+
+        /**
+         * The look the painter draws the schemes of [ov] with: its info-block style with the options, an old look with
+         * the background, or null = auto (the colours of the video style).
+         */
+        fun schemeLook(ov: StudioOverlay): SchemeStyle? = InfoStyles.look(ov.look, ov.schemePlace())
+            ?: SchemeStyles.BUILT_IN.firstOrNull { it.id == ov.look && it.id != SchemeStyles.AUTO }?.let { style(it, ov.bg, ov.schemePlace()) }
 
         fun parse(s: String?): StudioOverlay? = s?.takeIf { it.isNotBlank() }?.let { runCatching { fromJson(JSONObject(it)) }.getOrNull() }
 

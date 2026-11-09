@@ -1401,10 +1401,11 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
 
     /** An info-scheme in [box]: nodes come in on their words, arrows grow between them, the layout's guides behind. */
     private fun scheme(
-        c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a: Float, box: RectF = schemeBox(cx, cy),
+        c: Canvas, s: SScheme, index: Int, cx: Float, cy: Float, tMs: Long, a0: Float, box: RectF = schemeBox(cx, cy),
         start: Long = plan.times[index].startMs, nodeMs: List<Long>? = null
     ) {
         val st = sstyle()
+        val a = a0 * st.alpha
         val acc = st.accent ?: accent
         val bw = box.width()
         var bh = box.height()
@@ -1417,7 +1418,12 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             bh -= p.textSize * 1.8f
         }
         val boxes = StudioScheme.layout(s, bw / bh)
-        val times = nodeMs ?: plan.schemeMs.getOrNull(index).orEmpty()
+        val times0 = nodeMs ?: plan.schemeMs.getOrNull(index).orEmpty()
+        // a cascade: the blocks never come in closer than the style's stagger
+        val times = if (st.stagger <= 0) times0 else {
+            var last = Long.MIN_VALUE / 2
+            s.nodes.indices.map { i -> maxOf(times0.getOrElse(i) { start }, last + st.stagger).also { last = it } }
+        }
         val ps = s.nodes.indices.map { Studio.appear(tMs, times.getOrElse(it) { 0L }, st.dur.toLong()) }
         val rects = boxes.map { b -> RectF(left + (b.x - b.w / 2) * bw, top + (b.y - b.h / 2) * bh, left + (b.x + b.w / 2) * bw, top + (b.y + b.h / 2) * bh) }
         val guide = Studio.appear(tMs, start, 400) * a
@@ -1442,7 +1448,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
             val j = ids.indexOf(l.to)
             if (i < 0 || j < 0) continue
             val p = min(ps[i], ps[j])
-            if (p > 0f) arrow(c, st, rects[i], boxes[i].shape, rects[j], boxes[j].shape, p, a, l.label)
+            if (p > 0f && st.link != "none") arrow(c, st, rects[i], boxes[i].shape, rects[j], boxes[j].shape, p, a, l.label)
         }
         if (s.layout == "timeline") {
             val horiz = bw / bh >= 1.2f
@@ -1457,7 +1463,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 if (horiz) c.drawCircle(r.centerX(), top + bh / 2, 1.1f * u, fill) else c.drawCircle(mx, r.centerY(), 1.1f * u, fill)
             }
         }
-        s.nodes.forEachIndexed { i, n -> schemeNode(c, st, acc, n, rects[i], boxes[i].shape, ps[i], a) }
+        s.nodes.forEachIndexed { i, n -> schemeNode(c, st, acc, n, rects[i], boxes[i].shape, ps[i], a, tMs, i, times.getOrElse(i) { start }) }
         if (s.layout == "venn" && s.center.isNotBlank() && rects.isNotEmpty()) {
             val p = schText(st, 3.4f * u, st.ink, a * Studio.appear(tMs, (times.maxOrNull() ?: start) + 300, 300), bold = true)
             c.drawText(cased(st, s.center), rects.map { it.centerX() }.average().toFloat(), rects.map { it.centerY() }.average().toFloat() + p.textSize * 0.35f, p)
@@ -1500,13 +1506,33 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         line.color = st.muted
         line.alpha = (Color.alpha(st.muted) * a * p).toInt()
         line.strokeWidth = max(1.5f, 0.55f * u)
-        c.drawLine(sx, sy, ex, ey, line)
-        val hd = 1.8f * u
-        c.drawPath(Path().apply {
-            moveTo(ex - ux * hd - uy * hd * 0.6f, ey - uy * hd + ux * hd * 0.6f)
-            lineTo(ex, ey)
-            lineTo(ex - ux * hd + uy * hd * 0.6f, ey - uy * hd - ux * hd * 0.6f)
-        }, line)
+        when (st.link) {
+            "dots" -> {
+                fill.color = st.muted
+                fill.alpha = line.alpha
+                val step = 2.4f * u
+                val total = kotlin.math.hypot(ex - sx, ey - sy)
+                var d = 0f
+                while (d <= total) {
+                    c.drawCircle(sx + ux * d, sy + uy * d, max(1.2f, 0.45f * u), fill)
+                    d += step
+                }
+            }
+            "dash" -> {
+                line.pathEffect = android.graphics.DashPathEffect(floatArrayOf(1.6f * u, 1.1f * u), 0f)
+                c.drawLine(sx, sy, ex, ey, line)
+                line.pathEffect = null
+            }
+            else -> c.drawLine(sx, sy, ex, ey, line)
+        }
+        if (st.link == "arrow" || st.link == "dash") {
+            val hd = 1.8f * u
+            c.drawPath(Path().apply {
+                moveTo(ex - ux * hd - uy * hd * 0.6f, ey - uy * hd + ux * hd * 0.6f)
+                lineTo(ex, ey)
+                lineTo(ex - ux * hd + uy * hd * 0.6f, ey - uy * hd - ux * hd * 0.6f)
+            }, line)
+        }
         if (label.isNotBlank() && p >= 1f) {
             val tp = schText(st, 2.8f * u, st.muted, a)
             c.drawText(cased(st, label), (sx + ex) / 2 - uy * 2.2f * u, (sy + ey) / 2 + ux * 2.2f * u + tp.textSize * 0.35f, tp)
@@ -1514,7 +1540,16 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
     }
 
     /** Background of a block in the style: solid or glass fill, outline, or nothing; soft shadow to lift it off the video. */
-    private fun schCard(c: Canvas, st: SchemeStyle, r: RectF, radius: Float, al: Float, border: Int) {
+    private fun schCard(c: Canvas, st: SchemeStyle, r: RectF, radius: Float, al: Float, border: Int, glow: Float = 0f, glowColor: Int = 0) {
+        if (glow > 0f) {
+            // a coloured halo that breathes around the block
+            line.color = glowColor
+            line.alpha = (230 * al).toInt().coerceIn(0, 255)
+            line.strokeWidth = max(1.5f, 0.45f * u)
+            line.setShadowLayer(3.4f * u * (0.5f + 0.5f * glow), 0f, 0f, (glowColor and 0x00FFFFFF) or ((230 * glow * al).toInt().coerceIn(0, 255) shl 24))
+            c.drawRoundRect(r, radius, radius, line)
+            line.clearShadowLayer()
+        }
         if (st.fill == "solid" || st.fill == "glass") {
             fill.color = st.card
             fill.alpha = (Color.alpha(st.card) * al).toInt()
@@ -1531,18 +1566,111 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
         }
     }
 
-    /** One block of a scheme: a card, a band (funnel, pyramid) or a circle (venn) with emoji, label and value. */
-    private fun schemeNode(c: Canvas, st: SchemeStyle, acc: Int, n: SchNode, r: RectF, shape: String, p: Float, a: Float) {
-        if (p <= 0f) return
-        val al = (if (st.enter == "draw") min(1f, p * 1.6f) else p) * a
-        c.save()
-        when (st.enter) {
-            "fade" -> Unit
-            "slide" -> c.translate(0f, (1 - p) * 3f * u)
-            "draw" -> c.scale(0.6f + 0.4f * p, 1f, r.left, r.centerY())
-            else -> (0.86f + 0.14f * p).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }
+    /** Ease-out cubic: fast start, soft landing. */
+    private fun easeOut(x: Float): Float = 1f - (1f - x.coerceIn(0f, 1f)).let { it * it * it }
+
+    /** Elastic landing (overshoots and settles). */
+    private fun elastic(x: Float): Float {
+        if (x <= 0f) return 0f
+        if (x >= 1f) return 1f
+        return (Math.pow(2.0, -10.0 * x) * kotlin.math.sin((x * 10 - 0.75) * (2 * Math.PI / 3)) + 1).toFloat()
+    }
+
+    /**
+     * The entrance of one block (lumen.info motions) at progress [p]: moves the canvas and returns the alpha factor.
+     * [i] — index of the block (the glitch differs per block).
+     */
+    private fun nodeIn(c: Canvas, m: String, r: RectF, p: Float, i: Int, tMs: Long): Float {
+        val q = p.coerceIn(0f, 1f)
+        val e = easeOut(q)
+        val pad = 2f * u
+        return when (m) {
+            "fade" -> q
+            "rise", "slide" -> { c.translate(0f, (1 - e) * 4f * u); q }
+            "drop" -> { c.translate(0f, -(1 - StudioMotion.backOut(q, 1.6f)) * 7f * u); min(1f, q * 2f) }
+            "left" -> { c.translate(-(1 - e) * 9f * u, 0f); min(1f, q * 1.6f) }
+            "right" -> { c.translate((1 - e) * 9f * u, 0f); min(1f, q * 1.6f) }
+            "zoom" -> { (0.35f + 0.65f * e).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }; min(1f, q * 1.8f) }
+            "stamp" -> { (1f + 0.65f * (1 - e)).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }; min(1f, q * 2.5f) }
+            "flip" -> { c.scale(max(0.02f, e), 1f, r.centerX(), r.centerY()); 1f }
+            "unfold" -> { c.scale(1f, max(0.02f, e), r.centerX(), r.top); 1f }
+            "draw" -> { c.scale(0.6f + 0.4f * q, 1f, r.left, r.centerY()); min(1f, q * 1.6f) }
+            "wipe" -> { c.clipRect(r.left - pad, r.top - pad, r.left - pad + (r.width() + 2 * pad) * e, r.bottom + pad); 1f }
+            "reveal" -> { c.clipRect(r.left - pad, r.bottom + pad - (r.height() + 2 * pad) * e, r.right + pad, r.bottom + pad); 1f }
+            "bounce" -> { StudioMotion.backOut(q, 2.4f).let { k -> c.scale(k, k, r.centerX(), r.bottom) }; min(1f, q * 3f) }
+            "elastic" -> { elastic(q).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }; min(1f, q * 3f) }
+            "spin" -> {
+                c.rotate(-120f * (1 - e), r.centerX(), r.centerY())
+                (0.4f + 0.6f * e).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }
+                min(1f, q * 2f)
+            }
+            "swing" -> {
+                val k = 1 - q
+                c.rotate(32f * k * k * kotlin.math.cos(q * 14f), r.centerX(), r.top)
+                min(1f, q * 3f)
+            }
+            "ghost" -> { (1.18f - 0.18f * e).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }; q * q }
+            "glitch" -> {
+                if (q < 1f) {
+                    val j = kotlin.math.sin(tMs * 0.11 + i * 7.3).toFloat() * 2.8f * u * (1 - q)
+                    c.translate(j, 0f)
+                    if (((tMs / 55) + i) % 3 == 0L && q < 0.85f) 0.35f else min(1f, q * 2f)
+                } else 1f
+            }
+            "type" -> min(1f, q * 4f)
+            else -> { (0.86f + 0.14f * q).let { k -> c.scale(k, k, r.centerX(), r.centerY()) }; q }
         }
+    }
+
+    /** How a block lives once it is in ([idle]): moves the canvas and returns the alpha factor; ramps up over 400 ms. */
+    private fun nodeIdle(c: Canvas, idle: String, r: RectF, i: Int, tMs: Long, since: Long): Float {
+        if (idle == "none" || idle == "shine" || idle == "glow") return 1f
+        val k = ((tMs - since) / 400f).coerceIn(0f, 1f)
+        if (k <= 0f) return 1f
+        val ph = i * 1.3
+        return when (idle) {
+            "float" -> { c.translate(0f, kotlin.math.sin(tMs / 430.0 + ph).toFloat() * 0.7f * u * k); 1f }
+            "pulse" -> { (1f + 0.03f * k * kotlin.math.sin(tMs / 240.0 + ph).toFloat()).let { s -> c.scale(s, s, r.centerX(), r.centerY()) }; 1f }
+            "wiggle" -> { c.rotate(1.6f * k * kotlin.math.sin(tMs / 170.0 + ph * 2).toFloat(), r.centerX(), r.centerY()); 1f }
+            "breathe" -> 1f - 0.16f * k * (0.5f + 0.5f * kotlin.math.sin(tMs / 620.0 + ph).toFloat())
+            else -> 1f
+        }
+    }
+
+    /** A light streak sweeping over a block every 3.2 s ([idle] shine). */
+    private fun shine(c: Canvas, r: RectF, radius: Float, i: Int, tMs: Long, al: Float) {
+        val t = ((tMs + i * 260L) % 3200L) / 900f
+        if (t >= 1f) return
+        c.save()
+        c.clipPath(Path().apply { addRoundRect(r, radius, radius, Path.Direction.CW) })
+        val bw = max(r.width(), r.height()) * 0.22f
+        val x = r.left - bw * 2 + (r.width() + bw * 4) * t
+        fill.color = Color.WHITE
+        fill.alpha = (70 * al).toInt()
+        c.rotate(20f, x, r.centerY())
+        c.drawRect(x - bw / 2, r.top - r.height(), x + bw / 2, r.bottom + r.height(), fill)
+        c.restore()
+    }
+
+    /**
+     * One block: a card, a band (list, funnel, pyramid), a big number (stat) or a circle (venn) with emoji, label and
+     * value. It comes in with the style's motion at progress [p], then lives with its idle motion; [since] — when it
+     * started coming in.
+     */
+    private fun schemeNode(c: Canvas, st: SchemeStyle, acc: Int, n0: SchNode, r: RectF, shape: String, p: Float, a: Float, tMs: Long = 0L, i: Int = 0, since: Long = 0L) {
+        if (p <= 0f) return
+        c.save()
+        val m = st.move
+        var al = nodeIn(c, m, r, p, i, tMs) * a
+        if (p >= 1f) al *= nodeIdle(c, st.idle, r, i, tMs, since + st.dur)
+        // typewriter: the label is typed letter by letter, the value comes when it is done
+        val n = if (m == "type" && p < 1f) {
+            val q = p.coerceIn(0f, 1f) * 1.25f
+            n0.copy(label = n0.label.take(kotlin.math.ceil(n0.label.length * q.coerceAtMost(1f)).toInt()), value = if (q >= 1f) n0.value else "")
+        } else n0
+        val glow = if (st.idle == "glow" && p >= 1f && (n.accent || i % 2 == 0)) 0.55f + 0.45f * kotlin.math.sin(tMs / 380.0 + i).toFloat() else 0f
         val border = if (n.accent) acc else st.line
+        var radius = 0f
         when (shape) {
             "circle" -> {
                 val rad = min(r.width(), r.height()) / 2
@@ -1558,7 +1686,8 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 nodeText(c, st, acc, n.label, n.value, r.centerX(), ty + rad * 0.22f, rad * 1.2f, rad * 0.16f, al, false)
             }
             "band" -> {
-                schCard(c, st, r, min(r.height() * st.radius * 1.6f, 3f * u), al, border)
+                radius = min(r.height() * st.radius * 1.6f, 3f * u)
+                schCard(c, st, r, radius, al, border, glow, acc)
                 val fs = min(r.height() * 0.34f, 4.2f * u)
                 var x = r.left + fs * 0.9f
                 if (n.icon.isNotBlank()) {
@@ -1572,8 +1701,23 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                     c.drawText(n.value, r.right - fs * 0.7f, r.centerY() + fs * 0.36f, vp)
                 }
             }
+            "stat" -> {
+                radius = min(r.width(), r.height()) * st.radius
+                schCard(c, st, r, radius, al, border, glow, acc)
+                val big = n.value.ifBlank { "" }
+                val fs = min(r.height() * 0.12f, r.width() * 0.11f).coerceAtMost(4.4f * u)
+                if (big.isNotEmpty()) {
+                    val vp = schText(st, min(r.height() * 0.36f, r.width() * 0.34f), acc, al, bold = true)
+                    val tw = vp.measureText(big)
+                    if (tw > r.width() * 0.86f) vp.textSize *= r.width() * 0.86f / tw
+                    c.drawText(big, r.centerX(), r.centerY() + vp.textSize * 0.2f, vp)
+                    if (n.icon.isNotBlank()) emoji(c, n.icon, r.left + fs * 1.6f, r.top + fs * 2.2f, fs * 1.4f, al)
+                } else if (n.icon.isNotBlank()) emoji(c, n.icon, r.centerX(), r.centerY() + r.height() * 0.08f, min(r.height() * 0.32f, r.width() * 0.4f), al)
+                nodeText(c, st, acc, n.label, "", r.centerX(), r.centerY() + r.height() * 0.3f, r.width() * 0.88f, fs, al, false)
+            }
             else -> {
-                schCard(c, st, r, min(r.width(), r.height()) * st.radius, al, border)
+                radius = min(r.width(), r.height()) * st.radius
+                schCard(c, st, r, radius, al, border, glow, acc)
                 val fs = min(r.height() * 0.15f, r.width() * 0.13f).coerceAtMost(4.4f * u)
                 val hasText = n.label.isNotBlank() || n.value.isNotBlank()
                 val icon = min(r.height() * (if (hasText) 0.34f else 0.5f), r.width() * 0.4f)
@@ -1583,6 +1727,7 @@ class StudioPainter(private val w: Int, private val h: Int, private val plan: St
                 nodeText(c, st, acc, n.label, n.value, r.centerX(), ty, r.width() * 0.9f, fs, al, true)
             }
         }
+        if (st.idle == "shine" && p >= 1f && shape != "circle" && (st.fill == "solid" || st.fill == "glass")) shine(c, r, radius, i, tMs, al)
         c.restore()
     }
 

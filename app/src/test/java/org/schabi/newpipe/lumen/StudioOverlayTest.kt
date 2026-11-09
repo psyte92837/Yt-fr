@@ -22,7 +22,7 @@ class StudioOverlayTest {
 
     @Test
     fun jsonRoundTripAndBadValues() {
-        val o = StudioOverlay(StudioOverlay.SCHEMES, false, "clear", "neon", "l", "pip", "big", "many")
+        val o = StudioOverlay(StudioOverlay.SCHEMES, false, "clear", "ib:neonjump", "l", "pip", "big", "many")
         assertEquals(o, StudioOverlay.parse(o.toJson().toString()))
         val bad = StudioOverlay.parse("""{"mode":"all","bg":"rainbow","look":"nope","size":"xl","place":"moon"}""")!!
         assertEquals(StudioOverlay(), bad)
@@ -93,7 +93,7 @@ class StudioOverlayTest {
 
     @Test
     fun fullScreenMoments() {
-        val o = StudioOverlay(StudioOverlay.SCHEMES, false, "clear", "neon", "l", "full", "big", "many", StudioOverlay.BLOCKS_ONLY)
+        val o = StudioOverlay(StudioOverlay.SCHEMES, false, "clear", "ib:neonjump", "l", "full", "big", "many", StudioOverlay.BLOCKS_ONLY)
         assertEquals(o, StudioOverlay.parse(o.toJson().toString()))
         assertEquals(StudioOverlay.FULL, StudioOverlay.parse("""{"full":"moon"}""")!!.full)
         // old settings without the key keep the full-screen insert

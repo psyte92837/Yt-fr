@@ -1,8 +1,8 @@
 {
  "protocol": "lumen.freeai v1",
- "version": "2026.11.05",
- "upstream": "freellmapi snapshot monthly 2026.11.04",
- "hash": "74227ece91f987fa",
+ "version": "2026.11.09",
+ "upstream": "freellmapi snapshot monthly 2026.11.07.3db98c",
+ "hash": "e026f2fde1536b94",
  "providers": [
   {
    "id": "agnes",
@@ -1901,20 +1901,6 @@
    "tools": true
   },
   {
-   "p": "nvidia",
-   "id": "meta/llama-3.2-11b-vision-instruct",
-   "name": "Llama 3.2 11B Vision Instruct (NVIDIA NIM)",
-   "intel": 97,
-   "speed": 8,
-   "ctx": 131072,
-   "rpm": 40,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
-   "tools": true
-  },
-  {
    "p": "mistral",
    "id": "ministral-8b-2512",
    "name": "Ministral 8B (2512)",
@@ -2048,20 +2034,6 @@
    "speed": 8,
    "ctx": 32000,
    "rpm": 40,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "ovh",
-   "id": "Mistral-Nemo-Instruct-2407",
-   "name": "Mistral Nemo (OVH)",
-   "intel": 99,
-   "speed": 9,
-   "ctx": 128000,
-   "rpm": 2,
    "rpd": 0,
    "tpm": 0,
    "tpd": 0,
@@ -2259,20 +2231,6 @@
    "ctx": 131072,
    "rpm": 40,
    "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": false
-  },
-  {
-   "p": "openrouter",
-   "id": "nvidia/nemotron-3.5-content-safety:free",
-   "name": "Nemotron 3.5 Content Safety (free)",
-   "intel": 103,
-   "speed": 9,
-   "ctx": 128000,
-   "rpm": 20,
-   "rpd": 50,
    "tpm": 0,
    "tpd": 0,
    "vision": false,

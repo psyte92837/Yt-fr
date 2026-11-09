@@ -471,6 +471,6 @@ object EditSplit {
     /** Loudness of the main video at [tMs]: its piece's, times the split screen's setting. */
     fun mainVolume(blocks: List<EBlock>, tMs: Long, clipVolume: Float): Float = clipVolume * (active(blocks, tMs)?.mainVolume ?: 1f)
 
-    /** Blocks on the stage over the picture (a split screen and sounds are not; a picture-in-picture box is, to move it). */
-    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { (it.kind != KIND || it.look.startsWith(PIP)) && it.kind != EditMusic.KIND }
+    /** Blocks on the stage over the picture (a split screen, sounds and effect layers are not; a picture-in-picture box is, to move it). */
+    fun overlays(blocks: List<EBlock>): List<EBlock> = blocks.filter { (it.kind != KIND || it.look.startsWith(PIP)) && it.kind != EditMusic.KIND && it.kind != EditFx.KIND }
 }

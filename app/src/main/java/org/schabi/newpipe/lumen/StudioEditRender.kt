@@ -709,8 +709,9 @@ object StudioEditRender {
         val splits = job.blocks.filter { it.kind == EditSplit.KIND }
         val music = job.blocks.filter { EditMusic.isSound(it) }
         // the sound is rebuilt when the track is cut, a split screen is heard (or makes the main video quieter) or music plays
-        val sound = if (EditTrack.soundPlain(clips, p.durMs) && !EditSplit.mixes(splits) && !EditMusic.mixes(music)) null
-        else EditAudio.build(File(dir, StudioEditStore.BASE), clips, splits + music, dir, cancelled, progress)
+        val fxSound = EditFx.sounds(job.blocks)
+        val sound = if (EditTrack.soundPlain(clips, p.durMs) && !EditSplit.mixes(splits) && !EditMusic.mixes(music) && fxSound.isEmpty()) null
+        else EditAudio.build(File(dir, StudioEditStore.BASE), clips, splits + music + fxSound, dir, cancelled, progress)
         try {
             val n = StudioEditGl.render(job, dir, words, accent, styleDir, out, maxSide, sound, cancelled, progress)
             L.i("studio", "edit export on GPU: $n frames in ${(System.currentTimeMillis() - started) / 1000} s")
@@ -798,6 +799,9 @@ object StudioEditRender {
             val size = w * h * 3 / 2
             var colorKey: VClip? = null
             var colorM: FloatArray? = null
+            // colour layers (EditFx) over the pieces
+            val fxColor = p.blocks.filter { EditFx.isColor(it) }
+            var fxKey = ""
             for (f in 0 until frames) {
                 if (cancelled()) throw CancellationException()
                 val pts = Studio.frameTimeUs(f, fps)
@@ -849,9 +853,11 @@ object StudioEditRender {
                 lastSrc = srcUs
                 dec.advance(srcUs, frame, true)
                 // the colour of the piece on a copy: the next frame may keep this picture when the source has fewer frames
-                if (colorKey !== clip) {
+                val fk = if (fxColor.isEmpty()) "" else EditFx.colorKey(fxColor, tMs)
+                if (colorKey !== clip || fk != fxKey) {
                     colorKey = clip
-                    colorM = EditColor.matrix(clip)
+                    fxKey = fk
+                    colorM = EditFx.matrix(clip, fxColor, tMs)
                 }
                 val cm = colorM
                 val pix = if (cm == null) frame else {
@@ -1593,6 +1599,9 @@ private object StudioEditGl {
             // colour of the piece being written (3×3 and offsets), identity for none
             var colM = ID3
             var colO = ZERO3
+            // colour layers (EditFx): the colour is worked out again when the piece or the layers lasting change
+            val fxColor = p.blocks.filter { EditFx.isColor(it) }
+            var colKey: String? = null
             // radius of the blur shader: the blurred background, or a block that blurs the video under it
             var blurRadius = 0.04f
             fun draw(prog: Int, target: Int, id: Int, mat: FloatArray, at: java.nio.FloatBuffer = pos, cm: FloatArray = ID3, co: FloatArray = ZERO3) {
@@ -1646,6 +1655,13 @@ private object StudioEditGl {
                 android.opengl.GLES20.glClearColor(bgR, bgG, bgB, 1f)
                 android.opengl.GLES20.glClear(android.opengl.GLES20.GL_COLOR_BUFFER_BIT)
                 val tMs = outUs / 1000
+                val ck = "$curK|" + (if (fxColor.isEmpty()) "" else EditFx.colorKey(fxColor, tMs))
+                if (ck != colKey) {
+                    colKey = ck
+                    val cm = EditFx.matrix(clips.getOrNull(curK), fxColor, tMs)?.let { EditColor.gl(it) }
+                    colM = cm?.first ?: ID3
+                    colO = cm?.second ?: ZERO3
+                }
                 val sp = EditSplit.active(splits, tMs)
                 fun viewport(r: FRect) = android.opengl.GLES20.glViewport(r.l.roundToInt(), (h - r.b).roundToInt(), r.w.roundToInt(), r.h.roundToInt())
                 val pip = sp != null && EditSplit.isPip(sp)
@@ -1806,9 +1822,8 @@ private object StudioEditGl {
                     else -> c.toMs * 1000
                 }
                 vidPos = if (!c.mirror && c.zoom == 1f && c.rot == 0) pos else floats(*EditCanvas.quad(c.mirror, c.zoom, c.rot))
-                val cm = EditColor.matrix(c)?.let { EditColor.gl(it) }
-                colM = cm?.first ?: ID3
-                colO = cm?.second ?: ZERO3
+                // the colour of this piece (with the layers) is set in present()
+                colKey = null
                 if (k > 0 && !switched) d.flush()
                 ex.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
                 var inDone = false

@@ -23,6 +23,11 @@ internal class EditSoundProcessor : BaseAudioProcessor() {
     private var want: Pair<String, Float> = "" to 1f
     private var have: Pair<String, Float>? = null
     private var chain: EditSound.Chain? = null
+    /** The effect layer lasting now ([EditFx]), over the piece's own effect. */
+    @Volatile
+    private var wantLayer: Pair<String, Float> = "" to 1f
+    private var haveLayer: Pair<String, Float>? = null
+    private var layer: EditSound.Chain? = null
     private var fmt: AudioProcessor.AudioFormat? = null
     private var pcm = ShortArray(0)
     private var seed = 1L
@@ -32,11 +37,18 @@ internal class EditSoundProcessor : BaseAudioProcessor() {
         want = id to k
     }
 
+    /** The sound effect of the layer under the playhead ("" = none). */
+    fun setLayer(id: String, k: Float) {
+        val w = wantLayer
+        if (w.first != id || w.second != k) wantLayer = id to k
+    }
+
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         // other encodings pass by untouched (the processor is then inactive)
         if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) return AudioProcessor.AudioFormat.NOT_SET
         fmt = inputAudioFormat
         have = null
+        haveLayer = null
         return inputAudioFormat
     }
 
@@ -49,16 +61,25 @@ internal class EditSoundProcessor : BaseAudioProcessor() {
             have = w
             chain = if (f == null) null else EditSound.chain(w.first, f.sampleRate, f.channelCount, w.second, seed++)
         }
+        val wl = wantLayer
+        if (wl != haveLayer) {
+            haveLayer = wl
+            layer = if (f == null) null else EditSound.chain(wl.first, f.sampleRate, f.channelCount, wl.second, seed++)
+        }
         val out = replaceOutputBuffer(n)
         val c = chain
-        if (c == null) {
+        val l = layer
+        if (c == null && l == null) {
             out.put(inputBuffer)
         } else {
             val shorts = n / 2
             if (pcm.size < shorts) pcm = ShortArray(shorts)
             inputBuffer.order(ByteOrder.nativeOrder()).asShortBuffer().get(pcm, 0, shorts)
             inputBuffer.position(inputBuffer.position() + shorts * 2)
-            runCatching { c.process(pcm, shorts) }.onFailure { L.w("studio", "sound effect preview: ${it.message}") }
+            runCatching {
+                c?.process(pcm, shorts)
+                l?.process(pcm, shorts)
+            }.onFailure { L.w("studio", "sound effect preview: ${it.message}") }
             out.order(ByteOrder.nativeOrder()).asShortBuffer().put(pcm, 0, shorts)
             out.position(out.position() + shorts * 2)
             // an odd last byte, if any
@@ -70,11 +91,14 @@ internal class EditSoundProcessor : BaseAudioProcessor() {
     override fun onFlush() {
         // after a seek the tail of the old place must not ring on
         have = null
+        haveLayer = null
     }
 
     override fun onReset() {
         have = null
         chain = null
+        haveLayer = null
+        layer = null
         fmt = null
     }
 }

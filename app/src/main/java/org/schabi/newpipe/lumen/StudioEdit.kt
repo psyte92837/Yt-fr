@@ -131,7 +131,7 @@ object StudioEdit {
     const val MIN_W = 0.06f
     const val MAX_W = 2f
 
-    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)
+    val KINDS = listOf("scheme", "image", "text", "emoji", "split", "audio", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND, EditFx.KIND)
     val ANIMS = listOf("none", "fade", "pop", "slide", "zoom", "wipe", "drop", "spin", "type")
     val EMPHS = listOf("", "pulse", "shake", "wiggle", "bounce")
     val TEXT_LOOKS = listOf("plate", "shadow", "accent", "light")
@@ -266,6 +266,13 @@ object StudioEdit {
 
     /** Row of every block on the timeline: blocks that overlap in time go to different rows (first free row). */
     fun lanes(blocks: List<EBlock>): Map<String, Int> {
+        // effect layers (EditFx) take the tracks right under the video, the other blocks the ones below them
+        val fx = pack(blocks.filter { it.kind == EditFx.KIND })
+        val below = if (fx.isEmpty()) 0 else fx.values.max() + 1
+        return fx + pack(blocks.filter { it.kind != EditFx.KIND }).mapValues { it.value + below }
+    }
+
+    private fun pack(blocks: List<EBlock>): Map<String, Int> {
         val ends = mutableListOf<Long>()
         val out = HashMap<String, Int>()
         blocks.withIndex().sortedWith(compareBy({ it.value.startMs }, { it.index })).forEach { (_, b) ->

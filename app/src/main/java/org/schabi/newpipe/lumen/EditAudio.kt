@@ -75,7 +75,7 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                 val idx = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
                 val heard = splits.filter { (it.kind == EditSplit.KIND || it.kind == EditMusic.KIND) && it.file.isNotEmpty() && it.volume > 0f }
                 // a main video without sound: silence at 44.1 kHz, unless nothing is heard at all
-                if (idx == null && heard.isEmpty() && clips.none { it.src.isNotEmpty() }) return null
+                if (idx == null && heard.isEmpty() && clips.none { it.src.isNotEmpty() } && !EditFx.mixes(splits)) return null
                 var r: Remix? = null
                 var rate = 44_100
                 var outCh = 2
@@ -119,7 +119,11 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
                     setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 64 * 1024)
                 }, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 e.start()
-                val w = Writer(e, rate, outCh, sides)
+                // effect layers (EditFx) over the main sound, in output time
+                val layers = EditFx.sounds(splits).mapNotNull { b ->
+                    EditSound.chain(EditFx.soundId(b), rate, outCh, 1f, b.id.hashCode().toLong())?.let { FxMix(b, it, rate) }
+                }
+                val w = Writer(e, rate, outCh, sides, layers)
                 // pieces of the other videos of the project: each video's sound decoded on its own
                 val others = HashMap<String, Remix?>()
                 fun remixOf(src: String): Remix? = if (src.isEmpty()) r else if (others.containsKey(src)) others[src] else run {
@@ -422,8 +426,18 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
         }
     }
 
+    /** A sound effect layer ([EditFx]) over output frames of block [b]; [chain] runs at full strength, mixed by the layer's weight. */
+    private class FxMix(val b: EBlock, val chain: EditSound.Chain, private val rate: Int) {
+        val startF: Long = b.startMs * rate / 1000
+        val endF: Long = b.endMs * rate / 1000
+        fun weight(f: Long): Float = EditFx.weight(b, f * 1000 / rate)
+    }
+
     /** Feeds PCM to the AAC encoder and keeps what comes out. */
-    private class Writer(private val enc: MediaCodec, private val rate: Int, private val ch: Int, private val sides: List<SideMix> = emptyList()) {
+    private class Writer(
+        private val enc: MediaCodec, private val rate: Int, private val ch: Int, private val sides: List<SideMix> = emptyList(),
+        private val layers: List<FxMix> = emptyList()
+    ) {
         val packets = ArrayList<Triple<ByteArray, Long, Int>>()
         var format: MediaFormat? = null
         private var frames = 0L
@@ -444,6 +458,22 @@ internal class EditAudio private constructor(private val format: MediaFormat, pr
             var pcm = pcm0
             val f0 = frames
             val n = count / ch
+            // effect layers change the main sound while they last (before the other tracks are mixed in)
+            for (fx in layers) {
+                val a = max(f0, fx.startF)
+                val b = min(f0 + n, fx.endF)
+                if (b <= a) continue
+                if (pcm === pcm0) pcm = pcm0.copyOf(count)
+                val base = ((a - f0) * ch).toInt()
+                val len = ((b - a) * ch).toInt()
+                val wet = pcm.copyOfRange(base, base + len)
+                fx.chain.process(wet, len)
+                for (i in 0 until len) {
+                    val g = fx.weight(a + i / ch)
+                    val dry = pcm[base + i]
+                    pcm[base + i] = (dry + (wet[i] - dry) * g).roundToInt().coerceIn(-32768, 32767).toShort()
+                }
+            }
             for (sd in sides) {
                 val a = max(f0, sd.startF)
                 val b = min(f0 + n, sd.endF)

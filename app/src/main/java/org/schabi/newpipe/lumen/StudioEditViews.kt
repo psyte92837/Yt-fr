@@ -485,11 +485,12 @@ class EditTimeline(ctx: Context) : View(ctx) {
     private fun xOf(ms: Long) = width / 2f + (ms - playMs) * pxPerMs
     private fun msAt(x: Float) = playMs + ((x - width / 2f) / pxPerMs).toLong()
 
-    private fun color(kind: String) = when (kind) {
+    private fun color(kind: String, b0: EBlock? = null) = when (kind) {
         "scheme" -> 0xFF6750A4.toInt()
         "image" -> 0xFF00796B.toInt()
         EditSplit.KIND -> 0xFF1565C0.toInt()
         EditMusic.KIND -> 0xFF2E7D32.toInt()
+        EditFx.KIND -> if (EditFx.type(b0) == EditFx.Type.SOUND) 0xFFEF6C00.toInt() else 0xFFAD1457.toInt()
         "text" -> 0xFFB45309.toInt()
         EditInsert.KIND -> 0xFF8E24AA.toInt()
         EditMotion.KIND -> 0xFF5E35B1.toInt()
@@ -508,6 +509,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         "text" -> "T " + b.text.replace('\n', ' ')
         EditMotion.KIND -> "⚡ " + b.text.ifBlank { EditMotion.preset(b.look)?.name.orEmpty() }
         EditLottie.KIND -> "🌀 " + b.text.ifBlank { "Lottie" }
+        EditFx.KIND -> EditFx.name(b)
         else -> b.text
     }
 
@@ -664,7 +666,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
             val r = rectOf(b, lay[b.id] ?: 0)
             if (r.right < 0 || r.left > w) continue
             val isSel = b.id == selected
-            blockP.color = color(b.kind)
+            blockP.color = color(b.kind, b)
             blockP.alpha = if (isSel) 255 else 220
             val rad = 7 * dp
             c.drawRoundRect(r, rad, rad, blockP)

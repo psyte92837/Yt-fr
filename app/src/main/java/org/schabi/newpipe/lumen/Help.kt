@@ -406,8 +406,8 @@ object Help {
                     "🎵 Sounds → 🔔 Short sounds: transitions, interface, drums, fun — tap to listen, \"＋\" puts it at the cursor; tone and noise generators; 🤐 bleep the selection."),
                 t("🎚 Дорожки: добавить аудиофайлы или звук из видео (в конец — склеить, в курсор — вставить, поверх — смешать), запись с микрофона (можно слушать проект в наушниках), громкость, панорама, 🔇 и 🎧 соло, переименовать, удалить.",
                     "🎚 Tracks: add audio files or the sound of a video (at the end — join, at the cursor — insert, over — mix), microphone recording (you can hear the project in headphones), volume, pan, 🔇 and 🎧 solo, rename, delete."),
-                t("💾 Сохранить: M4A (AAC 192 кбит/с) или WAV, весь проект или выделенное, с выравниванием громкости — в Музыка/Lumen, «Поделиться» или в любую папку.",
-                    "💾 Save: M4A (AAC 192 kbit/s) or WAV, the whole project or the selection, optionally levelled — to Music/Lumen, \"Share\" or any folder.")
+                t("💾 Сохранить: MP3 (128–320 кбит/с, играет везде), M4A (AAC 192 кбит/с) или WAV, весь проект или выделенное, с выравниванием громкости — в Музыка/Lumen, «Поделиться» или в любую папку.",
+                    "💾 Save: MP3 (128–320 kbit/s, plays everywhere), M4A (AAC 192 kbit/s) or WAV, the whole project or the selection, optionally levelled — to Music/Lumen, \"Share\" or any folder.")
             ),
             listOf(
                 t("↶ ↷ отменяют и повторяют до 60 шагов. Проекты — внизу экрана «Аудиоредактор»; удержание — удалить. Файл длиннее 30 минут обрезается.",

@@ -358,6 +358,7 @@ dependencies {
 
     // Lumen Studio: Lottie for animated emoji in the videos
     implementation(libs.lottie)
+    implementation(libs.jump3r)
     // Lumen: Android AppFunctions (on-device agents, Android 16+); KSP generates LumenAgentService + XML
     implementation(libs.androidx.appfunctions)
     ksp(libs.androidx.appfunctions.compiler)

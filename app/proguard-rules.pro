@@ -60,3 +60,6 @@
 
 # Lumen module (no reflection, kept for readable crash traces)
 -keep class org.schabi.newpipe.lumen.** { *; }
+
+# jump3r (MP3 export): its desktop wrapper and CLI refer to javax.sound, which Android lacks; Lumen wires the LAME core itself
+-dontwarn javax.sound.**

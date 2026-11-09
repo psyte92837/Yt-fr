@@ -1559,12 +1559,25 @@ class AudioEditorActivity : LumenBase() {
     // ---------- 💾 save ----------
 
     private fun saveTools(c: Col, q: AProject) {
-        val fmt = runCatching { AudioRender.Fmt.valueOf(Lumen.prefs.getString("audio_fmt", "M4A") ?: "M4A") }.getOrDefault(AudioRender.Fmt.M4A)
+        val fmt = exportFmt()
         val norm = Lumen.prefs.getString("audio_norm", "none") ?: "none"
         c.add(text(this, t("Формат", "Format"), Type.LABEL, bold = true, color = Palette.MUTED), 0)
-        c.add(choiceChips(this, listOf(AudioRender.Fmt.M4A to t("M4A (AAC) — компактно", "M4A (AAC) — small"), AudioRender.Fmt.WAV to t("WAV — без потерь", "WAV — lossless")), fmt) {
+        c.add(choiceChips(this, listOf(
+            AudioRender.Fmt.MP3 to t("MP3 — играет везде", "MP3 — plays everywhere"),
+            AudioRender.Fmt.M4A to t("M4A (AAC) — компактно", "M4A (AAC) — small"),
+            AudioRender.Fmt.WAV to t("WAV — без потерь", "WAV — lossless")
+        ), fmt) {
             Lumen.prefs.edit().putString("audio_fmt", it.name).apply()
+            render()
         }, 4)
+        if (fmt == AudioRender.Fmt.MP3) {
+            c.add(text(this, t("Качество MP3", "MP3 quality"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            c.add(choiceChips(this, Mp3Writer.BITRATES.map { kb ->
+                kb to "$kb " + t("кбит/с", "kbit/s") + when (kb) { 128 -> t(" · речь", " · speech"); 192 -> t(" · обычно", " · usual"); 320 -> t(" · максимум", " · best"); else -> "" }
+            }, mp3Kbps()) { Lumen.prefs.edit().putInt("audio_mp3_kbps", it).apply() }, 4)
+            c.muted(t("≈ ${mp3Kbps() * 60 / 8 / 1000.0} МБ в минуту. MP3 кодируется дольше M4A (LAME на Java, без нативных библиотек).",
+                "≈ ${mp3Kbps() * 60 / 8 / 1000.0} MB a minute. MP3 takes longer than M4A to encode (LAME in Java, no native code)."))
+        }
         c.add(text(this, t("Выровнять громкость", "Level the loudness"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         c.add(choiceChips(this, listOf("none" to t("Как есть", "As is"), "peak" to t("Пик −1 дБ", "Peak −1 dB"), "-14" to "−14 LUFS", "-16" to "−16 LUFS"), norm) {
             Lumen.prefs.edit().putString("audio_norm", it).apply()
@@ -1582,9 +1595,14 @@ class AudioEditorActivity : LumenBase() {
         c.muted(t("Исходные файлы не меняются: правки хранятся в проекте, его можно открыть и доделать позже.", "The original files stay untouched: edits live in the project, open it any time later."))
     }
 
+    private fun exportFmt(): AudioRender.Fmt =
+        runCatching { AudioRender.Fmt.valueOf(Lumen.prefs.getString("audio_fmt", "MP3") ?: "MP3") }.getOrDefault(AudioRender.Fmt.MP3)
+
+    private fun mp3Kbps(): Int = Lumen.prefs.getInt("audio_mp3_kbps", Mp3Writer.DEFAULT_KBPS).takeIf { it in Mp3Writer.BITRATES } ?: Mp3Writer.DEFAULT_KBPS
+
     private fun export(q: AProject, range: LongRange?, then: String) {
         if (q.length <= 0) return toast(t("Проект пуст", "The project is empty"))
-        val fmt = runCatching { AudioRender.Fmt.valueOf(Lumen.prefs.getString("audio_fmt", "M4A") ?: "M4A") }.getOrDefault(AudioRender.Fmt.M4A)
+        val fmt = exportFmt()
         val norm = Lumen.prefs.getString("audio_norm", "none") ?: "none"
         val a = range?.first ?: 0L
         val b = range?.last ?: q.length
@@ -1598,7 +1616,7 @@ class AudioEditorActivity : LumenBase() {
                     if (norm == "peak") AudioEdit.peakGain(m.peak, -1f) else AudioEdit.loudGain(m.gatedDb, m.peak, norm.toFloat())
                 }
             }
-            AudioRender.write(q, a, b, fmt, out, gain, cancelled) { pct -> progress(if (norm == "none") pct else 33 + pct * 2 / 3) }
+            AudioRender.write(q, a, b, fmt, out, gain, cancelled, { pct -> progress(if (norm == "none") pct else 33 + pct * 2 / 3) }, mp3Kbps())
             if (then == "music") AudioRender.saveToMusic(this, out, fmt.mime) else out.name
         }) { where ->
             lastExport = out

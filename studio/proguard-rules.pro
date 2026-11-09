@@ -10,3 +10,6 @@
 -dontwarn com.google.errorprone.**
 -dontwarn org.jetbrains.annotations.**
 -keep class com.google.android.exoplayer2.** { *; }
+
+# jump3r (MP3 export): its desktop wrapper and CLI refer to javax.sound, which Android lacks; Lumen wires the LAME core itself
+-dontwarn javax.sound.**

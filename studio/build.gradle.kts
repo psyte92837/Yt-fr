@@ -139,5 +139,6 @@ dependencies {
     implementation(libs.google.exoplayer.datasource)
     implementation(libs.squareup.okhttp)
     implementation(libs.lottie)
+    implementation(libs.jump3r)
     implementation(libs.mlkit.translate)
 }

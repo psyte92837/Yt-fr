@@ -282,4 +282,19 @@ class AudioEditTest {
         assertTrue(a.indices.count { a[it] != b[it] } > a.size / 2)
         assertEquals(6_000L, AudioAmb.lengthOf("car_pass", 60_000))
     }
+
+    @Test
+    fun mp3WriterMakesConstantBitrateFrames() {
+        val rate = 44_100
+        val out = java.io.ByteArrayOutputStream()
+        val w = Mp3Writer(rate, 2, 128, 7, out)
+        val b = FloatArray(4096 * 2) { i -> (0.3 * sin(2 * PI * 440 * (i / 2) / rate)).toFloat() }
+        repeat(11) { w.write(b, 4096) } // ≈ 1.02 s
+        w.finish()
+        val mp3 = out.toByteArray()
+        // MPEG-1 Layer III frame sync, and about 128 kbit/s × 1 s
+        assertEquals(0xFF, mp3[0].toInt() and 0xFF)
+        assertEquals(0xFA, mp3[1].toInt() and 0xFE)
+        assertTrue("${mp3.size} bytes", mp3.size in 15_000..19_000)
+    }
 }

@@ -565,7 +565,7 @@ object AudioPreview {
 
 /** Rendering a project: measuring it, writing WAV / M4A, saving to Music/Lumen, and processing a source (noise removal). */
 object AudioRender {
-    enum class Fmt(val ext: String, val mime: String) { WAV("wav", "audio/wav"), M4A("m4a", "audio/mp4") }
+    enum class Fmt(val ext: String, val mime: String) { MP3("mp3", "audio/mpeg"), M4A("m4a", "audio/mp4"), WAV("wav", "audio/wav") }
 
     private const val BLOCK = 4096
     private const val TIMEOUT = 10_000L
@@ -602,8 +602,19 @@ object AudioRender {
     /**
      * Writes [a]..[b] of [p] as [fmt] into [out]; [gain] scales everything (normalising). Progress 0..100.
      */
-    fun write(p: AProject, a: Long, b: Long, fmt: Fmt, out: File, gain: Float, cancelled: () -> Boolean, progress: (Int) -> Unit) {
+    fun write(p: AProject, a: Long, b: Long, fmt: Fmt, out: File, gain: Float, cancelled: () -> Boolean, progress: (Int) -> Unit, kbps: Int = Mp3Writer.DEFAULT_KBPS) {
         out.parentFile?.mkdirs()
+        if (fmt == Fmt.MP3) {
+            java.io.BufferedOutputStream(java.io.FileOutputStream(out), 1 shl 16).use { os ->
+                val w = Mp3Writer(p.rate, 2, kbps, Mp3Writer.DEFAULT_QUALITY, os)
+                pass(p, a, b, cancelled, progress) { buf, n ->
+                    for (i in 0 until n * 2) buf[i] = EditSound.soft(buf[i] * gain)
+                    w.write(buf, n)
+                }
+                w.finish()
+            }
+            return
+        }
         if (fmt == Fmt.WAV) {
             RandomAccessFile(out, "rw").use { raf ->
                 raf.setLength(0)

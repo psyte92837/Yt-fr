@@ -490,7 +490,7 @@ class EditTimeline(ctx: Context) : View(ctx) {
         "image" -> 0xFF00796B.toInt()
         EditSplit.KIND -> 0xFF1565C0.toInt()
         EditMusic.KIND -> 0xFF2E7D32.toInt()
-        EditFx.KIND -> if (EditFx.type(b0) == EditFx.Type.SOUND) 0xFFEF6C00.toInt() else 0xFFAD1457.toInt()
+        EditFx.KIND -> if (b0?.let { EditFx.type(it) } == EditFx.Type.SOUND) 0xFFEF6C00.toInt() else 0xFFAD1457.toInt()
         "text" -> 0xFFB45309.toInt()
         EditInsert.KIND -> 0xFF8E24AA.toInt()
         EditMotion.KIND -> 0xFF5E35B1.toInt()

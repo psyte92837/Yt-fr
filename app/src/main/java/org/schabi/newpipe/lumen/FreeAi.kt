@@ -103,6 +103,7 @@ object FreeAi {
             .containsMatchIn(m) || m.contains("no endpoints found")
         return when {
             code == null -> Fail.NETWORK
+            m.contains("location is not supported") || m.contains("unsupported_country") -> Fail.AUTH
             code == 401 || code == 403 -> if (modelGone) Fail.MODEL else Fail.AUTH
             code == 402 -> Fail.DAILY
             code == 404 -> Fail.MODEL

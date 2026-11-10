@@ -185,4 +185,15 @@ class LlmCoreTest {
         assertEquals(JSONArray().length(), JsonFix.items("{}", "x").length())
         assertNotNull(JsonFix.items("""{"x":[{"a":1}""", "x").optJSONObject(0))
     }
+
+    @Test
+    fun fatalApiErrorsAreNotRetried() {
+        val region = """{"error":{"code":400,"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}"""
+        assertEquals(LlmErrors.Kind.REGION, LlmErrors.fatal(400, region))
+        assertEquals(LlmErrors.Kind.KEY, LlmErrors.fatal(400, """{"error":{"message":"API key not valid","details":[{"reason":"API_KEY_INVALID"}]}}"""))
+        assertEquals(LlmErrors.Kind.DAILY, LlmErrors.fatal(429, "Generate content requests per day limit exceeded on Free Tier"))
+        assertNull(LlmErrors.fatal(429, "Generate content requests per minute limit exceeded on Free Tier"))
+        assertNull(LlmErrors.fatal(400, "Invalid JSON payload: unknown field responseSchema"))
+        assertNull(LlmErrors.fatal(503, "overloaded"))
+    }
 }

@@ -2324,8 +2324,10 @@ class StudioMixActivity : LumenBase() {
                 urls = (given + StudioMixAssist.pickVideos(hits, auto, maxVideoMs, given.toSet())).distinct()
             }
             val groups = StudioMixAssist.batches(urls, b.batch)
+            val stop = java.util.concurrent.atomic.AtomicReference<String?>(null)
             fun ask(g: List<String>, depth: Int) {
                 if (cancel) throw java.util.concurrent.CancellationException()
+                if (stop.get() != null) return
                 try {
                     val r = Llm.complete(prov, prov.fastModel, "Answer with JSON only.", Prompts.fill("studio_mix_find", vars + ("n" to g.size.toString())),
                         json = true, fileUri = g.joinToString("\n"), maxTokens = (40 * g.size * b.perVideo).coerceIn(400, 8000),
@@ -2342,6 +2344,11 @@ class StudioMixActivity : LumenBase() {
                     throw e
                 } catch (e: Exception) {
                     L.w("studio", "mix assist batch of ${g.size}: ${e.message}")
+                    // region blocked, bad key, daily quota: the other batches would fail the same way
+                    if ((e as? LlmException)?.fatal != null) {
+                        if (stop.compareAndSet(null, e.message)) errors += e.message.orEmpty()
+                        return
+                    }
                     // a batch too big for the model or a stuck answer: the halves separately
                     if (g.size > 1 && depth < 4) {
                         ask(g.subList(0, g.size / 2), depth + 1)

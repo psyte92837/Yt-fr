@@ -79,7 +79,10 @@ data class LlmReply(
 )
 
 /** [raw] keeps the provider response body (shown in the AI journal). */
-class LlmException(msg: String, val raw: String = "", val code: Int = 0) : IOException(msg)
+class LlmException(msg: String, val raw: String = "", val code: Int = 0) : IOException(msg) {
+    /** Not fixable by a retry (region blocked, bad key, daily quota): callers stop instead of repeating or splitting. */
+    val fatal: LlmErrors.Kind? get() = if (code == 0) null else LlmErrors.fatal(code, raw.ifBlank { message.orEmpty() })
+}
 
 /** Where a call goes: a configured [Provider] or one free model ([FreeAi]). */
 data class LlmEndpoint(
@@ -127,7 +130,14 @@ object Llm {
         L.i("llm", "$method $where → $code in ${System.currentTimeMillis() - started}ms, ${text.length}ch")
         if (code !in 200..299) {
             L.e("llm", "$where error $code: ${text.take(500)}")
-            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}", text, code)
+            val hint = when (LlmErrors.fatal(code, text)) {
+                LlmErrors.Kind.REGION -> t(" — API недоступен из вашей страны: включите VPN (США/Европа) или выберите другого провайдера в Настройках → ИИ",
+                    " — the API is not available in your country: use a VPN (US/Europe) or pick another provider in Settings → AI")
+                LlmErrors.Kind.KEY -> t(" — ключ не принят: проверьте его в Настройках → ИИ", " — the key was rejected: check it in Settings → AI")
+                LlmErrors.Kind.DAILY -> t(" — дневной лимит исчерпан, до завтра", " — daily limit used up until tomorrow")
+                null -> ""
+            }
+            throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}$hint", text, code)
         }
         return text
     }
@@ -286,7 +296,7 @@ object Llm {
     } catch (e: LlmException) {
         // a model that does not take the schema or the thinking setting: once more without them (the prompt has the format)
         val extra = media != null && (media.schema != null || media.noThinking)
-        if (e.code != 400 || !extra) throw e
+        if (e.code != 400 || !extra || e.fatal != null) throw e
         L.w("llm", "400 with schema/thinking options, retry without: ${e.message?.take(200)}")
         completeRaw0(p, model, system, user, json, fileUri, maxTokens, lowMedia, image, imageMime, media!!.copy(schema = null, noThinking = false), onRaw)
     }

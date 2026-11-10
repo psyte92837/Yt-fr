@@ -239,6 +239,24 @@ object Retrieve {
     }
 }
 
+/** API errors that no repeat, smaller request or option change can fix: retrying them only burns the quota. */
+object LlmErrors {
+    enum class Kind { REGION, KEY, DAILY }
+
+    /** [code] HTTP status, [raw] the error body or message. */
+    fun fatal(code: Int, raw: String): Kind? {
+        val m = raw.lowercase()
+        return when {
+            m.contains("location is not supported") || m.contains("unsupported_country") ||
+                m.contains("country, region, or territory not supported") -> Kind.REGION
+            code == 401 || m.contains("api_key_invalid") || m.contains("api key not valid") || m.contains("invalid api key") ||
+                m.contains("incorrect api key") -> Kind.KEY
+            code == 429 && Regex("per ?day|requestsperday|daily").containsMatchIn(m) -> Kind.DAILY
+            else -> null
+        }
+    }
+}
+
 /** Cheap repairs of JSON answers: fix the answer alone, or ask only for the rest of an answer cut by the limit. */
 object JsonFix {
     /** The answer is a JSON object (after fences, comments, trailing commas are dropped). */

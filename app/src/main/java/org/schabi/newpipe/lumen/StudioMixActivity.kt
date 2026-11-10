@@ -1174,7 +1174,7 @@ class StudioMixActivity : LumenBase() {
      */
     private fun clipSheet(id: String) {
         val cl = clips.firstOrNull { it.id == id } ?: return
-        val look = MiniLook()
+        val look = MiniLook(this)
         bottomSheet(t("Клип ${cl.id}", "Clip ${cl.id}"), onDismiss = { look.release() }) { dismiss ->
             p(cl.title.ifBlank { cl.note }.ifBlank { cl.url }.take(120))
             muted(t("Отрезок ", "Part ") + StudioCuts.stamp(cl.fromMs) + "–" + StudioCuts.stamp(cl.toMs) +
@@ -2406,171 +2406,6 @@ class StudioMixActivity : LumenBase() {
      * playing it); a tap on a frame plays the lowest quality stream from there in a mini player (with sound when
      * there is one), through the NewPipe YouTube data source. Tap on the picture pauses; ⏪/⏩ jump 10 s.
      */
-    private inner class MiniLook {
-        private val looks = HashMap<String, StudioCutsLoad.Look>()
-        private var player: com.google.android.exoplayer2.ExoPlayer? = null
-        private var current = ""
-        private var started = false
-        private val surface = android.view.TextureView(this@StudioMixActivity)
-        private val frame = FrameLayout(this@StudioMixActivity).apply {
-            setBackgroundColor(0xFF000000.toInt())
-            visibility = View.GONE
-            addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER))
-            setOnClickListener { player?.let { p -> p.playWhenReady = !p.playWhenReady } }
-        }
-        private val strip = LinearLayout(this@StudioMixActivity).apply { orientation = LinearLayout.HORIZONTAL }
-        private val stripScroll = android.widget.HorizontalScrollView(this@StudioMixActivity).apply {
-            isHorizontalScrollBarEnabled = false
-            addView(strip)
-        }
-        private val state = text(this@StudioMixActivity, "", 12f, color = Palette.MUTED)
-        private val playBtn = btn(this@StudioMixActivity, "▶", style = BtnStyle.TONAL) { toggle() }
-        private val tick = object : Runnable {
-            override fun run() {
-                val p = player ?: return
-                if (current.isNotEmpty() && started && p.duration > 0) {
-                    state.text = StudioCuts.stamp(p.currentPosition) + " / " + StudioCuts.stamp(p.duration)
-                    playBtn.text = if (p.playWhenReady) "⏸" else "▶"
-                }
-                frame.postDelayed(this, 500)
-            }
-        }
-        val view: LinearLayout = LinearLayout(this@StudioMixActivity).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(stripScroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
-            addView(frame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(200)).apply { topMargin = dp(4) })
-            addView(LinearLayout(this@StudioMixActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                addView(playBtn)
-                addView(state, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(8) })
-                addView(btn(this@StudioMixActivity, "⏪ 10", style = BtnStyle.TEXT) { seek(-10_000) })
-                addView(btn(this@StudioMixActivity, "10 ⏩", style = BtnStyle.TEXT) { seek(10_000) })
-            })
-        }
-
-        private fun seek(d: Long) {
-            val p = player ?: return
-            if (!started) return
-            p.seekTo((p.currentPosition + d).coerceIn(0, if (p.duration > 0) maxOf(0, p.duration - 500) else Long.MAX_VALUE))
-        }
-
-        private fun toggle() {
-            val p = player
-            if (started && p != null) p.playWhenReady = !p.playWhenReady else play(0)
-        }
-
-        private fun exo(): com.google.android.exoplayer2.ExoPlayer = player ?: com.google.android.exoplayer2.ExoPlayer.Builder(this@StudioMixActivity).build().also { p ->
-            player = p
-            p.setVideoTextureView(surface)
-            p.addListener(object : com.google.android.exoplayer2.Player.Listener {
-                override fun onVideoSizeChanged(size: com.google.android.exoplayer2.video.VideoSize) {
-                    // keep the shape of the video inside the frame
-                    if (size.width <= 0 || size.height <= 0) return
-                    val fw = frame.width.takeIf { it > 0 } ?: return
-                    val fh = frame.height
-                    val vh = size.height / size.pixelWidthHeightRatio.coerceAtLeast(0.1f)
-                    val k = minOf(fw.toFloat() / size.width, fh.toFloat() / vh)
-                    surface.layoutParams = FrameLayout.LayoutParams((size.width * k).toInt(), (vh * k).toInt(), Gravity.CENTER)
-                }
-
-                override fun onPlayerError(error: com.google.android.exoplayer2.PlaybackException) {
-                    state.text = t("Не играет: ", "Cannot play: ") + (error.message ?: error.errorCodeName)
-                }
-            })
-            frame.post(tick)
-        }
-
-        /** Playback speed of the mini player (the feed: ×1, ×1.5, ×2). */
-        var speed = 1f
-            set(v) {
-                field = v
-                player?.setPlaybackSpeed(v)
-            }
-
-        /** Opens the look at [url]: the frames strip first, the video only on a tap ([auto]: plays at once from [fromMs], or the middle when −1). */
-        fun open(url: String, auto: Boolean = false, fromMs: Long = -1) {
-            stop()
-            current = url
-            strip.removeAllViews()
-            playBtn.text = "▶"
-            fun go(lk: StudioCutsLoad.Look) {
-                show(lk)
-                if (auto) play(if (fromMs >= 0) fromMs else lk.frames.getOrNull(lk.frames.size / 2)?.first ?: 0)
-            }
-            looks[url]?.let { return go(it) }
-            state.text = t("Загрузка кадров…", "Loading frames…")
-            Lumen.async({ StudioCutsLoad.look(url) }, { e ->
-                if (current == url) state.text = (e.message ?: e.javaClass.simpleName).take(160)
-            }) { lk ->
-                looks[url] = lk
-                if (current == url && !isDestroyed) go(lk)
-            }
-        }
-
-        private fun show(lk: StudioCutsLoad.Look) {
-            strip.removeAllViews()
-            val h = dp(64)
-            for ((ms, bmp) in lk.frames) {
-                val w = (h.toLong() * bmp.width / bmp.height.coerceAtLeast(1)).toInt()
-                strip.addView(FrameLayout(this@StudioMixActivity).apply {
-                    addView(ImageView(this@StudioMixActivity).apply {
-                        scaleType = ImageView.ScaleType.CENTER_CROP
-                        setImageBitmap(bmp)
-                    }, FrameLayout.LayoutParams(w, h))
-                    addView(text(this@StudioMixActivity, StudioCuts.stamp(ms), 10f, bold = true, color = 0xFFFFFFFF.toInt()).apply {
-                        setShadowLayer(3f, 0f, 1f, 0xFF000000.toInt())
-                        setPadding(dp(3), 0, dp(3), dp(1))
-                    }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.START))
-                    contentDescription = t("Смотреть с ", "Watch from ") + StudioCuts.stamp(ms)
-                    setOnClickListener { play(ms) }
-                }, LinearLayout.LayoutParams(w, h).apply { rightMargin = dp(3) })
-            }
-            stripScroll.visibility = if (lk.frames.isEmpty()) View.GONE else View.VISIBLE
-            state.text = when {
-                lk.stream.isEmpty() -> t("Только кадры: поток для просмотра не найден", "Frames only: no stream to watch")
-                lk.frames.isEmpty() -> t("Кадров нет — ▶ включит видео", "No frames — ▶ plays the video")
-                else -> t("Кадры по всему видео. Нажмите на кадр — видео с этого места", "Frames across the video. Tap a frame to watch from there")
-            }
-        }
-
-        /** Plays the video from [fromMs] in the mini player. */
-        fun play(fromMs: Long) {
-            val lk = looks[current]?.takeIf { it.stream.isNotEmpty() } ?: return
-            val src = com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(StudioCutsLoad.dataSource()).createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(lk.stream))
-            frame.visibility = View.VISIBLE
-            state.text = t("Загрузка…", "Loading…")
-            val p = exo()
-            p.setMediaSource(src)
-            p.prepare()
-            if (fromMs > 0) p.seekTo(fromMs)
-            p.setPlaybackSpeed(speed)
-            p.playWhenReady = true
-            started = true
-            playBtn.text = "⏸"
-        }
-
-        /** Position of the playing video, ms; −1 when nothing plays. */
-        fun posMs(): Long = player?.takeIf { started && current.isNotEmpty() }?.currentPosition ?: -1
-
-        /** Length of the playing video, ms; 0 when not known. */
-        fun durMs(): Long = player?.takeIf { started }?.duration?.takeIf { it > 0 } ?: 0
-
-        fun stop() {
-            current = ""
-            started = false
-            frame.visibility = View.GONE
-            player?.stop()
-        }
-
-        fun release() {
-            stop()
-            frame.removeCallbacks(tick)
-            player?.release()
-            player = null
-        }
-    }
-
     /** One video of the feed: [fromMs] — where to start (−1 = the middle). */
     private data class FeedItem(val url: String, val title: String, val fromMs: Long)
 
@@ -2580,7 +2415,7 @@ class StudioMixActivity : LumenBase() {
      */
     private fun feedSheet(items: List<FeedItem>, take: (FeedItem, Long) -> Unit) {
         if (items.isEmpty()) return
-        val look = MiniLook()
+        val look = MiniLook(this)
         var i = 0
         lateinit var title: TextView
         lateinit var count: TextView
@@ -2648,7 +2483,7 @@ class StudioMixActivity : LumenBase() {
         }
 
         // ---- quick look: one mini player, under the video being watched ----
-        val look = MiniLook()
+        val look = MiniLook(this)
         var watching = ""
         lateinit var fillRef: () -> Unit
 

@@ -71,6 +71,7 @@ StudioExplain.kt
 StudioLayers.kt
 StudioMix.kt
 StudioMixActivity.kt
+StudioMiniLook.kt
 StudioMixAssist.kt
 StudioMusic.kt
 StudioOverlay.kt

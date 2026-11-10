@@ -1591,7 +1591,20 @@ class StudioActivity : LumenBase() {
                 val what = if (scn.clip in ready) "🎞 ${scn.clip}" else kindLabel(scn.kind)
                 val line = "${Studio.clock(st.startMs)} · $what" + (if (fx.isNotEmpty()) " $fx" else "") + " · " +
                     scn.say.take(70) + if (scn.say.length > 70) "…" else ""
-                if (pickable) {
+                if (pickable && StudioPrefs.cutsLate && busy.isEmpty()) {
+                    // every piece: 🔄 another piece of this video, another clip or a new video
+                    add(LinearLayout(ctx).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = android.view.Gravity.CENTER_VERTICAL
+                        addView(text(ctx, line, 13f, color = if (scn.clip in ready) Palette.ON_SURFACE else Palette.MUTED).apply {
+                            setPadding(0, dp(4), 0, dp(4))
+                            setOnClickListener { pieceMenu(st.scene) }
+                        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(btn(ctx, "🔄", style = BtnStyle.TEXT) { pieceMenu(st.scene) }.apply {
+                            contentDescription = t("Другой кусок для сцены ${st.scene + 1}", "Another piece for scene ${st.scene + 1}")
+                        })
+                    }, 2)
+                } else if (pickable) {
                     add(text(ctx, line, 13f, color = if (scn.clip in ready) Palette.ON_SURFACE else Palette.MUTED).apply {
                         setPadding(0, dp(4), 0, dp(4))
                         setOnClickListener { pickClip(st.scene) }
@@ -1885,6 +1898,7 @@ class StudioActivity : LumenBase() {
 
         fun fill() {
             box.removeAllViews()
+            (look.view.parent as? ViewGroup)?.removeView(look.view)
             for (h in results) {
                 val row = Col(this, 12)
                 row.root.background = roundBg(Palette.CARD, 12f, this)
@@ -2385,10 +2399,14 @@ class StudioActivity : LumenBase() {
      * Finds videos by title on YouTube, optionally lets AI keep only the ones that fit a description,
      * and adds the marked ones as clips (start 0:00, the time is set later with ✎).
      */
-    private fun findClips() {
+    private fun findClips(forScene: Int = -1) {
         var hits: List<CutHit> = emptyList()
         var notes: Map<String, String> = emptyMap()
         val marked = LinkedHashSet<String>()
+        // own parts marked while watching: url → from, to (ms)
+        val parts = HashMap<String, Pair<Long, Long>>()
+        val look = MiniLook(this)
+        var watching = ""
         lateinit var box: LinearLayout
         lateinit var status: Pair<TextView, ProgressBar>
         lateinit var addBtn: Button
@@ -2410,11 +2428,31 @@ class StudioActivity : LumenBase() {
                 for (h in list) {
                     val sub = listOf(h.channel, if (h.durationMs > 0) StudioCuts.stamp(h.durationMs) else "").filter { it.isNotBlank() }.joinToString(" · ")
                     val note = notes[h.url].orEmpty()
-                    val label = h.title + (if (sub.isNotEmpty()) "\n$sub" else "") + (if (note.isNotEmpty()) "\n✨ $note" else "")
-                    box.addView(chk(this, label, h.url in marked) { on ->
+                    val part = parts[h.url]?.let { (a, b) -> "\n✂ " + StudioCuts.stamp(a) + "–" + StudioCuts.stamp(b) }.orEmpty()
+                    val label = h.title + (if (sub.isNotEmpty()) "\n$sub" else "") + (if (note.isNotEmpty()) "\n✨ $note" else "") + part
+                    box.addView(hitRow(h, label, h.url in marked, watching == h.url, { on ->
                         if (on) marked += h.url else marked -= h.url
                         updateAdd()
+                    }) {
+                        watching = if (watching == h.url) "" else h.url
+                        if (watching.isEmpty()) look.stop() else {
+                            look.open(h.url)
+                            look.dur = h.durationMs
+                            look.marks = listOfNotNull(parts[h.url])
+                        }
+                        fill()
                     }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(4) })
+                    if (watching == h.url) {
+                        box.addView(look.view)
+                        box.addView(partRow(look, parts[h.url]) { range ->
+                            if (range == null) parts -= h.url else {
+                                parts[h.url] = range
+                                marked += h.url
+                            }
+                            look.marks = listOfNotNull(range)
+                            fill()
+                        })
+                    }
                 }
             }
             group(t("✨ Подобрал ИИ", "✨ Picked by AI"), picked)
@@ -2431,7 +2469,8 @@ class StudioActivity : LumenBase() {
             cancel = false
             Lumen.async({
                 val found = YouTube.search(listOf(q), SearchFilters(limit = 30)).map {
-                    CutHit(it.url, it.title, it.channel, if (it.duration > 0) it.duration * 1000 else 0)
+                    CutHit(it.url, it.title, it.channel, if (it.duration > 0) it.duration * 1000 else 0,
+                        YtQuery.videoIdFromUrl(it.url)?.let { id -> "https://i.ytimg.com/vi/$id/mqdefault.jpg" } ?: it.thumb)
                 }
                 val picks = if (useAi && found.isNotEmpty()) {
                     runOnUiThread { status.first.text = t("ИИ отбирает видео…", "AI is picking videos…") }
@@ -2457,12 +2496,12 @@ class StudioActivity : LumenBase() {
             }
         }
 
-        bottomSheet(t("Найти видео для нарезки", "Find videos for cuts")) { dismiss ->
+        bottomSheet(t("Найти видео для нарезки", "Find videos for cuts"), onDismiss = { look.release() }) { dismiss ->
             dismissSheet = dismiss
             muted(t("Поиск по названию на YouTube. ИИ-фильтр (необязательно) оставит видео, подходящие под описание, — по названиям; в ИИ уходят только названия. " +
-                "Отмеченные добавятся клипами с 0:00 на 5 с — время поправьте через ✎.",
+                "Нажмите на картинку: кадры по всему видео и просмотр с любого места; на нужном месте «⟦ Начало» и «Конец ⟧» — отрезок видно на полосе под видео.",
                 "Search YouTube by title. The AI filter (optional) keeps videos that fit the description, by titles; only the titles go to AI. " +
-                    "Marked ones are added as clips from 0:00 for 5 s; adjust the time with ✎."))
+                    "Tap the picture: frames across the video and watching from any place; at the right moment \"⟦ Start\" and \"End ⟧\" — the part shows on the bar under the video."))
             val query = edit(t("Что искать, напр. «Хоумлендер реакция»", "What to search, e.g. \"shocked reaction meme\""))
             val want = edit(t("ИИ-фильтр: что должно быть в кадре (можно пусто)", "AI filter: what must be in the shot (optional)"))
             row(
@@ -2480,7 +2519,10 @@ class StudioActivity : LumenBase() {
                 val chosen = hits.filter { it.url in marked }
                 if (chosen.isEmpty()) return@button
                 val before = cutClips.size
-                val list = StudioCuts.addHits(cutClips, chosen, notes)
+                val list = StudioCuts.addHits(cutClips, chosen, notes).map { c ->
+                    // the part marked while watching
+                    parts[c.url]?.takeIf { c.id !in cutClips.map { it.id } }?.let { (a, b) -> StudioCuts.span(a, b).let { (x, y) -> c.copy(fromMs = x, toMs = y) } } ?: c
+                }
                 if (list.size - before < chosen.size) {
                     toast(t("Добавлено ${list.size - before}: повторы пропущены, максимум ${StudioCuts.MAX_CLIPS}",
                         "Added ${list.size - before}: repeats skipped, at most ${StudioCuts.MAX_CLIPS}"))
@@ -2488,10 +2530,55 @@ class StudioActivity : LumenBase() {
                 saveCuts(list)
                 board = emptyList()
                 dismissSheet()
-                render()
+                // a new video for one scene of the storyboard: the scene takes it, its piece is cut at the marked part
+                val picked = list.firstOrNull { c -> c.url == chosen.first().url }
+                if (forScene >= 0 && picked != null) {
+                    setSceneClip(forScene, picked.id)
+                    cutPieces(only = setOf(forScene))
+                } else render()
             }
             updateAdd()
         }
+    }
+
+    /** A found video: its picture (tap — frames and watching), the check and ▾. */
+    private fun hitRow(h: CutHit, label: String, checked: Boolean, open: Boolean, onCheck: (Boolean) -> Unit, onLook: () -> Unit) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(ImageView(this@StudioActivity).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setBackgroundColor(0xFF202020.toInt())
+                Thumbs.load(this, h.thumb)
+                contentDescription = t("Кадры видео", "Video frames")
+                setOnClickListener { onLook() }
+            }, LinearLayout.LayoutParams(dp(96), dp(54)).apply { rightMargin = dp(6) })
+            addView(chk(this@StudioActivity, label, checked, onCheck), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(btn(this@StudioActivity, if (open) "▴" else "▾", style = BtnStyle.TEXT) { onLook() }.apply {
+                contentDescription = t("Кадры и просмотр", "Frames and watching")
+            })
+        }
+
+    /** Marks of a part while the video plays: start and end at the playing moment, ✕ clears; [set] gets the part. */
+    private fun partRow(look: MiniLook, cur: Pair<Long, Long>?, set: (Pair<Long, Long>?) -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = android.view.Gravity.CENTER_VERTICAL
+        fun now(): Long? = look.posMs().takeIf { it >= 0 }?.let { it / 100 * 100 }
+            ?: run { toast(t("Включите видео: тап по кадру", "Play the video: tap a frame")); null }
+        addView(btn(this@StudioActivity, t("⟦ Начало", "⟦ Start"), style = BtnStyle.TONAL) {
+            val at = now() ?: return@btn
+            val end = cur?.second?.takeIf { it > at + 300 } ?: (at + StudioCuts.DEFAULT_CLIP_MS)
+            set(StudioCuts.span(at, end))
+        })
+        addView(btn(this@StudioActivity, t("Конец ⟧", "End ⟧"), style = BtnStyle.TONAL) {
+            val at = now() ?: return@btn
+            val from = cur?.first?.takeIf { it < at - 300 } ?: maxOf(0, at - StudioCuts.DEFAULT_CLIP_MS)
+            set(StudioCuts.span(from, at))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) })
+        addView(text(this@StudioActivity, cur?.let { (a, b) -> "✂ " + StudioCuts.stamp(a) + "–" + StudioCuts.stamp(b) }
+            ?: t("отрезок не отмечен", "no part marked"), 13f, color = Palette.MUTED).apply { setPadding(dp(8), 0, 0, 0) },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (cur != null) addView(btn(this@StudioActivity, "✕", style = BtnStyle.TEXT) { set(null) }.apply { contentDescription = t("Убрать отрезок", "Clear the part") })
     }
 
     /** Adds a clip ([old] == null) or changes one; a new link or time drops the downloaded file. */
@@ -2658,17 +2745,17 @@ class StudioActivity : LumenBase() {
      * or [reshuffle] all at new places of the videos (away from the pieces before). Lengths of the videos are
      * read first, the pieces download two at a time.
      */
-    private fun cutPieces(again: Boolean = false, reshuffle: Boolean = false) {
+    private fun cutPieces(again: Boolean = false, reshuffle: Boolean = false, only: Set<Int>? = null) {
         if (busy.isNotEmpty() || task != StudioTask.CUTS) return
         val plan = currentPlan() ?: return
         val sceneClips = StudioCuts.effectiveClips(plan.script.scenes, placeIds(), all = plan.fullMode != StudioOverlay.FULL)
         val old = cutParts
-        val need = if (again || reshuffle) null else StudioCuts.needCut(plan.times, sceneClips, old).toSet()
+        val need = only ?: if (again || reshuffle) null else StudioCuts.needCut(plan.times, sceneClips, old).toSet()
         if (need != null && need.isEmpty()) return
         val times = if (need == null) plan.times else plan.times.filter { it.scene in need }
         val keep = if (need == null) emptyList() else old.filter { it.scene !in need && sceneClips.getOrNull(it.scene) == it.src }
         val gone = old.filter { it !in keep }
-        val used = (if (reshuffle) old else keep).groupBy({ it.url }, { it.fromMs to it.toMs })
+        val used = (if (reshuffle || only != null) old else keep).groupBy({ it.url }, { it.fromMs to it.toMs })
         val seed = if (reshuffle) System.nanoTime() or 1L else 0L
         val pieceMs = StudioPrefs.cutPiece
         val clipsNow = cutClips
@@ -2725,6 +2812,35 @@ class StudioActivity : LumenBase() {
             if (errors.isNotEmpty()) showText(t("Не все куски скачались", "Some pieces failed"), errors.joinToString("\n"))
             else toast(t("Нарезано кусков: ${got.size}", "Pieces cut: ${got.size}"))
         }
+    }
+
+    /** Scene [i] of the storyboard: another piece of its video, another added clip, a new video from the search, or graphics. */
+    private fun pieceMenu(i: Int) {
+        val sc = script ?: return
+        val plan = currentPlan() ?: return
+        val ids = StudioCuts.effectiveClips(plan.script.scenes, placeIds(), all = plan.fullMode != StudioOverlay.FULL)
+        val own = ids.getOrNull(i).orEmpty()
+        val src = cutClips.firstOrNull { it.id == own }
+        val items = mutableListOf<Pair<String, () -> Unit>>()
+        if (src != null) items += t("🎲 Другой кусок этого видео", "🎲 Another piece of this video") to {
+            // the scene keeps its video: a new place, away from the pieces already taken
+            if (sc.scenes[i].clip != own) setSceneClip(i, own)
+            cutPieces(only = setOf(i), reshuffle = true)
+        }
+        items += t("🎞 Другое добавленное видео…", "🎞 Another added video…") to { pickClip(i) }
+        items += t("🔎 Новое видео: поиск…", "🔎 A new video: search…") to { findClips(forScene = i) }
+        items += t("— Графика, без клипа", "— Graphics, no clip") to { setSceneClip(i, "") }
+        android.app.AlertDialog.Builder(this).setTitle(t("Сцена ${i + 1}", "Scene ${i + 1}") + (src?.let { " · 🎞 ${it.id}" } ?: ""))
+            .setItems(items.map { it.first }.toTypedArray()) { _, k -> items[k].second() }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    private fun setSceneClip(i: Int, id: String) {
+        val sc = script ?: return
+        script = sc.copy(scenes = sc.scenes.mapIndexed { j, s -> if (j == i) s.copy(clip = id) else s })
+        board = emptyList()
+        saveAnalysis()
+        render()
     }
 
     /** Picks the clip of scene [i] (or graphics). */

@@ -149,6 +149,17 @@ class TtsActivity : LumenBase() {
             setRate = slider(this, t("Скорость речи", "Speech rate"), -50, 100, 5, TtsPrefs.rate, "%") { TtsPrefs.rate = it; renderPresets() }
             pitchChips = add(LinearLayout(this@TtsActivity))
             setPitch = slider(this, t("Тон (высота голоса)", "Pitch"), -50, 50, 2, TtsPrefs.pitch, " Hz") { TtsPrefs.pitch = it; renderPresets() }
+            muted(t("Настроение — готовые скорость и высота голоса (голоса Microsoft не умеют эмоции, только темп и тон):",
+                "Mood: ready rate and pitch (Microsoft voices have no emotions, only pace and pitch):"))
+            chips(VoiceTone.ALL.map { tn ->
+                chip(this@TtsActivity, tn.emoji + " " + t(tn.ru, tn.en), TtsPrefs.rate == tn.rate && TtsPrefs.pitch == tn.pitch) {
+                    TtsPrefs.rate = tn.rate
+                    TtsPrefs.pitch = tn.pitch
+                    setRate(tn.rate)
+                    setPitch(tn.pitch)
+                    renderPresets()
+                }
+            }, collapseAfter = 8)
             val setVolume = slider(this, t("Громкость", "Volume"), -50, 50, 5, TtsPrefs.volume, "%") { TtsPrefs.volume = it }
             button(t("Сбросить звучание", "Reset sound"), style = BtnStyle.TEXT) {
                 TtsPrefs.rate = 0

@@ -126,6 +126,10 @@ object StudioPrefs {
     var rate: Int
         get() = p.getInt("studio_rate", 10)
         set(v) = p.edit().putInt("studio_rate", v).apply()
+    /** Tone of the synthesised voice-over ([VoiceTone]): Gemini reads it as an instruction, Edge as rate/pitch. */
+    var tone: String
+        get() = p.getString("studio_voice_tone", VoiceTone.DEFAULT) ?: VoiceTone.DEFAULT
+        set(v) = p.edit().putString("studio_voice_tone", v).apply()
     /** Gemini TTS: voice ([GeminiVoice.VOICES]), model and the author's reading wish. */
     var geminiVoice: String
         get() = p.getString("studio_gemini_voice", GeminiVoice.DEFAULT_VOICE) ?: GeminiVoice.DEFAULT_VOICE
@@ -930,6 +934,7 @@ class StudioActivity : LumenBase() {
             resetAnalysis()
             render()
         }
+        tonePicker(c)
     }
 
     /** The voice is synthesised (Edge or Gemini): the script is the speech, no pauses or slips to cut. */
@@ -966,6 +971,7 @@ class StudioActivity : LumenBase() {
             resetAnalysis()
             render()
         }
+        tonePicker(c)
         c.add(text(this, t("Как читать (по желанию)", "How to read (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         val wish = c.edit(t("например: с улыбкой, шёпотом, как диктор новостей", "e.g. with a smile, in a whisper, like a news anchor"), StudioPrefs.geminiWish)
         wish.addTextChangedListener(object : android.text.TextWatcher {
@@ -977,10 +983,24 @@ class StudioActivity : LumenBase() {
         })
     }
 
+    /** Tone chips for both synthesised voices: Gemini follows it closely, Edge only by rate and pitch. */
+    private fun tonePicker(c: Col) {
+        c.add(text(this, t("Тон озвучки", "Tone of the voice-over"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        c.chips(VoiceTone.ALL.map { tn ->
+            chip(this, tn.emoji + " " + t(tn.ru, tn.en), tn.id == VoiceTone.of(StudioPrefs.tone).id) {
+                StudioPrefs.tone = tn.id
+                resetAnalysis()
+                render()
+            }
+        }, collapseAfter = 8)
+        if (StudioPrefs.voiceMode == "edge" && StudioPrefs.tone != VoiceTone.DEFAULT) c.muted(t("Голоса Microsoft передают тон только темпом и высотой. Живые эмоции и юмор лучше у «✨ Gemini».",
+            "Microsoft voices show the tone only by pace and pitch. Real emotion and humour sound better with \"✨ Gemini\"."))
+    }
+
     /** A short sample of a Gemini voice (kept on disk: every sample is a request of the daily limit). */
     private fun tryGemini(name: String) {
         val model = StudioPrefs.geminiModel
-        val f = File(File(cacheDir, "gemini_try").apply { mkdirs() }, "${name}_$model.wav")
+        val f = File(File(cacheDir, "gemini_try").apply { mkdirs() }, "${name}_${model}_${StudioPrefs.tone}_${(StudioPrefs.geminiWish + StudioPrefs.rate).hashCode()}.wav")
         fun play() {
             musicPreview?.let { runCatching { it.stop() }; it.release() }
             musicPreview = MediaPlayer().apply {
@@ -994,7 +1014,7 @@ class StudioActivity : LumenBase() {
         toast(t("Gemini озвучивает пример…", "Gemini is voicing a sample…"))
         val sample = if (lang() == "ru") "Привет! Я $name. Так будет звучать ваш ролик." else "Hi! I'm $name. This is how your video will sound."
         Lumen.async({
-            val (pcm, rate) = GeminiVoice.audio(Llm.speech(sample, name, model, GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru"), "studio_tts_gemini_try"))
+            val (pcm, rate) = GeminiVoice.audio(Llm.speech(sample, name, model, GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru", StudioPrefs.tone), "studio_tts_gemini_try"))
             writeWav(f, pcm, rate)
         }, ::err) { play() }
     }
@@ -2996,7 +3016,7 @@ class StudioActivity : LumenBase() {
     private fun analyseEdge(sc: SScript) {
         val voice = StudioPrefs.voice.takeIf { v -> voices.any { it.shortName == v } && v.startsWith(lang(), true) }
             ?: EdgeTts.pickVoice(voices, lang(), TtsPrefs.voiceFor(lang()))?.shortName ?: TtsPrefs.voice
-        val o = TtsOptions(voice, StudioPrefs.rate)
+        val o = VoiceTone.edge(TtsOptions(voice, StudioPrefs.rate), StudioPrefs.tone)
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val castVoices = StudioToon.pickVoices(cast, voices, lang(), voice)
         val tmp = File(cacheDir, "studio_tts").apply { mkdirs() }
@@ -3071,7 +3091,7 @@ class StudioActivity : LumenBase() {
         val n = says.size
         val narrator = GeminiVoice.voice(StudioPrefs.geminiVoice).name
         val model = StudioPrefs.geminiModel
-        val style = GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru")
+        val style = GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru", StudioPrefs.tone)
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val castVoices = if (cast.isEmpty()) emptyList() else GeminiVoice.castVoices(
             StudioToon.pickVoices(cast, voices, lang(), "").map { v -> voices.firstOrNull { it.shortName == v }?.let { it.gender == "Female" } }, narrator)

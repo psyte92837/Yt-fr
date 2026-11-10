@@ -137,6 +137,12 @@ class UxLogicTest {
     }
 
     @Test
+    fun resetKeepsKeysPromptsLanguageAndState() {
+        val keys = listOf("lang", "theme", "text_scale", "prompt_digest", "home_pins", "api_key_gemini", "bot_token", "crash_seen_at", "last_run", "studio_over")
+        assertEquals(listOf("studio_over", "text_scale", "theme"), PrefsIo.resetKeys(keys))
+    }
+
+    @Test
     fun scrollStaysOnRerenderAndPerTab() {
         val m = ScrollMemo()
         // first render: top

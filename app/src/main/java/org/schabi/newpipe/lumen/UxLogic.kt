@@ -199,6 +199,12 @@ object PrefsIo {
 
     fun keepKey(k: String) = !secret.containsMatchIn(k)
 
+    /** Kept by «reset all settings»: interface language, own prompts (they have their own reset), pinned projects. */
+    private val survivesReset = Regex("^(lang|prompt_.*|home_pins)$")
+
+    /** Keys removed by «reset all settings»: user options only; keys, tokens and internal state stay. */
+    fun resetKeys(all: Collection<String>): List<String> = all.filter { keepKey(it) && !survivesReset.matches(it) }.sorted()
+
     fun export(all: Map<String, *>): String {
         val o = org.json.JSONObject().put("protocol", PROTOCOL).put("v", 1)
         val v = org.json.JSONObject()

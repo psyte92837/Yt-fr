@@ -17,6 +17,47 @@ class AiSettings(private val a: LumenBase, private val rerender: () -> Unit) {
     private var usageGroup = AiStats.Group.PROJECT
     private var usageDays = 30
 
+    /** «Reset all settings» button: options back to defaults with Undo; keys, prompts, language and data stay. */
+    fun resetAll(c: Col, after: () -> Unit = {}) { with(a) {
+        c.muted(t("Все параметры вернутся к значениям по умолчанию. Ключи ИИ, ваши промпты, язык, проекты и файлы не трогаются.",
+            "All options return to their defaults. AI keys, your prompts, the language, projects and files stay."))
+        c.button(t("↺ Сбросить все настройки", "↺ Reset all settings"), style = BtnStyle.OUTLINED) {
+            val before = HashMap(Lumen.prefs.all)
+            val gone = PrefsIo.resetKeys(before.keys)
+            if (gone.isEmpty()) return@button toast(t("Все настройки уже по умолчанию", "All settings are already default"))
+            confirm(t("Сбросить настройки?", "Reset the settings?"),
+                t("Параметров: ${gone.size}. Ключи ИИ, промпты, язык и данные останутся.", "Values: ${gone.size}. AI keys, prompts, the language and data stay."),
+                t("Сбросить", "Reset"), danger = true) {
+                // the page is redrawn in place (recreate would drop the Undo bar); theme applies on the next screen
+                fun reapply() {
+                    runCatching { after() }
+                    rerender()
+                }
+                undoable(t("Настройки сброшены", "Settings reset"), apply = {
+                    val e = Lumen.prefs.edit()
+                    gone.forEach { e.remove(it) }
+                    e.commit()
+                    reapply()
+                }, revert = {
+                    val e = Lumen.prefs.edit()
+                    for (k in gone) {
+                        @Suppress("UNCHECKED_CAST")
+                        when (val v = before[k]) {
+                            is Boolean -> e.putBoolean(k, v)
+                            is Int -> e.putInt(k, v)
+                            is Long -> e.putLong(k, v)
+                            is Float -> e.putFloat(k, v)
+                            is String -> e.putString(k, v)
+                            is Set<*> -> e.putStringSet(k, v as Set<String>)
+                        }
+                    }
+                    e.commit()
+                    reapply()
+                })
+            }
+        }
+    } }
+
     fun usage(c: Col) { with(a) {
         val recs = AiStats.all()
         c.muted(t("Все вызовы AI с самого начала: токены, запросы, время, ошибки. Только на устройстве; токены берутся из ответа провайдера.",

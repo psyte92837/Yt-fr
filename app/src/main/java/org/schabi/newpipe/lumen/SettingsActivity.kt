@@ -285,6 +285,8 @@ class SettingsActivity : LumenBase() {
                 startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_PREFS_IN)
             }
         )
+        c.h2(t("Сброс настроек", "Reset settings"))
+        aiUi.resetAll(c) { Monitoring.reapplyAll(this) }
         c.h2(t("Восстановление", "Restore"))
         c.button(t("Восстановить из копии…", "Restore from backup…"), style = BtnStyle.OUTLINED) {
             confirm(t("Восстановить?", "Restore?"), t("Файлы из копии заменят совпадающие данные.", "Files from the backup will overwrite matching data.")) {

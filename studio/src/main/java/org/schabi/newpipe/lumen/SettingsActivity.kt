@@ -135,6 +135,8 @@ class SettingsActivity : LumenBase() {
         }
         c.h2(t("Статистика ИИ", "AI usage"))
         aiUi.usage(c)
+        c.h2(t("Сброс настроек", "Reset settings"))
+        aiUi.resetAll(c)
         c.h2(t("Журнал", "Logs"))
         c.button(t("🧯 Лог сбоя и зависаний", "🧯 Crash and freeze log"), style = BtnStyle.OUTLINED) { CrashLogActivity.open(this) }
         c.muted(t("Отчёт для разработчика: версия, устройство, настройки без ключей и последние строки журнала.",

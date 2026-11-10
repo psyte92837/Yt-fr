@@ -91,7 +91,7 @@ class ArchitectureRulesTest {
     fun pureLogicDoesNotTouchAndroid() {
         // files whose logic is unit-tested on the JVM: an Android import here breaks their tests in CI only
         val pure = listOf("AudioEdit.kt", "Board.kt", "LlmCore.kt", "EditSound.kt", "AlgoCore.kt", "Bite.kt", "StudioMix.kt",
-            "StudioMixAssist.kt", "StudioScheme.kt", "GeminiVoice.kt", "UxLogic.kt", "EditTrack.kt", "EditFx.kt", "PlayerCore.kt", "AgentCore.kt", "Predict.kt")
+            "StudioMixAssist.kt", "StudioScheme.kt", "GeminiVoice.kt", "VoiceTone.kt", "UxLogic.kt", "EditTrack.kt", "EditFx.kt", "PlayerCore.kt", "AgentCore.kt", "Predict.kt")
         val files = pure.map { File(lumen, it) }.filter { it.isFile }
         assertTrue("the pure list is outdated", files.size >= pure.size - 2)
         rule("Android import in pure logic", grep(files, Regex("""^import (android|androidx)\.""")))

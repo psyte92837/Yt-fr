@@ -70,18 +70,8 @@ object GeminiVoice {
 
     fun model(id: String): String = MODELS.firstOrNull { it.first == id }?.first ?: DEFAULT_MODEL
 
-    /** Reading instruction for the Studio's speech rate (−10 calm … 20 fast) and the author's own [wish]. */
-    fun style(rate: Int, wish: String, ru: Boolean): String {
-        val pace = when {
-            rate <= -5 -> if (ru) "спокойно и размеренно" else "calmly, at an unhurried pace"
-            rate >= 15 -> if (ru) "быстро и энергично" else "fast and energetic"
-            rate >= 5 -> if (ru) "бодро и живо" else "briskly and lively"
-            else -> if (ru) "естественно" else "naturally"
-        }
-        val w = wish.trim().trimEnd('.', ':')
-        return if (ru) "Прочитай $pace, как ведущий ролика" + (if (w.isNotEmpty()) "; $w" else "") + ":"
-        else "Read $pace, like a video host" + (if (w.isNotEmpty()) "; $w" else "") + ":"
-    }
+    /** Reading instruction: the [tone] ([VoiceTone]), the Studio's speech rate (−10 … 20) and the author's own [wish]. */
+    fun style(rate: Int, wish: String, ru: Boolean, tone: String = VoiceTone.DEFAULT): String = VoiceTone.instruction(tone, rate, wish, ru)
 
     /** Body of a generateContent request that answers with audio in [voice]. */
     fun body(text: String, voice: String, style: String): String = JSONObject()

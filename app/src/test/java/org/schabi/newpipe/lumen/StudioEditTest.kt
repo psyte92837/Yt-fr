@@ -209,7 +209,8 @@ class StudioEditTest {
         assertEquals("40", f.nodes[1].value)
         val tree = StudioEdit.schemeFromLines("Компания\nОтдел А\nОтдел Б", "tree")!!
         assertEquals("n1", tree.nodes[2].parent)
-        assertNull(StudioEdit.schemeFromLines("одна строка"))
+        // one line is an info-block card
+        assertEquals("card", StudioEdit.schemeFromLines("одна строка")!!.layout)
         // matrix needs exactly four nodes and axes: three lines do not fit
         assertNull(StudioEdit.schemeFromLines("a\nb\nc", "matrix"))
         assertEquals("hub", StudioEdit.schemeFromLines((1..6).joinToString("\n") { "Пункт $it" })!!.layout)

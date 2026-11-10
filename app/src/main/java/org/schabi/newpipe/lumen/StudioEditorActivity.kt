@@ -131,7 +131,12 @@ class StudioEditorActivity : LumenBase() {
     private var pickAt = 0L
     /** The next audio picked is the author's own voice-over (named so, no fade-out). */
     private var pickVoice = false
-    private var lastStyle = SchemeStyles.AUTO
+    /** The info-block style of new blocks (spec "ib:…"), remembered between sessions. */
+    private var lastStyle: String
+        get() = Lumen.prefs.getString("edit_info_spec", null)?.takeIf { InfoStyles.isSpec(it) } ?: InfoStyles.spec("smoke")
+        set(v) {
+            if (InfoStyles.isSpec(v)) Lumen.prefs.edit().putString("edit_info_spec", v).apply()
+        }
     @Volatile private var cancelExport = false
 
     private var stage: EditStage? = null
@@ -1115,7 +1120,8 @@ class StudioEditorActivity : LumenBase() {
                 buildList {
                     add(done { select(null) })
                     add(act("✎", t("Изменить", "Edit")) { edit(b) })
-                    if (b.kind !in setOf("emoji", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
+                    if (b.kind == "scheme") add(act("🧩", t("Инфоблок", "Info-block")) { infoHub(b) })
+                    else if (b.kind !in setOf("emoji", EditInsert.KIND, EditMotion.KIND, EditLottie.KIND)) add(act("🎨", t("Вид", "Look")) { lookSheet(b) })
                     if (b.req.isNotEmpty()) {
                         add(act("⧉", t("Запрос ещё раз", "Request again")) { copyRequestOf(b) })
                         add(act("📥", t("Вставить ответ", "Paste answer")) { pasteAnswerTo(b) })
@@ -1211,8 +1217,6 @@ class StudioEditorActivity : LumenBase() {
                     back(),
                     act("T", t("Надпись", "Caption")) { captionSheet(null) },
                     act("💬", t("Автосубтитры", "Auto captions")) { subsSheet() },
-                    act("✍️", t("Схема текстом", "Text scheme")) { textSchemeSheet(null) },
-                    act("📚", t("Готовые схемы", "Ready schemes")) { schemeTemplates() },
                     if (words.isNotEmpty()) act("📝", t("Текст речи", "Speech text")) { textSheet() } else null
                 )
             }
@@ -1230,11 +1234,11 @@ class StudioEditorActivity : LumenBase() {
                 line = catName("ai")
                 listOfNotNull(
                     back(),
-                    act("✨", t("Схема или анимация", "Scheme or animation")) { insert.start() },
+                    act("✨", t("Анимация ИИ", "AI animation")) { insert.start() },
                     if (words.isNotEmpty()) act("💡", t("Где нужны вставки", "Where inserts")) { hintsSheet() } else null,
                     act("📊", t("Отчёт", "Report")) { reportSheet() },
                     act("🔤", t("Перевести", "Translate")) { translateSheet() },
-                    if (words.isNotEmpty()) act("🤖", t("Схемы на всё", "Schemes for all")) { autoSchemes() } else null
+                    act("🧩", t("Инфоблоки", "Info-blocks")) { infoHub() }
                 )
             }
             else -> listOf(
@@ -1243,11 +1247,12 @@ class StudioEditorActivity : LumenBase() {
                 act("🎞", t("Добавить видео", "Add video")) { addClipSheet() },
                 act("🎵", t("Аудио", "Audio")) { openCat("audio") },
                 act("✨", t("Эффекты", "Effects")) { openCat("fx") },
+                act("🧩", t("Инфоблоки", "Info-blocks")) { infoHub() },
                 act("T", t("Текст", "Text")) { openCat("text") },
                 act("😀", t("Стикеры", "Stickers")) { emojiSheet(null) },
                 act("🖼", t("Наложение", "Overlay")) { openCat("overlay") },
                 act("🖌", t("Тема", "Theme"), on = project?.theme?.isNotEmpty() == true) { themeSheet() },
-                act("🧩", t("ИИ", "AI")) { openCat("ai") },
+                act("🤖", t("ИИ", "AI")) { openCat("ai") },
                 act("☰", t("Слои", "Layers")) { blocksSheet() }
             )
         }
@@ -2087,6 +2092,10 @@ class StudioEditorActivity : LumenBase() {
     // ---------- names ----------
 
     private fun layoutName(l: String) = when (l) {
+        "card" -> t("💡 Карточка", "💡 Card")
+        "stat" -> t("🔢 Число", "🔢 Number")
+        "list" -> t("📋 Список", "📋 List")
+        "grid" -> t("🔲 Плитки", "🔲 Tiles")
         "chain" -> t("Цепочка", "Chain")
         "hub" -> t("Звезда", "Hub")
         "tree" -> t("Дерево", "Tree")
@@ -2130,8 +2139,25 @@ class StudioEditorActivity : LumenBase() {
         else -> t("Нет", "None")
     }
 
-    private fun styles(): List<Pair<String, String>> = SchemeStyles.list(styleDir).filter { it.place == "overlay" || it.place == "panel" || it.id == SchemeStyles.AUTO }
-        .map { it.id to if (it.id == SchemeStyles.AUTO) t("Авто (светлая)", "Auto (light)") else it.name }
+    /**
+     * The style in the text / AI sheets: one line with its name and «🎨» that opens the same style picker as the
+     * «🧩 Инфоблоки» sheet; an old look is shown as its info-block style.
+     */
+    private fun styleRow(c: Col, spec0: String, onChange: (String) -> Unit) {
+        var spec = if (InfoStyles.isSpec(spec0)) spec0 else InfoStyles.fromOld(spec0).takeIf { InfoStyles.isSpec(it) } ?: lastStyle
+        onChange(spec)
+        val line = text(this, "", 13f, color = Palette.MUTED)
+        fun show() { line.text = t("Стиль: ", "Style: ") + InfoUi.name(spec) }
+        show()
+        c.add(rowOf(this, line,
+            btn(this, t("🎨 Сменить", "🎨 Change"), false, BtnStyle.TEXT) {
+                InfoUi.picker(this, spec, auto = false) { v ->
+                    spec = v
+                    onChange(v)
+                    show()
+                }
+            }), 12)
+    }
 
     private fun label(c: Col, s: String) = c.add(text(this, s, Type.LABEL, bold = true, color = Palette.MUTED), 12)
 
@@ -2172,12 +2198,10 @@ class StudioEditorActivity : LumenBase() {
                 muted(sub)
             }
             if (words.isNotEmpty()) item(t("📝 По тексту речи", "📝 From the speech text"), t("выделите фразу — блок встанет ровно на неё", "select a phrase — the block goes exactly on it")) { textSheet() }
-            item(t("✨ Схема или анимация от ИИ", "✨ AI scheme or animation"), t("помощник: что показать → бриф → без ИИ сразу или ИИ → проверка", "wizard: what to show → brief → at once without AI or the AI → check")) { insert.start() }
+            item(t("🧩 Инфоблоки", "🧩 Info-blocks"), t("карточка, число, список, плитки или схема — 100 моушн-стилей, текстом, по готовому шаблону или ИИ", "a card, number, list, tiles or a scheme — 100 motion styles, from text, a ready template or the AI")) { infoHub() }
+            item(t("✨ Анимация от ИИ", "✨ AI animation"), t("помощник: что показать → бриф → без ИИ сразу или ИИ → проверка", "wizard: what to show → brief → at once without AI or the AI → check")) { insert.start() }
             if (words.isNotEmpty()) item(t("💡 Где нужны вставки", "💡 Where inserts are needed"), t("Lumen найдёт по речи числа, перечисления, даты, сравнения", "Lumen finds numbers, lists, dates and comparisons in the speech")) { hintsSheet() }
             item(t("🌀 Lottie-анимация (.json)", "🌀 Lottie animation (.json)"), t("готовый вектор: LottieFiles и т. п., тексты и цвет темы меняются", "ready vector art: LottieFiles etc., texts and the theme colour change")) { pickLottie() }
-            if (words.isNotEmpty()) item(t("🤖 Схемы на весь ролик", "🤖 Schemes for the whole video"), t("ИИ сам выберет места и поставит схемы", "the AI picks the places and puts schemes there")) { autoSchemes() }
-            item(t("✍️ Схема своим текстом", "✍️ Scheme from your text"), t("строки «эмодзи Подпись — значение», без ИИ", "lines \"emoji Label — value\", no AI")) { textSchemeSheet(null) }
-            item(t("📚 Готовые схемы (100)", "📚 Ready schemes (100)"), t("SWOT, AIDA, Маслоу, PDCA… — как есть, текстом или ИИ по речи", "SWOT, AIDA, Maslow, PDCA… — as is, as text or AI from the speech")) { schemeTemplates() }
             item(t("🖼 Картинка из галереи", "🖼 Picture from the gallery"), t("фото, скриншот, логотип (PNG с прозрачностью тоже)", "a photo, screenshot or logo (transparent PNG too)")) { pickImage(null) }
             item(t("🌐 Фото по запросу", "🌐 Photo search"), t("бесплатные фото Openverse; запрос может подобрать ИИ", "free Openverse photos; the AI can suggest the query")) { photoSheet(null) }
             item(t("T Надпись", "T Caption"), t("свой текст или варианты от ИИ", "your text or AI suggestions")) { captionSheet(null) }
@@ -2198,20 +2222,19 @@ class StudioEditorActivity : LumenBase() {
         var layout = old?.scheme?.layout ?: "auto"
         var durMs = 5000L
         var style = old?.look?.ifEmpty { null } ?: lastStyle
-        bottomSheet(if (old == null) t("🧩 Инфосхема от ИИ", "🧩 AI info-scheme") else t("🤖 Переделать схему", "🤖 Redo the scheme")) { dismiss ->
+        bottomSheet(if (old == null) t("🤖 Инфоблок от ИИ", "🤖 AI info-block") else t("🤖 Переделать инфоблок", "🤖 Redo the info-block")) { dismiss ->
             val said = span?.joinToString(" ") { words[it].text } ?: StudioEdit.momentText(words, at, 2000, 10_000)
             if (span != null) muted(t("Схема встанет на фразу: ", "The scheme goes on the phrase: ") + "«" + said.take(260) + "»")
             else if (said.isNotBlank()) muted(t("Звучит с ", "Spoken from ") + StudioEdit.clock(at) + ": «" + said.take(260) + "»")
             else muted(t("У этого видео нет слов с таймингом — опишите, какую схему нарисовать.", "This video has no timed words — describe the scheme to draw."))
             val wish = edit(t("Что показать (необязательно)", "What to show (optional)"), old?.ask.orEmpty(), multiline = true)
-            label(this, t("Тип схемы", "Scheme type"))
+            label(this, t("Вид инфоблока", "Info-block kind"))
             add(choiceChips(ctx, listOf("auto" to t("Авто", "Auto")) + StudioScheme.LAYOUTS.map { it to layoutName(it) }, layout) { layout = it })
             if (old == null && span == null) {
                 label(this, t("Длительность", "Length"))
                 add(choiceChips(ctx, listOf(3000L to "3 с", 5000L to "5 с", 8000L to "8 с", 12_000L to "12 с"), durMs) { durMs = it })
             }
-            label(this, t("Стиль", "Style"))
-            add(choiceChips(ctx, styles(), style) { style = it })
+            styleRow(this, style) { style = it }
             button(t("🤖 Нарисовать", "🤖 Draw"), primary = true) {
                 val w = wish.text.toString().trim()
                 if (said.isBlank() && w.isBlank()) return@button toast(t("Опишите схему", "Describe the scheme"))
@@ -2286,12 +2309,11 @@ class StudioEditorActivity : LumenBase() {
         if (BgTasks.has(TASK_AI)) return toast(t("ИИ уже работает — дождитесь или остановите", "The AI is already working — wait or stop it"))
         val segs = StudioEdit.segments(words)
         var style = lastStyle
-        bottomSheet(t("🤖 Схемы по всему ролику", "🤖 Schemes for the whole video")) { dismiss ->
-            muted(t("ИИ прочитает речь (${segs.size} фрагм.) и поставит инфосхемы туда, где они объяснят лучше слов, — до ${StudioScheme.maxSchemes(segs.size)} шт. Каждая встанет ровно на свою фразу; потом их можно двигать и менять, а «↶» уберёт все сразу.",
+        bottomSheet(t("🤖 Инфоблоки по всему ролику", "🤖 Info-blocks for the whole video")) { dismiss ->
+            muted(t("ИИ прочитает речь (${segs.size} фрагм.) и поставит инфоблоки туда, где они объяснят лучше слов, — до ${StudioScheme.maxSchemes(segs.size)} шт. Каждая встанет ровно на свою фразу; потом их можно двигать и менять, а «↶» уберёт все сразу.",
                 "The AI reads the speech (${segs.size} pieces) and puts info-schemes where they explain better than words — up to ${StudioScheme.maxSchemes(segs.size)}. Each goes exactly on its phrase; move or change them later, \"↶\" removes them all at once."))
             val wish = edit(t("Пожелание (необязательно)", "Wish (optional)"), "", multiline = true)
-            label(this, t("Стиль", "Style"))
-            add(choiceChips(ctx, styles(), style) { style = it })
+            styleRow(this, style) { style = it }
             button(t("🤖 Расставить", "🤖 Place them"), primary = true) {
                 dismiss()
                 lastStyle = style
@@ -2533,22 +2555,30 @@ class StudioEditorActivity : LumenBase() {
         commit(blocks.map { b -> if (b.id in ids) StudioEdit.clampTime(b.copy(startMs = (b.startMs + ms).coerceAtLeast(0)), total) else b })
     }
 
-    private fun textSchemeSheet(old: EBlock?, tpl: SchemeTpl? = null) {
+    private fun textSchemeSheet(old: EBlock?, tpl: SchemeTpl? = null, kind: String? = null) {
         pause()
         val at = old?.startMs ?: curMs
         val ru = I18n.ru
         val fromTpl = tpl?.let { SchemeTemplates.scheme(it, ru) }
-        var layout = old?.scheme?.layout ?: tpl?.layout ?: "auto"
-        var style = old?.look?.ifEmpty { null } ?: tpl?.look ?: lastStyle
-        bottomSheet(if (old == null) t("✍️ Схема своим текстом", "✍️ Scheme from your text") else t("✎ Схема", "✎ Scheme")) { dismiss ->
-            muted(t("Каждый узел — строка: «эмодзи Подпись — значение». Первая строка с двоеточием в конце — заголовок. 2–7 строк.",
-                "One node per line: \"emoji Label — value\". A first line ending with a colon is the title. 2–7 lines."))
-            val e = edit(t("Заголовок:\n🔍 Поиск — 100%\n🛒 Покупка — 5%", "Title:\n🔍 Search — 100%\n🛒 Purchase — 5%"),
+        var layout = old?.scheme?.layout ?: tpl?.layout ?: kind ?: "auto"
+        var style = old?.look?.ifEmpty { null } ?: lastStyle
+        bottomSheet(if (old == null) t("✍️ Инфоблок своим текстом", "✍️ Info-block from your text") else t("✎ Инфоблок", "✎ Info-block")) { dismiss ->
+            muted(when (layout) {
+                "card" -> t("Одна строка: «эмодзи Мысль — число или факт».", "One line: \"emoji Thought — number or fact\".")
+                "stat" -> t("1–3 строки: «эмодзи что это — число». Число станет крупным.", "1–3 lines: \"emoji what it is — number\". The number becomes big.")
+                else -> t("Каждый блок — строка: «эмодзи Подпись — значение». Первая строка с двоеточием в конце — заголовок. 1–7 строк.",
+                    "One block per line: \"emoji Label — value\". A first line ending with a colon is the title. 1–7 lines.")
+            })
+            val e = edit(when (layout) {
+                "card" -> t("💡 Главная мысль — 3×", "💡 Key idea — 3×")
+                "stat" -> t("📈 рост — +42%\n⏱ минут — 15", "📈 growth — +42%\n⏱ minutes — 15")
+                "list" -> t("Шаги:\n1️⃣ Идея\n2️⃣ Сценарий\n3️⃣ Монтаж", "Steps:\n1️⃣ Idea\n2️⃣ Script\n3️⃣ Edit")
+                else -> t("Заголовок:\n🔍 Поиск — 100%\n🛒 Покупка — 5%", "Title:\n🔍 Search — 100%\n🛒 Purchase — 5%")
+            },
                 old?.scheme?.let { StudioEdit.schemeLines(it) } ?: fromTpl?.let { StudioEdit.schemeLines(it) }.orEmpty(), multiline = true)
-            label(this, t("Тип схемы", "Scheme type"))
+            label(this, t("Вид инфоблока", "Info-block kind"))
             add(choiceChips(ctx, listOf("auto" to t("Авто", "Auto")) + StudioScheme.LAYOUTS.map { it to layoutName(it) }, layout) { layout = it })
-            label(this, t("Стиль", "Style"))
-            add(choiceChips(ctx, styles(), style) { style = it })
+            styleRow(this, style) { style = it }
             button(if (old == null) t("Вставить", "Insert") else t("Применить", "Apply"), primary = true) {
                 val s = StudioEdit.schemeFromLines(e.text.toString(), layout, (old?.scheme ?: fromTpl)?.takeIf { it.layout == layout || layout == "auto" })
                     ?: return@button toast(when (layout) {
@@ -2556,6 +2586,9 @@ class StudioEditorActivity : LumenBase() {
                         "venn" -> t("Кругам Венна нужно 2–3 строки", "Venn needs 2–3 lines")
                         "funnel", "pyramid", "timeline" -> t("Для этого типа нужно 3–6 строк", "This type needs 3–6 lines")
                         "hub" -> t("Звезде нужно 3–7 строк", "A hub needs 3–7 lines")
+                        "card" -> t("Карточке нужна 1 строка", "A card needs 1 line")
+                        "stat" -> t("Числам нужно 1–3 строки", "Numbers need 1–3 lines")
+                        "grid" -> t("Плиткам нужно 2–6 строк", "Tiles need 2–6 lines")
                         else -> t("Нужно 2–7 строк", "2–7 lines are needed")
                     })
                 dismiss()
@@ -2568,7 +2601,7 @@ class StudioEditorActivity : LumenBase() {
                 dismiss()
                 aiSchemeSheet(old)
             }
-            if (old == null && tpl == null) button(t("📚 Взять готовую схему", "📚 Start from a ready scheme"), style = BtnStyle.TEXT) {
+            if (old == null && tpl == null) button(t("📚 Взять готовый шаблон (100)", "📚 Start from a ready template (100)"), style = BtnStyle.TEXT) {
                 dismiss()
                 schemeTemplates()
             }
@@ -2578,7 +2611,7 @@ class StudioEditorActivity : LumenBase() {
     /** «📚 Готовые схемы»: 100 framework templates with live previews → [templateSheet]. */
     private fun schemeTemplates() {
         pause()
-        TplPicker.schemes(this, dir, styleDir) { templateSheet(it) }
+        TplPicker.schemes(this, dir, styleDir, lastStyle) { templateSheet(it) }
     }
 
     /** A picked scheme template: insert it as is, fill it from the speech with the AI or edit its lines first. */
@@ -2588,18 +2621,18 @@ class StudioEditorActivity : LumenBase() {
         val at = curMs
         bottomSheet("📚 " + SchemeTemplates.name(tpl, ru)) { dismiss ->
             muted(SchemeTemplates.use(tpl, ru) + " · " + layoutName(tpl.layout))
-            add(TplPreview(ctx, dir, styleDir, 4200L) { w, h -> TplPicker.schemeBlock(tpl, w, h) }, 8).layoutParams.height = dp(210)
+            val look = lastStyle
+            add(TplPreview(ctx, dir, styleDir, 4200L) { w, h -> TplPicker.schemeBlock(tpl, w, h, look) }, 8).layoutParams.height = dp(210)
+            muted(t("Стиль: ", "Style: ") + InfoUi.name(look) + t(" — сменить можно у блока «🧩 Инфоблок».", " — change it on the block with «🧩 Info-block»."))
             button(t("➕ Вставить как есть", "➕ Insert as is"), primary = true) {
                 dismiss()
-                lastStyle = tpl.look
-                addNew("scheme", at, 6000L, schemeRatio(p)) { it.copy(scheme = SchemeTemplates.scheme(tpl, ru), look = tpl.look, animIn = "fade", animOut = "fade") }
+                addNew("scheme", at, 6000L, schemeRatio(p)) { it.copy(scheme = SchemeTemplates.scheme(tpl, ru), look = look, animIn = "fade", animOut = "fade") }
                 stage?.refresh()
                 toast(t("Схема вставлена: ✎ у блока — вписать свои подписи", "Scheme inserted: ✎ on the block to write your labels"))
             }
             button(t("🤖 Заполнить по речи с ИИ", "🤖 Fill from the speech with AI"), style = BtnStyle.TONAL) {
                 dismiss()
-                lastStyle = tpl.look
-                runAiScheme(p, at, SchemeTemplates.wish(tpl, ru), tpl.layout, 6000L, tpl.look, null)
+                runAiScheme(p, at, SchemeTemplates.wish(tpl, ru), tpl.layout, 6000L, look, null)
             }
             button(t("✍️ Поправить текстом и вставить", "✍️ Edit the text, then insert"), style = BtnStyle.TEXT) {
                 dismiss()
@@ -3002,10 +3035,10 @@ class StudioEditorActivity : LumenBase() {
     }
 
     private fun lookSheet(b: EBlock) {
+        if (b.kind == "scheme") return infoHub(b)
         val opts = when (b.kind) {
             "text" -> StudioEdit.TEXT_LOOKS.map { it to lookName(it) }
             "image" -> StudioEdit.IMAGE_LOOKS.map { it to lookName(it) }
-            "scheme" -> styles()
             else -> emptyList()
         }
         if (opts.isEmpty()) return
@@ -3054,6 +3087,57 @@ class StudioEditorActivity : LumenBase() {
                 stage?.refresh()
             }
         }
+    }
+
+    // ---------- info-blocks (lumen.info): one entry, one style card ----------
+
+    /**
+     * «🧩 Инфоблоки» — the same sheet as in the Studio and the Mix ([InfoUi.hub]). Without [b]: the style of new
+     * info-blocks and what to add (card, number, list, tiles, scheme, ready templates) or what the AI does (this
+     * moment, the whole video). With [b] (a picked info-block): its style, edit its text, redo it with the AI.
+     */
+    private fun infoHub(b: EBlock? = null) {
+        pause()
+        val at = b?.startMs ?: curMs
+        var spec = b?.let { bl -> bl.look.takeIf { InfoStyles.isSpec(it) } ?: InfoStyles.fromOld(bl.look).takeIf { InfoStyles.isSpec(it) } } ?: lastStyle
+        val n = blocks.count { it.kind == "scheme" }
+        fun act(icon: String, name: String, sub: String, f: () -> Unit) = InfoUi.Action(icon, name, sub, f)
+        InfoUi.hub(this, spec = { spec }, auto = false,
+            setSpec = { v ->
+                spec = v
+                lastStyle = v
+                if (b != null) {
+                    change(b.id) { it.copy(look = v) }
+                    stage?.refresh()
+                }
+            },
+            title = if (b != null) t("🧩 Инфоблок", "🧩 Info-block") else t("🧩 Инфоблоки в ", "🧩 Info-blocks at ") + StudioEdit.clock(at),
+            note = StudioEdit.momentText(words, at, 1000, 5000).takeIf { it.isNotBlank() }?.let { "«" + it.take(160) + "»" }.orEmpty(),
+            add = if (b != null) listOf(
+                act("✎", t("Изменить текст и вид", "Edit the text and kind"), t("строки «эмодзи Подпись — значение»; карточка, число, список, схема…", "lines \"emoji Label — value\"; card, number, list, scheme…")) { textSchemeSheet(b) }
+            ) else listOf(
+                act("💡", t("Карточка", "Card"), t("одна мысль или факт крупно", "one thought or fact, big")) { textSchemeSheet(null, kind = "card") },
+                act("🔢", t("Число", "Number"), t("1–3 крупных числа: рост, цена, срок", "1–3 big numbers: growth, price, time")) { textSchemeSheet(null, kind = "stat") },
+                act("📋", t("Список", "List"), t("шаги или пункты по порядку", "steps or points in order")) { textSchemeSheet(null, kind = "list") },
+                act("🔲", t("Плитки", "Tiles"), t("2–6 равных блоков: плюсы, варианты", "2–6 equal blocks: pros, options")) { textSchemeSheet(null, kind = "grid") },
+                act("🔗", t("Схема", "Scheme"), t("цепочка, звезда, дерево, воронка, матрица…", "chain, hub, tree, funnel, matrix…")) { textSchemeSheet(null) },
+                act("📚", t("Готовые шаблоны (100)", "Ready templates (100)"), t("SWOT, AIDA, Маслоу, PDCA… — как есть, текстом или ИИ по речи", "SWOT, AIDA, Maslow, PDCA… — as is, as text or AI from the speech")) { schemeTemplates() }
+            ),
+            ai = if (b != null) listOf(
+                act("🤖", t("Переделать", "Redo"), t("ИИ составит этот инфоблок заново по фразе", "the AI makes this info-block anew from the phrase")) { aiSchemeSheet(b) }
+            ) else listOfNotNull(
+                act("🤖", t("По этому месту", "For this moment"), t("ИИ прочитает фразу и выберет вид сам", "the AI reads the phrase and picks the kind")) { aiSchemeSheet(null) },
+                if (words.isNotEmpty()) act("🧩", t("По всему ролику", "For the whole video"), t("ИИ сам расставит инфоблоки по речи", "the AI places info-blocks along the speech")) { autoSchemes() } else null
+            ),
+            extra = { dismiss ->
+                if (n > (if (b != null) 1 else 0)) button(t("🎨 Этот стиль — всем инфоблокам ($n)", "🎨 This style for all info-blocks ($n)"), style = BtnStyle.TEXT) {
+                    dismiss()
+                    val look = spec
+                    commit(blocks.map { if (it.kind == "scheme") it.copy(look = look) else it })
+                    stage?.refresh()
+                    toast(t("Стиль «${InfoUi.name(look)}» — у всех инфоблоков", "Style \"${InfoUi.name(look)}\" on all info-blocks"))
+                }
+            })
     }
 
     private fun timingSheet(b: EBlock) {

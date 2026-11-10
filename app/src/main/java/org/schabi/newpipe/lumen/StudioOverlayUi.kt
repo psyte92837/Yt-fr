@@ -6,9 +6,9 @@ package org.schabi.newpipe.lumen
 
 /**
  * The one control of every Studio section (and the Mix) for what goes over the picture: «💬 Субтитры» or
- * «🧩 Инфосхемы». With schemes the background of the blocks is chosen right there (solid / glass / clear, as in the
- * Editor); the rest sits in «⚙ Опции» with good defaults. The AI composes the schemes by itself when they are chosen
- * (and before the build), there are no separate scheme buttons any more.
+ * «🧩 Инфоблоки» (cards, numbers, lists and schemes are one thing now). With info-blocks there is
+ * one entry row that opens the one info-block sheet of every screen ([InfoUi.entry], [InfoUi.hub]). The AI composes
+ * the info-blocks by itself when they are chosen (and before the build), there are no separate buttons.
  */
 object StudioOverlayUi {
     /**
@@ -29,11 +29,11 @@ object StudioOverlayUi {
     }
 
     fun fullHint(f: String) = when (f) {
-        StudioOverlay.BLOCKS_ONLY -> t("Видео идёт дальше, поверх — только блоки схемы на прозрачном фоне (текст и значки с тенью), без субтитров.",
-            "The video plays on, with only the blocks of the scheme over it on a transparent background (text and icons with a shadow), no subtitles.")
-        StudioOverlay.SUBS_ONLY -> t("Схема не вставляется: видео идёт дальше, только субтитры.", "No scheme insert: the video plays on, subtitles only.")
-        StudioOverlay.OFF -> t("Ни схемы, ни субтитров: в эти моменты просто видео.", "Neither the scheme nor subtitles: just the video at these moments.")
-        else -> t("Схема вставкой на весь экран, видео под ней не видно.", "The scheme as a full-screen insert, the video is hidden under it.")
+        StudioOverlay.BLOCKS_ONLY -> t("Видео идёт дальше, поверх — только блоки на прозрачном фоне (текст и значки с тенью), без субтитров.",
+            "The video plays on, with only the blocks over it on a transparent background (text and icons with a shadow), no subtitles.")
+        StudioOverlay.SUBS_ONLY -> t("Инфоблок не вставляется: видео идёт дальше, только субтитры.", "No info-block insert: the video plays on, subtitles only.")
+        StudioOverlay.OFF -> t("Ни инфоблока, ни субтитров: в эти моменты просто видео.", "Neither the info-block nor subtitles: just the video at these moments.")
+        else -> t("Инфоблок вставкой на весь экран, видео под ним не видно.", "The info-block as a full-screen insert, the video is hidden under it.")
     }
 
     fun bgLabel(bg: String) = when (bg) {
@@ -61,32 +61,17 @@ object StudioOverlayUi {
         else -> t("Обычно", "Normal")
     }
 
-    private fun lookName(id: String): String = SchemeStyles.BUILT_IN.firstOrNull { it.id == id }?.let { p ->
-        if (t("ru", "en") == "ru") p.name else when (p.id) {
-            SchemeStyles.AUTO -> "Auto"
-            "clean" -> "Clean"
-            "glass" -> "Glass"
-            "paper" -> "Paper"
-            "neon" -> "Neon"
-            "bold" -> "Bold"
-            "soft" -> "Soft"
-            "news" -> "News"
-            "minimal" -> "Minimal"
-            else -> p.id.replaceFirstChar { it.uppercase() }
-        }
-    } ?: id
-
     private fun subName(ov: StudioOverlay): String = TextStyles.of(ov.subStyle)?.let { TextStyles.name(it, I18n.ru) }
         ?: t("как в стиле ролика", "as the video style")
 
     /** One line under the choice: what the viewer will see. */
     fun summary(ov: StudioOverlay, w: Where): String {
-        if (!ov.schemes) return t("Только субтитры под голос: без схем, заголовков и стикеров. Стиль: ", "Subtitles with the voice only: no schemes, headlines or stickers. Style: ") + subName(ov) + "."
+        if (!ov.schemes) return t("Только субтитры под голос: без инфоблоков, заголовков и стикеров. Стиль: ", "Subtitles with the voice only: no info-blocks, headlines or stickers. Style: ") + subName(ov) + "."
         val parts = mutableListOf<String>()
-        parts += if (w.schemes > 0) t("схем: ${w.schemes}", "schemes: ${w.schemes}") else t("ИИ составит схемы сам", "the AI composes the schemes")
+        parts += if (w.schemes > 0) t("инфоблоков: ${w.schemes}", "info-blocks: ${w.schemes}") else t("ИИ составит инфоблоки сам", "the AI composes the info-blocks")
         parts += if (ov.subsToo) t("субтитры: ", "subtitles: ") + subName(ov) else t("без субтитров", "no subtitles")
         if (w.video) {
-            parts += lookName(ov.look)
+            parts += InfoUi.name(ov.look)
             parts += placeLabel(ov.place).lowercase()
         }
         if (hasFull(ov, w) && ov.full != StudioOverlay.FULL) parts += t("на весь экран: ", "full screen: ") + fullLabel(ov.full).substringAfter(' ').lowercase()
@@ -95,25 +80,22 @@ object StudioOverlayUi {
         return parts.joinToString(" · ")
     }
 
-    /** The choice, the background of the blocks and «⚙ Опции». */
+    /**
+     * The choice «💬 Субтитры | 🧩 Инфоблоки»; with info-blocks — the entry row that opens [options] (the one sheet:
+     * style, where and how many, the AI), the same as in the Editor.
+     */
     fun block(c: Col, ov: StudioOverlay, w: Where, set: (StudioOverlay) -> Unit, options: () -> Unit): Unit = with(c) {
         add(text(ctx, t("Поверх видео", "Over the picture"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        add(segBar(ctx, listOf(t("💬 Субтитры", "💬 Subtitles"), t("🧩 Инфосхемы", "🧩 Info-schemes")), if (ov.schemes) 1 else 0) {
+        add(segBar(ctx, listOf(t("💬 Субтитры", "💬 Subtitles"), t("🧩 Инфоблоки", "🧩 Info-blocks")), if (ov.schemes) 1 else 0) {
             set(ov.copy(mode = StudioOverlay.MODES[it]))
         }, 4)
-        muted(summary(ov, w))
+        if (!ov.schemes) muted(summary(ov, w))
         if (ov.subs) (ctx as? LumenBase)?.let { host -> subStyleRow(this, host, ov, set) }
         if (!ov.schemes) return@with
-        add(text(ctx, t("Фон блоков", "Block background"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
-        chips(StudioOverlay.BGS.map { b -> chip(ctx, bgLabel(b), ov.bg == b) { if (ov.bg != b) set(ov.copy(bg = b)) } })
-        if (ov.bg == "clear") muted(t("Без подложки: только текст и значки с мягкой тенью — видео видно целиком.",
-            "No plate: text and icons with a soft shadow only — the whole video stays visible."))
-        if (hasFull(ov, w)) {
-            add(text(ctx, t("Где схема на весь экран", "Where a scheme is full screen"), Type.LABEL, bold = true, color = Palette.MUTED), 8)
-            chips(StudioOverlay.FULLS.map { f -> chip(ctx, fullLabel(f), ov.full == f) { if (ov.full != f) set(ov.copy(full = f)) } })
-            muted(fullHint(ov.full))
+        // the same entry as in the Editor: a tap opens the one info-block sheet (style, AI, where and how many)
+        InfoUi.entry(this, ov.look, if (w.working) t("ИИ составляет инфоблоки…", "The AI composes the info-blocks…") else summary(ov, w)) {
+            if (!w.working) options()
         }
-        if (!w.working) button(t("⚙ Опции схем", "⚙ Scheme options"), style = BtnStyle.TEXT) { options() }
     }
 
     /**
@@ -132,74 +114,68 @@ object StudioOverlayUi {
         else row(pick, btn(ctx, t("✕ Как в стиле", "✕ As the style"), false, BtnStyle.TEXT) { set(ov.copy(subStyle = "")) })
     }
 
-    /** «📚 Готовая схема»: a framework template turned into the wish for the AI that composes the schemes ([wish] field). */
+    /** «📚 Готовая схема»: a framework template turned into the wish for the AI that composes the info-blocks ([wish] field). */
     fun templateWish(c: Col, host: LumenBase, wish: android.widget.EditText): Unit = with(c) {
         button(t("📚 Взять за основу готовую схему (100)", "📚 Base it on a ready scheme (100)"), style = BtnStyle.TEXT) {
             TplPicker.schemes(host, host.cacheDir, StudioEditStore.styleDir(host)) { tpl ->
                 wish.setText(SchemeTemplates.studioWish(tpl, I18n.ru))
-                host.toast(t("Шаблон «${tpl.name}» в пожелании — составьте схемы", "Template \"${tpl.nameEn}\" is in the wish — compose the schemes"))
+                host.toast(t("Шаблон «${tpl.name}» в пожелании — составьте инфоблоки", "Template \"${tpl.nameEn}\" is in the wish — compose the info-blocks"))
             }
         }
     }
 
     /**
-     * «⚙ Опции»: look, size, placement, subtitles together, how many schemes; [actions] adds the screen's own lines
-     * (wish, compose again, remove, only ticked pieces).
+     * «🧩 Инфоблоки» of the Studio and the Mix — the same sheet as in the Editor ([InfoUi.hub]): the style, where and
+     * how many (placement, full-screen moments, the animation, size, amount, subtitles together), then [actions] of
+     * the screen (wish, compose again, remove, only ticked pieces).
      */
     fun sheet(host: LumenBase, ov0: StudioOverlay, w: Where, set: (StudioOverlay) -> Unit, actions: Col.(dismiss: () -> Unit) -> Unit) {
         var ov = ov0
-        host.bottomSheet(t("⚙ Опции инфосхем", "⚙ Info-scheme options")) { dismiss ->
-            val box = Col(ctx, 0)
-            add(box.root, 0)
-            fun change(n: StudioOverlay, refill: () -> Unit) {
-                ov = n
-                set(n)
-                refill()
-            }
-            fun fill() {
-                box.clear()
-                with(box) {
-                    fun label(s: String) = add(text(ctx, s, Type.LABEL, bold = true, color = Palette.MUTED), 12)
-                    label(t("Фон блоков", "Block background"))
-                    chips(StudioOverlay.BGS.map { b -> chip(ctx, bgLabel(b), ov.bg == b) { change(ov.copy(bg = b)) { fill() } } })
-                    if (w.video) {
-                        label(t("Оформление", "Look"))
-                        chips(SchemeStyles.BUILT_IN.map { p -> chip(ctx, lookName(p.id), ov.look == p.id) { change(ov.copy(look = p.id)) { fill() } } })
-                        muted(t("Авто — цвета ролика. Остальные — готовые наборы цветов, шрифта и появления; фон блоков выбирается выше.",
-                            "Auto — the colours of the video. The rest are ready sets of colours, font and entrance; the background is chosen above."))
-                        label(t("Где", "Where"))
-                        chips(StudioOverlay.PLACES.map { p -> chip(ctx, placeLabel(p), ov.place == p) { change(ov.copy(place = p)) { fill() } } })
-                        muted(when (ov.place) {
-                            "side" -> t("Кадр со спикером сдвигается, схема рядом — для подкастов и говорящих голов.", "The speaker's frame slides aside, the scheme beside it — for podcasts and talking heads.")
-                            "pip" -> t("Спикер уходит в угол, схема занимает кадр.", "The speaker goes into a corner, the scheme takes the frame.")
-                            "full" -> t("Схема на весь экран вместо видео; что показывать в эти моменты — ниже.", "The scheme full screen instead of the video; what these moments show — below.")
-                            else -> t("Схема поверх видео, видео остаётся видно.", "The scheme over the video, the video stays visible.")
-                        })
-                    }
-                    if (hasFull(ov, w)) {
-                        label(t("Где схема на весь экран", "Where a scheme is full screen"))
-                        chips(StudioOverlay.FULLS.map { f -> chip(ctx, fullLabel(f), ov.full == f) { change(ov.copy(full = f)) { fill() } } })
-                        muted(fullHint(ov.full) + if (w.inserts && ov.full != StudioOverlay.FULL)
-                            t(" В нарезке на этих местах продолжается соседний клип.", " In the cut montage the clip next to them plays on there.") else "")
-                    }
-                    if (w.cartoon) {
-                        label(t("В анимации", "In the animation"))
-                        chips(StudioOverlay.TOONS.map { p ->
-                            chip(ctx, if (p == "big") t("Крупно, герои меньше", "Big, characters smaller") else t("На доске над героями", "On a board above the characters"), ov.toon == p) {
-                                change(ov.copy(toon = p)) { fill() }
-                            }
-                        })
-                    }
-                    label(t("Размер", "Size"))
-                    chips(StudioOverlay.SIZES.map { s -> chip(ctx, sizeLabel(s), ov.size == s) { change(ov.copy(size = s)) { fill() } } })
-                    label(t("Сколько схем", "How many schemes"))
-                    chips(StudioOverlay.AMOUNTS.map { a -> chip(ctx, amountLabel(a), ov.amount == a) { change(ov.copy(amount = a)) { fill() } } })
-                    check(t("💬 Субтитры вместе со схемами", "💬 Subtitles together with the schemes"), ov.subsToo) { v -> change(ov.copy(subsToo = v)) { fill() } }
-                }
-            }
-            fill()
-            actions(dismiss)
-            button(t("Готово", "Done"), primary = true) { dismiss() }
+        fun change(n: StudioOverlay) {
+            ov = n
+            set(n)
         }
+        InfoUi.hub(host, spec = { ov.look }, auto = true, setSpec = { change(ov.withInfo(it)) },
+            note = summary(ov, w),
+            place = { refresh ->
+                fun label(s: String) = add(text(ctx, s, Type.LABEL, bold = true, color = Palette.MUTED), 10)
+                fun pick(n: StudioOverlay) {
+                    change(n)
+                    refresh()
+                }
+                if (w.video) {
+                    label(t("Где", "Where"))
+                    chips(StudioOverlay.PLACES.map { p -> chip(ctx, placeLabel(p), ov.place == p) { pick(ov.copy(place = p)) } })
+                    muted(when (ov.place) {
+                        "side" -> t("Кадр со спикером сдвигается, инфоблок рядом — для подкастов и говорящих голов.", "The speaker's frame slides aside, the info-block beside it — for podcasts and talking heads.")
+                        "pip" -> t("Спикер уходит в угол, инфоблок занимает кадр.", "The speaker goes into a corner, the info-block takes the frame.")
+                        "full" -> t("Инфоблок на весь экран вместо видео; что показывать в эти моменты — ниже.", "The info-block full screen instead of the video; what these moments show — below.")
+                        else -> t("Инфоблок поверх видео, видео остаётся видно.", "The info-block over the video, the video stays visible.")
+                    })
+                }
+                if (hasFull(ov, w)) {
+                    label(t("Где инфоблок на весь экран", "Where an info-block is full screen"))
+                    chips(StudioOverlay.FULLS.map { f -> chip(ctx, fullLabel(f), ov.full == f) { pick(ov.copy(full = f)) } })
+                    muted(fullHint(ov.full) + if (w.inserts && ov.full != StudioOverlay.FULL)
+                        t(" В нарезке на этих местах продолжается соседний клип.", " In the cut montage the clip next to them plays on there.") else "")
+                }
+                if (w.cartoon) {
+                    label(t("В анимации", "In the animation"))
+                    chips(StudioOverlay.TOONS.map { p ->
+                        chip(ctx, if (p == "big") t("Крупно, герои меньше", "Big, characters smaller") else t("На доске над героями", "On a board above the characters"), ov.toon == p) {
+                            pick(ov.copy(toon = p))
+                        }
+                    })
+                }
+                label(t("Размер", "Size"))
+                chips(StudioOverlay.SIZES.map { s -> chip(ctx, sizeLabel(s), ov.size == s) { pick(ov.copy(size = s)) } })
+                label(t("Сколько инфоблоков", "How many info-blocks"))
+                chips(StudioOverlay.AMOUNTS.map { a -> chip(ctx, amountLabel(a), ov.amount == a) { pick(ov.copy(amount = a)) } })
+                check(t("💬 Субтитры вместе с инфоблоками", "💬 Subtitles together with the info-blocks"), ov.subsToo) { v -> pick(ov.copy(subsToo = v)) }
+            },
+            extra = { dismiss ->
+                add(text(ctx, t("ИИ", "AI"), Type.LABEL, bold = true, color = Palette.MUTED), 14)
+                actions(dismiss)
+            })
     }
 }

@@ -74,7 +74,8 @@ class TemplatesCatalogTest {
         val ov = StudioOverlay(subStyle = "game_neon", look = "bento")
         val back = StudioOverlay.fromJson(ov.toJson())
         assertEquals("game_neon", back.subStyle)
-        assertEquals("bento", back.look)
+        // an old look comes back as the info-block style made of it (lumen.info)
+        assertEquals(InfoStyles.spec("bento"), back.look)
         assertEquals("", StudioOverlay.fromJson(ov.toJson().put("sub", "nope")).subStyle)
         assertTrue(SchemeTemplates.studioWish(SchemeTemplates.of("aida")!!).contains("funnel"))
     }

@@ -31,6 +31,8 @@ VoiceTone.kt
 AzureSpeech.kt
 Help.kt
 I18n.kt
+InfoStyles.kt
+InfoUi.kt
 KeyText.kt
 KeyVault.kt
 Llm.kt

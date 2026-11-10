@@ -30,7 +30,7 @@ data class SchBox(val x: Float, val y: Float, val w: Float, val h: Float, val sh
  * Pure logic, no Android.
  */
 object StudioScheme {
-    val LAYOUTS = listOf("chain", "hub", "tree", "timeline", "funnel", "pyramid", "matrix", "venn")
+    val LAYOUTS = listOf("card", "stat", "list", "grid", "chain", "hub", "tree", "timeline", "funnel", "pyramid", "matrix", "venn")
     const val MAX_NODES = 7
     private const val MAX_LABEL = 28
 
@@ -38,7 +38,10 @@ object StudioScheme {
     const val PROTOCOL = "Протокол lumen.scheme v1. Схема сцены — JSON: " +
         "{\"layout\":\"...\",\"title\":\"до 5 слов или пусто\",\"nodes\":[{\"id\":\"a\",\"icon\":\"эмодзи\",\"label\":\"1-3 слова\",\"value\":\"число или факт, можно пусто\",\"at\":N,\"parent\":\"id\",\"accent\":true}]," +
         "\"links\":[{\"from\":\"a\",\"to\":\"b\",\"label\":\"0-2 слова\"}],\"axes\":[\"ось X\",\"ось Y\"],\"center\":\"общее\"}. " +
-        "layout: chain — 2-5 шагов или цепочка причина→следствие (связи по порядку ставятся сами); " +
+        "layout: card — один инфоблок: главная мысль или факт (1 узел, value — число или короткий факт); " +
+        "stat — 1-3 крупных числа (value — число с единицей, label — что это); list — список 2-7 пунктов по порядку; " +
+        "grid — 2-6 равноправных плиток (преимущества, варианты, признаки); " +
+        "chain — 2-5 шагов или цепочка причина→следствие (связи по порядку ставятся сами); " +
         "hub — главное понятие (первый узел) и 3-6 связанных с ним вокруг; " +
         "tree — иерархия 3-7 узлов до 3 уровней, у дочерних parent = id родителя, у корня parent пусто; " +
         "timeline — 3-6 событий по порядку, value — год или срок; " +
@@ -111,6 +114,9 @@ object StudioScheme {
         val (min, max) = when (s.layout) {
             "matrix" -> 4 to 4
             "venn" -> 2 to 3
+            "card" -> 1 to 1
+            "stat" -> 1 to 3
+            "grid" -> 2 to 6
             "hub" -> 3 to MAX_NODES
             "funnel", "pyramid", "timeline" -> 3 to 6
             else -> 2 to MAX_NODES
@@ -131,7 +137,13 @@ object StudioScheme {
 
     /** Small mechanical fixes that need no AI: extra nodes, links to unknown ids, [at] outside the scene, several accents. */
     fun repair(s: SScheme, words: IntRange? = null): SScheme {
-        val nodes0 = s.nodes.take(if (s.layout == "matrix") 4 else if (s.layout == "venn") 3 else MAX_NODES)
+        val nodes0 = s.nodes.take(when (s.layout) {
+            "matrix" -> 4
+            "venn", "stat" -> 3
+            "card" -> 1
+            "grid" -> 6
+            else -> MAX_NODES
+        })
         var accented = false
         val nodes = nodes0.map { n ->
             val acc = n.accent && !accented
@@ -182,6 +194,10 @@ object StudioScheme {
         if (n == 0) return emptyList()
         val wide = ratio >= 1.2f
         return when (s.layout) {
+            "card" -> if (n == 1) listOf(SchBox(0.5f, 0.5f, 0.92f, 0.86f)) else grid(n, wide)
+            "stat" -> (0 until n).map { i -> SchBox((i + 0.5f) / n, 0.5f, (0.94f / n).coerceAtMost(if (wide) 0.34f else 0.62f), if (wide || n == 1) 0.8f else 0.6f, "stat") }
+            "list" -> (0 until n).map { i -> SchBox(0.5f, (i + 0.5f) / n, 0.96f, (0.9f / n).coerceAtMost(0.26f), "band") }
+            "grid" -> grid(n, wide)
             "chain" -> if (wide || n <= 3) row(n, 0.5f) else column(n)
             "hub" -> {
                 val k = n - 1
@@ -225,6 +241,22 @@ object StudioScheme {
         }
     }
 
+    /** Equal tiles: 2 or 3 columns, the last row centred. */
+    private fun grid(n: Int, wide: Boolean): List<SchBox> {
+        val cols = when {
+            n <= 2 -> n
+            wide && n >= 5 -> 3
+            n == 3 && wide -> 3
+            else -> 2
+        }
+        val rows = (n + cols - 1) / cols
+        return (0 until n).map { i ->
+            val rI = i / cols
+            val inRow = if (rI == rows - 1) n - rI * cols else cols
+            SchBox((i % cols + 0.5f) / inRow, (rI + 0.5f) / rows, 0.92f / cols, 0.88f / rows)
+        }
+    }
+
     private fun row(n: Int, y: Float) = (0 until n).map { i -> SchBox((i + 0.5f) / n, y, (0.86f / n).coerceAtMost(0.3f), 0.6f) }
 
     private fun column(n: Int) = (0 until n).map { i -> SchBox(0.5f, (i + 0.5f) / n, 0.7f, (0.84f / n).coerceAtMost(0.22f)) }
@@ -243,7 +275,7 @@ object StudioScheme {
             val byAt = node.at.takeIf { it in range && it in words.indices }?.let { words[it].startMs }
             byAt ?: matchWord(node.label, words, range)?.let { words[it].startMs } ?: (startMs + 250 + span * i / n.coerceAtLeast(1))
         }
-        if (s.layout !in listOf("chain", "timeline", "funnel", "pyramid")) return raw
+        if (s.layout !in listOf("chain", "timeline", "funnel", "pyramid", "list")) return raw
         var last = Long.MIN_VALUE
         return raw.map { t -> maxOf(t, last + 120).also { last = it } }
     }

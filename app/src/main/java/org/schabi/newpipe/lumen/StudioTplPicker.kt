@@ -88,10 +88,11 @@ object TplPicker {
     }
 
     /** A scheme block that shows [tpl] on a [w]×[h] preview. */
-    fun schemeBlock(tpl: SchemeTpl, w: Int, h: Int): EBlock {
+    fun schemeBlock(tpl: SchemeTpl, w: Int, h: Int, look: String? = null): EBlock {
         val bw = 0.95f
         return EBlock("p", "scheme", 0, SCHEME_LOOP - 150, x = 0.5f, y = 0.5f, w = bw, ratio = (h * 0.92f) / (w * bw),
-            animIn = "fade", animOut = "fade", look = tpl.look, scheme = SchemeTemplates.scheme(tpl, ru))
+            animIn = "fade", animOut = "fade", look = look?.takeIf { InfoStyles.isSpec(it) } ?: InfoStyles.fromOld(tpl.look).takeIf { InfoStyles.isSpec(it) } ?: tpl.look,
+            scheme = SchemeTemplates.scheme(tpl, ru))
     }
 
     private fun card(ctx: Context, preview: View, previewDp: Int, title: String, sub: String, selected: Boolean, onClick: () -> Unit): View =
@@ -167,20 +168,20 @@ object TplPicker {
     }
 
     /** «📚 Готовые схемы»: 100 scheme templates of known frameworks by field with a search; a tap picks one. */
-    fun schemes(host: LumenBase, dir: File, styleDir: File, onPick: (SchemeTpl) -> Unit) {
+    fun schemes(host: LumenBase, dir: File, styleDir: File, look: String? = null, onPick: (SchemeTpl) -> Unit) {
         val ctx: Context = host
         val prefs = Lumen.prefs
         var area = prefs.getString("tpl_scheme_area", null)?.takeIf { a -> SchemeTemplates.AREAS.any { it.id == a } } ?: SchemeTemplates.AREAS.first().id
-        host.bottomSheet(t("📚 Готовые схемы", "📚 Ready schemes")) { dismiss ->
-            muted(t("100 схем-фреймворков из разных областей (SWOT, AIDA, Маслоу, PDCA…) в современных стилях. Вставьте как есть, поправьте текстом или дайте ИИ заполнить по речи.",
-                "100 framework schemes from different fields (SWOT, AIDA, Maslow, PDCA…) in modern looks. Insert as is, edit as text or let the AI fill it from the speech."))
+        host.bottomSheet(t("📚 Готовые шаблоны инфоблоков", "📚 Ready info-block templates")) { dismiss ->
+            muted(t("100 шаблонов-фреймворков из разных областей (SWOT, AIDA, Маслоу, PDCA…) — содержание инфоблока; вид задаёт выбранный стиль. Вставьте как есть, поправьте текстом или дайте ИИ заполнить по речи.",
+                "100 framework templates from different fields (SWOT, AIDA, Maslow, PDCA…) — the content of an info-block; the look comes from the chosen style. Insert as is, edit as text or let the AI fill it from the speech."))
             val q = edit(t("🔍 Поиск: воронка, цикл, матрица…", "🔍 Search: funnel, cycle, matrix…"))
             val box = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
             fun fill() {
                 val query = q.text.toString().trim()
                 val list = if (query.isNotEmpty()) SchemeTemplates.search(query).take(16) else SchemeTemplates.inArea(area)
                 grid(ctx, box, list.map { tpl ->
-                    val pv = TplPreview(ctx, dir, styleDir, SCHEME_LOOP) { w, h -> schemeBlock(tpl, w, h) }
+                    val pv = TplPreview(ctx, dir, styleDir, SCHEME_LOOP) { w, h -> schemeBlock(tpl, w, h, look) }
                     card(ctx, pv, 112, SchemeTemplates.name(tpl, ru), SchemeTemplates.use(tpl, ru), false) {
                         prefs.edit().putString("tpl_scheme_area", tpl.area).apply()
                         dismiss()

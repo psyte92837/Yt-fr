@@ -1898,7 +1898,6 @@ class StudioActivity : LumenBase() {
 
         fun fill() {
             box.removeAllViews()
-            (look.view.parent as? ViewGroup)?.removeView(look.view)
             for (h in results) {
                 val row = Col(this, 12)
                 row.root.background = roundBg(Palette.CARD, 12f, this)
@@ -2419,6 +2418,7 @@ class StudioActivity : LumenBase() {
 
         fun fill() {
             box.removeAllViews()
+            (look.view.parent as? ViewGroup)?.removeView(look.view)
             val picked = hits.filter { it.url in notes }
             val rest = hits.filter { it.url !in notes }
             fun group(title: String, list: List<CutHit>) {

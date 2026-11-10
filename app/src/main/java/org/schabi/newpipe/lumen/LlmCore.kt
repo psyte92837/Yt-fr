@@ -257,6 +257,39 @@ object LlmErrors {
     }
 }
 
+/**
+ * The model is overloaded (Gemini 503 "high demand", Anthropic 529) or hit a per-minute limit: a repeat a minute later or
+ * another model of the same provider usually works. Gemini gets a short chain of neighbours of the chosen model; a busy
+ * model rests for [REST_MS], so the next calls go straight to the neighbour instead of waiting for the retries again.
+ */
+object LlmBusy {
+    const val REST_MS = 5 * 60_000L
+
+    fun overloaded(code: Int, raw: String): Boolean {
+        val m = raw.lowercase()
+        if (code == 503 || code == 529) return true
+        if (code == 429) return LlmErrors.fatal(code, raw) == null
+        return code in 500..599 && (m.contains("overloaded") || m.contains("high demand") || m.contains("unavailable"))
+    }
+
+    /** Neighbours of a Gemini text model, lighter first for a light model; no models closed to new keys (2.5 Flash). */
+    fun alternates(model: String): List<String> {
+        val m = model.removePrefix("models/").lowercase()
+        if (!m.startsWith("gemini") || m.contains("tts") || m.contains("image")) return emptyList()
+        val lite = listOf("gemini-3.5-flash-lite", "gemini-3.1-flash-lite", "gemini-flash-lite-latest")
+        val flash = listOf("gemini-3.5-flash", "gemini-flash-latest")
+        val chain = if (m.contains("lite")) lite + flash else if (m.contains("pro")) listOf("gemini-pro-latest") + flash + lite else flash + lite
+        return chain.filter { it != m }.distinct()
+    }
+
+    /** Models to try: the chosen one first unless it is resting, resting ones at the end (oldest rest first). */
+    fun order(model: String, restingUntil: Map<String, Long>, now: Long): List<String> {
+        val all = (listOf(model) + alternates(model)).distinct()
+        val (rest, free) = all.partition { (restingUntil[it] ?: 0L) > now }
+        return free + rest.sortedBy { restingUntil[it] ?: 0L }
+    }
+}
+
 /** Cheap repairs of JSON answers: fix the answer alone, or ask only for the rest of an answer cut by the limit. */
 object JsonFix {
     /** The answer is a JSON object (after fences, comments, trailing commas are dropped). */

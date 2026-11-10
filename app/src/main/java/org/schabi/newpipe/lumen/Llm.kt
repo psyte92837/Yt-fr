@@ -135,7 +135,11 @@ object Llm {
                     " — the API is not available in your country: use a VPN (US/Europe) or pick another provider in Settings → AI")
                 LlmErrors.Kind.KEY -> t(" — ключ не принят: проверьте его в Настройках → ИИ", " — the key was rejected: check it in Settings → AI")
                 LlmErrors.Kind.DAILY -> t(" — дневной лимит исчерпан, до завтра", " — daily limit used up until tomorrow")
-                null -> ""
+                null -> if (!LlmBusy.overloaded(code, text)) "" else if (code == 429)
+                    t(" — лимит запросов в минуту: подождите минуту или выберите другую модель в Настройках → ИИ",
+                        " — requests-per-minute limit: wait a minute or pick another model in Settings → AI")
+                else t(" — модель сейчас перегружена у провайдера (это временно): повторите через пару минут или выберите другую модель или «Бесплатные ИИ» в Настройках → ИИ",
+                    " — the model is overloaded at the provider (temporary): retry in a couple of minutes or pick another model or Free AI in Settings → AI")
             }
             throw LlmException("HTTP $code: ${LlmParse.errorMessage(text).take(400)}$hint", text, code)
         }
@@ -199,7 +203,7 @@ object Llm {
         val file = out.fileUri
         try {
             val r = if (p == Provider.FREE) free(model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, opts) { raw = it }
-            else Par.retrying { completeRaw(endpoint(p), model, system, sent, json, file, maxTokens, lowMedia, image, imageMime, opts) { raw = it } }
+            else busyAware(p, model) { m -> completeRaw(endpoint(p), m, system, sent, json, file, maxTokens, lowMedia, image, imageMime, opts) { raw = it } }
             AiJournal.record(pid, task, p.name, r.model, system, sent, r.text, raw ?: "", r.inTokens, r.outTokens,
                 if (r.truncated) "truncated" else "ok", null, System.currentTimeMillis() - started, file, r.thoughtTokens, r.cachedTokens)
             // stopped while waiting for the answer: the answer stays in the journal, the task ends here
@@ -211,6 +215,40 @@ object Llm {
                 "error", e.message ?: e.javaClass.simpleName, System.currentTimeMillis() - started, file)
             throw e
         }
+    }
+
+    /** Gemini models resting after an overload (503) or a per-minute limit: name → until (ms). */
+    private val resting = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Retries, and for Gemini moves to a neighbour model ([LlmBusy.alternates]) when the chosen one is overloaded:
+     * one short repeat instead of four, the busy model rests [LlmBusy.REST_MS]. All busy → the first error.
+     */
+    private fun busyAware(p: Provider, model: String, call: (String) -> LlmReply): LlmReply {
+        val order = if (p.kind == ApiKind.GEMINI) LlmBusy.order(model, resting, System.currentTimeMillis()) else listOf(model)
+        if (order.size < 2) return Par.retrying { call(model) }
+        var first: LlmException? = null
+        var lastErr: LlmException? = null
+        for ((i, m) in order.withIndex()) {
+            BgTasks.checkpoint()
+            val last = i == order.size - 1
+            try {
+                return Par.retrying(if (last) 3 else 2) { call(m) }.also { resting.remove(m) }
+            } catch (e: LlmException) {
+                if (e.fatal != null) throw first ?: e
+                lastErr = e
+                val busy = LlmBusy.overloaded(e.code, e.raw.ifBlank { e.message.orEmpty() })
+                if (busy) {
+                    resting[m] = System.currentTimeMillis() + LlmBusy.REST_MS
+                    if (first == null) first = e
+                    L.w("llm", "$m overloaded (${e.code}), next model")
+                } else if (m != model) {
+                    // a neighbour closed to this key (404/403) or failing otherwise: the next one, the error of the chosen model stays
+                    L.w("llm", "$m skipped (${e.code}): ${e.message?.take(120)}")
+                } else throw e
+            }
+        }
+        throw first ?: lastErr ?: LlmException("?")
     }
 
     private fun relay(

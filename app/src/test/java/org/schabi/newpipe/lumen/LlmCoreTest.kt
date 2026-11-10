@@ -187,6 +187,32 @@ class LlmCoreTest {
     }
 
     @Test
+    fun overloadedGeminiMovesToNeighbourModels() {
+        val busy = """{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}"""
+        assertTrue(LlmBusy.overloaded(503, busy))
+        assertTrue(LlmBusy.overloaded(529, "overloaded_error"))
+        assertTrue(LlmBusy.overloaded(429, "Generate content requests per minute limit exceeded"))
+        assertFalse(LlmBusy.overloaded(429, "Generate content requests per day limit exceeded on Free Tier"))
+        assertFalse(LlmBusy.overloaded(400, "User location is not supported for the API use."))
+        assertFalse(LlmBusy.overloaded(500, "Internal error"))
+
+        val alt = LlmBusy.alternates("gemini-3.5-flash-lite")
+        assertEquals("gemini-3.1-flash-lite", alt.first())
+        assertFalse("gemini-3.5-flash-lite" in alt)
+        assertFalse(alt.any { it.startsWith("gemini-2.5") })
+        assertEquals("gemini-flash-latest", LlmBusy.alternates("gemini-3.5-flash").first())
+        assertTrue(LlmBusy.alternates("gpt-4o").isEmpty())
+        assertTrue(LlmBusy.alternates("gemini-3.8-flash-tts").isEmpty())
+
+        val now = 1_000L
+        assertEquals("gemini-3.5-flash-lite", LlmBusy.order("gemini-3.5-flash-lite", emptyMap(), now).first())
+        val o = LlmBusy.order("gemini-3.5-flash-lite", mapOf("gemini-3.5-flash-lite" to now + LlmBusy.REST_MS), now)
+        assertEquals("gemini-3.1-flash-lite", o.first())
+        assertEquals("gemini-3.5-flash-lite", o.last())
+        assertEquals("gemini-3.5-flash-lite", LlmBusy.order("gemini-3.5-flash-lite", mapOf("gemini-3.5-flash-lite" to now - 1), now).first())
+    }
+
+    @Test
     fun fatalApiErrorsAreNotRetried() {
         val region = """{"error":{"code":400,"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}"""
         assertEquals(LlmErrors.Kind.REGION, LlmErrors.fatal(400, region))

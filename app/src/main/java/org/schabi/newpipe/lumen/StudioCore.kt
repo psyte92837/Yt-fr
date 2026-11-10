@@ -1171,6 +1171,8 @@ object StudioMusicCatalog {
 
 /** Editable prompts of Lumen Studio (added to [Prompts.defaults]). */
 val STUDIO_PROMPTS = linkedMapOf(
+    // Gemini voice-over: how fast, in what tone, which emotions to mix ({lang} {tone} {pace} {emotions} {wish}); the text follows
+    "studio_tts_gemini" to VoiceTone.PROMPT,
     "studio_script" to (
         "Ты сценарист коротких вертикальных видео-объяснялок (Shorts, Reels) в стиле анимированной инфографики: " +
             "крупные слова на тёмном фоне появляются под голос, рядом простые схемы из эмодзи-плиток.\n" +

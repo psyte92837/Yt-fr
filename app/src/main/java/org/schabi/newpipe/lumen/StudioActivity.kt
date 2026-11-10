@@ -147,6 +147,10 @@ object StudioPrefs {
     var geminiModel: String
         get() = GeminiVoice.model(p.getString("studio_gemini_model", "") ?: "")
         set(v) = p.edit().putString("studio_gemini_model", v).apply()
+    /** Emotions through the text: [VoiceTone.MIX_ONE], [VoiceTone.MIX_AUTO] or tone ids separated by commas. */
+    var geminiMix: String
+        get() = p.getString("studio_gemini_mix", VoiceTone.MIX_AUTO) ?: VoiceTone.MIX_AUTO
+        set(v) = p.edit().putString("studio_gemini_mix", v).apply()
     var geminiWish: String
         get() = p.getString("studio_gemini_wish", "") ?: ""
         set(v) = p.edit().putString("studio_gemini_wish", v).apply()
@@ -988,8 +992,9 @@ class StudioActivity : LumenBase() {
             render()
         }
         tonePicker(c)
+        emotionMix(c)
         c.add(text(this, t("Как читать (по желанию)", "How to read (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-        val wish = c.edit(t("например: с улыбкой, шёпотом, как диктор новостей", "e.g. with a smile, in a whisper, like a news anchor"), StudioPrefs.geminiWish)
+        val wish = c.edit(t("например: в начале интригуй, на цифрах замедляйся, в конце — энергично", "e.g. build intrigue at the start, slow down on numbers, energetic at the end"), StudioPrefs.geminiWish, multiline = true)
         wish.addTextChangedListener(object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) = Unit
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) = Unit
@@ -997,6 +1002,68 @@ class StudioActivity : LumenBase() {
                 StudioPrefs.geminiWish = s?.toString().orEmpty()
             }
         })
+    }
+
+    /** The Gemini voice-over prompt for the current settings (template from Settings → AI → Prompts, key studio_tts_gemini). */
+    private fun geminiDirection(): String = VoiceTone.direction(Prompts.get("studio_tts_gemini"), StudioPrefs.tone, StudioPrefs.rate,
+        StudioPrefs.geminiWish, StudioPrefs.geminiMix, Studio.langName(lang()))
+
+    /** How emotions change: one tone, by the meaning of the paragraphs, or the author's own mix of tones. */
+    private fun emotionMix(c: Col) {
+        val mix = StudioPrefs.geminiMix
+        val own = mix != VoiceTone.MIX_ONE && mix != VoiceTone.MIX_AUTO
+        c.add(text(this, t("Эмоции по ходу текста", "Emotions through the text"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        c.add(segBar(this, listOf(t("Один тон", "One tone"), t("По смыслу", "By meaning"), t("Свой набор", "Own mix")),
+            if (own) 2 else if (mix == VoiceTone.MIX_ONE) 0 else 1) {
+            StudioPrefs.geminiMix = when (it) {
+                0 -> VoiceTone.MIX_ONE
+                1 -> VoiceTone.MIX_AUTO
+                else -> "humor,dramatic,motivational"
+            }
+            resetAnalysis()
+            render()
+        }, 4)
+        if (own) {
+            val set = mix.split(',').map { it.trim() }.toMutableSet()
+            c.muted(t("Отметьте, какие эмоции смешивать: Gemini возьмёт каждую там, где она подходит по смыслу абзаца. Основа — «Тон озвучки».",
+                "Tick the emotions to mix: Gemini uses each where it fits the paragraph. The base is the tone above."))
+            c.chips(VoiceTone.ALL.filter { it.id != VoiceTone.of(StudioPrefs.tone).id }.map { tn ->
+                chip(this, tn.emoji + " " + t(tn.ru, tn.en), tn.id in set) {
+                    if (!set.remove(tn.id)) set += tn.id
+                    StudioPrefs.geminiMix = set.filter { id -> VoiceTone.ALL.any { it.id == id } }.joinToString(",").ifEmpty { VoiceTone.MIX_ONE }
+                    resetAnalysis()
+                    render()
+                }
+            }, collapseAfter = 8)
+        }
+        c.button(t("📝 Промпт озвучки", "📝 Voice-over prompt"), style = BtnStyle.TONAL) { geminiPromptSheet() }
+    }
+
+    /** The voice-over prompt like the script prompts: edit the template, see the filled one, reset. */
+    private fun geminiPromptSheet() {
+        bottomSheet(t("📝 Промпт озвучки Gemini", "📝 Gemini voice-over prompt"), {}) { dismiss ->
+            muted(t("Это указания диктору перед текстом: как быстро, каким тоном, какие эмоции и где. Переменные: {lang} язык, {tone} тон, {pace} темп, {emotions} эмоции, {wish} ваше пожелание. Текст сцен добавляется после строки «ТЕКСТ:». Тот же шаблон — в Настройки → ИИ → Промпты (studio_tts_gemini).",
+                "Directions to the narrator before the text: how fast, in what tone, which emotions and where. Variables: {lang}, {tone}, {pace}, {emotions}, {wish}. The scenes' text follows the line «ТЕКСТ:». The same template is in Settings → AI → Prompts (studio_tts_gemini)."))
+            val ed = edit(t("Шаблон промпта", "Prompt template"), Prompts.get("studio_tts_gemini"), multiline = true)
+            add(text(ctx, t("Сейчас уйдёт в Gemini:", "Sent to Gemini now:"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            muted(geminiDirection())
+            row(
+                btn(ctx, t("Сбросить", "Reset"), style = BtnStyle.TEXT) {
+                    Prompts.set("studio_tts_gemini", "")
+                    resetAnalysis()
+                    dismiss()
+                    render()
+                },
+                btn(ctx, t("Сохранить", "Save"), style = BtnStyle.FILLED) {
+                    val v = ed.text.toString()
+                    if (!v.contains("ТЕКСТ") && !v.contains("TEXT", true)) toast(t("Совет: закончите шаблон строкой «ТЕКСТ:», чтобы Gemini не читал указания вслух", "Tip: end the template with «ТЕКСТ:» so Gemini does not read the notes aloud"))
+                    Prompts.set("studio_tts_gemini", v)
+                    resetAnalysis()
+                    dismiss()
+                    render()
+                }
+            )
+        }
     }
 
     /** Tone chips for both synthesised voices: Gemini follows it closely, Edge only by rate and pitch. */
@@ -1147,7 +1214,7 @@ class StudioActivity : LumenBase() {
     /** A short sample of a Gemini voice (kept on disk: every sample is a request of the daily limit). */
     private fun tryGemini(name: String) {
         val model = StudioPrefs.geminiModel
-        val f = File(File(cacheDir, "gemini_try").apply { mkdirs() }, "${name}_${model}_${StudioPrefs.tone}_${(StudioPrefs.geminiWish + StudioPrefs.rate).hashCode()}.wav")
+        val f = File(File(cacheDir, "gemini_try").apply { mkdirs() }, "${name}_${model}_${geminiDirection().hashCode()}.wav")
         fun play() {
             musicPreview?.let { runCatching { it.stop() }; it.release() }
             musicPreview = MediaPlayer().apply {
@@ -1161,7 +1228,7 @@ class StudioActivity : LumenBase() {
         toast(t("Gemini озвучивает пример…", "Gemini is voicing a sample…"))
         val sample = if (lang() == "ru") "Привет! Я $name. Так будет звучать ваш ролик." else "Hi! I'm $name. This is how your video will sound."
         Lumen.async({
-            val (pcm, rate) = GeminiVoice.audio(Llm.speech(sample, name, model, GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru", StudioPrefs.tone), "studio_tts_gemini_try"))
+            val (pcm, rate) = GeminiVoice.audio(Llm.speech(sample, name, model, geminiDirection(), "studio_tts_gemini_try"))
             writeWav(f, pcm, rate)
         }, ::err) { play() }
     }
@@ -3237,7 +3304,7 @@ class StudioActivity : LumenBase() {
     private fun analyseGemini(sc: SScript) {
         val narrator = GeminiVoice.voice(StudioPrefs.geminiVoice).name
         val model = StudioPrefs.geminiModel
-        val style = GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru", StudioPrefs.tone)
+        val style = geminiDirection()
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val castVoices = if (cast.isEmpty()) emptyList() else GeminiVoice.castVoices(castFemale(cast), narrator)
         val perScene = sc.scenes.map { s -> StudioToon.find(cast, s.who).let { if (it >= 0) castVoices[it] else narrator } }

@@ -32,4 +32,20 @@ class VoiceToneTest {
         assertEquals(20, o.pitch)
         assertEquals(TtsOptions("v", 10), VoiceTone.edge(TtsOptions("v", 10), "classic"))
     }
+
+    @Test
+    fun geminiPromptFillsEveryVariable() {
+        val d = VoiceTone.direction(VoiceTone.PROMPT, "documentary", -10, "", VoiceTone.MIX_ONE, "русский")
+        assertTrue(d, !d.contains('{') && d.endsWith("ТЕКСТ:") && d.contains("язык: русский") && d.contains("120 слов"))
+        assertTrue(d, d.contains("документального фильма") && d.contains("один тон") && !d.contains("Пожелание") && !d.contains("\n\n\n"))
+        assertTrue(VoiceTone.direction(VoiceTone.PROMPT, "classic", 0, "тише", VoiceTone.MIX_AUTO, "en").contains("Пожелание автора: тише"))
+    }
+
+    @Test
+    fun ownEmotionMix() {
+        val e = VoiceTone.emotions("humor,sad,nope,humor,classic", "classic")
+        assertTrue(e, e.contains("с юмором") && e.contains("грустно") && !e.contains("nope") && !e.contains("классика"))
+        assertTrue(VoiceTone.emotions("nope", "classic").contains("один тон"))
+        assertTrue(VoiceTone.emotions(VoiceTone.MIX_AUTO, "classic").contains("по смыслу"))
+    }
 }

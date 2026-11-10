@@ -320,4 +320,43 @@ class StudioCutsTest {
         assertEquals(listOf("c1"), StudioCuts.belowCap(listOf(old, hq, none), 1080).map { it.id })
         assertEquals(1080, StudioCuts.fromJson(StudioCuts.toJson(listOf(hq))).single().q)
     }
+
+    @Test
+    fun piecesCutAtTheStoryboardFillTheVoiceOver() {
+        val a = SClip("c1", "https://youtu.be/aaaaaaaaaaa", 10_000, 15_000, "кот", durMs = 600_000)
+        val b = SClip("c2", "https://youtu.be/bbbbbbbbbbb", 0, 5_000, "пёс", durMs = 300_000)
+        val clips = mapOf("c1" to a, "c2" to b)
+        val times = listOf(SceneTime(0, 0, 4_000, 0..3), SceneTime(1, 4_000, 10_000, 4..9), SceneTime(2, 10_000, 11_000, 10..10))
+        val ids = listOf("c1", "c2", "c1")
+        // one piece per scene: from the author's start, the next piece of a video right after the previous one
+        val per = StudioCuts.cutPlan(times, ids, clips, 0)
+        assertEquals(listOf("p0_0", "p1_0", "p2_0"), per.map { it.id })
+        assertEquals(10_000L, per[0].fromMs)
+        assertEquals(4_000L + StudioCuts.PIECE_MARGIN_MS, per[0].ms)
+        assertEquals(per[0].toMs, per[2].fromMs)
+        // pieces of 2 s: the scene of 6 s gets 3, together exactly the scene
+        val two = StudioCuts.cutPlan(times, ids, clips, 2_000)
+        assertEquals(3, two.count { it.scene == 1 })
+        assertEquals(2, StudioCuts.piecesOf(4_000, 2_000))
+        assertEquals(2, StudioCuts.piecesOf(50_000, 0))
+        // other places: away from the pieces before, inside the video
+        val used = two.groupBy({ it.url }, { it.fromMs to it.toMs })
+        val again = StudioCuts.cutPlan(times, ids, clips, 2_000, seed = 42, used = used)
+        assertTrue(again.all { p -> used[p.url].orEmpty().none { (x, y) -> p.fromMs < y && p.toMs > x } })
+        assertTrue(again.all { it.toMs <= it.durMs })
+        // downloaded pieces share the scene time evenly; nothing missing → nothing to cut
+        val ready = two.map { it.copy(file = it.id + ".mp4", lenMs = it.ms) }
+        val slots = StudioCuts.pieceSlots(times, ids, ready)
+        assertEquals(11_000L, slots.sumOf { it.endMs - it.startMs })
+        assertEquals(listOf(4_000L, 6_000L, 8_000L), slots.filter { it.id.startsWith("p1_") }.map { it.startMs })
+        assertTrue(StudioCuts.needCut(times, ids, ready).isEmpty())
+        // another clip on a scene, or a scene that grew: cut again
+        assertEquals(listOf(0), StudioCuts.needCut(times, listOf("c2", "c2", "c1"), ready))
+        assertEquals(listOf(2), StudioCuts.needCut(times.take(2) + SceneTime(2, 10_000, 14_000, 10..10), ids, ready))
+        val back = StudioCuts.fromJson(StudioCuts.toJson(ready)).first { it.id == "p1_2" }
+        assertEquals(1, back.scene)
+        assertEquals("c2", back.src)
+        assertEquals(2, back.part)
+        assertEquals(3, back.parts)
+    }
 }

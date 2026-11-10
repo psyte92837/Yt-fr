@@ -33,7 +33,14 @@ data class SClip(
     /** Length of the whole YouTube video (0 = not known yet): new random moments are picked inside it. */
     val durMs: Long = 0,
     /** Quality cap (short side, px) the file was downloaded with; 0 = not known (older downloads). */
-    val q: Int = 0
+    val q: Int = 0,
+    /** A piece cut at the storyboard: the scene it plays on (−1 = a clip marked by the author). */
+    val scene: Int = -1,
+    /** Clip (the author's mark) this piece is cut from. */
+    val src: String = "",
+    /** Place of the piece in its scene: [part] of [parts]. */
+    val part: Int = 0,
+    val parts: Int = 1
 ) {
     val ms: Long get() = toMs - fromMs
 }
@@ -139,7 +146,10 @@ object StudioCuts {
     fun toJson(clips: List<SClip>): String = JSONArray().apply {
         clips.forEach {
             put(JSONObject().put("id", it.id).put("url", it.url).put("from", it.fromMs).put("to", it.toMs).put("note", it.note)
-                .put("title", it.title).put("file", it.file).put("lead", it.leadMs).put("len", it.lenMs).put("dur", it.durMs).apply { if (it.q > 0) put("q", it.q) })
+                .put("title", it.title).put("file", it.file).put("lead", it.leadMs).put("len", it.lenMs).put("dur", it.durMs).apply {
+                    if (it.q > 0) put("q", it.q)
+                    if (it.scene >= 0) put("scene", it.scene).put("src", it.src).put("part", it.part).put("parts", it.parts)
+                })
         }
     }.toString()
 
@@ -151,7 +161,8 @@ object StudioCuts {
             val url = o.optString("url").trim()
             if (id.isEmpty() || url.isEmpty()) return@mapNotNull null
             SClip(id, url, o.optLong("from"), o.optLong("to"), o.optString("note"), o.optString("title"), o.optString("file"),
-                o.optLong("lead"), o.optLong("len"), o.optLong("dur"), o.optInt("q"))
+                o.optLong("lead"), o.optLong("len"), o.optLong("dur"), o.optInt("q"),
+                o.optInt("scene", -1), o.optString("src"), o.optInt("part"), o.optInt("parts", 1).coerceAtLeast(1))
         }
     }.getOrDefault(emptyList())
 
@@ -273,6 +284,91 @@ object StudioCuts {
         return out
     }
 
+    // ---------- pieces cut at the storyboard ----------
+
+    /** A piece is downloaded this much longer than its place: the scenes may move a little after a new layout. */
+    const val PIECE_MARGIN_MS = 700L
+
+    /** Pieces of a scene [lenMs] long: by [pieceMs] (0 = one piece for the scene), each at most [MAX_CLIP_MS]. */
+    fun piecesOf(lenMs: Long, pieceMs: Long): Int {
+        val most = MAX_CLIP_MS - PIECE_MARGIN_MS
+        val byLen = if (pieceMs <= 0) 1 else ((lenMs + pieceMs / 2) / pieceMs).toInt().coerceAtLeast(1)
+        return maxOf(byLen, ((lenMs + most - 1) / most).toInt())
+    }
+
+    /**
+     * Pieces for the voice-over: every scene with a clip ([sceneClips], clip id per scene) gets pieces of its
+     * clip's video that together last exactly the scene ([piecesOf], plus [PIECE_MARGIN_MS] each), so the cut
+     * video is as long as the voice. [seed] 0 — from the author's start of each video onwards, the next piece
+     * right after the previous one of that video; otherwise new random places of the whole video (needs
+     * [SClip.durMs]) that miss [used] (url → parts taken before). Pieces are numbered "p<scene>_<k>".
+     */
+    fun cutPlan(times: List<SceneTime>, sceneClips: List<String>, clips: Map<String, SClip>, pieceMs: Long,
+                seed: Long = 0, used: Map<String, List<Pair<Long, Long>>> = emptyMap()): List<SClip> {
+        val out = mutableListOf<SClip>()
+        val taken = HashMap<String, MutableList<Pair<Long, Long>>>()
+        used.forEach { (u, l) -> taken[u] = l.toMutableList() }
+        val cursor = HashMap<String, Long>()
+        for (st in times) {
+            val id = sceneClips.getOrNull(st.scene)?.takeIf { it.isNotEmpty() } ?: continue
+            val c = clips[id] ?: continue
+            val total = st.endMs - st.startMs
+            if (total < MIN_SLOT_MS) continue
+            val n = piecesOf(total, pieceMs)
+            for (k in 0 until n) {
+                val len = total / n + PIECE_MARGIN_MS
+                val dur = c.durMs
+                val have = taken.getOrPut(c.url) { mutableListOf() }
+                val from = if (seed != 0L && dur > len) {
+                    StudioMix.freshStart(dur, len, have, seed * 7919 + out.size)
+                } else {
+                    val at = cursor[c.url] ?: maxOf(c.fromMs, used[c.url]?.maxOfOrNull { it.second } ?: 0L)
+                    // the video ended: go on from a fresh place of it
+                    if (dur > len && at + len > dur - dur / 20) StudioMix.freshStart(dur, len, have, c.url.hashCode() + out.size.toLong()) else at
+                }
+                have += from to from + len
+                cursor[c.url] = from + len
+                out += SClip("p${st.scene}_$k", c.url, from, from + len, c.note, c.title, durMs = dur,
+                    scene = st.scene, src = id, part = k, parts = n)
+            }
+        }
+        return out
+    }
+
+    /** Scenes whose pieces are missing or do not fit any more (another clip, or the scene grew past the piece). */
+    fun needCut(times: List<SceneTime>, sceneClips: List<String>, pieces: List<SClip>): List<Int> {
+        val by = pieces.groupBy { it.scene }
+        return times.filter { st ->
+            val id = sceneClips.getOrNull(st.scene)?.takeIf { it.isNotEmpty() } ?: return@filter false
+            if (st.endMs - st.startMs < MIN_SLOT_MS) return@filter false
+            val ps = by[st.scene].orEmpty().filter { it.src == id }
+            if (ps.isEmpty()) return@filter true
+            val each = (st.endMs - st.startMs) / ps.size
+            ps.any { it.ms + 300 < each }
+        }.map { it.scene }
+    }
+
+    /**
+     * Slots of the pieces cut at the storyboard (downloaded ones only): the pieces of a scene share its time
+     * evenly, in their order; scenes without pieces get no slot.
+     */
+    fun pieceSlots(times: List<SceneTime>, sceneClips: List<String>, pieces: List<SClip>): List<ClipSlot> {
+        val by = pieces.filter { it.lenMs > 0 && it.file.isNotEmpty() }.groupBy { it.scene }
+        val out = mutableListOf<ClipSlot>()
+        for (st in times) {
+            val id = sceneClips.getOrNull(st.scene)?.takeIf { it.isNotEmpty() } ?: continue
+            val ps = by[st.scene].orEmpty().filter { it.src == id }.sortedBy { it.part }
+            if (ps.isEmpty()) continue
+            val total = st.endMs - st.startMs
+            ps.forEachIndexed { i, p ->
+                val a = st.startMs + total * i / ps.size
+                val b = st.startMs + total * (i + 1) / ps.size
+                if (b > a) out += ClipSlot(a, b, p.id, p.leadMs, p.lenMs)
+            }
+        }
+        return out
+    }
+
     /** A clip piece shorter than this is not worth a cut: the scene keeps the clip a little longer instead. */
     const val MIN_SLOT_MS = 400L
 
@@ -353,17 +449,18 @@ object StudioCuts {
     }
 
     /** Part of the director prompt about the downloaded clips (goes after the visuals); empty without clips. */
-    fun promptBlock(clips: List<SClip>): String {
-        val ready = clips.filter { it.file.isNotEmpty() && it.lenMs > 0 }
+    fun promptBlock(clips: List<SClip>, anyLength: Boolean = false): String {
+        val ready = if (anyLength) clips.filter { it.url.isNotBlank() } else clips.filter { it.file.isNotEmpty() && it.lenMs > 0 }
         if (ready.isEmpty()) return ""
         return " Ещё есть видеоклипы для вставок (B-roll и мемы-реакции): " +
             ready.joinToString("; ") { c ->
                 val about = c.note.ifBlank { c.title }.replace('\n', ' ').trim().take(100)
-                "${c.id} — «$about», ${(c.lenMs + 500) / 1000} с"
+                if (anyLength) "${c.id} — «$about»" else "${c.id} — «$about», ${(c.lenMs + 500) / 1000} с"
             } +
             ". Сцене можно дать поле \"clip\" с id клипа: тогда вместо графики на экране идёт этот клип, а голос продолжает рассказ. " +
-            "Ставь клип туда, где он по смыслу иллюстрирует речь или смешно реагирует на неё; каждый клип 1-2 раза; " +
-            "сцена с клипом обычно не длиннее клипа; между клипами — сцены с графикой."
+            "Ставь клип туда, где он по смыслу иллюстрирует речь или смешно реагирует на неё; " +
+            (if (anyLength) "куски клипа нарежутся под длину сцены, клип можно ставить на несколько сцен; "
+            else "каждый клип 1-2 раза; сцена с клипом обычно не длиннее клипа; ") + "между клипами — сцены с графикой."
     }
 
     // ---------- search by title ----------

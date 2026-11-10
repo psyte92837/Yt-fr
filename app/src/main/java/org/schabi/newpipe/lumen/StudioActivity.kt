@@ -228,6 +228,14 @@ object StudioPrefs {
     var cutsFill: Boolean
         get() = p.getBoolean("studio_cuts_fill", true)
         set(v) = p.edit().putBoolean("studio_cuts_fill", v).apply()
+    /** Cuts task: the videos are cut at the storyboard, by the scenes of the voice-over (false = the marked pieces beforehand). */
+    var cutsLate: Boolean
+        get() = p.getBoolean("studio_cuts_late", true)
+        set(v) = p.edit().putBoolean("studio_cuts_late", v).apply()
+    /** Length of a piece cut at the storyboard, ms (0 = one piece for the whole scene). */
+    var cutPiece: Long
+        get() = p.getLong("studio_cut_piece", 0)
+        set(v) = p.edit().putLong("studio_cut_piece", v).apply()
     /** The take follows the script (teleprompter); otherwise it is recognised. */
     var readScript: Boolean
         get() = p.getBoolean("studio_read_script", true)
@@ -339,6 +347,10 @@ class StudioActivity : LumenBase() {
     private val cutsFile get() = File(tdir, "clips.json")
     private val cutsDir get() = File(tdir, "clips").apply { mkdirs() }
     private var cutClips: List<SClip> = emptyList()
+    /** Pieces cut at the storyboard (StudioPrefs.cutsLate): clips/parts.json, files in clips/parts/. */
+    private var cutParts: List<SClip> = emptyList()
+    private val partsDir get() = File(cutsDir, "parts").apply { mkdirs() }
+    private val partsFile get() = File(cutsDir, "parts.json")
     private var previewBusy = false
     private var previewAgain = false
 
@@ -1549,12 +1561,13 @@ class StudioActivity : LumenBase() {
             progress("schemes", t("ИИ составляет инфоблоки…", "AI composes info-blocks…"))
             val plan = currentPlan() ?: return@card
             add(text(ctx, t("Сцены", "Scenes"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
-            val pickable = task == StudioTask.CUTS && readyCuts().isNotEmpty()
+            val pickable = task == StudioTask.CUTS && placeable().isNotEmpty()
             if (pickable) {
                 muted(t("Нажмите на сцену, чтобы выбрать ей клип.", "Tap a scene to pick its clip."))
                 if (busy.isEmpty()) button(t("🎞 Расставить клипы по сценам без ИИ", "🎞 Place the clips on scenes without AI"), style = BtnStyle.TEXT) { autoPlace() }
+                if (StudioPrefs.cutsLate) cutBlock(this, plan)
             }
-            val ready = readyIds()
+            val ready = placeIds()
             plan.times.take(60).forEach { st ->
                 val scn = sc.scenes[st.scene]
                 val fx = scn.cues.joinToString("") { when (it.type) { "zoom" -> "🔍"; "pop" -> "💬"; else -> "🔊" } } +
@@ -2020,7 +2033,7 @@ class StudioActivity : LumenBase() {
     private fun montageReady() = task != StudioTask.CUTS && task != StudioTask.CARTOON && (videoReady() || clips().isNotEmpty())
 
     /** Cuts task with downloaded clips: always a montage (clips on their scenes, graphics in between). */
-    private fun cutMontage() = task == StudioTask.CUTS && readyCuts().isNotEmpty()
+    private fun cutMontage() = task == StudioTask.CUTS && (readyCuts().isNotEmpty() || StudioPrefs.cutsLate && readyParts().isNotEmpty())
 
     /**
      * What goes under a VIDEO-style video: the speaker's own video (with cuts), the background clips,
@@ -2029,6 +2042,17 @@ class StudioActivity : LumenBase() {
     private fun bgSpec(plan: StudioPlan): StudioBg {
         if (task == StudioTask.CUTS) {
             val ready = readyCuts()
+            if (StudioPrefs.cutsLate) {
+                // pieces cut by the scenes; a scene without its pieces falls back to a downloaded marked clip
+                val sceneClips = StudioCuts.effectiveClips(plan.script.scenes, placeIds(), all = plan.fullMode != StudioOverlay.FULL)
+                val parts = readyParts()
+                val covered = coveredScenes(sceneClips)
+                val rest = sceneClips.mapIndexed { i, id -> if (i in covered) "" else id }
+                val old = if (ready.isEmpty()) emptyList() else StudioCuts.fillSlots(plan.times, rest, ready.associateBy { it.id })
+                val slots = (StudioCuts.pieceSlots(plan.times, sceneClips, parts) + old).sortedBy { it.startMs }
+                return StudioBg(null, null, emptyList(), slots,
+                    ready.associate { it.id to File(cutsDir, it.file) } + parts.associate { it.id to File(partsDir, it.file) })
+            }
             val sceneClips = StudioCuts.effectiveClips(plan.script.scenes, ready.map { it.id }.toSet(), all = plan.fullMode != StudioOverlay.FULL)
             val slots = if (StudioPrefs.cutsFill) StudioCuts.fillSlots(plan.times, sceneClips, ready.associateBy { it.id })
                 else StudioCuts.slots(plan.times, sceneClips, ready.associateBy { it.id })
@@ -2137,7 +2161,25 @@ class StudioActivity : LumenBase() {
 
     private fun loadCuts() {
         cutClips = if (task == StudioTask.CUTS && cutsFile.exists()) StudioCuts.fromJson(cutsFile.readText()) else emptyList()
+        cutParts = if (task == StudioTask.CUTS && partsFile.exists()) StudioCuts.fromJson(partsFile.readText()) else emptyList()
     }
+
+    private fun saveParts(list: List<SClip>) {
+        cutParts = list
+        runCatching { partsFile.writeText(StudioCuts.toJson(list)) }.onFailure { L.w("studio", "save pieces: ${it.message}") }
+    }
+
+    /** Pieces cut at the storyboard that are on disk. */
+    private fun readyParts(): List<SClip> = cutParts.filter { it.file.isNotEmpty() && it.lenMs > 0 && File(partsDir, it.file).exists() }
+
+    /** Clips the scenes can take: every marked video when cutting at the storyboard, else the downloaded ones. */
+    private fun placeable(): List<SClip> = if (StudioPrefs.cutsLate) cutClips else readyCuts()
+
+    private fun placeIds(): Set<String> = placeable().map { it.id }.toSet()
+
+    /** Scenes of [sceneClips] that have their own cut pieces on disk. */
+    private fun coveredScenes(sceneClips: List<String>): Set<Int> =
+        readyParts().filter { sceneClips.getOrNull(it.scene) == it.src }.map { it.scene }.toSet()
 
     private fun saveCuts(list: List<SClip>) {
         cutClips = list
@@ -2153,17 +2195,29 @@ class StudioActivity : LumenBase() {
 
     private fun cutsCard(c: Col, n: Int) = c.card {
         add(text(ctx, "$n. " + t("🎞 Клипы с YouTube", "🎞 YouTube clips"), Type.TITLE_M, bold = true), 0)
-        muted(t("Отметьте куски видео: ссылка, начало и конец (до 30 с) и что в кадре — по этой подписи ИИ-режиссёр поймёт, куда поставить клип. " +
+        val late = StudioPrefs.cutsLate
+        if (late) muted(t("Добавьте видео: ссылка, откуда брать (начало) и что в кадре — по этой подписи ИИ-режиссёр поймёт, куда поставить клип. " +
+            "Заранее ничего не качается: после раскадровки куски нарежутся сами — ровно на длину озвучки, без звука.",
+            "Add videos: link, where to take from (start) and what is in the shot; the AI director uses this note to place the clip. " +
+                "Nothing is downloaded beforehand: after the storyboard the pieces are cut by themselves, exactly as long as the voice-over, without sound."))
+        else muted(t("Отметьте куски видео: ссылка, начало и конец (до 30 с) и что в кадре — по этой подписи ИИ-режиссёр поймёт, куда поставить клип. " +
             "Скачиваются только эти секунды, без звука. Короткие вставки по 1–5 с безопаснее для авторских прав.",
             "Mark pieces of videos: link, start and end (up to 30 s) and what is in the shot; the AI director uses this note to place the clip. " +
                 "Only these seconds are downloaded, without sound. Short 1–5 s inserts are safer for copyright."))
+        if (busy.isEmpty()) add(choiceChips(ctx, listOf(true to t("✂ Резать при раскадровке", "✂ Cut at the storyboard"),
+            false to t("⬇ Скачать отмеченное заранее", "⬇ Download the marks beforehand")), late) { v ->
+            StudioPrefs.cutsLate = v
+            board = emptyList()
+            render()
+        }, 8)
         cutClips.forEach { cl ->
-            val ready = cl.file.isNotEmpty() && File(cutsDir, cl.file).exists()
+            val ready = !late && cl.file.isNotEmpty() && File(cutsDir, cl.file).exists()
             val about = cl.note.ifBlank { cl.title }.ifBlank { cl.url }
             val line = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                addView(text(ctx, (if (ready) "✅ " else "⬇ ") + "${cl.id} · ${StudioCuts.stamp(cl.fromMs)}–${StudioCuts.stamp(cl.toMs)}\n" +
+                addView(text(ctx, (if (late) "🎞 " else if (ready) "✅ " else "⬇ ") + "${cl.id} · ${StudioCuts.stamp(cl.fromMs)}" +
+                    (if (late) "" else "–${StudioCuts.stamp(cl.toMs)}") + "\n" +
                     about.take(90), 14f), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 if (busy.isEmpty()) {
                     addView(btn(ctx, "✎", style = BtnStyle.TEXT) { editClip(cl) }.apply { contentDescription = t("Изменить ${cl.id}", "Edit ${cl.id}") })
@@ -2177,7 +2231,8 @@ class StudioActivity : LumenBase() {
         val addBtn = btn(ctx, t("＋ Клип по ссылке", "＋ Clip by link"), style = BtnStyle.TONAL) { editClip(null) }
         val findBtn = btn(ctx, t("🔎 Найти видео", "🔎 Find videos"), style = BtnStyle.TONAL) { findClips() }
         row(addBtn, findBtn)
-        clipQuality(this, readyCuts(), { render() }) { downloadCuts(it) }
+        clipQuality(this, if (late) emptyList() else readyCuts(), { render() }) { downloadCuts(it) }
+        if (late) return@card
         if (cutClips.any { it !in readyCuts() }) button(t("⬇ Скачать", "⬇ Download"), primary = true) { downloadCuts() }
         val ready = readyCuts()
         if (ready.isNotEmpty()) {
@@ -2522,12 +2577,146 @@ class StudioActivity : LumenBase() {
         }
     }
 
+    /** Signature of the scenes the pieces were last cut for automatically (no second try on the same layout). */
+    private var autoCutKey = ""
+
+    /**
+     * Cutting at the storyboard: length of the pieces for all scenes at once, what is cut against the voice-over,
+     * "cut again in other places"; new or changed scenes are cut by themselves once.
+     */
+    private fun cutBlock(c: Col, plan: StudioPlan) = with(c) {
+        val sceneClips = StudioCuts.effectiveClips(plan.script.scenes, placeIds(), all = plan.fullMode != StudioOverlay.FULL)
+        val need = StudioCuts.needCut(plan.times, sceneClips, cutParts)
+        add(text(ctx, t("✂ Куски клипов", "✂ Clip pieces"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        val piece = StudioPrefs.cutPiece
+        val presets = listOf(1_500L, 2_000L, 3_000L, 5_000L)
+        if (busy.isEmpty()) add(choiceChips(ctx, listOf(0L to t("По сцене", "Per scene")) + presets.map { it to StudioMix.pieceLabel(it) } +
+            listOf((if (piece > 0 && piece !in presets) piece else -1L) to (if (piece > 0 && piece !in presets) "✎ " + StudioMix.pieceLabel(piece) else t("✎ Своя", "✎ Own"))), piece) { v ->
+            if (v == -1L || v == piece && v > 0 && v !in presets) {
+                askText(t("Длина куска, секунд", "Piece length, seconds"), if (piece > 0) (piece / 1000.0).toString() else "2.5") { s ->
+                    StudioMix.parsePiece(s)?.let { setPiece(it) } ?: toast(t("Нужно число секунд", "A number of seconds is needed"))
+                }
+            } else setPiece(v)
+        }, 4)
+        val clipped = plan.times.filter { sceneClips.getOrNull(it.scene).orEmpty().isNotEmpty() }.sumOf { it.endMs - it.startMs }
+        val parts = readyParts().filter { sceneClips.getOrNull(it.scene) == it.src }
+        muted(if (parts.isEmpty()) t("Куски нарежутся по сценам с клипами: ${Studio.clock(clipped)} из ${Studio.clock(plan.totalMs)} ролика.",
+            "Pieces are cut for the scenes with clips: ${Studio.clock(clipped)} of the ${Studio.clock(plan.totalMs)} video.")
+        else t("Нарезано кусков: ${parts.size} на ${Studio.clock(clipped)} из ${Studio.clock(plan.totalMs)} ролика.",
+            "Pieces cut: ${parts.size} for ${Studio.clock(clipped)} of the ${Studio.clock(plan.totalMs)} video.") +
+            if (need.isNotEmpty()) t(" Не нарезано сцен: ${need.size}.", " Scenes not cut: ${need.size}.") else "")
+        progress("cutparts", t("Нарезка кусков…", "Cutting pieces…"))
+        if (busy.isNotEmpty()) return@with
+        if (need.isNotEmpty()) button(t("✂ Нарезать куски (${need.size})", "✂ Cut the pieces (${need.size})"), primary = true) { cutPieces() }
+        if (parts.isNotEmpty()) row(
+            btn(ctx, t("🎲 В других местах", "🎲 Other places"), style = BtnStyle.TONAL) { cutPieces(reshuffle = true) },
+            btn(ctx, t("✂ Нарезать заново", "✂ Cut again"), style = BtnStyle.TEXT) { cutPieces(again = true) }
+        )
+        // a fresh layout cuts its pieces by itself, once
+        val key = sceneClips.joinToString(",") + "|" + plan.times.joinToString(",") { "${it.startMs}-${it.endMs}" }
+        if (need.isNotEmpty() && key != autoCutKey) {
+            autoCutKey = key
+            window.decorView.post { cutPieces() }
+        }
+    }
+
+    private fun setPiece(ms: Long) {
+        if (ms == StudioPrefs.cutPiece) return
+        StudioPrefs.cutPiece = ms
+        if (cutParts.isNotEmpty()) cutPieces(again = true) else render()
+    }
+
+    private fun askText(title: String, value: String, done: (String) -> Unit) {
+        val e = edt(this, title, value)
+        val box = LinearLayout(this).apply {
+            setPadding(dp(24), dp(8), dp(24), 0)
+            addView(e, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        android.app.AlertDialog.Builder(this).setTitle(title).setView(box)
+            .setPositiveButton("OK") { _, _ -> done(e.text.toString()) }
+            .setNegativeButton(t("Отмена", "Cancel"), null).show()
+    }
+
+    /**
+     * Cuts the pieces of the scenes with clips: the missing ones, or [again] all of them from the marked starts,
+     * or [reshuffle] all at new places of the videos (away from the pieces before). Lengths of the videos are
+     * read first, the pieces download two at a time.
+     */
+    private fun cutPieces(again: Boolean = false, reshuffle: Boolean = false) {
+        if (busy.isNotEmpty() || task != StudioTask.CUTS) return
+        val plan = currentPlan() ?: return
+        val sceneClips = StudioCuts.effectiveClips(plan.script.scenes, placeIds(), all = plan.fullMode != StudioOverlay.FULL)
+        val old = cutParts
+        val need = if (again || reshuffle) null else StudioCuts.needCut(plan.times, sceneClips, old).toSet()
+        if (need != null && need.isEmpty()) return
+        val times = if (need == null) plan.times else plan.times.filter { it.scene in need }
+        val keep = if (need == null) emptyList() else old.filter { it.scene !in need && sceneClips.getOrNull(it.scene) == it.src }
+        val gone = old.filter { it !in keep }
+        val used = (if (reshuffle) old else keep).groupBy({ it.url }, { it.fromMs to it.toMs })
+        val seed = if (reshuffle) System.nanoTime() or 1L else 0L
+        val pieceMs = StudioPrefs.cutPiece
+        val clipsNow = cutClips
+        val wanted = sceneClips.toSet()
+        val dir = partsDir
+        val maxH = StudioPrefs.clipCap
+        busy = "cutparts"
+        cancel = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        render()
+        job("cutparts", {
+            gone.forEach { if (it.file.isNotEmpty()) File(dir, it.file).delete() }
+            report("cutparts", t("Длина видео…", "Video lengths…"))
+            // new places are picked inside the whole video: its length first
+            val withDur = clipsNow.map { c ->
+                if (c.durMs > 0 || c.id !in wanted) c
+                else runCatching { c.copy(durMs = StudioCutsLoad.durationMs(c.url)) }.getOrElse { e ->
+                    if (e is java.util.concurrent.CancellationException) throw e
+                    c
+                }
+            }
+            val todo = StudioCuts.cutPlan(times, sceneClips, withDur.associateBy { it.id }, pieceMs, seed, used)
+            val done = java.util.concurrent.ConcurrentHashMap<String, SClip>()
+            val errors = java.util.Collections.synchronizedList(mutableListOf<String>())
+            val count = java.util.concurrent.atomic.AtomicInteger()
+            Par.mapAll(todo, 2) { i, p ->
+                if (cancel) throw java.util.concurrent.CancellationException()
+                try {
+                    done[p.id] = StudioCutsLoad.fetch(p, dir, maxH, { cancel }) { }
+                } catch (e: java.util.concurrent.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    L.w("studio", "piece ${p.id}: ${e.message}")
+                    errors += "${p.src} → ${p.id}: ${e.message ?: e.javaClass.simpleName}"
+                }
+                report("cutparts", t("Кусок ${count.incrementAndGet()}/${todo.size}", "Piece ${count.get()}/${todo.size}"))
+                i
+            }
+            Triple(withDur, todo.mapNotNull { done[it.id] }, errors.toList())
+        }, { e ->
+            busy = ""
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            saveParts(keep)
+            render()
+            if (e !is java.util.concurrent.CancellationException) err(e)
+        }) { (withDur, got, errors) ->
+            busy = ""
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            val dur = withDur.associate { it.id to it.durMs }
+            saveCuts(cutClips.map { c -> dur[c.id]?.takeIf { it > 0 && c.durMs <= 0 }?.let { c.copy(durMs = it) } ?: c })
+            saveParts((keep + got).sortedWith(compareBy({ it.scene }, { it.part })))
+            board = emptyList()
+            render()
+            if (errors.isNotEmpty()) showText(t("Не все куски скачались", "Some pieces failed"), errors.joinToString("\n"))
+            else toast(t("Нарезано кусков: ${got.size}", "Pieces cut: ${got.size}"))
+        }
+    }
+
     /** Picks the clip of scene [i] (or graphics). */
     private fun pickClip(i: Int) {
         val sc = script ?: return
-        val ready = readyCuts()
+        val ready = placeable()
         val labels = listOf(t("— графика, без клипа", "— graphics, no clip")) +
-            ready.map { "🎞 ${it.id} · ${it.note.ifBlank { it.title }.take(50)} · ${(it.lenMs + 500) / 1000} с" }
+            ready.map { "🎞 ${it.id} · ${it.note.ifBlank { it.title }.take(50)}" + if (StudioPrefs.cutsLate) "" else " · ${(it.lenMs + 500) / 1000} с" }
         android.app.AlertDialog.Builder(this).setTitle(t("Сцена ${i + 1}", "Scene ${i + 1}"))
             .setItems(labels.toTypedArray()) { _, k ->
                 val id = if (k == 0) "" else ready[k - 1].id
@@ -2542,7 +2731,7 @@ class StudioActivity : LumenBase() {
     /** Puts the downloaded clips on scenes by the words of their notes, without the AI. */
     private fun autoPlace() {
         val sc = script ?: return
-        script = withClips(sc, StudioCuts.autoAssign(sc.scenes, readyCuts()))
+        script = withClips(sc, StudioCuts.autoAssign(sc.scenes, placeable()))
         board = emptyList()
         saveAnalysis()
         render()
@@ -2580,8 +2769,14 @@ class StudioActivity : LumenBase() {
         val voice = pcm ?: return null
         if (words.isEmpty()) return null
         val style = currentStyle()
-        val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) StudioCuts.effectiveClips(sc.scenes, readyIds()).let { ids -> sc.scenes.indices.filter { ids[it].isNotEmpty() }.toSet() }
-        else null
+        val clipScenes = if (task == StudioTask.CUTS && style == StudioStyle.VIDEO) {
+            if (StudioPrefs.cutsLate) {
+                val ids = StudioCuts.effectiveClips(sc.scenes, placeIds())
+                val covered = coveredScenes(ids)
+                val ready = readyIds()
+                sc.scenes.indices.filter { ids[it].isNotEmpty() && (it in covered || ids[it] in ready) }.toSet()
+            } else StudioCuts.effectiveClips(sc.scenes, readyIds()).let { ids -> sc.scenes.indices.filter { ids[it].isNotEmpty() }.toSet() }
+        } else null
         val ov = StudioPrefs.over
         return StudioPlan.build(sc, words, voice.ms + 500, style, StudioPrefs.accent, ranges, ov.overlay(),
             StudioPrefs.zooms, StudioPrefs.transitions,
@@ -3517,11 +3712,11 @@ class StudioActivity : LumenBase() {
         val format = formatText()
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
         val roles = script?.let { sc -> ranges?.let { StudioToon.wordRoles(sc.scenes, it, ws.size, cast) } }
-        val cutsNow = if (task == StudioTask.CUTS) readyCuts() else emptyList()
+        val cutsNow = if (task == StudioTask.CUTS) placeable() else emptyList()
         val vars = mapOf(
             "format" to format,
             "long" to if (task == StudioTask.VIDEO || p0.ms > 180_000) ", в длинном ролике до 12 секунд" else "",
-            "visuals" to visuals() + StudioCuts.promptBlock(cutsNow),
+            "visuals" to visuals() + StudioCuts.promptBlock(cutsNow, StudioPrefs.cutsLate),
             "drop" to if (allowDrop) "drop — номера слов-паразитов («эм», «ну», «короче», «как бы», «вот»), повторов и оговорок, которые нужно вырезать из записи. " +
                 "Не трогай значимые слова и не вырезай больше 10% текста. Если вырезать нечего — пустой массив."
             else "drop — всегда пустой массив.",

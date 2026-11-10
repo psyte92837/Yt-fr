@@ -106,12 +106,21 @@ object StudioCutsLoad {
     }
 
     /** Length of a YouTube video in ms (0 when not known). Network; worker thread. */
-    fun durationMs(url: String): Long = StreamInfo.getInfo(ServiceList.YouTube, url).duration.coerceAtLeast(0) * 1000
+    fun durationMs(url: String): Long = info(url).duration.coerceAtLeast(0) * 1000
+
+    /** Stream info of a video, kept 20 minutes: pieces cut at the storyboard ask for the same video many times. */
+    private val infos = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, StreamInfo>>()
+
+    private fun info(url: String): StreamInfo {
+        val now = System.currentTimeMillis()
+        infos[url]?.let { (at, i) -> if (now - at < 20 * 60_000L) return i }
+        return StreamInfo.getInfo(ServiceList.YouTube, url).also { infos[url] = now to it }
+    }
 
     /** Downloads and cuts [c] into [dir]; returns it with the file, the lead and the length. */
     fun fetch(c: SClip, dir: File, maxHeight: Int, cancelled: () -> Boolean, progress: (String) -> Unit): SClip {
         progress(t("${c.id}: ссылка на поток…", "${c.id}: getting the stream…"))
-        val info = StreamInfo.getInfo(ServiceList.YouTube, c.url)
+        val info = info(c.url)
         if (cancelled()) throw CancellationException()
         val stream = pickStream(info.videoOnlyStreams, maxHeight)
             ?: error(t("Нет видеопотока MP4/H.264 для «${info.name}»", "No MP4/H.264 video stream for \"${info.name}\""))

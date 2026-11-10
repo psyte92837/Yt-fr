@@ -26,6 +26,7 @@ EditVoiceBase.kt
 FreeAi.kt
 FreeAiActivity.kt
 FreeAiStore.kt
+GeminiVoice.kt
 Help.kt
 I18n.kt
 KeyText.kt

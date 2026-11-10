@@ -116,7 +116,7 @@ object StudioPrefs {
     var seconds: Int
         get() = p.getInt("studio_seconds", 60)
         set(v) = p.edit().putInt("studio_seconds", v).apply()
-    /** "edge", "mic", "file" or "video"; an animated voice-over uses "file" or "mic". */
+    /** "edge", "gemini", "mic", "file" or "video"; an animated voice-over uses "file" or "mic". */
     var voiceMode: String
         get() = p.getString(key("studio_voice_mode"), null) ?: if (StudioTask.of(task) == StudioTask.VOICE) "file" else "edge"
         set(v) = p.edit().putString(key("studio_voice_mode"), v).apply()
@@ -126,6 +126,16 @@ object StudioPrefs {
     var rate: Int
         get() = p.getInt("studio_rate", 10)
         set(v) = p.edit().putInt("studio_rate", v).apply()
+    /** Gemini TTS: voice ([GeminiVoice.VOICES]), model and the author's reading wish. */
+    var geminiVoice: String
+        get() = p.getString("studio_gemini_voice", GeminiVoice.DEFAULT_VOICE) ?: GeminiVoice.DEFAULT_VOICE
+        set(v) = p.edit().putString("studio_gemini_voice", v).apply()
+    var geminiModel: String
+        get() = GeminiVoice.model(p.getString("studio_gemini_model", "") ?: "")
+        set(v) = p.edit().putString("studio_gemini_model", v).apply()
+    var geminiWish: String
+        get() = p.getString("studio_gemini_wish", "") ?: ""
+        set(v) = p.edit().putString("studio_gemini_wish", v).apply()
     var style: String
         get() = p.getString("studio_style", StudioStyle.DARK.name) ?: StudioStyle.DARK.name
         set(v) = p.edit().putString("studio_style", v).apply()
@@ -827,8 +837,8 @@ class StudioActivity : LumenBase() {
         add(text(ctx, "$n. " + if (task == StudioTask.VOICE) t("Озвучка", "Voice-over") else t("Голос", "Voice"), Type.TITLE_M, bold = true), 0)
         val modes = when (task) {
             StudioTask.VOICE -> listOf("file", "mic")
-            StudioTask.CUTS, StudioTask.CARTOON -> listOf("edge", "mic", "file")
-            else -> listOf("edge", "mic", "file", "video")
+            StudioTask.CUTS, StudioTask.CARTOON -> listOf("edge", "gemini", "mic", "file")
+            else -> listOf("edge", "gemini", "mic", "file", "video")
         }
         if (task == StudioTask.VOICE) {
             aspectPicker(this)
@@ -846,7 +856,7 @@ class StudioActivity : LumenBase() {
                 "Pick a voice memo or a podcast and the rest happens by itself: loudness, recognition, the AI director (cuts slips and pauses), info-schemes, B-roll, the «Explainer» style with chapters from the questions, sounds and the video build. The previous work goes to Drafts."))
         }
         val labels = if (task == StudioTask.VOICE) listOf(t("📎 Аудиофайл", "📎 Audio file"), t("🎙 Запись", "🎙 Record"))
-        else listOf(t("🗣 Синтез", "🗣 Synth"), t("🎙 Запись", "🎙 Record"), t("📎 Файл", "📎 File"), t("🎥 Видео", "🎥 Video")).take(modes.size)
+        else listOf(t("🗣 Синтез", "🗣 Synth"), "✨ Gemini", t("🎙 Запись", "🎙 Record"), t("📎 Файл", "📎 File"), t("🎥 Видео", "🎥 Video")).take(modes.size)
         add(segBar(ctx, labels, modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)) {
             StudioPrefs.voiceMode = modes[it]
             resetAnalysis()
@@ -854,6 +864,7 @@ class StudioActivity : LumenBase() {
         }, 8)
         when (StudioPrefs.voiceMode) {
             "edge" -> edgeVoice(this)
+            "gemini" -> geminiVoice(this)
             "mic" -> micVoice(this)
             "video" -> videoVoice(this)
             else -> fileVoice(this)
@@ -919,6 +930,73 @@ class StudioActivity : LumenBase() {
             resetAnalysis()
             render()
         }
+    }
+
+    /** The voice is synthesised (Edge or Gemini): the script is the speech, no pauses or slips to cut. */
+    private fun synth() = StudioPrefs.voiceMode == "edge" || StudioPrefs.voiceMode == "gemini"
+
+    private fun geminiVoice(c: Col) {
+        c.muted(t("Живые голоса Google Gemini, 30 штук, говорят на любом языке. Нужен ключ Gemini (Настройки → ИИ), текст уходит в Google. Один запрос — до ~1,5 минуты речи; на бесплатном ключе запросов в день немного.",
+            "Lifelike Google Gemini voices, 30 of them, speak any language. Needs a Gemini key (Settings → AI); the text goes to Google. One request is up to ~1.5 minutes of speech; a free key allows few requests a day."))
+        if (Llm.geminiKey() == null) {
+            c.add(text(this, t("⚠ Ключ Gemini не задан", "⚠ No Gemini key"), Type.LABEL, bold = true, color = 0xFFFF8A3D.toInt()), 8)
+            c.button(t("🔑 Ввести ключ", "🔑 Enter the key")) { startActivity(Intent(this, SettingsActivity::class.java)) }
+        }
+        if (task == StudioTask.CARTOON) c.muted(t("Персонажи получат свои голоса Gemini того же пола; здесь — голос рассказчика.",
+            "Characters get their own Gemini voices of the same gender; this is the narrator's voice."))
+        val cur = GeminiVoice.voice(StudioPrefs.geminiVoice)
+        for ((female, label) in listOf(true to t("Женские", "Female"), false to t("Мужские", "Male"))) {
+            c.add(text(this, label, Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            c.chips(GeminiVoice.VOICES.filter { it.female == female }.map { v ->
+                chip(this, (if (female) "♀ " else "♂ ") + v.name + " · " + t(v.ru, v.en), v.name == cur.name) {
+                    StudioPrefs.geminiVoice = v.name
+                    resetAnalysis()
+                    render()
+                }
+            }, collapseAfter = 16)
+        }
+        c.button(t("▶ Послушать «${cur.name}»", "▶ Listen to \"${cur.name}\"")) { tryGemini(cur.name) }
+        c.spinner(t("Модель", "Model"), GeminiVoice.MODELS.map { it.first to t(it.second, it.third) }, StudioPrefs.geminiModel) {
+            StudioPrefs.geminiModel = it
+            resetAnalysis()
+            render()
+        }
+        c.spinner(t("Темп речи", "Speech rate"), listOf(-10 to t("спокойно", "calm"), 0 to t("обычно", "normal"), 10 to t("бодро", "brisk"), 20 to t("быстро", "fast")), StudioPrefs.rate) {
+            StudioPrefs.rate = it
+            resetAnalysis()
+            render()
+        }
+        c.add(text(this, t("Как читать (по желанию)", "How to read (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+        val wish = c.edit(t("например: с улыбкой, шёпотом, как диктор новостей", "e.g. with a smile, in a whisper, like a news anchor"), StudioPrefs.geminiWish)
+        wish.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, a: Int, b: Int, d: Int) = Unit
+            override fun afterTextChanged(s: android.text.Editable?) {
+                StudioPrefs.geminiWish = s?.toString().orEmpty()
+            }
+        })
+    }
+
+    /** A short sample of a Gemini voice (kept on disk: every sample is a request of the daily limit). */
+    private fun tryGemini(name: String) {
+        val model = StudioPrefs.geminiModel
+        val f = File(File(cacheDir, "gemini_try").apply { mkdirs() }, "${name}_$model.wav")
+        fun play() {
+            musicPreview?.let { runCatching { it.stop() }; it.release() }
+            musicPreview = MediaPlayer().apply {
+                setDataSource(f.absolutePath)
+                setOnPreparedListener { it.start() }
+                setOnErrorListener { _, _, _ -> toast(t("Не удалось проиграть", "Cannot play")); true }
+                prepareAsync()
+            }
+        }
+        if (f.length() > 44) return play()
+        toast(t("Gemini озвучивает пример…", "Gemini is voicing a sample…"))
+        val sample = if (lang() == "ru") "Привет! Я $name. Так будет звучать ваш ролик." else "Hi! I'm $name. This is how your video will sound."
+        Lumen.async({
+            val (pcm, rate) = GeminiVoice.audio(Llm.speech(sample, name, model, GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru"), "studio_tts_gemini_try"))
+            writeWav(f, pcm, rate)
+        }, ::err) { play() }
     }
 
     private fun micVoice(c: Col) {
@@ -1169,7 +1247,7 @@ class StudioActivity : LumenBase() {
     private fun analyseCard(c: Col, n: Int) = c.card {
         add(text(ctx, "$n. " + t("Сцены и режиссура", "Scenes and direction"), Type.TITLE_M, bold = true), 0)
         muted(when (StudioPrefs.voiceMode) {
-            "edge" -> t("Озвучка сцен и разметка слов по времени.", "Voicing the scenes and timing every word.")
+            "edge", "gemini" -> t("Озвучка сцен и разметка слов по времени.", "Voicing the scenes and timing every word.")
             else -> t("Поиск речи и пауз, темп, расстановка слов по времени.", "Finding speech and pauses, the pace, timing every word.")
         })
         if (busy.isEmpty()) button(if (words.isEmpty()) t("🔍 Разметить сцены", "🔍 Lay out scenes") else t("🔍 Разметить заново", "🔍 Lay out again"), primary = words.isEmpty()) { analyse() }
@@ -1180,7 +1258,7 @@ class StudioActivity : LumenBase() {
         if (s != null && sc != null && words.isNotEmpty()) {
             p(t("Длительность ${Studio.clock(s.totalMs)} · речь ${Studio.clock(s.speechMs)} · слов ${s.words} · темп ${s.wordsPerMinute} сл/мин",
                 "Length ${Studio.clock(s.totalMs)} · speech ${Studio.clock(s.speechMs)} · words ${s.words} · pace ${s.wordsPerMinute} wpm"))
-            if (StudioPrefs.voiceMode != "edge") {
+            if (!synth()) {
                 muted(t("Пауз: ${s.pauses} · самая длинная ${s.longestPauseMs / 100 / 10.0} с", "Pauses: ${s.pauses} · longest ${s.longestPauseMs / 100 / 10.0} s"))
                 paceTip(s)?.let { muted("💡 $it") }
             }
@@ -1215,7 +1293,7 @@ class StudioActivity : LumenBase() {
                 Relay.mode = if (!it) "off" else if (Relay.mode == "all") "all" else "studio"
             }
             if (cur == StudioApproach.FULL) {
-                if (StudioPrefs.voiceMode != "edge") check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
+                if (!synth()) check(t("✂ Вырезать слова-паразиты и оговорки", "✂ Cut filler words and slips"), StudioPrefs.dropFillers) { StudioPrefs.dropFillers = it }
                 check(t("🖼 Подбирать B-roll (свободные лицензии)", "🖼 Find B-roll (open licences)"), StudioPrefs.broll) { StudioPrefs.broll = it }
                 if (StudioPrefs.broll) {
                     check(t("🎞 Сначала реальные видео-клипы (Pexels, Pixabay, Wikimedia), иначе фото", "🎞 Real video clips first (Pexels, Pixabay, Wikimedia), else photos"),
@@ -2461,7 +2539,7 @@ class StudioActivity : LumenBase() {
                     runCatching { requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 1) }
                 }
                 topicEdit.setText(idea.ifBlank { topic })
-                if (StudioPrefs.voiceMode != "edge") StudioPrefs.voiceMode = "edge"
+                if (!synth()) StudioPrefs.voiceMode = "edge"
                 autoAll = build
                 podcastAuto = false
                 runWrite(topic, StudioAuto.extra(scenes, draft)) {
@@ -2729,11 +2807,12 @@ class StudioActivity : LumenBase() {
         val text = scriptEdit.text.toString()
         val sc = Studio.parseText(text)
         val mode = StudioPrefs.voiceMode
-        if (mode == "edge" && sc.scenes.isEmpty()) {
+        val synth = mode == "edge" || mode == "gemini"
+        if (synth && sc.scenes.isEmpty()) {
             toast(t("Нужен сценарий (шаг 1)", "A script is needed (step 1)"))
             return
         }
-        if (mode != "edge" && !takeFile.exists()) {
+        if (!synth && !takeFile.exists()) {
             toast(when (mode) {
                 "mic" -> t("Сначала запишите голос (шаг 2)", "Record your voice first (step 2)")
                 "video" -> t("Сначала снимите или выберите видео (шаг 2)", "Film or pick a video first (step 2)")
@@ -2741,9 +2820,9 @@ class StudioActivity : LumenBase() {
             })
             return
         }
-        val useScript = mode != "edge" && (task == StudioTask.VOICE || StudioPrefs.readScript) && sc.scenes.isNotEmpty()
+        val useScript = !synth && (task == StudioTask.VOICE || StudioPrefs.readScript) && sc.scenes.isNotEmpty()
         // no script and no recogniser: edit by the sound alone with a no-AI template
-        val canRecognise = mode == "edge" || useScript || StudioRecognizer.available(this)
+        val canRecognise = synth || useScript || StudioRecognizer.available(this)
         var noText = false
         resetAnalysis()
         busy = "analyse"
@@ -2778,6 +2857,7 @@ class StudioActivity : LumenBase() {
         }
         when {
             mode == "edge" -> job("analyse", { analyseEdge(sc) }, fail, done)
+            mode == "gemini" -> job("analyse", { analyseGemini(sc) }, fail, done)
             useScript -> job("analyse", { analyseTake(sc) }, fail, done)
             else -> Lumen.async({ speechOf(loadTake(), silentOk = true) }, fail) { (take, speech) ->
                 // the take cannot be turned into text: beats by the sound, then a template
@@ -2986,6 +3066,65 @@ class StudioActivity : LumenBase() {
         stats = VoiceStats(take.ms, take.ms, 0, 0, all.size)
     }
 
+    private fun analyseGemini(sc: SScript) {
+        val says = sc.scenes.map { it.say }
+        val n = says.size
+        val narrator = GeminiVoice.voice(StudioPrefs.geminiVoice).name
+        val model = StudioPrefs.geminiModel
+        val style = GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru")
+        val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
+        val castVoices = if (cast.isEmpty()) emptyList() else GeminiVoice.castVoices(
+            StudioToon.pickVoices(cast, voices, lang(), "").map { v -> voices.firstOrNull { it.shortName == v }?.let { it.gender == "Female" } }, narrator)
+        val perScene = sc.scenes.map { s -> StudioToon.find(cast, s.who).let { if (it >= 0) castVoices[it] else narrator } }
+        val chunks = GeminiVoice.chunks(says, perScene)
+        if (chunks.isEmpty()) error(t("Сценарий пустой", "The script is empty"))
+        val tmp = File(cacheDir, "studio_tts").apply { mkdirs() }
+        val keys = chunks.map { c -> "gm" + StudioTtsCache.key(style + "\n" + GeminiVoice.text(says, c), TtsOptions("gemini:$model:${c.voice}")) }
+        val chunks16 = mutableListOf<ShortArray>()
+        val all = mutableListOf<SWord>()
+        val rs = arrayOfNulls<IntRange>(n)
+        var len = 0
+        var rate = 24_000
+        report("analyse", t("Gemini озвучивает 0/${chunks.size}", "Gemini is voicing 0/${chunks.size}"))
+        chunks.forEachIndexed { k, c ->
+            if (cancel) throw java.util.concurrent.CancellationException()
+            // a chunk voiced in an earlier, interrupted attempt is taken from disk: no second request
+            val f = File(tmp, keys[k] + ".wav")
+            val (data0, r) = f.takeIf { it.length() > 44 }?.let { Studio.readWav(it.readBytes()) } ?: try {
+                GeminiVoice.audio(Llm.speech(GeminiVoice.text(says, c), c.voice, model, style)).also { (p, pr) -> writeWav(f, p, pr) }
+            } catch (e: LlmException) {
+                throw LlmException(e.message.orEmpty() + t(" Озвучено кусков: $k из ${chunks.size}, они сохранены — «🔍 Разметить сцены» продолжит с остальных.",
+                    " Chunks voiced: $k of ${chunks.size}, they are kept: \"🔍 Lay out scenes\" continues with the rest."), e.raw, e.code)
+            }
+            if (chunks16.isEmpty()) rate = r
+            val data = if (r == rate) data0 else Studio.resample(data0, r, rate)
+            val shift = Studio.durationMs(len, rate)
+            GeminiVoice.words(says, c, data, rate).forEachIndexed { j, ws ->
+                val i = c.scenes[j]
+                val first = all.size
+                all += ws.map { it.copy(startMs = it.startMs + shift, endMs = it.endMs + shift) }
+                rs[i] = first until all.size
+            }
+            chunks16 += data
+            len += data.size
+            val gap = Studio.silence(if (k < chunks.size - 1) 180 else 400, rate)
+            chunks16 += gap
+            len += gap.size
+            report("analyse", t("Gemini озвучивает ${k + 1}/${chunks.size}", "Gemini is voicing ${k + 1}/${chunks.size}"))
+        }
+        // blank scenes own no words
+        var at = 0
+        val ranges0 = rs.map { r -> (r ?: (at until at)).also { at = it.last + 1 } }
+        tmp.listFiles()?.filter { it.name.startsWith("gm") && it.name.removeSuffix(".wav") !in keys }?.forEach { it.delete() }
+        if (all.isEmpty()) error(t("Gemini не вернул речь. Попробуйте другой голос.", "Gemini returned no speech. Try another voice."))
+        val take = StudioAudio.Pcm(Studio.concat(chunks16), rate)
+        pcm = take
+        words = all
+        script = sc
+        ranges = ranges0
+        stats = VoiceStats(take.ms, take.ms, 0, 0, all.size)
+    }
+
     /** Tokens of the last AI direction (in → out), to compare the ways. */
     @Volatile private var lastTokens: Pair<Int, Int>? = null
 
@@ -3100,7 +3239,7 @@ class StudioActivity : LumenBase() {
         val p0 = pcm ?: return
         val ws = words
         if (ws.isEmpty() || busy.isNotEmpty()) return
-        val allowDrop = StudioPrefs.voiceMode != "edge" && StudioPrefs.dropFillers
+        val allowDrop = !synth() && StudioPrefs.dropFillers
         val oldCuts = cuts
         val format = formatText()
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()

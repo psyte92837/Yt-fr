@@ -370,6 +370,33 @@ object Llm {
         }
     }
 
+    /** Gemini key for speech: the Gemini provider's, else the free-AI one. */
+    fun geminiKey(): String? = Provider.GEMINI.apiKey?.takeIf { it.isNotBlank() } ?: FreeAiStore.key("google")?.takeIf { it.isNotBlank() }
+
+    /**
+     * Gemini text-to-speech: the raw answer with base64 audio ([GeminiVoice.audio] reads it).
+     * Journaled like a completion; not sent through SendGate (the author's own script, read aloud).
+     */
+    fun speech(text: String, voice: String, model: String, style: String, task: String = "studio_tts_gemini", pid: String = ""): String {
+        val key = geminiKey() ?: throw LlmException(t("Нужен ключ Gemini: Настройки → ИИ → Google Gemini.", "A Gemini key is needed: Settings → AI → Google Gemini."))
+        val started = System.currentTimeMillis()
+        BgTasks.checkpoint()
+        val e = LlmEndpoint(ApiKind.GEMINI, Provider.GEMINI.baseUrl, key)
+        return try {
+            val raw = Par.retrying { http("${e.base}/models/$model:generateContent", "POST", authHeaders(e), GeminiVoice.body(text, voice, style)) }
+            val usage = runCatching { JSONObject(raw).optJSONObject("usageMetadata") }.getOrNull()
+            AiJournal.record(pid, task, Provider.GEMINI.name, model, style, text, "♪ $voice", "", usage?.optInt("promptTokenCount") ?: 0,
+                usage?.optInt("candidatesTokenCount") ?: 0, "ok", null, System.currentTimeMillis() - started)
+            BgTasks.checkpoint()
+            raw
+        } catch (x: Exception) {
+            if (x is java.util.concurrent.CancellationException) throw x
+            AiJournal.record(pid, task, Provider.GEMINI.name, model, style, text, "", (x as? LlmException)?.raw ?: "", 0, 0,
+                "error", x.message ?: x.javaClass.simpleName, System.currentTimeMillis() - started)
+            throw x
+        }
+    }
+
     /** Lists models available for the provider, where its API supports it. */
     fun listModels(p: Provider): List<String> =
         LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(endpoint(p)), null), p.kind == ApiKind.GEMINI)

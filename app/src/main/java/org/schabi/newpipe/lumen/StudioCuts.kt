@@ -82,6 +82,9 @@ object StudioCuts {
 
     // ---------- time ----------
 
+    /** Longest time a user can type (minutes): far beyond any video, far below a Long overflow. */
+    private const val MAX_TYPED_MIN = 10_000_000L
+
     /** "83", "83.5", "1:23", "1:02:03", "1m23s", "2h" → milliseconds; null when it is not a time. */
     fun parseTime(s: String): Long? {
         val v = s.trim().lowercase().replace(',', '.')
@@ -94,16 +97,18 @@ object StudioCuts {
             var min = 0L
             for (p in parts.dropLast(1)) {
                 val n = p.toLongOrNull() ?: return null
-                if (n < 0) return null
+                if (n < 0 || n > MAX_TYPED_MIN) return null
                 min = min * 60 + n
             }
-            return min * 60_000 + (sec * 1000).roundToLong()
+            // past ~17 years the sum would overflow to a negative time
+            return if (min > MAX_TYPED_MIN) null else min * 60_000 + (sec * 1000).roundToLong()
         }
         val m = Regex("""(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s?)?""").matchEntire(v) ?: return null
         if (m.value.isEmpty()) return null
         val h = m.groupValues[1].toLongOrNull() ?: 0
         val mi = m.groupValues[2].toLongOrNull() ?: 0
         val sec = m.groupValues[3].toDoubleOrNull() ?: 0.0
+        if (h > MAX_TYPED_MIN / 60 || mi > MAX_TYPED_MIN || sec > MAX_TYPED_MIN * 60.0) return null
         return (h * 3600 + mi * 60) * 1000 + (sec * 1000).roundToLong()
     }
 

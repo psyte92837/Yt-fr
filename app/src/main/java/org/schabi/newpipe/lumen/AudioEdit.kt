@@ -311,7 +311,8 @@ object AudioEdit {
     fun removeClip(p: AProject, id: Int, ripple: Boolean): AProject {
         val t = p.trackOf(id) ?: return p
         val c = t.clips.first { it.id == id }
-        val rest = t.clips.filter { it.id != id }.map { if (ripple && it.at >= c.end - 1) it.copy(at = it.at - c.len) else it }
+        // clips may overlap (they mix), so a moved one can pass an unmoved one: keep the track in time order
+        val rest = sorted(t.clips.filter { it.id != id }.map { if (ripple && it.at >= c.end - 1) it.copy(at = max(0L, it.at - c.len)) else it })
         return p.copy(tracks = p.tracks.map { if (it.id == t.id) t.copy(clips = rest) else it })
     }
 
@@ -672,7 +673,8 @@ object AudioEdit {
         return try {
             var sec = 0.0
             for (p in parts) sec = sec * 60 + p.toDouble()
-            if (sec < 0) null else (sec * 1000).roundToLong()
+            // "NaN"/"Infinity" are numbers to toDouble(); roundToLong() throws on NaN
+            if (sec < 0 || !sec.isFinite()) null else (sec * 1000).roundToLong()
         } catch (e: NumberFormatException) {
             null
         }

@@ -607,8 +607,16 @@ fun <T> spin(ctx: Context, options: List<Pair<T, String>>, selected: T, onSelect
     minimumHeight = ctx.dp(56)
     setPadding(ctx.dp(8), 0, ctx.dp(8), 0)
     setSelection(maxOf(0, options.indexOfFirst { it.first == selected }))
+    // Spinner reports its first selection on layout by itself: a callback that redraws the screen would build
+    // a new spinner that reports again — an endless redraw (the screen hangs). Only a real change goes on.
+    var current = selected
     onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = onSelect(options[position].first)
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+            val v = options.getOrNull(position)?.first ?: return
+            if (v == current) return
+            current = v
+            onSelect(v)
+        }
         override fun onNothingSelected(parent: AdapterView<*>?) {}
     }
 }

@@ -397,6 +397,60 @@ object Llm {
         }
     }
 
+    /** Azure Speech key and region (Studio → Voice → Azure). */
+    fun azureKey(): String? = KeyVault.get(AzureSpeech.KEY)?.takeIf { it.isNotBlank() }
+
+    private fun azureBytes(path: String, region: String, body: String?, extra: Map<String, String>): ByteArray {
+        val key = azureKey() ?: throw LlmException(t("Нужен ключ Azure Speech.", "An Azure Speech key is needed."))
+        val c = URL("https://${AzureSpeech.host(region)}$path").openConnection() as HttpURLConnection
+        c.connectTimeout = 30_000
+        c.readTimeout = 180_000
+        c.setRequestProperty("Ocp-Apim-Subscription-Key", key)
+        c.setRequestProperty("User-Agent", "Lumen")
+        extra.forEach { (k, v) -> c.setRequestProperty(k, v) }
+        if (body != null) {
+            c.requestMethod = "POST"
+            c.doOutput = true
+            c.outputStream.use { it.write(body.toByteArray()) }
+        }
+        val code = c.responseCode
+        val bytes = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes() } ?: ByteArray(0)
+        c.disconnect()
+        if (code !in 200..299) {
+            val msg = String(bytes).take(300)
+            L.e("llm", "azure $path → $code: $msg")
+            val hint = when (code) {
+                401 -> t(" — ключ не принят: проверьте ключ и регион ресурса", " — the key was rejected: check the key and the resource's region")
+                429 -> t(" — лимит Azure: бесплатный уровень даёт 20 запросов в минуту и 0,5 млн символов в месяц", " — Azure limit: the free tier allows 20 requests a minute and 0.5 million characters a month")
+                400 -> t(" — голос не поддерживает этот стиль или язык", " — the voice does not support this style or language")
+                else -> ""
+            }
+            throw LlmException("HTTP $code (Azure): $msg$hint", msg, code)
+        }
+        return bytes
+    }
+
+    /** Azure voices of the region (JSON array with styles); also checks the key. */
+    fun azureVoices(region: String): String = String(Par.retrying { azureBytes("/cognitiveservices/voices/list", region, null, emptyMap()) })
+
+    /** Azure text-to-speech: a 16-bit mono WAV of the [ssml]; journaled like an AI call. */
+    fun azureSpeech(ssml: String, region: String, voice: String, chars: Int, task: String = "studio_tts_azure", pid: String = ""): ByteArray {
+        val started = System.currentTimeMillis()
+        BgTasks.checkpoint()
+        return try {
+            val wav = Par.retrying { azureBytes("/cognitiveservices/v1", region, ssml,
+                mapOf("Content-Type" to "application/ssml+xml", "X-Microsoft-OutputFormat" to AzureSpeech.FORMAT)) }
+            AiJournal.record(pid, task, "AZURE", voice, "", ssml, "♪ $chars", "", chars, 0, "ok", null, System.currentTimeMillis() - started)
+            BgTasks.checkpoint()
+            wav
+        } catch (x: Exception) {
+            if (x is java.util.concurrent.CancellationException) throw x
+            AiJournal.record(pid, task, "AZURE", voice, "", ssml, "", (x as? LlmException)?.raw ?: "", 0, 0,
+                "error", x.message ?: x.javaClass.simpleName, System.currentTimeMillis() - started)
+            throw x
+        }
+    }
+
     /** Lists models available for the provider, where its API supports it. */
     fun listModels(p: Provider): List<String> =
         LlmParse.models(http("${p.baseUrl}/models", "GET", authHeaders(endpoint(p)), null), p.kind == ApiKind.GEMINI)

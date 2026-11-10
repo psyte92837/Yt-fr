@@ -133,6 +133,7 @@ class ParserFuzzTest {
         survives("Board.quick") { Board.quick(it, 20_000) }
         survives("Board.parseAi") { Board.parseAi(it, 20_000) }
         survives("JsonText.firstObject") { JsonText.firstObject(it) }
+        survives("AzureSpeech.parseVoices") { AzureSpeech.parseVoices(it) }
     }
 
     @Test

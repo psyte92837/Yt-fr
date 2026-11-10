@@ -116,7 +116,7 @@ object StudioPrefs {
     var seconds: Int
         get() = p.getInt("studio_seconds", 60)
         set(v) = p.edit().putInt("studio_seconds", v).apply()
-    /** "edge", "gemini", "mic", "file" or "video"; an animated voice-over uses "file" or "mic". */
+    /** "edge", "gemini", "azure", "mic", "file" or "video"; an animated voice-over uses "file" or "mic". */
     var voiceMode: String
         get() = p.getString(key("studio_voice_mode"), null) ?: if (StudioTask.of(task) == StudioTask.VOICE) "file" else "edge"
         set(v) = p.edit().putString(key("studio_voice_mode"), v).apply()
@@ -131,6 +131,16 @@ object StudioPrefs {
         get() = p.getString("studio_voice_tone", VoiceTone.DEFAULT) ?: VoiceTone.DEFAULT
         set(v) = p.edit().putString("studio_voice_tone", v).apply()
     /** Gemini TTS: voice ([GeminiVoice.VOICES]), model and the author's reading wish. */
+    /** Azure Speech: region of the resource, voice (ShortName) and emotion strength 0.5–2. */
+    var azureRegion: String
+        get() = p.getString("studio_azure_region", "westeurope") ?: "westeurope"
+        set(v) = p.edit().putString("studio_azure_region", v).apply()
+    var azureVoice: String
+        get() = p.getString("studio_azure_voice", "") ?: ""
+        set(v) = p.edit().putString("studio_azure_voice", v).apply()
+    var azureDegree: Double
+        get() = p.getFloat("studio_azure_degree", 1.3f).toDouble()
+        set(v) = p.edit().putFloat("studio_azure_degree", v.toFloat()).apply()
     var geminiVoice: String
         get() = p.getString("studio_gemini_voice", GeminiVoice.DEFAULT_VOICE) ?: GeminiVoice.DEFAULT_VOICE
         set(v) = p.edit().putString("studio_gemini_voice", v).apply()
@@ -841,8 +851,8 @@ class StudioActivity : LumenBase() {
         add(text(ctx, "$n. " + if (task == StudioTask.VOICE) t("Озвучка", "Voice-over") else t("Голос", "Voice"), Type.TITLE_M, bold = true), 0)
         val modes = when (task) {
             StudioTask.VOICE -> listOf("file", "mic")
-            StudioTask.CUTS, StudioTask.CARTOON -> listOf("edge", "gemini", "mic", "file")
-            else -> listOf("edge", "gemini", "mic", "file", "video")
+            StudioTask.CUTS, StudioTask.CARTOON -> listOf("edge", "gemini", "azure", "mic", "file")
+            else -> listOf("edge", "gemini", "azure", "mic", "file", "video")
         }
         if (task == StudioTask.VOICE) {
             aspectPicker(this)
@@ -860,15 +870,21 @@ class StudioActivity : LumenBase() {
                 "Pick a voice memo or a podcast and the rest happens by itself: loudness, recognition, the AI director (cuts slips and pauses), info-schemes, B-roll, the «Explainer» style with chapters from the questions, sounds and the video build. The previous work goes to Drafts."))
         }
         val labels = if (task == StudioTask.VOICE) listOf(t("📎 Аудиофайл", "📎 Audio file"), t("🎙 Запись", "🎙 Record"))
-        else listOf(t("🗣 Синтез", "🗣 Synth"), "✨ Gemini", t("🎙 Запись", "🎙 Record"), t("📎 Файл", "📎 File"), t("🎥 Видео", "🎥 Video")).take(modes.size)
-        add(segBar(ctx, labels, modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)) {
-            StudioPrefs.voiceMode = modes[it]
-            resetAnalysis()
-            render()
-        }, 8)
+        else listOf(t("🗣 Синтез", "🗣 Synth"), "✨ Gemini", "☁ Azure", t("🎙 Запись", "🎙 Record"), t("📎 Файл", "📎 File"), t("🎥 Видео", "🎥 Video")).take(modes.size)
+        val sel = modes.indexOf(StudioPrefs.voiceMode).coerceAtLeast(0)
+        // rows of three: six ways do not fit one row on a phone
+        for (from in labels.indices step 3) {
+            val to = minOf(from + 3, labels.size)
+            add(segBar(ctx, labels.subList(from, to), if (sel in from until to) sel - from else -1) {
+                StudioPrefs.voiceMode = modes[from + it]
+                resetAnalysis()
+                render()
+            }, if (from == 0) 8 else 4)
+        }
         when (StudioPrefs.voiceMode) {
             "edge" -> edgeVoice(this)
             "gemini" -> geminiVoice(this)
+            "azure" -> azureVoice(this)
             "mic" -> micVoice(this)
             "video" -> videoVoice(this)
             else -> fileVoice(this)
@@ -938,7 +954,7 @@ class StudioActivity : LumenBase() {
     }
 
     /** The voice is synthesised (Edge or Gemini): the script is the speech, no pauses or slips to cut. */
-    private fun synth() = StudioPrefs.voiceMode == "edge" || StudioPrefs.voiceMode == "gemini"
+    private fun synth() = StudioPrefs.voiceMode in listOf("edge", "gemini", "azure")
 
     private fun geminiVoice(c: Col) {
         c.muted(t("Живые голоса Google Gemini, 30 штук, говорят на любом языке. Нужен ключ Gemini (Настройки → ИИ), текст уходит в Google. Один запрос — до ~1,5 минуты речи; на бесплатном ключе запросов в день немного.",
@@ -995,6 +1011,137 @@ class StudioActivity : LumenBase() {
         }, collapseAfter = 8)
         if (StudioPrefs.voiceMode == "edge" && StudioPrefs.tone != VoiceTone.DEFAULT) c.muted(t("Голоса Microsoft передают тон только темпом и высотой. Живые эмоции и юмор лучше у «✨ Gemini».",
             "Microsoft voices show the tone only by pace and pitch. Real emotion and humour sound better with \"✨ Gemini\"."))
+    }
+
+    @Volatile private var azureVoices: List<AzureSpeech.Voice> = emptyList()
+    private val azureFile get() = File(filesDir, "lumen/azure_voices.json")
+
+    private fun azureList(): List<AzureSpeech.Voice> {
+        if (azureVoices.isEmpty()) azureVoices = runCatching { AzureSpeech.parseVoices(azureFile.readText()) }.getOrDefault(emptyList())
+        return azureVoices
+    }
+
+    /** Voices of the region (also checks the key); kept on the phone. */
+    private fun fetchAzureVoices(region: String): List<AzureSpeech.Voice> {
+        val raw = Llm.azureVoices(region)
+        val list = AzureSpeech.parseVoices(raw)
+        if (list.isNotEmpty()) runCatching { azureFile.parentFile?.mkdirs(); azureFile.writeText(raw) }
+        azureVoices = list
+        return list
+    }
+
+    private fun azureVoice(c: Col) {
+        c.muted(t("Голоса Microsoft Azure с эмоциями: весёлый, грустный, шёпот, новости, документальный и другие. Бесплатно 0,5 млн символов в месяц (около 9 часов речи). Нужен свой ключ Azure Speech (уровень Free F0); текст уходит в Microsoft.",
+            "Microsoft Azure voices with emotions: cheerful, sad, whisper, newscast, documentary and more. Free: 0.5 million characters a month (about 9 hours of speech). Needs your own Azure Speech key (Free F0 tier); the text goes to Microsoft."))
+        val hasKey = Llm.azureKey() != null
+        c.button(if (hasKey) t("🔑 Ключ и регион Azure", "🔑 Azure key and region") else t("🔑 Ввести ключ Azure", "🔑 Enter an Azure key"), primary = !hasKey) { azureKeySheet() }
+        if (!hasKey) return
+        val list = azureList()
+        if (list.isEmpty()) {
+            c.button(t("⬇ Загрузить голоса", "⬇ Load the voices"), primary = true) { loadAzureVoices() }
+            return
+        }
+        val lang = lang()
+        val ofLang = AzureSpeech.forLang(list, lang)
+        val cur = ofLang.firstOrNull { it.shortName == StudioPrefs.azureVoice } ?: ofLang.firstOrNull()
+        fun voiceChips(vs: List<AzureSpeech.Voice>, after: Int) = c.chips(vs.map { v ->
+            chip(this, (if (v.female) "♀ " else "♂ ") + v.name + (if (v.styles.isNotEmpty()) " 🎭${v.styles.size}" else "") +
+                (if (v.locale.substringBefore('-').equals(lang, true)) "" else " · " + v.locale), v.shortName == cur?.shortName) {
+                StudioPrefs.azureVoice = v.shortName
+                resetAnalysis()
+                render()
+            }
+        }, collapseAfter = after)
+        val native = ofLang.filter { it.locale.substringBefore('-').equals(lang, true) }
+        if (native.isNotEmpty()) {
+            c.add(text(this, if (task == StudioTask.CARTOON) t("Голос рассказчика", "Narrator voice") else t("Голос", "Voice"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            voiceChips(native, 12)
+        }
+        val multi = ofLang - native.toSet()
+        if (multi.isNotEmpty()) {
+            c.add(text(this, t("Многоязычные с эмоциями 🎭 (говорят и на этом языке, с лёгким акцентом)", "Multilingual with emotions 🎭 (also speak this language, with a slight accent)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
+            voiceChips(multi, 8)
+        }
+        tonePicker(c)
+        if (cur != null) {
+            val ru = !t("ru", "en").startsWith("en")
+            val st = AzureSpeech.styleFor(StudioPrefs.tone, cur.styles)
+            c.muted(when {
+                st != null -> t("Тон передаётся стилем Azure «${AzureSpeech.styleLabel(st, ru)}».", "The tone is the Azure style \"$st\".")
+                cur.styles.isEmpty() -> t("У этого голоса нет эмоций — тон передаётся только темпом и высотой. Эмоции есть у голосов с 🎭.",
+                    "This voice has no emotions: the tone is only pace and pitch. Voices with 🎭 have emotions.")
+                else -> t("Для этого тона у голоса нет стиля — только темп и высота. Его эмоции: ", "The voice has no style for this tone, only pace and pitch. Its emotions: ") +
+                    cur.styles.joinToString(", ") { AzureSpeech.styleLabel(it, ru) }
+            })
+            if (st != null) c.spinner(t("Сила эмоции", "Emotion strength"), listOf(0.6 to t("слабо", "light"), 1.0 to t("обычно", "normal"), 1.3 to t("ярко", "vivid"), 2.0 to t("максимум", "maximum")),
+                listOf(0.6, 1.0, 1.3, 2.0).minByOrNull { kotlin.math.abs(it - StudioPrefs.azureDegree) } ?: 1.3) {
+                StudioPrefs.azureDegree = it
+                resetAnalysis()
+                render()
+            }
+            c.button(t("▶ Послушать «${cur.name}»", "▶ Listen to \"${cur.name}\"")) { tryAzure(cur) }
+        }
+        c.spinner(t("Темп речи", "Speech rate"), listOf(-10 to t("спокойно", "calm"), 0 to t("обычно", "normal"), 10 to t("бодро", "brisk"), 20 to t("быстро", "fast")), StudioPrefs.rate) {
+            StudioPrefs.rate = it
+            resetAnalysis()
+            render()
+        }
+    }
+
+    private fun loadAzureVoices() {
+        val region = StudioPrefs.azureRegion
+        toast(t("Загружаю голоса Azure…", "Loading Azure voices…"))
+        Lumen.async({ fetchAzureVoices(region) }, ::err) { list ->
+            toast(t("Голосов Azure: ${list.size}", "Azure voices: ${list.size}"))
+            render()
+        }
+    }
+
+    private fun azureKeySheet() {
+        bottomSheet(t("☁ Azure Speech", "☁ Azure Speech"), {}) { dismiss ->
+            muted(t("Как получить бесплатный ключ: portal.azure.com → «Создать ресурс» → «Speech» → ценовая категория Free F0 → после создания «Ключи и конечная точка»: скопируйте «Ключ 1» и запомните «Расположение/Регион». Ключ хранится только на телефоне.",
+                "How to get a free key: portal.azure.com → Create a resource → Speech → pricing tier Free F0 → then Keys and Endpoint: copy KEY 1 and note the Location/Region. The key stays on the phone."))
+            button(t("Открыть портал Azure", "Open the Azure portal"), style = BtnStyle.TEXT) { openUrl(AzureSpeech.KEY_URL) }
+            val key = edit(if (Llm.azureKey() != null) t("Ключ сохранён (вставьте новый, чтобы заменить)", "Key saved (paste a new one to replace)") else t("Ключ Azure Speech", "Azure Speech key"))
+            var region = StudioPrefs.azureRegion
+            spinner(t("Регион ресурса", "Resource region"), AzureSpeech.REGIONS.map { it to it }, region) { region = it }
+            button(t("Сохранить и проверить", "Save and check"), primary = true) {
+                val k = key.text.toString().trim()
+                if (k.length >= 20) KeyVault.put(AzureSpeech.KEY, k)
+                if (Llm.azureKey() == null) {
+                    toast(t("Вставьте ключ", "Paste the key"))
+                    return@button
+                }
+                StudioPrefs.azureRegion = region
+                azureVoices = emptyList()
+                runCatching { azureFile.delete() }
+                dismiss()
+                loadAzureVoices()
+            }
+        }
+    }
+
+    /** A short sample of an Azure voice in the current tone (kept on disk: the free tier counts characters). */
+    private fun tryAzure(v: AzureSpeech.Voice) {
+        val tone = StudioPrefs.tone
+        val degree = StudioPrefs.azureDegree
+        val f = File(File(cacheDir, "azure_try").apply { mkdirs() }, "${v.shortName}_${tone}_${degree}_${StudioPrefs.rate}.wav")
+        fun play() {
+            musicPreview?.let { runCatching { it.stop() }; it.release() }
+            musicPreview = MediaPlayer().apply {
+                setDataSource(f.absolutePath)
+                setOnPreparedListener { it.start() }
+                setOnErrorListener { _, _, _ -> toast(t("Не удалось проиграть", "Cannot play")); true }
+                prepareAsync()
+            }
+        }
+        if (f.length() > 44) return play()
+        val lang = lang()
+        val sample = if (lang == "ru") "Привет! Я ${v.name}. Так будет звучать ваш ролик." else "Hi! I'm ${v.name}. This is how your video will sound."
+        val style = AzureSpeech.styleFor(tone, v.styles)
+        val (r, p) = AzureSpeech.prosody(tone, StudioPrefs.rate, style != null)
+        val region = StudioPrefs.azureRegion
+        Lumen.async({ f.writeBytes(Llm.azureSpeech(AzureSpeech.ssml(sample, v, lang, style, degree, r, p), region, v.shortName, sample.length, "studio_tts_azure_try")) }, ::err) { play() }
     }
 
     /** A short sample of a Gemini voice (kept on disk: every sample is a request of the daily limit). */
@@ -1267,7 +1414,7 @@ class StudioActivity : LumenBase() {
     private fun analyseCard(c: Col, n: Int) = c.card {
         add(text(ctx, "$n. " + t("Сцены и режиссура", "Scenes and direction"), Type.TITLE_M, bold = true), 0)
         muted(when (StudioPrefs.voiceMode) {
-            "edge", "gemini" -> t("Озвучка сцен и разметка слов по времени.", "Voicing the scenes and timing every word.")
+            "edge", "gemini", "azure" -> t("Озвучка сцен и разметка слов по времени.", "Voicing the scenes and timing every word.")
             else -> t("Поиск речи и пауз, темп, расстановка слов по времени.", "Finding speech and pauses, the pace, timing every word.")
         })
         if (busy.isEmpty()) button(if (words.isEmpty()) t("🔍 Разметить сцены", "🔍 Lay out scenes") else t("🔍 Разметить заново", "🔍 Lay out again"), primary = words.isEmpty()) { analyse() }
@@ -2827,7 +2974,7 @@ class StudioActivity : LumenBase() {
         val text = scriptEdit.text.toString()
         val sc = Studio.parseText(text)
         val mode = StudioPrefs.voiceMode
-        val synth = mode == "edge" || mode == "gemini"
+        val synth = mode == "edge" || mode == "gemini" || mode == "azure"
         if (synth && sc.scenes.isEmpty()) {
             toast(t("Нужен сценарий (шаг 1)", "A script is needed (step 1)"))
             return
@@ -2878,6 +3025,7 @@ class StudioActivity : LumenBase() {
         when {
             mode == "edge" -> job("analyse", { analyseEdge(sc) }, fail, done)
             mode == "gemini" -> job("analyse", { analyseGemini(sc) }, fail, done)
+            mode == "azure" -> job("analyse", { analyseAzure(sc) }, fail, done)
             useScript -> job("analyse", { analyseTake(sc) }, fail, done)
             else -> Lumen.async({ speechOf(loadTake(), silentOk = true) }, fail) { (take, speech) ->
                 // the take cannot be turned into text: beats by the sound, then a template
@@ -3087,31 +3235,69 @@ class StudioActivity : LumenBase() {
     }
 
     private fun analyseGemini(sc: SScript) {
-        val says = sc.scenes.map { it.say }
-        val n = says.size
         val narrator = GeminiVoice.voice(StudioPrefs.geminiVoice).name
         val model = StudioPrefs.geminiModel
         val style = GeminiVoice.style(StudioPrefs.rate, StudioPrefs.geminiWish, lang() == "ru", StudioPrefs.tone)
         val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
-        val castVoices = if (cast.isEmpty()) emptyList() else GeminiVoice.castVoices(
-            StudioToon.pickVoices(cast, voices, lang(), "").map { v -> voices.firstOrNull { it.shortName == v }?.let { it.gender == "Female" } }, narrator)
+        val castVoices = if (cast.isEmpty()) emptyList() else GeminiVoice.castVoices(castFemale(cast), narrator)
         val perScene = sc.scenes.map { s -> StudioToon.find(cast, s.who).let { if (it >= 0) castVoices[it] else narrator } }
+        analyseChunked(sc, "Gemini", "gm", perScene, "gemini:$model:$style") { text, voice ->
+            GeminiVoice.audio(Llm.speech(text, voice, model, style))
+        }
+    }
+
+    private fun analyseAzure(sc: SScript) {
+        val region = StudioPrefs.azureRegion
+        val list = azureList().ifEmpty { fetchAzureVoices(region) }
+        val ofLang = AzureSpeech.forLang(list, lang())
+        if (ofLang.isEmpty()) error(t("У Azure нет голосов для этого языка", "Azure has no voices for this language"))
+        val narrator = ofLang.firstOrNull { it.shortName == StudioPrefs.azureVoice } ?: ofLang.first()
+        val cast = if (task == StudioTask.CARTOON) StudioPrefs.cast else emptyList()
+        val used = mutableSetOf(narrator.shortName)
+        val castVoices = castFemale(cast).map { f ->
+            val pool = ofLang.filter { f == null || it.female == f }.ifEmpty { ofLang }
+            (pool.firstOrNull { it.shortName !in used } ?: pool.first()).shortName.also { used += it }
+        }
+        val perScene = sc.scenes.map { s -> StudioToon.find(cast, s.who).let { if (it >= 0) castVoices[it] else narrator.shortName } }
+        val tone = StudioPrefs.tone
+        val degree = StudioPrefs.azureDegree
+        analyseChunked(sc, "Azure", "az", perScene, "azure:$region:$tone:$degree:${StudioPrefs.rate}") { text, name ->
+            val v = ofLang.first { it.shortName == name }
+            val style = AzureSpeech.styleFor(tone, v.styles)
+            val (r, p) = AzureSpeech.prosody(tone, StudioPrefs.rate, style != null)
+            Studio.readWav(Llm.azureSpeech(AzureSpeech.ssml(text, v, lang(), style, degree, r, p), region, name, text.length))
+                ?: error(t("Azure вернул не WAV", "Azure did not return a WAV"))
+        }
+    }
+
+    /** Gender of each character's Edge voice (null = unknown). */
+    private fun castFemale(cast: List<SChar>): List<Boolean?> =
+        StudioToon.pickVoices(cast, voices, lang(), "").map { v -> voices.firstOrNull { it.shortName == v }?.let { it.gender == "Female" } }
+
+    /**
+     * Voices the script by chunks of neighbouring scenes with one voice (few requests), caching every chunk on disk
+     * so an interrupted run continues; words are spread over the speech parts (these services give no word marks).
+     */
+    private fun analyseChunked(sc: SScript, who: String, prefix: String, perScene: List<String>, salt: String,
+                               synth: (String, String) -> Pair<ShortArray, Int>) {
+        val says = sc.scenes.map { it.say }
+        val n = says.size
         val chunks = GeminiVoice.chunks(says, perScene)
         if (chunks.isEmpty()) error(t("Сценарий пустой", "The script is empty"))
         val tmp = File(cacheDir, "studio_tts").apply { mkdirs() }
-        val keys = chunks.map { c -> "gm" + StudioTtsCache.key(style + "\n" + GeminiVoice.text(says, c), TtsOptions("gemini:$model:${c.voice}")) }
+        val keys = chunks.map { c -> prefix + StudioTtsCache.key(salt + "\n" + GeminiVoice.text(says, c), TtsOptions(c.voice)) }
         val chunks16 = mutableListOf<ShortArray>()
         val all = mutableListOf<SWord>()
         val rs = arrayOfNulls<IntRange>(n)
         var len = 0
         var rate = 24_000
-        report("analyse", t("Gemini озвучивает 0/${chunks.size}", "Gemini is voicing 0/${chunks.size}"))
+        report("analyse", t("$who озвучивает 0/${chunks.size}", "$who is voicing 0/${chunks.size}"))
         chunks.forEachIndexed { k, c ->
             if (cancel) throw java.util.concurrent.CancellationException()
             // a chunk voiced in an earlier, interrupted attempt is taken from disk: no second request
             val f = File(tmp, keys[k] + ".wav")
             val (data0, r) = f.takeIf { it.length() > 44 }?.let { Studio.readWav(it.readBytes()) } ?: try {
-                GeminiVoice.audio(Llm.speech(GeminiVoice.text(says, c), c.voice, model, style)).also { (p, pr) -> writeWav(f, p, pr) }
+                synth(GeminiVoice.text(says, c), c.voice).also { (p, pr) -> writeWav(f, p, pr) }
             } catch (e: LlmException) {
                 throw LlmException(e.message.orEmpty() + t(" Озвучено кусков: $k из ${chunks.size}, они сохранены — «🔍 Разметить сцены» продолжит с остальных.",
                     " Chunks voiced: $k of ${chunks.size}, they are kept: \"🔍 Lay out scenes\" continues with the rest."), e.raw, e.code)
@@ -3130,13 +3316,13 @@ class StudioActivity : LumenBase() {
             val gap = Studio.silence(if (k < chunks.size - 1) 180 else 400, rate)
             chunks16 += gap
             len += gap.size
-            report("analyse", t("Gemini озвучивает ${k + 1}/${chunks.size}", "Gemini is voicing ${k + 1}/${chunks.size}"))
+            report("analyse", t("$who озвучивает ${k + 1}/${chunks.size}", "$who is voicing ${k + 1}/${chunks.size}"))
         }
         // blank scenes own no words
         var at = 0
         val ranges0 = rs.map { r -> (r ?: (at until at)).also { at = it.last + 1 } }
-        tmp.listFiles()?.filter { it.name.startsWith("gm") && it.name.removeSuffix(".wav") !in keys }?.forEach { it.delete() }
-        if (all.isEmpty()) error(t("Gemini не вернул речь. Попробуйте другой голос.", "Gemini returned no speech. Try another voice."))
+        tmp.listFiles()?.filter { it.name.startsWith(prefix) && it.name.removeSuffix(".wav") !in keys }?.forEach { it.delete() }
+        if (all.isEmpty()) error(t("$who не вернул речь. Попробуйте другой голос.", "$who returned no speech. Try another voice."))
         val take = StudioAudio.Pcm(Studio.concat(chunks16), rate)
         pcm = take
         words = all

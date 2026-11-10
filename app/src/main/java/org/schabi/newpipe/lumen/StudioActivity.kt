@@ -228,6 +228,10 @@ object StudioPrefs {
     var cutsFill: Boolean
         get() = p.getBoolean("studio_cuts_fill", true)
         set(v) = p.edit().putBoolean("studio_cuts_fill", v).apply()
+    /** Gemini/Azure voice: an AI that hears audio times the phrases for the subtitles (false = by the pauses only). */
+    var aiTiming: Boolean
+        get() = p.getBoolean("studio_ai_timing", true)
+        set(v) = p.edit().putBoolean("studio_ai_timing", v).apply()
     /** Cuts task: the videos are cut at the storyboard, by the scenes of the voice-over (false = the marked pieces beforehand). */
     var cutsLate: Boolean
         get() = p.getBoolean("studio_cuts_late", true)
@@ -1005,6 +1009,7 @@ class StudioActivity : LumenBase() {
         }
         tonePicker(c)
         emotionMix(c)
+        timingCheck(c)
         c.add(text(this, t("Как читать (по желанию)", "How to read (optional)"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         val wish = c.edit(t("например: в начале интригуй, на цифрах замедляйся, в конце — энергично", "e.g. build intrigue at the start, slow down on numbers, energetic at the end"), StudioPrefs.geminiWish, multiline = true)
         wish.addTextChangedListener(object : android.text.TextWatcher {
@@ -1079,6 +1084,16 @@ class StudioActivity : LumenBase() {
     }
 
     /** Tone chips for both synthesised voices: Gemini follows it closely, Edge only by rate and pitch. */
+    /** Subtitles by the pace the AI hears in the voice-over, or by the pauses only. */
+    private fun timingCheck(c: Col) {
+        c.check(t("🎯 Субтитры по темпу озвучки: ИИ слушает запись и отмечает фразы (Gemini, 1 запрос на кусок)",
+            "🎯 Subtitles by the voice pace: the AI listens and marks the phrases (Gemini, 1 request a chunk)"), StudioPrefs.aiTiming) {
+            StudioPrefs.aiTiming = it
+            resetAnalysis()
+            render()
+        }
+    }
+
     private fun tonePicker(c: Col) {
         c.add(text(this, t("Тон озвучки", "Tone of the voice-over"), Type.LABEL, bold = true, color = Palette.MUTED), 12)
         c.chips(VoiceTone.ALL.map { tn ->
@@ -1142,6 +1157,7 @@ class StudioActivity : LumenBase() {
             voiceChips(multi, 8)
         }
         tonePicker(c)
+        timingCheck(c)
         if (cur != null) {
             val ru = !t("ru", "en").startsWith("en")
             val st = AzureSpeech.styleFor(StudioPrefs.tone, cur.styles)
@@ -3567,7 +3583,8 @@ class StudioActivity : LumenBase() {
             if (chunks16.isEmpty()) rate = r
             val data = if (r == rate) data0 else Studio.resample(data0, r, rate)
             val shift = Studio.durationMs(len, rate)
-            GeminiVoice.words(says, c, data, rate).forEachIndexed { j, ws ->
+            val timing = voiceTiming(File(tmp, keys[k] + ".t.json"), says, c, data, rate, who, k, chunks.size)
+            GeminiVoice.wordsTimed(says, c, data, rate, timing).forEachIndexed { j, ws ->
                 val i = c.scenes[j]
                 val first = all.size
                 all += ws.map { it.copy(startMs = it.startMs + shift, endMs = it.endMs + shift) }
@@ -3583,7 +3600,7 @@ class StudioActivity : LumenBase() {
         // blank scenes own no words
         var at = 0
         val ranges0 = rs.map { r -> (r ?: (at until at)).also { at = it.last + 1 } }
-        tmp.listFiles()?.filter { it.name.startsWith(prefix) && it.name.removeSuffix(".wav") !in keys }?.forEach { it.delete() }
+        tmp.listFiles()?.filter { it.name.startsWith(prefix) && it.name.substringBefore('.') !in keys }?.forEach { it.delete() }
         if (all.isEmpty()) error(t("$who не вернул речь. Попробуйте другой голос.", "$who returned no speech. Try another voice."))
         val take = StudioAudio.Pcm(Studio.concat(chunks16), rate)
         pcm = take
@@ -3591,6 +3608,41 @@ class StudioActivity : LumenBase() {
         script = sc
         ranges = ranges0
         stats = VoiceStats(take.ms, take.ms, 0, 0, all.size)
+    }
+
+    /**
+     * The voice gives no word marks: an AI that hears audio (Gemini, or the free AIs through Gemini) tells
+     * when every phrase of the chunk is said; the answer is kept next to the chunk. Null without such an AI,
+     * with timing off or on an error — then the words are pinned to the pauses.
+     */
+    private fun voiceTiming(cache: File, says: List<String>, c: GeminiVoice.Chunk, pcm: ShortArray, rate: Int,
+                            who: String, k: Int, n: Int): String? {
+        if (!StudioPrefs.aiTiming) return null
+        cache.takeIf { it.length() > 2 }?.let { return it.readText() }
+        val prov = Provider.active()?.takeIf { it.kind == ApiKind.GEMINI || it == Provider.FREE }
+            ?: Provider.GEMINI.takeIf { it.isConfigured } ?: return null
+        val (_, flat, hard) = GeminiVoice.chunkWords(says, c)
+        val ph = GeminiVoice.phrases(flat, hard)
+        if (ph.size < 2) return null
+        report("analyse", t("$who: ИИ слушает темп ${k + 1}/$n…", "$who: AI listens to the pace ${k + 1}/$n…"))
+        return try {
+            val pcm16 = Studio.resample(pcm, rate, StudioRecognizer.RATE)
+            val body = java.nio.ByteBuffer.allocate(pcm16.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            body.asShortBuffer().put(pcm16)
+            val wav = Studio.wavHeader(pcm16.size * 2, StudioRecognizer.RATE) + body.array()
+            val r = Llm.complete(prov, prov.fastModel, "You time speech in audio. Answer with JSON only.",
+                Prompts.fill("studio_tts_timing", mapOf("phrases" to GeminiVoice.phraseList(flat, ph))), json = true, maxTokens = 4000,
+                task = "studio_tts_timing", pid = "studio", schema = GeminiVoice.TIMING_SCHEMA,
+                image = android.util.Base64.encodeToString(wav, android.util.Base64.NO_WRAP), imageMime = "audio/wav")
+            val ok = GeminiVoice.parseTiming(r.text, ph.size, pcm.size * 1000L / rate) != null
+            if (ok) cache.writeText(r.text) else L.w("studio", "voice timing: the answer does not fit")
+            r.text.takeIf { ok }
+        } catch (e: java.util.concurrent.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            L.w("studio", "voice timing: ${e.message}")
+            null
+        }
     }
 
     /** Tokens of the last AI direction (in → out), to compare the ways. */

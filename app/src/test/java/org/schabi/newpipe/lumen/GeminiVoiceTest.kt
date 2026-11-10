@@ -110,4 +110,30 @@ class GeminiVoiceTest {
         assertTrue(GeminiVoice.style(20, "с улыбкой.", true).let { it.contains("быстро") && it.contains("с улыбкой") && it.endsWith(":") })
         assertEquals(20, GeminiVoice.minutesPerDay(12))
     }
+
+    @Test
+    fun phrasesTimedByTheAiThatHearsTheVoice() {
+        val words = Studio.tokens("Представьте: в 2025 году рынок вырос на 37%. Это много, но не рекорд. Почему так вышло?")
+        val ph = GeminiVoice.phrases(words)
+        assertEquals(listOf("Представьте:", "в 2025 году рынок вырос на 37%.", "Это много,", "но не рекорд.", "Почему так вышло?"),
+            ph.map { r -> words.subList(r.first, r.last + 1).joinToString(" ") })
+        assertTrue(GeminiVoice.phraseList(words, ph).startsWith("1. Представьте:\n2. в 2025"))
+        // a live answer of gemini-3.5-flash-lite (times within ~0.1 s of the real pauses), one phrase going back in time
+        val answer = "[[1,4.026,4.526],[2,4.866,8.656],[3,9.166,9.706],[4,3.0,3.5],[5,11.206,11.966]]"
+        val marks = GeminiVoice.parseTiming(answer, ph.size, 12_000)!!
+        assertEquals(4026L, marks[0]!![0])
+        assertEquals(null, marks[3])
+        assertEquals(null, GeminiVoice.parseTiming("[[1,1,2]]", 5, 12_000))
+        assertEquals(null, GeminiVoice.parseTiming("нет", 5, 12_000))
+        // speech parts of that voice: phrase starts snap to them, the untimed phrase fills the gap
+        val speech = listOf(Span(3880, 4500), Span(4840, 8680), Span(9260, 9700), Span(9900, 10620), Span(11160, 12000))
+        val ws = GeminiVoice.alignTimed(words, ph, marks, speech, 12_000)
+        assertEquals(words.size, ws.size)
+        assertEquals(3880L, ws[0].startMs)
+        assertEquals(4840L, ws[1].startMs)
+        assertEquals(9260L, ws[ph[2].first].startMs)
+        assertEquals(11160L, ws[ph[4].first].startMs)
+        assertTrue(ws[ph[3].first].startMs in 9700..10000)
+        assertTrue(ws.zipWithNext().all { (a, b) -> a.startMs <= b.startMs && a.endMs <= b.startMs + 1 })
+    }
 }

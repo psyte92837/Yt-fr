@@ -556,7 +556,7 @@ object Studio {
     }
 
     /** Words spread over [speech] by [weights] (no word in a pause). */
-    private fun spread(words: List<String>, weights: List<Double>, speech: List<Span>): List<SWord> {
+    fun spread(words: List<String>, weights: List<Double>, speech: List<Span>): List<SWord> {
         if (words.isEmpty()) return emptyList()
         val total = weights.sum()
         val speechMs = speech.sumOf { it.ms }.toDouble()
@@ -1305,6 +1305,8 @@ object StudioMusicCatalog {
 val STUDIO_PROMPTS = linkedMapOf(
     // Gemini voice-over: how fast, in what tone, which emotions to mix ({lang} {tone} {pace} {emotions} {wish}); the text follows
     "studio_tts_gemini" to VoiceTone.PROMPT,
+    // timing of the voice-over by the AI that hears it: start and end of every numbered phrase ({phrases})
+    "studio_tts_timing" to GeminiVoice.TIMING_PROMPT,
     "studio_script" to (
         "Ты сценарист коротких вертикальных видео-объяснялок (Shorts, Reels) в стиле анимированной инфографики: " +
             "крупные слова на тёмном фоне появляются под голос, рядом простые схемы из эмодзи-плиток.\n" +

@@ -201,6 +201,142 @@ object GeminiVoice {
         return out
     }
 
+    // ---------- timing by the AI that hears the voice-over ----------
+
+    /** The voice gives no word marks: an AI that hears audio tells when every phrase starts and ends. */
+    const val TIMING_PROMPT = "Это запись озвучки, её текст разбит на фразы с номерами. Послушай запись и для каждой фразы укажи, " +
+        "когда она начинается и заканчивается, в секундах от начала записи с десятыми (12.4). Время — по звуку, а не по длине текста; " +
+        "фразы идут по порядку. Ответ — только JSON: массив [номер, начало, конец] для каждой фразы.\nФРАЗЫ:\n{phrases}"
+
+    /** responseSchema of the timing answer: [[n, start, end], …]. */
+    val TIMING_SCHEMA: JSONObject get() = JSONObject().put("type", "ARRAY")
+        .put("items", JSONObject().put("type", "ARRAY").put("items", JSONObject().put("type", "NUMBER")))
+
+    /** Phrases of [words] (word ranges): they end at punctuation and before [hard] breaks; a long one is split at ~[most] words. */
+    fun phrases(words: List<String>, hard: Set<Int> = emptySet(), most: Int = 14): List<IntRange> {
+        val out = mutableListOf<IntRange>()
+        var a = 0
+        for (i in words.indices) {
+            val end = i == words.lastIndex || (i + 1) in hard || Studio.breakStrength(words[i]) > 0 || i - a + 1 >= most
+            if (end) { out += a..i; a = i + 1 }
+        }
+        return out
+    }
+
+    /** "1. text" lines of the phrases for [TIMING_PROMPT]. */
+    fun phraseList(words: List<String>, phrases: List<IntRange>): String =
+        phrases.withIndex().joinToString("\n") { (k, r) -> "${k + 1}. " + words.subList(r.first, r.last + 1).joinToString(" ") }
+
+    /**
+     * Start and end (ms) of each of [n] phrases from the AI answer, null where missing or impossible: outside the
+     * audio ([durMs]), ending before it starts, or going back in time. Null for the whole answer when under half fit.
+     */
+    fun parseTiming(answer: String, n: Int, durMs: Long): List<LongArray?>? {
+        val a = answer.indexOf('[')
+        val b = answer.lastIndexOf(']')
+        if (n <= 0 || a < 0 || b <= a) return null
+        val arr = runCatching { JSONArray(answer.substring(a, b + 1)) }.getOrNull() ?: return null
+        val out = arrayOfNulls<LongArray>(n)
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONArray(i)
+            val k: Int
+            val s: Double
+            val e: Double
+            if (o != null && o.length() >= 3) { k = o.optInt(0) - 1; s = o.optDouble(1); e = o.optDouble(2) }
+            else {
+                val j = arr.optJSONObject(i) ?: continue
+                k = j.optInt("n", i + 1) - 1; s = j.optDouble("start"); e = j.optDouble("end")
+            }
+            if (k !in 0 until n || s.isNaN() || e.isNaN()) continue
+            val sm = (s * 1000).toLong()
+            val em = (e * 1000).toLong()
+            if (sm < 0 || em <= sm || sm > durMs + 300) continue
+            out[k] = longArrayOf(sm, minOf(em, durMs))
+        }
+        // going back in time: keep the longest increasing run (by start)
+        var last = -1L
+        for (k in 0 until n) {
+            val m = out[k] ?: continue
+            if (m[0] < last - 150) out[k] = null else last = maxOf(last, m[0])
+        }
+        return out.toList().takeIf { l -> l.count { it != null } * 2 >= n }
+    }
+
+    /**
+     * Words placed by the AI phrase times: every timed phrase starts and ends at the nearest pause edge of [speech]
+     * (within 400 ms), untimed phrases share the time between their timed neighbours, words spread inside each phrase.
+     */
+    fun alignTimed(words: List<String>, phrases: List<IntRange>, marks: List<LongArray?>, speech: List<Span>, durMs: Long): List<SWord> {
+        if (words.isEmpty()) return emptyList()
+        val starts = speech.map { it.startMs }
+        val ends = speech.map { it.endMs }
+        fun snap(t: Long, edges: List<Long>): Long = edges.minByOrNull { kotlin.math.abs(it - t) }?.takeIf { kotlin.math.abs(it - t) <= 400 } ?: t
+        val wt = words.map { Studio.spokenWeight(it) }
+        fun weight(r: IntRange) = (r.first..r.last).sumOf { wt[it] }
+        val win = arrayOfNulls<LongArray>(phrases.size)
+        var prevEnd = speech.firstOrNull()?.startMs ?: 0L
+        for (k in phrases.indices) {
+            val m = marks.getOrNull(k) ?: continue
+            val a = maxOf(prevEnd, snap(m[0], starts))
+            val b = maxOf(a + 80, snap(m[1], ends))
+            win[k] = longArrayOf(a, b)
+            prevEnd = b
+        }
+        // untimed runs: the gap between neighbours by weight
+        var k = 0
+        val endAll = maxOf(speech.lastOrNull()?.endMs ?: durMs, prevEnd)
+        while (k < phrases.size) {
+            if (win[k] != null) { k++; continue }
+            var j = k
+            while (j < phrases.size && win[j] == null) j++
+            val a = if (k > 0) win[k - 1]!![1] else speech.firstOrNull()?.startMs ?: 0L
+            val b = maxOf(a + 80L * (j - k), if (j < phrases.size) win[j]!![0] else endAll)
+            val total = (k until j).sumOf { weight(phrases[it]) }
+            var at = a.toDouble()
+            for (i in k until j) {
+                val len = (b - a) * weight(phrases[i]) / total
+                win[i] = longArrayOf(at.toLong(), (at + len).toLong())
+                at += len
+            }
+            k = j
+        }
+        val out = ArrayList<SWord>(words.size)
+        for ((i, r) in phrases.withIndex()) {
+            val (a, b) = win[i]!!.let { it[0] to maxOf(it[0] + 1, it[1]) }
+            val inside = speech.mapNotNull { s -> val x = maxOf(s.startMs, a); val y = minOf(s.endMs, b); if (y > x) Span(x, y) else null }
+                .ifEmpty { listOf(Span(a, b)) }
+            out += Studio.spread(words.subList(r.first, r.last + 1), wt.subList(r.first, r.last + 1), inside)
+        }
+        return out
+    }
+
+    /** Words of the chunk and its phrases for the timing request (scene starts are hard breaks). */
+    fun chunkWords(says: List<String>, c: Chunk): Triple<List<List<String>>, List<String>, Set<Int>> {
+        val per = c.scenes.map { Studio.tokens(says[it]) }
+        val hard = mutableSetOf<Int>()
+        var at = 0
+        for (p in per) { if (at > 0 && p.isNotEmpty()) hard += at; at += p.size }
+        return Triple(per, per.flatten(), hard)
+    }
+
+    /**
+     * Words of a voiced chunk by scene: by the AI [timing] answer when it fits (see [parseTiming]),
+     * else pinned to pauses ([words]).
+     */
+    fun wordsTimed(says: List<String>, c: Chunk, pcm: ShortArray, rate: Int, timing: String?): List<List<SWord>> {
+        val (per, flat, hard) = chunkWords(says, c)
+        val durMs = pcm.size * 1000L / rate
+        val ph = phrases(flat, hard)
+        val marks = timing?.let { parseTiming(it, ph.size, durMs) } ?: return words(says, c, pcm, rate)
+        var spans = Studio.speechSpans(pcm, rate, minPauseMs = 200)
+        if (spans.isEmpty()) spans = listOf(Span(0, durMs))
+        val all = alignTimed(flat, ph, marks, spans, durMs)
+        val out = mutableListOf<List<SWord>>()
+        var k = 0
+        for (p in per) { out += all.subList(k, minOf(all.size, k + p.size)).toList(); k += p.size }
+        return out
+    }
+
     /** Gemini voices of the characters: same gender as their Edge voice, all different while possible. */
     fun castVoices(female: List<Boolean?>, narrator: String): List<String> {
         val used = mutableSetOf(voice(narrator).name)

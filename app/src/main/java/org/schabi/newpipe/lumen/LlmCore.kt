@@ -38,7 +38,7 @@ object LlmTasks {
         "algo_judge_videos", "algo_judge_channels", "algo_niches", "algo_changes", "algo_topic",
         "ideas_queries", "ideas_translate", "predict_names", "predict_classify", "dossier_channel",
         "voc_extract", "json_fix", "studio_edit_query", "studio_edit_title", "studio_edit_translate",
-        "studio_cuts_filter", "studio_stt", "studio_mix_find", "transcribe", "player_filter", "ping"
+        "studio_cuts_filter", "studio_stt", "studio_tts_timing", "studio_mix_find", "transcribe", "player_filter", "ping"
     )
 
     fun isLight(task: String): Boolean = task in LIGHT || task.startsWith("studio_mix_")

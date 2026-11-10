@@ -382,6 +382,25 @@ object Llm {
         val started = System.currentTimeMillis()
         BgTasks.checkpoint()
         val e = LlmEndpoint(ApiKind.GEMINI, Provider.GEMINI.baseUrl, key)
+        // "Auto": the model that answered last time first, then the others of the chain
+        val chain = GeminiVoice.chain(model).let { l -> speechOk?.takeIf { it in l }?.let { listOf(it) + (l - it) } ?: l }
+        var last: Exception? = null
+        for ((i, m) in chain.withIndex()) {
+            try {
+                return speechOne(e, m, text, voice, style, task, pid, started).also { if (chain.size > 1) speechOk = m }
+            } catch (x: LlmException) {
+                last = x
+                if (i == chain.lastIndex || !GeminiVoice.tryNext(x.code, x.raw.ifBlank { x.message.orEmpty() })) throw x
+                L.w("llm", "gemini tts $m → ${x.code}, next model")
+            }
+        }
+        throw last ?: LlmException("Gemini returned no audio")
+    }
+
+    /** Voice model that answered last ("Auto" starts with it). */
+    @Volatile private var speechOk: String? = null
+
+    private fun speechOne(e: LlmEndpoint, model: String, text: String, voice: String, style: String, task: String, pid: String, started: Long): String {
         return try {
             val raw = Par.retrying { http("${e.base}/models/$model:generateContent", "POST", authHeaders(e), GeminiVoice.body(text, voice, style)) }
             val usage = runCatching { JSONObject(raw).optJSONObject("usageMetadata") }.getOrNull()

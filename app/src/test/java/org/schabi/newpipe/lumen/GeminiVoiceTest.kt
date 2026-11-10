@@ -38,6 +38,19 @@ class GeminiVoiceTest {
     }
 
     @Test
+    fun autoModelTriesTheNextVoiceModel() {
+        assertEquals(GeminiVoice.AUTO, GeminiVoice.model(""))
+        assertEquals(listOf("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"), GeminiVoice.chain(""))
+        assertEquals(listOf("gemini-3.8-flash-lite-tts"), GeminiVoice.chain("gemini-3.8-flash-lite-tts"))
+        assertTrue(GeminiVoice.tryNext(404, "models/x is not found"))
+        assertTrue(GeminiVoice.tryNext(429, "quota"))
+        assertTrue(GeminiVoice.tryNext(503, "overloaded"))
+        assertTrue(!GeminiVoice.tryNext(400, "API key not valid"))
+        assertTrue(!GeminiVoice.tryNext(400, "User location is not supported"))
+        assertTrue(GeminiVoice.MODELS.all { it.second.length <= 26 && it.third.length <= 26 })
+    }
+
+    @Test
     fun base64RoundTrip() {
         for (n in 0..7) {
             val b = ByteArray(n) { (it * 37 - 100).toByte() }

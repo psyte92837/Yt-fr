@@ -51,14 +51,31 @@ object GeminiVoice {
     )
 
     const val DEFAULT_VOICE = "Kore"
-    const val DEFAULT_MODEL = "gemini-3.8-flash-tts"
+    /** "Auto": the voice models in turn ([chain]), nothing to set up; the text model of Settings is not used here. */
+    const val AUTO = "auto"
+    const val DEFAULT_MODEL = AUTO
 
-    /** Models: id, Russian and English label. */
+    /** Models: id, Russian and English label (short: they are chips). */
     val MODELS = listOf(
+        Triple(AUTO, "Авто", "Auto"),
         Triple("gemini-3.8-flash-tts", "Flash — лучше звучит", "Flash — sounds best"),
         Triple("gemini-3.8-flash-lite-tts", "Flash Lite — быстрее", "Flash Lite — faster"),
-        Triple("gemini-2.5-pro-preview-tts", "2.5 Pro — только платный ключ", "2.5 Pro — paid key only"),
+        Triple("gemini-2.5-pro-preview-tts", "2.5 Pro — платный", "2.5 Pro — paid"),
     )
+
+    /** Voice models to try for [id], in order: "Auto" — the best one first, then the lighter one. */
+    fun chain(id: String): List<String> =
+        if (model(id) == AUTO) listOf("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts") else listOf(model(id))
+
+    /**
+     * Should "Auto" try the next model after HTTP [code] with [raw] body? Yes for a missing model, a limit
+     * or an overload of this model; no for a bad key or a blocked region (another model would fail the same way).
+     */
+    fun tryNext(code: Int, raw: String): Boolean {
+        val m = raw.lowercase()
+        if (m.contains("location is not supported") || m.contains("api key not valid") || m.contains("api_key_invalid") || code == 401) return false
+        return code == 404 || code == 429 || code == 403 || code >= 500 || code == 400 && m.contains("model")
+    }
 
     /** ~25 audio tokens per second of speech (measured), so a minute is ~1500 output tokens. */
     const val TOKENS_PER_SEC = 25

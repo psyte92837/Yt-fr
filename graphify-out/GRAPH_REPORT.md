@@ -466,7 +466,7 @@
 - `TtsActivity.kt` (42): TtsActivity:30, .build():109, TtsActivity.kt:1, .render():324, .buildBar():189, .start():395
 - `TtsService.kt` (50): TtsService:71, TtsService.kt:1, .start():102, .build():514, .finishJob():188, .playPart():315
 - `TtsShare.kt` (8): .onCreate():17, .startSave():68, TtsShareBase:14, .go():32, .onRequestPermissionsResult():60, TtsShare.kt:1
-- `Ui.kt` (136): toast():257, Col:796, text():525, dp():248, .err():1420, btn():534
+- `Ui.kt` (136): toast():257, Col:804, text():525, dp():248, .err():1428, btn():534
 - `UpdateService.kt` (3): UpdateService.kt:1, .cleanupOld():19, Updates:13
 - `Updates.kt` (32): UpdateLogic:41, .parse():48, Updates.kt:1, ExtractorHealth:121, Kind:122, .whatsNew():90
 - `UxLogic.kt` (38): UxLogic.kt:1, SearchIndex:131, UndoSlot:54, Item:55, .label():34, .parsePins():181

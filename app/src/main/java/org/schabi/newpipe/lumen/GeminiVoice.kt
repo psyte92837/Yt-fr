@@ -185,9 +185,13 @@ object GeminiVoice {
      */
     fun words(says: List<String>, c: Chunk, pcm: ShortArray, rate: Int): List<List<SWord>> {
         val per = c.scenes.map { Studio.tokens(says[it]) }
-        var spans = Studio.speechSpans(pcm, rate)
+        var spans = Studio.speechSpans(pcm, rate, minPauseMs = 200)
         if (spans.isEmpty()) spans = listOf(Span(0, pcm.size * 1000L / rate))
-        val all = Studio.alignWords(per.flatten(), spans)
+        // scene starts are paragraph breaks: a sure pause
+        val hard = mutableSetOf<Int>()
+        var at = 0
+        for (p in per) { if (at > 0 && p.isNotEmpty()) hard += at; at += p.size }
+        val all = Studio.alignAnchored(per.flatten(), spans, hard)
         val out = mutableListOf<List<SWord>>()
         var k = 0
         for (p in per) {

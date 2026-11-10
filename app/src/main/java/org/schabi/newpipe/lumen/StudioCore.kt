@@ -528,6 +528,138 @@ object Studio {
         }
     }
 
+    /**
+     * How long a written word takes to say, in "letters": digits are read as whole words (2025 → four words),
+     * signs like % and № too; a word closing a phrase gets a little more (voices slow down before a stop).
+     */
+    fun spokenWeight(w: String): Double {
+        var n = 0.0
+        for (c in w) n += when {
+            c.isDigit() -> 3.5
+            c.isLetter() -> 1.0
+            c == '%' || c == '№' || c == '$' || c == '€' || c == '₽' || c == '&' || c == '+' || c == '=' -> 7.0
+            else -> 0.0
+        }
+        return max(2.0, n) + 1.0 + if (breakStrength(w) >= 2) 1.0 else 0.0
+    }
+
+    /** How surely a pause follows [w]: 3 after . ! ? …, 2 after ; : — –, 1 after a comma or a bracket, else 0. */
+    fun breakStrength(w: String): Int {
+        val tail = w.trimEnd('"', '\'', '»', '“', '”', ')', ']', '*')
+        val last = tail.lastOrNull() ?: return 0
+        return when {
+            last == '.' || last == '!' || last == '?' || last == '…' -> 3
+            last == ';' || last == ':' || w == "—" || w == "–" || last == '—' -> 2
+            last == ',' || w.endsWith(")") -> 1
+            else -> 0
+        }
+    }
+
+    /** Words spread over [speech] by [weights] (no word in a pause). */
+    private fun spread(words: List<String>, weights: List<Double>, speech: List<Span>): List<SWord> {
+        if (words.isEmpty()) return emptyList()
+        val total = weights.sum()
+        val speechMs = speech.sumOf { it.ms }.toDouble()
+        fun at(p: Double, preferNext: Boolean): Long {
+            var left = p * speechMs
+            for ((i, s) in speech.withIndex()) {
+                val last = i == speech.lastIndex
+                if (left < s.ms || (left <= s.ms && (!preferNext || last))) return s.startMs + left.roundToInt()
+                left -= s.ms
+            }
+            return speech.last().endMs
+        }
+        var cum = 0.0
+        return words.mapIndexed { i, w ->
+            val a = at(cum / total, true)
+            cum += weights[i]
+            val b = at(cum / total, false)
+            SWord(w, a, max(a + 1, b))
+        }
+    }
+
+    private const val SKIP = 14
+
+    /**
+     * Written words on a synthesised or read voice without word marks, pinned to its pauses: phrase ends
+     * (punctuation, [hardBreaks] = indices of words that start a new paragraph or scene) are matched to the pauses
+     * of [speech] by dynamic programming (the speaking pace between matched pauses stays even), and the words
+     * are spread only inside each matched piece. Letter-proportional spreading over the whole voice
+     * ([alignWords]) drifts by seconds on a long take; this keeps every sentence on its own pause.
+     */
+    fun alignAnchored(words: List<String>, speech: List<Span>, hardBreaks: Set<Int> = emptySet()): List<SWord> {
+        if (words.isEmpty() || speech.isEmpty()) return emptyList()
+        val wt = words.map { spokenWeight(it) }
+        if (speech.size < 2) return spread(words, wt, speech)
+        // candidate breaks: before word b (b in 1..n-1) with its strength
+        val bIdx = mutableListOf<Int>()
+        val bStr = mutableListOf<Int>()
+        for (b in 1 until words.size) {
+            val s = if (b in hardBreaks) 4 else breakStrength(words[b - 1])
+            if (s > 0) { bIdx += b; bStr += s }
+        }
+        val m = bIdx.size
+        val k = speech.size - 1 // pauses between speech parts
+        if (m == 0) return spread(words, wt, speech)
+        val cumW = DoubleArray(words.size + 1).also { c -> for (i in words.indices) c[i + 1] = c[i] + wt[i] }
+        val cumS = DoubleArray(speech.size + 1).also { c -> for (i in speech.indices) c[i + 1] = c[i] + speech[i].ms / 1000.0 }
+        val gapLen = DoubleArray(k) { (speech[it + 1].startMs - speech[it].endMs) / 1000.0 }
+        val cumG = DoubleArray(k + 1).also { c -> for (g in 0 until k) c[g + 1] = c[g] + min(gapLen[g], 1.0) }
+        val rate = cumS[speech.size] / cumW[words.size] // seconds of speech per weight unit
+        // segment of words [w0, w1) on speech parts [p0, p1] (pauses p0..p1-1 inside stay unmatched)
+        fun segCost(w0: Int, w1: Int, p0: Int, p1: Int): Double {
+            val act = cumS[p1 + 1] - cumS[p0]
+            val exp = (cumW[w1] - cumW[w0]) * rate
+            val d = act - exp
+            // a pause with no phrase end is unlikely
+            return d * d / (exp + 0.6) + 0.8 * (cumG[p1] - cumG[p0])
+        }
+        fun reward(j: Int, g: Int): Double = 0.35 * bStr[j] * min(gapLen[g], 0.8) / 0.4
+        // dp[j][g]: break j matched to pause g (words before bIdx[j] end at speech[g], the rest start at speech[g+1])
+        val inf = Double.MAX_VALUE / 4
+        val dp = Array(m) { DoubleArray(k) { inf } }
+        val from = Array(m) { IntArray(k) { -1 } } // packed j' * k + g', -1 = from the start
+        for (j in 0 until m) for (g in 0 until k) {
+            // from the start
+            var best = segCost(0, bIdx[j], 0, g)
+            var arg = -1
+            // a piece between two matches skips at most a few phrase ends and pauses (keeps long takes fast)
+            for (j2 in max(0, j - SKIP) until j) for (g2 in max(0, g - SKIP) until g) {
+                val prev = dp[j2][g2]
+                if (prev >= inf) continue
+                val c = prev + segCost(bIdx[j2], bIdx[j], g2 + 1, g)
+                if (c < best) { best = c; arg = j2 * k + g2 }
+            }
+            dp[j][g] = best - reward(j, g)
+            from[j][g] = arg
+        }
+        var best = segCost(0, words.size, 0, k)
+        var end = -2
+        for (j in 0 until m) for (g in 0 until k) {
+            if (dp[j][g] >= inf) continue
+            val c = dp[j][g] + segCost(bIdx[j], words.size, g + 1, k)
+            if (c < best) { best = c; end = j * k + g }
+        }
+        // matched (word index, pause index) pairs, in order
+        val pairs = mutableListOf<Pair<Int, Int>>()
+        var cur = end
+        while (cur >= 0) {
+            val j = cur / k
+            val g = cur % k
+            pairs.add(0, bIdx[j] to g)
+            cur = from[j][g]
+        }
+        val out = ArrayList<SWord>(words.size)
+        var w0 = 0
+        var p0 = 0
+        for ((b, g) in pairs + (words.size to k)) {
+            out += spread(words.subList(w0, b), wt.subList(w0, b), speech.subList(p0, g + 1))
+            w0 = b
+            p0 = g + 1
+        }
+        return out
+    }
+
     fun stats(totalMs: Long, speech: List<Span>, words: Int): VoiceStats {
         val gaps = speech.zipWithNext { a, b -> b.startMs - a.endMs }
         return VoiceStats(totalMs, speech.sumOf { it.ms }, gaps.size, gaps.maxOrNull() ?: 0, words)

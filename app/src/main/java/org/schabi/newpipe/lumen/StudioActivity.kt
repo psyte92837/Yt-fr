@@ -3201,7 +3201,7 @@ class StudioActivity : LumenBase() {
         // the teleprompter log of this take and script times the words; otherwise they are spread over the speech
         val log = prompterFile.takeIf { it.exists() }?.let { StudioPrompter.fromJson(it.readText(), tokens, take0.ms) }
         val w = log?.let { StudioPrompter.words(tokens, it, speech, take.ms, cuts).takeIf { ws -> ws.isNotEmpty() } }
-            ?: Studio.alignWords(tokens, speech)
+            ?: Studio.alignAnchored(tokens, speech)
         if (log != null) L.i("studio", "words from the teleprompter: ${log.size} marks")
         pcm = take
         words = w

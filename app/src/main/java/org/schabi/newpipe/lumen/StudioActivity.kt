@@ -80,10 +80,10 @@ object StudioPrefs {
         set(v) = p.edit().putInt("studio_clip_q", v).apply()
     /** The cap clips are downloaded with now. */
     val clipCap: Int get() = StudioCuts.capOf(clipQ, quality)
-    /** Sound effects of the AI director. */
+    /** Sound effects of the AI director (whoosh on cuts, pop on stickers and blocks); per task, off where the voice-over leads. */
     var sfx: Boolean
-        get() = p.getBoolean("studio_sfx", true)
-        set(v) = p.edit().putBoolean("studio_sfx", v).apply()
+        get() = p.getBoolean(key("studio_sfx"), !StudioTask.of(task).voiceFirst)
+        set(v) = p.edit().putBoolean(key("studio_sfx"), v).apply()
     /** Run the AI director right after the analysis. */
     var autoDirect: Boolean
         get() = p.getBoolean("studio_auto_direct", true)
@@ -1682,6 +1682,7 @@ class StudioActivity : LumenBase() {
             StudioPrefs.quality = it
         }
         check(t("🔊 Звуки эффектов: whoosh, pop, click, ding…", "🔊 Sound effects: whoosh, pop, click, ding…"), StudioPrefs.sfx) { StudioPrefs.sfx = it }
+        if (task.voiceFirst) add(text(ctx, t("Под озвучкой по умолчанию выключено: звуки склеек, субтитров и блоков не мешают голосу.", "Off by default under a voice-over: cut, caption and block sounds stay out of the voice."), Type.LABEL, color = Palette.MUTED))
         check(t("💓 Пульс: картинка дышит в такт голосу", "💓 Pulse: the picture breathes with the voice"), StudioPrefs.pulse) {
             StudioPrefs.pulse = it
             board = emptyList()
@@ -3278,7 +3279,6 @@ class StudioActivity : LumenBase() {
         StudioPrefs.voiceMode = "file"
         StudioPrefs.style = StudioStyle.EXPLAIN.name
         StudioPrefs.broll = true
-        StudioPrefs.sfx = true
         scriptEdit.setText("")
         saveInputs()
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {

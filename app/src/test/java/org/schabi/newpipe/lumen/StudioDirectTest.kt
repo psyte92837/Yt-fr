@@ -324,4 +324,11 @@ class StudioKeysTest {
         assertEquals("Photo: B", StudioDirector.authors("", "Photo: B"))
         assertEquals("", StudioDirector.authors(" ", ""))
     }
+
+    @Test
+    fun soundEffectsOffWhereTheVoiceOverLeads() {
+        assertTrue(StudioTask.CUTS.voiceFirst)
+        assertTrue(StudioTask.VOICE.voiceFirst)
+        assertTrue(!StudioTask.SHORTS.voiceFirst && !StudioTask.VIDEO.voiceFirst && !StudioTask.CARTOON.voiceFirst)
+    }
 }

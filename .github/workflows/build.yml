@@ -47,6 +47,36 @@ jobs:
           path: studio/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
+      # Lumen Next: the redesign branch publishes its own rolling release, main is not touched.
+      - name: Publish to the rolling "lumen-next" release (redesign branch only)
+        if: github.ref == 'refs/heads/ccr-b29513d4-0y76sk' && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          mkdir -p next
+          apk="next/lumen-next-$BUILD.apk"
+          cp "$(ls app/build/outputs/apk/debug/*.apk | head -n1)" "$apk"
+          studio="next/lumen-studio-next-$BUILD.apk"
+          cp "$(ls studio/build/outputs/apk/debug/*.apk | head -n1)" "$studio"
+          retry() { for i in 1 2 3 4 5; do "$@" && return 0; echo "retry $i: $*"; sleep $((i * 10)); done; return 1; }
+          git tag -f lumen-next "$GITHUB_SHA"
+          retry git push -f origin refs/tags/lumen-next
+          gh release view lumen-next >/dev/null 2>&1 || gh release create lumen-next --prerelease --verify-tag \
+            --title "Lumen Next: latest build" --notes "Rolling build of the redesign branch."
+          retry gh release upload lumen-next "$apk" "$studio" --clobber
+          gh release edit lumen-next --prerelease --title "Lumen Next: build $BUILD" \
+            --notes "Build $BUILD · ${GITHUB_SHA:0:10} · redesign branch, installs next to Lumen (own app id).
+
+          $(git log -1 --format=%s)"
+          for a in $(gh release view lumen-next --json assets --jq '.assets[].name'); do
+            case "$a" in
+              lumen-next-*.apk) [ "$a" != "$(basename "$apk")" ] && gh release delete-asset lumen-next "$a" -y ;;
+              lumen-studio-next-*.apk) [ "$a" != "$(basename "$studio")" ] && gh release delete-asset lumen-next "$a" -y ;;
+            esac
+          done
+          echo "Published Lumen Next build $BUILD: https://github.com/$GITHUB_REPOSITORY/releases/tag/lumen-next" >> "$GITHUB_STEP_SUMMARY"
+
       # The APKs are published for manual download; the app does not check for updates.
       - name: Publish to the rolling "lumen-latest" release (main only)
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

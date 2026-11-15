@@ -92,8 +92,11 @@ configure<ApplicationExtension> {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
-            resValue("string", "app_name", "Lumen Studio Debug")
+            // the redesign branch (Lumen Next) installs next to the main debug build
+            val next = providers.exec { commandLine("git", "rev-parse", "--abbrev-ref", "HEAD") }
+                .standardOutput.asText.map { it.trim() }.getOrElse("") == LUMEN_NEXT_BRANCH
+            applicationIdSuffix = if (next) ".next" else ".debug"
+            resValue("string", "app_name", if (next) "Lumen Studio Next" else "Lumen Studio Debug")
         }
         release {
             if (uploadKeystore != null) signingConfig = signingConfigs.getByName("playUpload")

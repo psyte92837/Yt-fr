@@ -1820,7 +1820,7 @@ class InsertWizard(private val h: InsertHost) {
                 val row = LinearLayout(ctx).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    background = ripple(ctx, roundBg(Palette.CARD, 12f, ctx), Palette.ON_SURFACE)
+                    background = ripple(ctx, roundBg(Palette.CARD, 18f, ctx), Palette.ON_SURFACE)
                     setPadding(ctx.dp(8), ctx.dp(8), ctx.dp(8), ctx.dp(8))
                     setOnClickListener {
                         dismiss()

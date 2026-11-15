@@ -509,7 +509,7 @@ private fun ProjectActivity.predictRow(id: String, meta: String): View {
     val row = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        background = ripple(this@predictRow, roundBg(Palette.CARD, 12f, this@predictRow), Palette.ON_SURFACE)
+        background = ripple(this@predictRow, roundBg(Palette.CARD, 18f, this@predictRow), Palette.ON_SURFACE)
         setPadding(dp(8), dp(8), 0, dp(8))
     }
     val img = ImageView(this).apply {

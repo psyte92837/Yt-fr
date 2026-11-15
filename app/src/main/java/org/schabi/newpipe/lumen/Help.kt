@@ -90,9 +90,10 @@ object Help {
                 t("Каждый ответ AI сохраняется в журнале «Ответы AI».", "Every AI answer is kept in the \"AI answers\" journal.")
             )),
         HelpTopic("home", t("Главный экран", "Home"),
-            t("Список проектов-тем и переход к основным разделам через нижнюю панель: Проекты, Браузер, Озвучка, Студия, Настройки.",
-                "The list of topic projects and the main sections in the bottom bar: Projects, Browser, Read aloud, Studio, Settings."),
+            t("Пять разделов в нижней панели: Главная (поиск, главные действия, недавние проекты), Проекты, Создать (Студия и редакторы), Инструменты, Ещё (настройки, архив, корзина, справка).",
+                "Five sections in the bottom dock: Home (search, main actions, recent projects), Projects, Create (the Studio and editors), Tools, More (settings, archive, trash, help)."),
             listOf(
+                t("Разделы переключаются на месте; «Назад» возвращает на Главную.", "Sections switch in place; Back returns to Home."),
                 t("«＋ Новый проект» — создать тему.", "\"＋ New project\" creates a topic."),
                 t("Нажмите на проект, чтобы открыть его; ⋮ на карточке — переименовать, дублировать, архив, закрепить, удалить.", "Tap a project to open it; ⋮ on the card renames, duplicates, archives, pins or deletes."),
                 t("Долгое нажатие на проект включает выбор нескольких: архив, закрепить, в корзину сразу для всех. «Назад» — выйти из выбора.",

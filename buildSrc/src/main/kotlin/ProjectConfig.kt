@@ -13,4 +13,7 @@ const val NEWPIPE_VERSION_NAME = "0.29.1"
 
 const val NEWPIPE_APPLICATION_ID_OLD = "org.schabi.newpipe"
 const val LUMEN_APPLICATION_ID = "org.lumen.analyzer"
+
+/** Lumen Next: the redesign branch; its debug builds install next to the main ones (own id suffix and name). */
+const val LUMEN_NEXT_BRANCH = "ccr-b29513d4-0y76sk"
 const val NEWPIPE_APPLICATION_ID_NEW = "net.newpipe.app"

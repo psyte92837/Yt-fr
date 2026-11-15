@@ -94,7 +94,10 @@ configure<ApplicationExtension> {
             isDebuggable = true
 
             // suffix the app id and the app name with git branch name
-            if (normalizedWorkingBranch.isEmpty() || workingBranch in defaultBranches) {
+            if (workingBranch == LUMEN_NEXT_BRANCH) {
+                applicationIdSuffix = ".next"
+                resValue("string", "app_name", "Lumen Next")
+            } else if (normalizedWorkingBranch.isEmpty() || workingBranch in defaultBranches) {
                 applicationIdSuffix = ".debug"
                 resValue("string", "app_name", "Lumen Debug")
             } else {
@@ -123,7 +126,10 @@ configure<ApplicationExtension> {
             isDefault = true
 
             // suffix the app id and the app name with git branch name
-            if (normalizedWorkingBranch.isEmpty() || workingBranch in defaultBranches) {
+            if (workingBranch == LUMEN_NEXT_BRANCH) {
+                applicationIdSuffix = ".next"
+                resValue("string", "app_name", "Lumen Next")
+            } else if (normalizedWorkingBranch.isEmpty() || workingBranch in defaultBranches) {
                 applicationIdSuffix = ".continuous"
                 resValue("string", "app_name", "Lumen Continuous")
             } else {

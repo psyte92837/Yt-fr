@@ -289,7 +289,7 @@ fun ProjectActivity.recRow(n: RecNode, picked: HashSet<String>): View {
     val row = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        background = ripple(this@recRow, roundBg(Palette.CARD, 12f, this@recRow), Palette.ON_SURFACE)
+        background = ripple(this@recRow, roundBg(Palette.CARD, 18f, this@recRow), Palette.ON_SURFACE)
         setPadding(dp(4), dp(8), dp(12), dp(8))
     }
     val cb = CheckBox(this).apply {

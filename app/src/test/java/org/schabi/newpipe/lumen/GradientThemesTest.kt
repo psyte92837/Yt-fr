@@ -40,4 +40,28 @@ class GradientThemesTest {
             bg.forEach { assertTrue("$k accent on bg", Palette.contrast(acc, it) >= 3.0) }
         }
     }
+
+    @Test
+    fun signatureSchemeIsReadable() {
+        assertEquals("lumen", Palette.accentNames.first().first)
+        for (night in listOf(true, false)) {
+            val c = Palette.signature(night)
+            assertEquals(17, c.size)
+            val (accent, onAccent, soft, onSoft, fab) = c.toList()
+            val onFab = c[5]; val surface = c[6]; val card = c[7]; val on = c[8]; val muted = c[9]
+            val tonal = c[11]; val onTonal = c[12]
+            assertTrue("button $night", Palette.contrast(accent, onAccent) >= 7.0)
+            assertTrue("selected $night", Palette.contrast(soft, onSoft) >= 7.0)
+            assertTrue("fab $night", Palette.contrast(fab, onFab) >= 7.0)
+            assertTrue("tonal $night", Palette.contrast(tonal, onTonal) >= 7.0)
+            listOf(surface, card).forEach { bg ->
+                assertTrue("text $night", Palette.contrast(on, bg) >= 7.0)
+                assertTrue("muted $night", Palette.contrast(muted, bg) >= 4.5)
+                assertTrue("accent $night", Palette.contrast(accent, bg) >= 3.0)
+                // error, success, warning as text
+                c.slice(14..16).forEach { assertTrue("status $night", Palette.contrast(it, bg) >= 4.5) }
+            }
+            assertTrue("muted on tonal $night", Palette.contrast(muted, tonal) >= 4.5)
+        }
+    }
 }

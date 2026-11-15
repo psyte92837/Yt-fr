@@ -862,7 +862,7 @@ class BoardActivity : LumenBase() {
                 add(text(ctx, t("Комментарии", "Comments"), Type.LABEL, bold = true, color = Palette.MUTED), 16)
                 old.notes.filter { !it.auto }.forEach { n ->
                     val b = Col(ctx, 12)
-                    b.root.background = roundBg(Palette.CARD, 12f, ctx)
+                    b.root.background = roundBg(Palette.CARD, 18f, ctx)
                     b.add(text(ctx, whenText(n.at), 11f, color = Palette.MUTED), 0)
                     b.add(text(ctx, n.text, 14f).apply { setTextIsSelectable(true) }, 2)
                     add(b.root, 6)

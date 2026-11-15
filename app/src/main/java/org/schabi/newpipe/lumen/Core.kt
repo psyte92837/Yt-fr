@@ -129,9 +129,9 @@ object Settings {
         get() = p.getString("theme", "system") ?: "system"
         set(v) = p.edit().putString("theme", v).apply()
 
-    /** "dynamic" (Material You) or a fixed accent preset name. */
+    /** "lumen" (signature graphite and lime), "dynamic" (Material You) or a fixed accent preset name. */
     var accent: String
-        get() = p.getString("accent", "dynamic") ?: "dynamic"
+        get() = p.getString("accent", "lumen") ?: "lumen"
         set(v) = p.edit().putString("accent", v).apply()
 
     /** "none" or a gradient theme name (overrides theme and accent). */

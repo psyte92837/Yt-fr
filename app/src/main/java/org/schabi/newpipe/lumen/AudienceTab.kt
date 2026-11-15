@@ -163,7 +163,7 @@ fun ProjectActivity.audienceTab(c: Col) {
 
 private fun ProjectActivity.insightCard(i: JSONObject): android.widget.LinearLayout {
     val c = Col(this)
-    c.root.background = ripple(this, roundBg(Palette.CARD, 12f, this), Palette.ON_SURFACE)
+    c.root.background = ripple(this, roundBg(Palette.CARD, 18f, this), Palette.ON_SURFACE)
     val q = i.optJSONArray("quotes")?.optJSONObject(0)
     val st = i.optString("status")
     c.add(text(this, (if (st == "accepted") "✓ " else if (st == "rejected") "✗ " else "") + i.optString("statement"), 14f, bold = true), 0)

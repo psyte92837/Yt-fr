@@ -1900,7 +1900,7 @@ class StudioActivity : LumenBase() {
             box.removeAllViews()
             for (h in results) {
                 val row = Col(this, 12)
-                row.root.background = roundBg(Palette.CARD, 12f, this)
+                row.root.background = roundBg(Palette.CARD, 18f, this)
                 row.add(text(this, h.title, 15f, bold = true).apply { maxLines = 2 }, 0)
                 row.muted(listOf(h.creator, Studio.clock(h.durationMs), StudioMusicCatalog.licenseLabel(h), h.source.substringAfter('/'))
                     .filter { it.isNotBlank() && it != "0:00" }.joinToString(" · ") +

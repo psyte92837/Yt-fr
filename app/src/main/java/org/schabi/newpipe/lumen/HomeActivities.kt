@@ -103,6 +103,16 @@ class LumenActivity : LumenBase() {
     /** Selection mode: tap toggles a project, the bar on top acts on all picked ones. */
     private var selecting = false
     private val picked = linkedSetOf<String>()
+    /** Open destination of the dock: the home hub, projects, creation tools, utilities, the rest. */
+    private var tab = TAB_HOME
+
+    private fun go(to: Int, archive: Boolean = false) {
+        tab = to
+        showArchived = archive
+        selecting = false
+        picked.clear()
+        render()
+    }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
@@ -110,6 +120,8 @@ class LumenActivity : LumenBase() {
             selecting = false
             picked.clear()
             render()
+        } else if (tab != TAB_HOME) {
+            go(TAB_HOME)
         } else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
@@ -165,39 +177,219 @@ class LumenActivity : LumenBase() {
 
     private fun render() {
         val c = Col(this)
+        val all = Store.projects()
+        when (tab) {
+            TAB_PROJECTS -> projectsTab(c, all)
+            TAB_CREATE -> createTab(c)
+            TAB_TOOLS -> toolsTab(c)
+            TAB_MORE -> moreTab(c, all)
+            else -> homeTab(c, all)
+        }
+        val archived = all.count { it.archived }
+        val titles = listOf("Lumen", if (showArchived) t("Архив", "Archive") else t("Проекты", "Projects"), t("Создать", "Create"),
+            t("Инструменты", "Tools"), t("Ещё", "More"))
+        page(
+            titles[tab], c.root, back = false,
+            actions = listOf<Pair<String, () -> Unit>>("🔍" to { SearchActivity.open(this) }) +
+                if (tab == TAB_PROJECTS) listOf<Pair<String, () -> Unit>>("⋮" to { homeMenu(archived) }) else emptyList(),
+            fab = if (tab == TAB_PROJECTS && !selecting && !showArchived) {
+                t("＋  Новый проект", "＋  New project") to { startActivity(Intent(this, NewProjectActivity::class.java)) }
+            } else null,
+            footer = bottomNav(this, listOf(
+                Ic.HOME to t("Главная", "Home"), Ic.LIST to t("Проекты", "Projects"),
+                Ic.MOVIE to t("Создать", "Create"), Ic.SPARK to t("Инструменты", "Tools"),
+                Ic.MORE to t("Ещё", "More")
+            ), tab) { if (it != tab || showArchived) go(it) }
+        )
+    }
+
+    /** Status cards shown on top of the hub: running tasks and "AI is not connected". */
+    private fun statusCards(c: Col) {
         TaskHub.count(this).takeIf { it > 0 }?.let { n ->
-            c.card {
-                add(text(ctx, t("⚙ Задач в работе: $n", "⚙ Tasks running: $n"), Type.TITLE_M, bold = true), 0)
-                muted(t("Нажмите, чтобы посмотреть или остановить", "Tap to view or stop them"))
-            }.setOnClickListener { TasksActivity.open(this) }
+            c.nav("⚙", t("Задач в работе: $n", "Tasks running: $n"), t("Посмотреть или остановить", "View or stop them")) { TasksActivity.open(this) }
         }
         if (Provider.active() == null) {
-            c.card {
-                val row = LinearLayout(ctx).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
-                }
-                val msg = LinearLayout(ctx).apply {
-                    orientation = LinearLayout.VERTICAL
-                    addView(text(ctx, t("AI не подключён", "AI is not connected"), Type.TITLE_M, bold = true))
-                    addView(text(ctx, t("Поиск, сбор и аналитика работают. Сводки нужен API.", "Search, collection and analytics work. Summaries need an API."), 13f, color = Palette.MUTED))
-                }
-                row.addView(msg, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                row.addView(btn(ctx, t("Подключить", "Connect"), style = BtnStyle.TONAL) {
-                    startActivity(Intent(ctx, SettingsActivity::class.java).putExtra("ai", true))
-                })
-                add(row, 0)
+            c.nav("✨", t("ИИ не подключён", "AI is not connected"),
+                t("Поиск, сбор и аналитика работают. Для сводок подключите ИИ — есть бесплатные.", "Search, collection and analytics work. Connect an AI for summaries — free ones exist."),
+                t("Подключить", "Connect")) { startActivity(Intent(this, SettingsActivity::class.java).putExtra("ai", true)) }
+        }
+    }
+
+    /** Home hub: search, the main actions, recent projects, quick entries to the sections. */
+    private fun homeTab(c: Col, all: List<Project>) {
+        val search = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(52)
+            background = ripple(this@LumenActivity, roundBg(Palette.TONAL, 18f, this@LumenActivity), Palette.ON_TONAL)
+            setPadding(dp(8), 0, dp(16), 0)
+            addView(android.widget.ImageView(context).apply {
+                setImageDrawable(IconDrawable(Ic.SEARCH, Palette.MUTED))
+                val p = dp(10)
+                setPadding(p, p, p, p)
+            }, LinearLayout.LayoutParams(dp(44), dp(44)))
+            addView(text(context, t("Проекты, видео, разделы, настройки", "Projects, videos, sections, settings"), 15f, color = Palette.MUTED).apply { isSingleLine = true })
+            contentDescription = t("Поиск по приложению", "Search the app")
+            setOnClickListener { SearchActivity.open(this@LumenActivity) }
+        }
+        c.add(search, 0)
+        statusCards(c)
+        c.tiles(listOf(
+            Tile("＋", t("Новый проект", "New project"), t("Тема, фраза или ссылка на видео, канал, плейлист", "A topic, a phrase or a link to a video, channel or playlist"), accent = true) {
+                startActivity(Intent(this, NewProjectActivity::class.java))
+            },
+            Tile("▶", t("Плеер YouTube", "YouTube player"), t("Поиск с фильтрами и ИИ-отбором", "Search with filters and AI picking")) { PlayerActivity.open(this) }
+        ))
+        val live = all.filter { !it.archived }
+        if (live.isNotEmpty()) {
+            c.h2(t("Недавние проекты", "Recent projects"))
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            live.sortedByDescending { maxOf(it.lastRunAt, it.createdAt) }.take(6).forEach { p ->
+                val card = Col(this, 14)
+                card.root.background = ripple(this, roundBg(Palette.CARD, Shape.CARD, this, Palette.HAIR), Palette.ON_SURFACE)
+                card.add(text(this, p.name.ifBlank { p.phrase }, 15f, bold = true).apply {
+                    maxLines = 2
+                    minLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, 0)
+                card.add(text(this, t("Видео: ", "Videos: ") + p.videoCount, 12.5f, color = Palette.MUTED), 6)
+                card.add(text(this, if (p.newCount > 0) t("новых: ", "new: ") + p.newCount else Fmt.dateTime(p.lastRunAt), 12f, bold = p.newCount > 0,
+                    color = if (p.newCount > 0) Palette.ON_SOFT else Palette.MUTED).apply {
+                    if (p.newCount > 0) {
+                        background = roundBg(Palette.ACCENT_SOFT, 10f, this@LumenActivity)
+                        setPadding(dp(8), dp(2), dp(8), dp(2))
+                    }
+                    isSingleLine = true
+                }, 6).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) }
+                card.root.contentDescription = p.name
+                card.root.setOnClickListener { openProjectScreen(p) }
+                row.addView(card.root, LinearLayout.LayoutParams(dp(176), ViewGroup.LayoutParams.MATCH_PARENT).apply { marginEnd = dp(10) })
+            }
+            row.addView(btn(this, t("Все →", "All →"), style = BtnStyle.TEXT) { go(TAB_PROJECTS) },
+                LinearLayout.LayoutParams(-2, -2).apply { gravity = Gravity.CENTER_VERTICAL })
+            c.add(android.widget.HorizontalScrollView(this).apply {
+                isHorizontalScrollBarEnabled = false
+                addView(row)
+            }, 10)
+        } else {
+            c.empty(t("Пока нет проектов", "No projects yet"),
+                t("Проект — это тема на YouTube: слово, фраза или ссылка на видео, канал, плейлист.",
+                    "A project is a YouTube topic: a word, a phrase or a link to a video, channel or playlist."),
+                t("Создать проект", "Create project")) { startActivity(Intent(this, NewProjectActivity::class.java)) }
+            c.button(t("Восстановить из резервной копии…", "Restore from a backup…"), style = BtnStyle.TEXT) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
             }
         }
-        if (!showArchived) ideasCard(c)
-        if (!showArchived) botsCard(c)
-        val all = Store.projects()
+        c.h2(t("Быстрый доступ", "Quick access"))
+        val ideas = Ideas.configs()
+        val latest = Ideas.latest()
+        val bots = Bots.list()
+        c.tiles(listOf(
+            Tile("🎬", t("Студия", "Studio"), t("Ролик из сценария, клипов или озвучки", "A video from a script, clips or a voice-over")) { StudioActivity.open(this) },
+            Tile("✂", t("Откусить", "Bite"), t("Отрезок видео или аудио с YouTube", "A piece of a YouTube video or audio")) { BiteActivity.open(this) },
+            Tile("💡", t("Идеи для бизнеса", "Business ideas"), when {
+                ideas.isEmpty() -> t("Сводки идей из свежих видео и комментариев", "Idea digests from fresh videos and comments")
+                latest != null -> IdeasLogic.headline(latest.second.text)
+                else -> t("Бизнесов: ${ideas.size}", "Businesses: ${ideas.size}")
+            }, if (ideas.size > 1) ideas.size.toString() else "") { IdeasActivity.open(this, ideas.singleOrNull()?.id.orEmpty()) },
+            Tile("🤖", t("Мои ТГ-боты", "My Telegram bots"),
+                if (bots.isEmpty()) t("ИИ напишет бота, телефон станет сервером", "AI writes a bot, the phone is its server")
+                else t("Ботов: ${bots.size} · работают: ${bots.count { it.enabled }}", "Bots: ${bots.size} · running: ${bots.count { it.enabled }}")) { BotsActivity.open(this) }
+        ))
+    }
+
+    /** Everything that makes content: the Studio tasks, the Mix, the editors, read aloud. */
+    private fun createTab(c: Col) {
+        c.muted(t("Видео, звук и текст — от сценария до готового файла.", "Video, sound and text — from a script to a finished file."))
+        c.h2(t("Ролик в Студии", "A video in the Studio"))
+        c.tiles(listOf(
+            Tile("📱", "Shorts", t("Вертикальный ролик из сценария", "A vertical video from a script"), accent = true) { StudioActivity.openTab(this, 0) },
+            Tile("🎬", t("Видео", "Video"), t("Горизонтальный ролик", "A horizontal video")) { StudioActivity.openTab(this, 1) },
+            Tile("🎙", t("Озвучка", "Voice-over"), t("Голос или подкаст → ролик", "A voice or a podcast → a video")) { StudioActivity.openTab(this, 2) },
+            Tile("🎞", t("Клипы", "Clips"), t("Сценарий поверх клипов YouTube", "A script over YouTube clips")) { StudioActivity.openTab(this, 3) },
+            Tile("🎨", t("Анимация", "Animation"), t("Персонажи и сцены", "Characters and scenes")) { StudioActivity.openTab(this, 4) },
+            Tile("🔀", t("Микс", "Mix"), t("Нарезка из нескольких видео", "A cut of several videos")) { StudioMixActivity.open(this) }
+        ))
+        c.h2(t("Редакторы", "Editors"))
+        c.nav("✏️", t("Редактор видео", "Video editor"), t("Монтаж, эффекты, инфоблоки, субтитры", "Cutting, effects, info blocks, subtitles")) { StudioEditorActivity.open(this) }
+        c.nav("🎧", t("Аудиоредактор", "Audio editor"), t("Дорожки, эффекты, шумоподавление, MP3", "Tracks, effects, noise removal, MP3")) { AudioEditorActivity.open(this) }
+        c.nav("🎛", t("Слой ИИ", "AI layer"), t("Графика поверх готового видео", "Graphics over a finished video")) { WebLayerActivity.open(this, null, false) }
+        c.h2(t("Текст и план", "Text and planning"))
+        c.nav("🗣", t("Читать вслух", "Read aloud"), t("Озвучить любой текст, сохранить в файл", "Read any text aloud, save it to a file")) { TtsActivity.open(this) }
+        c.nav("📚", t("Шаблоны", "Templates"), t("Свои анимации и способы режиссуры", "Your animations and directing recipes")) { StudioTemplatesActivity.open(this) }
+        c.nav("📋", t("Задачи", "Tasks"), t("Доска, сроки и планы автора", "The author's board, due dates and plans")) { BoardActivity.open(this) }
+    }
+
+    /** Utilities around YouTube and the web. */
+    private fun toolsTab(c: Col) {
+        c.tiles(listOf(
+            Tile("▶", t("Плеер YouTube", "YouTube player"), t("Поиск, фильтры, фон", "Search, filters, background"), accent = true) { PlayerActivity.open(this) },
+            Tile("✂", t("Откусить", "Bite"), t("Отрезок видео или аудио", "A piece of video or audio")) { BiteActivity.open(this) },
+            Tile("🌐", t("Браузер", "Browser"), t("Страницы с разбором ИИ", "Pages with AI analysis")) { BrowserActivity.open(this) },
+            Tile("🗣", t("Читать вслух", "Read aloud"), t("Текст → голос", "Text → voice")) { TtsActivity.open(this) }
+        ))
+        c.h2(t("Автоматика", "Automation"))
+        val ideas = Ideas.configs()
+        val bots = Bots.list()
+        c.nav("💡", t("Идеи для моего бизнеса", "Ideas for my business"),
+            if (ideas.isEmpty()) t("Опишите бизнес и рынок — Lumen пришлёт сводки идей", "Describe the business and the market — Lumen sends idea digests")
+            else t("Бизнесов: ${ideas.size}", "Businesses: ${ideas.size}")) { IdeasActivity.open(this, ideas.singleOrNull()?.id.orEmpty()) }
+        c.nav("🤖", t("Мои ТГ-боты", "My Telegram bots"),
+            if (bots.isEmpty()) t("ИИ напишет бота по описанию", "AI writes a bot from your description")
+            else t("Ботов: ${bots.size} · работают: ${bots.count { it.enabled }}", "Bots: ${bots.size} · running: ${bots.count { it.enabled }}")) { BotsActivity.open(this) }
+        c.nav("👁", t("Домен для наблюдения", "A domain to watch"), t("Следить за новыми видео по теме", "Watch for new videos on a topic")) {
+            startActivity(Intent(this, NewProjectActivity::class.java).putExtra("watch", true))
+        }
+        c.h2(t("Служебное", "Service"))
+        c.nav("🔍", t("Поиск по приложению", "Search the app"), t("Проекты, видео, справка, настройки", "Projects, videos, help, settings")) { SearchActivity.open(this) }
+        val n = TaskHub.count(this)
+        c.nav("⚙", t("Фоновые задачи", "Background tasks"), t("Что сейчас работает", "What is running now"), if (n > 0) n.toString() else "") { TasksActivity.open(this) }
+    }
+
+    /** Settings, data and help. */
+    private fun moreTab(c: Col, all: List<Project>) {
+        c.nav("⚙", t("Настройки", "Settings"), t("Оформление, язык, уведомления", "Look, language, notifications")) { startActivity(Intent(this, SettingsActivity::class.java)) }
+        c.nav("✨", t("ИИ и ключи", "AI and keys"),
+            if (Provider.active() == null) t("Не подключён", "Not connected") else t("Провайдер, модели, промпты", "Provider, models, prompts")) {
+            startActivity(Intent(this, SettingsActivity::class.java).putExtra("ai", true))
+        }
+        c.nav("🎬", t("Настройки Студии", "Studio settings")) { startActivity(Intent(this, SettingsActivity::class.java).putExtra("studio", true)) }
+        c.h2(t("Данные", "Data"))
+        val archived = all.count { it.archived }
+        c.nav("🗂", t("Архив проектов", "Project archive"), badge = if (archived > 0) archived.toString() else "") { go(TAB_PROJECTS, archive = true) }
+        val trashed = runCatching { Store.trashed().size }.getOrDefault(0)
+        c.nav("🗑", t("Корзина", "Trash"), t("Удалённые проекты хранятся ${TrashLogic.KEEP_DAYS} дней", "Deleted projects are kept for ${TrashLogic.KEEP_DAYS} days"),
+            if (trashed > 0) trashed.toString() else "") { trashSheet() }
+        c.nav("💾", t("Восстановить из копии", "Restore from a backup"), t("Файл «Загрузки/Lumen/${AutoBackup.FILE_NAME}»", "The file Downloads/Lumen/${AutoBackup.FILE_NAME}")) {
+            @Suppress("DEPRECATION")
+            startActivityForResult(AutoBackup.pickIntent(), REQ_RESTORE)
+        }
+        c.h2(t("Помощь", "Help"))
+        c.nav("❓", t("Справка и о проекте", "Help and about")) { HelpActivity.open(this, "about") }
+        c.nav("🧾", t("Журнал и отчёт об ошибке", "Logs and bug report")) { startActivity(Intent(this, SettingsActivity::class.java).putExtra("logs", true)) }
+    }
+
+    /** The project list (or the archive): order, selection, swipe to archive. */
+    private fun projectsTab(c: Col, all: List<Project>) {
         val pins = ProjectOrder.parsePins(Lumen.prefs.getString("home_pins", null))
         val byId = all.associateBy { it.id }
         val list = ProjectOrder.sort(all.filter { it.archived == showArchived }
             .map { ProjectOrder.Row(it.id, it.name.ifBlank { it.phrase }, it.createdAt, it.lastRunAt, it.videoCount) },
             Lumen.prefs.getString("home_sort", "recent") ?: "recent", pins).mapNotNull { byId[it.id] }
-        c.h2(if (showArchived) t("Архив", "Archive") + " (${list.size})" else t("Проекты", "Projects") + " (${list.size})")
+        val archived = all.count { it.archived }
+        if (!selecting) {
+            c.add(chipScroller(this, listOfNotNull(
+                chip(this, "⇅ " + sortName(Lumen.prefs.getString("home_sort", "recent") ?: "recent")) { sortDialog() },
+                if (showArchived || archived > 0) chip(this, t("Архив", "Archive") + if (archived > 0) " ($archived)" else "", showArchived) { go(TAB_PROJECTS, archive = !showArchived) } else null,
+                if (list.isNotEmpty()) chip(this, t("☑ Выбрать", "☑ Select")) {
+                    selecting = true
+                    picked.clear()
+                    render()
+                } else null
+            )), 0)
+        }
+        c.muted((if (showArchived) t("В архиве: ", "Archived: ") else t("Всего: ", "Total: ")) + list.size)
         if (selecting) selectionBar(c, list)
         if (list.isEmpty()) {
             if (showArchived) c.muted(t("В архиве пусто.", "The archive is empty."))
@@ -217,7 +409,7 @@ class LumenActivity : LumenBase() {
         for (p in list) {
             val card = c.card {
                 val mark = if (selecting) (if (p.id in picked) "☑ " else "☐ ") else ""
-                val title = text(ctx, mark + (if (p.id in pins) "📌 " else "") + p.name.ifBlank { p.phrase }, Type.TITLE_M, bold = true).apply {
+                val title = text(ctx, mark + (if (p.id in pins) "📌 " else "") + p.name.ifBlank { p.phrase }, 17f, bold = true).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 }
@@ -225,8 +417,8 @@ class LumenActivity : LumenBase() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     addView(title, LinearLayout.LayoutParams(0, -2, 1f))
-                    if (p.newCount > 0) addView(text(ctx, t("новых: ", "new: ") + p.newCount, 12f, bold = true, color = Palette.ON_ACCENT).apply {
-                        background = roundBg(Palette.ACCENT, 10f, ctx)
+                    if (p.newCount > 0) addView(text(ctx, t("новых: ", "new: ") + p.newCount, 12f, bold = true, color = Palette.ON_SOFT).apply {
+                        background = roundBg(Palette.ACCENT_SOFT, 10f, ctx)
                         setPadding(ctx.dp(8), ctx.dp(2), ctx.dp(8), ctx.dp(2))
                     })
                     addView(iconBtn(ctx, "⋮", Palette.MUTED) { projectMenu(p) }, LinearLayout.LayoutParams(ctx.dp(40), ctx.dp(40)).apply {
@@ -238,11 +430,11 @@ class LumenActivity : LumenBase() {
                 muted(t("Видео: ", "Videos: ") + p.videoCount + " · " + t("последний запуск: ", "last run: ") + Fmt.dateTime(p.lastRunAt) +
                     if (p.monitor.enabled && Settings.monitoringAllowed) " · ⏱" else "")
                 val added = p.runs.lastOrNull()?.added ?: 0
-                if (added > 0) add(text(ctx, t("В последнем запуске добавлено: +$added", "Added in the last run: +$added"), 13f, bold = true, color = Palette.ACCENT), 4)
+                if (added > 0) add(text(ctx, t("В последнем запуске добавлено: +$added", "Added in the last run: +$added"), 13f, bold = true, color = Palette.OK), 4)
                 add(kmapButton(ctx, p.id), 8).layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = ctx.dp(8) }
             }
             card.contentDescription = p.name
-            if (selecting && p.id in picked) card.background = roundBg(Palette.ACCENT_SOFT, 12f, this, Palette.ACCENT)
+            if (selecting && p.id in picked) card.background = roundBg(Palette.ACCENT_SOFT, Shape.CARD, this, Palette.ACCENT)
             card.setOnClickListener { if (selecting) toggle(p.id) else openProjectScreen(p) }
             // swipe sideways: archive (or back from the archive) with Undo
             if (!selecting) card.onSwipe { bulkArchive(listOf(p)) }
@@ -256,84 +448,6 @@ class LumenActivity : LumenBase() {
                 true
             }
         }
-        val archived = all.count { it.archived }
-        page(
-            "Lumen", c.root, back = false,
-            actions = listOf("🔍" to { SearchActivity.open(this) }, "⋮" to { homeMenu(archived) }),
-            fab = t("＋  Новый проект", "＋  New project") to { startActivity(Intent(this, NewProjectActivity::class.java)) },
-            footer = bottomNav(this, listOf(
-                Ic.HOME to t("Проекты", "Projects"), Ic.WEB to t("Браузер", "Browser"),
-                Ic.SPEAKER to t("Озвучка", "Read aloud"), Ic.MOVIE to t("Студия", "Studio"),
-                Ic.SETTINGS to t("Настройки", "Settings")
-            ), 0) {
-                when (it) {
-                    1 -> BrowserActivity.open(this)
-                    2 -> TtsActivity.open(this)
-                    3 -> StudioActivity.open(this)
-                    4 -> startActivity(Intent(this, SettingsActivity::class.java))
-                    else -> Unit
-                }
-            }
-        )
-    }
-
-    /** Big entry to "Ideas for my business": setup on first tap, then the latest digest headline. */
-    private fun ideasCard(c: Col) {
-        val all = Ideas.configs()
-        val latest = Ideas.latest()
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(20), dp(20), dp(20))
-            background = ripple(this@LumenActivity, roundBg(Palette.ACCENT, 20f, this@LumenActivity), Palette.ON_ACCENT)
-            elevation = dp(2).toFloat()
-            addView(text(context, t("💡 Идеи для моего бизнеса", "💡 Ideas for my business"), Type.TITLE_L, bold = true, color = Palette.ON_ACCENT))
-            val sub = when {
-                all.isEmpty() -> t("Опишите бизнес, выберите рынок (например, США) — Lumen будет следить за свежими видео и комментариями и присылать сводку идей",
-                    "Describe your business, pick a market (e.g. USA): Lumen watches fresh videos and comments and sends a digest of ideas")
-                latest != null -> (if (all.size > 1) t("Бизнесов: ${all.size} · ", "Businesses: ${all.size} · ") else "") +
-                    Fmt.dateTime(latest.second.at) + " · " + IdeasLogic.headline(latest.second.text)
-                all.size == 1 -> all[0].business.take(60) + " · " + Ideas.countryName(all[0].country) + " · " + IdeasActivity.freq(all[0].hours)
-                else -> t("Бизнесов: ${all.size}", "Businesses: ${all.size}")
-            }
-            addView(text(context, sub, 14f, color = Palette.ON_ACCENT).apply {
-                maxLines = 3
-                ellipsize = android.text.TextUtils.TruncateAt.END
-                setPadding(0, dp(6), 0, dp(14))
-            })
-            addView(text(context, if (all.isEmpty()) t("Настроить за минуту  →", "Set up in a minute  →") else t("Открыть сводки  →", "Open digests  →"),
-                15f, bold = true, color = Palette.ACCENT).apply {
-                background = roundBg(Palette.ON_ACCENT, 24f, this@LumenActivity)
-                setPadding(dp(20), dp(12), dp(20), dp(12))
-            }, LinearLayout.LayoutParams(-2, -2))
-            contentDescription = t("Идеи для моего бизнеса", "Ideas for my business")
-            // a single business opens right away, several open the list
-            setOnClickListener { IdeasActivity.open(this@LumenActivity, all.singleOrNull()?.id.orEmpty()) }
-        }
-        c.add(box, 12)
-    }
-
-    /** Entry to the separate "My Telegram bots" section (it also has its own launcher icon). */
-    private fun botsCard(c: Col) {
-        val bots = Bots.list()
-        val on = bots.count { it.enabled }
-        val card = c.card {
-            val row = LinearLayout(ctx).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-            }
-            val msg = LinearLayout(ctx).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(text(ctx, t("🤖 Мои ТГ боты", "🤖 My Telegram bots"), Type.TITLE_M, bold = true))
-                addView(text(ctx, when {
-                    bots.isEmpty() -> t("ИИ напишет бота по описанию, телефон станет сервером", "AI writes a bot from your description, the phone is its server")
-                    else -> t("Ботов: ${bots.size} · работают: $on", "Bots: ${bots.size} · running: $on")
-                }, 13f, color = Palette.MUTED))
-            }
-            row.addView(msg, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(btn(ctx, t("Открыть", "Open"), style = BtnStyle.TONAL) { BotsActivity.open(ctx) })
-            add(row, 0)
-        }
-        card.setOnClickListener { BotsActivity.open(this) }
     }
 
     private fun homeMenu(archived: Int) {
@@ -344,8 +458,7 @@ class LumenActivity : LumenBase() {
         items.add(t("▶ Плеер YouTube", "▶ YouTube player") to { PlayerActivity.open(this) })
         if (showArchived || archived > 0) {
             items.add((if (showArchived) t("К проектам", "Projects") else t("Архив ($archived)", "Archive ($archived)")) to {
-                showArchived = !showArchived
-                render()
+                go(TAB_PROJECTS, archive = !showArchived)
             })
         }
         items.add(t("☑ Выбрать несколько", "☑ Select several") to {
@@ -544,6 +657,11 @@ class LumenActivity : LumenBase() {
 }
 
 const val REQ_RESTORE = 61
+private const val TAB_HOME = 0
+private const val TAB_PROJECTS = 1
+private const val TAB_CREATE = 2
+private const val TAB_TOOLS = 3
+private const val TAB_MORE = 4
 
 /** Restores a picked backup, then reports and calls [done]. API keys are not in backups. */
 fun LumenBase.restoreFrom(uri: android.net.Uri, done: () -> Unit) {

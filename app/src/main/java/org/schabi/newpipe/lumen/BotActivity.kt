@@ -407,7 +407,7 @@ class BotActivity : LumenBase() {
             setPadding(dp(12), dp(12), dp(12), dp(12))
         }
         val hs = HorizontalScrollView(this).apply {
-            background = roundBg(Palette.CARD, 12f, context)
+            background = roundBg(Palette.CARD, 18f, context)
             addView(tv)
         }
         c.add(hs, 12)
@@ -648,7 +648,7 @@ class BotActivity : LumenBase() {
                 setPadding(dp(12), dp(12), dp(12), dp(12))
             }
             c.add(HorizontalScrollView(this).apply {
-                background = roundBg(Palette.CARD, 12f, context)
+                background = roundBg(Palette.CARD, 18f, context)
                 addView(tv)
             }, 8)
         }

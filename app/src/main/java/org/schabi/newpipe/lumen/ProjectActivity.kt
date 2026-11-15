@@ -653,7 +653,7 @@ class ProjectActivity : LumenBase() {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            background = ripple(this@ProjectActivity, roundBg(Palette.CARD, 12f, this@ProjectActivity), Palette.ON_SURFACE)
+            background = ripple(this@ProjectActivity, roundBg(Palette.CARD, 18f, this@ProjectActivity), Palette.ON_SURFACE)
             setPadding(dp(4), dp(8), dp(12), dp(8))
         }
         val cb = CheckBox(this).apply {
@@ -961,7 +961,7 @@ class ProjectActivity : LumenBase() {
         return text(this, "", 14f).apply {
             text = sb
             setLineSpacing(dp(4).toFloat(), 1.1f)
-            background = roundBg(Palette.CARD, 12f, this@ProjectActivity)
+            background = roundBg(Palette.CARD, 18f, this@ProjectActivity)
             setPadding(dp(16), dp(12), dp(16), dp(12))
         }
     }

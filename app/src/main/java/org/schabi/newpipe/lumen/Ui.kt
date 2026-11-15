@@ -68,6 +68,11 @@ object Palette {
     var BAD = 0xFFB3261E.toInt() // error
     var OK = 0xFF2E7D32.toInt()
     var WARN = 0xFFB26A00.toInt()
+    /** Neutral container of ordinary buttons, fields and unselected chips (Lumen Next). */
+    var TONAL = 0xFFE9E6DE.toInt()
+    var ON_TONAL = 0xFF15161A.toInt()
+    /** Hairline around cards. */
+    var HAIR = 0xFFE2DED4.toInt()
 
     /** Fixed accent presets: light (primary, onPrimary, container, onContainer), dark (same). */
     private val accents = mapOf(
@@ -78,7 +83,7 @@ object Palette {
         "orange" to listOf(0xFF9A4600, 0xFFFFFFFF, 0xFFFFDBC8, 0xFF321300, 0xFFFFB68A, 0xFF512400, 0xFF743400, 0xFFFFDBC8),
         "teal" to listOf(0xFF006B5E, 0xFFFFFFFF, 0xFF9EF2E0, 0xFF00201B, 0xFF82D5C4, 0xFF00382F, 0xFF005046, 0xFF9EF2E0)
     )
-    val accentNames get() = listOf("dynamic" to t("Динамический (Android 12+)", "Dynamic (Android 12+)"), "purple" to t("Фиолетовый", "Purple"),
+    val accentNames get() = listOf("lumen" to t("Lumen: графит и лайм", "Lumen: graphite and lime"), "dynamic" to t("Динамический (Android 12+)", "Dynamic (Android 12+)"), "purple" to t("Фиолетовый", "Purple"),
         "blue" to t("Синий", "Blue"), "green" to t("Зелёный", "Green"), "red" to t("Красный", "Red"),
         "orange" to t("Оранжевый", "Orange"), "teal" to t("Бирюзовый", "Teal"))
 
@@ -147,6 +152,15 @@ object Palette {
     fun init(ctx: Context) {
         val night = ctx.isNight()
         initBase(ctx, night)
+        applyStyle(night)
+        val signature = Settings.accent == "lumen" || (Settings.accent == "dynamic" && Build.VERSION.SDK_INT < 31)
+        if (signature && gradients[Settings.style] == null) return
+        // other accents: buttons take the accent container, cards get a soft outline
+        TONAL = ACCENT_SOFT; ON_TONAL = ON_SOFT
+        HAIR = (OUTLINE and 0x00FFFFFF) or 0x33000000
+    }
+
+    private fun applyStyle(night: Boolean) {
         gradients[Settings.style]?.let { g ->
             val a = g.accent.toInt()
             ACCENT = a; ON_ACCENT = g.onAccent.toInt(); FAB = g.cont.toInt(); ON_FAB = g.onCont.toInt()
@@ -172,11 +186,36 @@ object Palette {
         }
         if (night && Settings.theme == "black") {
             SURFACE = 0xFF000000.toInt()
-            CARD = 0xFF121212.toInt()
+            CARD = 0xFF101114.toInt()
         }
     }
 
+    /**
+     * Lumen Next signature scheme: graphite and lime at night, paper and ink by day. Order: accent, onAccent, soft, onSoft,
+     * fab, onFab, surface, card, onSurface, muted, outline, tonal, onTonal, hair, bad, ok, warn (contrast is checked by tests).
+     */
+    fun signature(night: Boolean): IntArray = if (night) intArrayOf(
+        0xFFC8F03C.toInt(), 0xFF11140A.toInt(), 0xFF323D10.toInt(), 0xFFE2F79A.toInt(), 0xFFC8F03C.toInt(), 0xFF11140A.toInt(),
+        0xFF0E0F12.toInt(), 0xFF17191E.toInt(), 0xFFF1F2F4.toInt(), 0xFFA3A8B3.toInt(), 0xFF4A4F5A.toInt(),
+        0xFF24272E.toInt(), 0xFFECEEF2.toInt(), 0xFF282B33.toInt(), 0xFFFF8A80.toInt(), 0xFF7EDC9A.toInt(), 0xFFFFC66D.toInt()
+    ) else intArrayOf(
+        0xFF1B1D22.toInt(), 0xFFFFFFFF.toInt(), 0xFFDDF37A.toInt(), 0xFF1A2000.toInt(), 0xFFC8F03C.toInt(), 0xFF151A00.toInt(),
+        0xFFF5F3EE.toInt(), 0xFFFFFFFF.toInt(), 0xFF15161A.toInt(), 0xFF5A5D66.toInt(), 0xFF8D8A82.toInt(),
+        0xFFE9E6DE.toInt(), 0xFF15161A.toInt(), 0xFFE2DED4.toInt(), 0xFFB3261E.toInt(), 0xFF1E7A34.toInt(), 0xFF9A5B00.toInt()
+    )
+
+    private fun initLumen(night: Boolean) {
+        val c = signature(night)
+        ACCENT = c[0]; ON_ACCENT = c[1]; ACCENT_SOFT = c[2]; ON_SOFT = c[3]; FAB = c[4]; ON_FAB = c[5]
+        SURFACE = c[6]; CARD = c[7]; ON_SURFACE = c[8]; MUTED = c[9]; OUTLINE = c[10]
+        TONAL = c[11]; ON_TONAL = c[12]; HAIR = c[13]; BAD = c[14]; OK = c[15]; WARN = c[16]
+    }
+
     private fun initBase(ctx: Context, night: Boolean) {
+        if (Settings.accent == "lumen" || (Settings.accent == "dynamic" && Build.VERSION.SDK_INT < 31)) {
+            initLumen(night)
+            return
+        }
         if (Build.VERSION.SDK_INT >= 31 && Settings.accent == "dynamic") {
             fun c(id: Int) = ctx.resources.getColor(id, ctx.theme)
             if (night) {
@@ -238,11 +277,22 @@ object Palette {
 /** M3 type scale. */
 object Type {
     val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    /** Display face of titles (bundled Montserrat); the system medium when it cannot be loaded. */
+    val display: Typeface by lazy { runCatching { LumenFonts.typeface("lf:montserrat") }.getOrNull() ?: Typeface.create("sans-serif", Typeface.BOLD) }
     const val HEADLINE = 28f
     const val TITLE_L = 22f
     const val TITLE_M = 16f
     const val BODY = 14f
     const val LABEL = 12f
+}
+
+/** Corner radii of the Lumen Next shapes, dp. */
+object Shape {
+    const val CARD = 22f
+    const val BTN = 16f
+    const val CHIP = 12f
+    const val FIELD = 16f
+    const val SHEET = 30f
 }
 
 fun Context.dp(v: Int): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v.toFloat(), resources.displayMetrics).toInt()
@@ -530,7 +580,7 @@ fun text(ctx: Context, s: String, size: Float = Type.BODY, bold: Boolean = false
     if (bold) typeface = Type.medium
 }
 
-/** M3 common button: 40dp visual height inside a 48dp touch target, pill shape. */
+/** Button: 44dp block inside a 48dp touch target, soft-square corners. */
 fun btn(ctx: Context, s: String, primary: Boolean = false, style: BtnStyle? = null, onClick: () -> Unit) = Button(ctx).apply {
     val st = style ?: if (primary) BtnStyle.FILLED else BtnStyle.TONAL
     text = s
@@ -542,15 +592,15 @@ fun btn(ctx: Context, s: String, primary: Boolean = false, style: BtnStyle? = nu
     minimumHeight = ctx.dp(48)
     val (bg, fg, stroke) = when (st) {
         BtnStyle.FILLED -> Triple(Palette.ACCENT, Palette.ON_ACCENT, 0)
-        BtnStyle.TONAL -> Triple(Palette.ACCENT_SOFT, Palette.ON_SOFT, 0)
+        BtnStyle.TONAL -> Triple(Palette.TONAL, Palette.ON_TONAL, 0)
         BtnStyle.OUTLINED -> Triple(0x00000000, Palette.ACCENT, Palette.OUTLINE)
         BtnStyle.TEXT -> Triple(0x00000000, Palette.ACCENT, 0)
     }
-    val shape = roundBg(bg, 20f, ctx, stroke)
-    val inset = android.graphics.drawable.InsetDrawable(shape, 0, ctx.dp(4), 0, ctx.dp(4))
+    val shape = roundBg(bg, Shape.BTN, ctx, stroke)
+    val inset = android.graphics.drawable.InsetDrawable(shape, 0, ctx.dp(2), 0, ctx.dp(2))
     background = ripple(ctx, inset, fg)
     setTextColor(fg)
-    val p = ctx.dp(if (A11yText.glyphOnly(s)) 12 else 24)
+    val p = ctx.dp(if (A11yText.glyphOnly(s)) 12 else 20)
     setPadding(p, 0, p, 0)
     minWidth = ctx.dp(48)
     minimumWidth = ctx.dp(48)
@@ -568,14 +618,14 @@ fun chk(ctx: Context, s: String, value: Boolean, onChange: (Boolean) -> Unit) = 
     setOnCheckedChangeListener { _, b -> onChange(b) }
 }
 
-/** M3 outlined text field look. */
+/** Filled text field: a soft block, the accent frame shows on focus. */
 fun edt(ctx: Context, hint: String, value: String = "", multiline: Boolean = false, number: Boolean = false) = EditText(ctx).apply {
     this.hint = hint
     setText(value)
     textSize = sp(16f)
     setTextColor(Palette.ON_SURFACE)
     setHintTextColor(Palette.MUTED)
-    background = roundBg(0x00000000, 4f, ctx, Palette.OUTLINE)
+    background = roundBg(Palette.TONAL, Shape.FIELD, ctx)
     val h = ctx.dp(16)
     setPadding(h, ctx.dp(14), h, ctx.dp(14))
     minHeight = ctx.dp(56)
@@ -591,8 +641,8 @@ fun edt(ctx: Context, hint: String, value: String = "", multiline: Boolean = fal
         isSingleLine = true
     }
     setOnFocusChangeListener { _, focused ->
-        background = if (focused) roundBg(0x00000000, 4f, ctx, Palette.ACCENT).apply { setStroke(ctx.dp(2), Palette.ACCENT) }
-        else roundBg(0x00000000, 4f, ctx, Palette.OUTLINE)
+        background = if (focused) roundBg(Palette.TONAL, Shape.FIELD, ctx).apply { setStroke(ctx.dp(2), Palette.ACCENT) }
+        else roundBg(Palette.TONAL, Shape.FIELD, ctx)
     }
 }
 
@@ -603,7 +653,7 @@ fun <T> spin(ctx: Context, options: List<Pair<T, String>>, selected: T, onSelect
         override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View =
             super.getDropDownView(position, convertView, parent).also { (it as? TextView)?.textSize = sp(16f) }
     }
-    background = roundBg(0x00000000, 4f, ctx, Palette.OUTLINE)
+    background = roundBg(Palette.TONAL, Shape.FIELD, ctx)
     minimumHeight = ctx.dp(56)
     setPadding(ctx.dp(8), 0, ctx.dp(8), 0)
     setSelection(maxOf(0, options.indexOfFirst { it.first == selected }))
@@ -621,7 +671,7 @@ fun <T> spin(ctx: Context, options: List<Pair<T, String>>, selected: T, onSelect
     }
 }
 
-/** M3 filter/assist chip. */
+/** Chip: a soft block; the selected one is filled with the accent. */
 fun chip(ctx: Context, s: String, selected: Boolean = false, onClick: (() -> Unit)? = null) = TextView(ctx).apply {
     text = s
     textSize = sp(14f)
@@ -630,8 +680,8 @@ fun chip(ctx: Context, s: String, selected: Boolean = false, onClick: (() -> Uni
     minHeight = ctx.dp(32)
     val h = ctx.dp(12)
     setPadding(h, ctx.dp(6), h, ctx.dp(6))
-    setTextColor(if (selected) Palette.ON_SOFT else Palette.MUTED)
-    val shape = if (selected) roundBg(Palette.ACCENT_SOFT, 8f, ctx) else roundBg(0x00000000, 8f, ctx, Palette.OUTLINE)
+    setTextColor(if (selected) Palette.ON_ACCENT else Palette.ON_TONAL)
+    val shape = if (selected) roundBg(Palette.ACCENT, Shape.CHIP, ctx) else roundBg(Palette.TONAL, Shape.CHIP, ctx)
     background = if (onClick != null) ripple(ctx, shape, Palette.ON_SURFACE) else shape
     isSelected = selected
     A11yText.label(s)?.let { contentDescription = it }
@@ -744,61 +794,77 @@ fun <T> choiceChips(ctx: Context, options: List<Pair<T, String>>, selected: T, o
     return box
 }
 
-/** M3 segmented button: 2-4 short options in one row, no scrolling. */
+/** Segmented switch: a soft track, the chosen option is an accent block inside it. */
 fun segBar(ctx: Context, labels: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
     val row = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
-        background = roundBg(0x00000000, 20f, ctx, Palette.OUTLINE)
+        background = roundBg(Palette.TONAL, Shape.BTN, ctx)
+        val m = ctx.dp(3)
+        setPadding(m, m, m, m)
     }
     labels.forEachIndexed { i, s ->
         val on = i == selected
-        val tv = text(ctx, s, if (s.length > 10) 12f else 14f, bold = true, color = if (on) Palette.ON_SOFT else Palette.MUTED).apply {
+        val tv = text(ctx, s, if (s.length > 10) 12f else 14f, bold = true, color = if (on) Palette.ON_ACCENT else Palette.MUTED).apply {
             gravity = Gravity.CENTER
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(ctx.dp(4), 0, ctx.dp(4), 0)
-            background = ripple(ctx, roundBg(if (on) Palette.ACCENT_SOFT else 0x00000000, 20f, ctx), Palette.ON_SURFACE)
+            background = ripple(ctx, roundBg(if (on) Palette.ACCENT else 0x00000000, Shape.BTN - 3f, ctx), Palette.ON_SURFACE)
             contentDescription = A11yText.label(s) ?: s
             isSelected = on
             if (Build.VERSION.SDK_INT >= 30) stateDescription = if (on) t("выбрано", "selected") else null
             setOnClickListener { if (!on) onSelect(i) }
         }
-        row.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(48), 1f))
+        row.addView(tv, LinearLayout.LayoutParams(0, ctx.dp(44), 1f))
     }
     return row
 }
 
-/** M3 navigation bar: icon in a pill, label under it; the active destination is bold. */
+/** Navigation dock: a floating rounded bar; the open destination is an accent block with its icon. */
 fun bottomNav(ctx: Context, items: List<Pair<Ic, String>>, selected: Int, onSelect: (Int) -> Unit): View {
     val bar = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
-        setBackgroundColor(Palette.CARD)
-        setPadding(ctx.dp(4), ctx.dp(8), ctx.dp(4), ctx.dp(8))
+        background = roundBg(Palette.CARD, 28f, ctx, Palette.HAIR)
+        elevation = ctx.dp(3).toFloat()
+        setPadding(ctx.dp(6), ctx.dp(6), ctx.dp(6), ctx.dp(6))
     }
     items.forEachIndexed { i, (ic, label) ->
         val on = i == selected
         val color = if (on) Palette.ON_SURFACE else Palette.MUTED
         val pill = ImageView(ctx).apply {
-            setImageDrawable(IconDrawable(ic, if (on) Palette.ON_SOFT else color))
-            background = roundBg(if (on) Palette.ACCENT_SOFT else 0x00000000, 16f, ctx)
-            val p = ctx.dp(4)
-            setPadding(ctx.dp(20), p, ctx.dp(20), p)
+            setImageDrawable(IconDrawable(ic, if (on) Palette.ON_ACCENT else color))
+            background = roundBg(if (on) Palette.ACCENT else 0x00000000, 14f, ctx)
+            val p = ctx.dp(5)
+            setPadding(ctx.dp(16), p, ctx.dp(16), p)
         }
         val cell = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.CENTER
             minimumHeight = ctx.dp(56)
             contentDescription = label
             isSelected = on
+            background = ripple(ctx, roundBg(0x00000000, 22f, ctx), Palette.ON_SURFACE)
             if (Build.VERSION.SDK_INT >= 30) stateDescription = if (on) t("открыто", "current") else null
-            addView(pill, LinearLayout.LayoutParams(ctx.dp(64), ctx.dp(32)))
-            addView(text(ctx, label, 12f, bold = on, color = color).apply { maxLines = 1 })
+            addView(pill, LinearLayout.LayoutParams(ctx.dp(56), ctx.dp(34)))
+            addView(text(ctx, label, 11f, bold = on, color = color).apply {
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                isSelected = on
+                setPadding(0, ctx.dp(2), 0, 0)
+            })
             setOnClickListener { onSelect(i) }
         }
         bar.addView(cell, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     }
-    return bar
+    return FrameLayout(ctx).apply {
+        setPadding(ctx.dp(12), ctx.dp(4), ctx.dp(12), ctx.dp(10))
+        clipToPadding = false
+        addView(bar)
+    }
 }
+
+/** One tile of a [Col.tiles] grid: a glyph in a soft square, a title, a line under it and an optional badge. */
+class Tile(val glyph: String, val title: String, val sub: String = "", val badge: String = "", val accent: Boolean = false, val onClick: () -> Unit)
 
 /** Tiny view DSL so screens can be built in code without XML or extra libraries (8dp grid). */
 class Col(val ctx: Context, padding: Int = 16) {
@@ -815,8 +881,13 @@ class Col(val ctx: Context, padding: Int = 16) {
         return v
     }
 
-    fun title(s: String) = add(text(ctx, s, Type.HEADLINE).apply { heading() }, 4)
-    fun h2(s: String) = add(text(ctx, s, Type.TITLE_M, bold = true).apply { heading() }, 24)
+    fun title(s: String) = add(text(ctx, s, Type.HEADLINE).apply { heading(); typeface = Type.display }, 4)
+
+    /** Section label: small capitals with wide tracking. */
+    fun h2(s: String) = add(text(ctx, s.uppercase(), 12.5f, bold = true, color = Palette.MUTED).apply {
+        heading()
+        letterSpacing = 0.09f
+    }, 26)
     fun p(s: String, size: Float = Type.BODY, color: Int? = null) = add(text(ctx, s, size, color = color ?: Palette.ON_SURFACE))
     fun muted(s: String) = add(text(ctx, s, 13f, color = Palette.MUTED), 4)
 
@@ -845,10 +916,10 @@ class Col(val ctx: Context, padding: Int = 16) {
     fun chips(chips: List<View>, collapseAfter: Int = 9) = add(chipRow(ctx, chips, collapseAfter), 8)
     fun row(vararg views: View): LinearLayout = add(rowOf(ctx, *views), 4)
 
-    /** M3 filled card, 12dp corners, 16dp inner padding. */
+    /** Card: 22dp corners, a hairline around, 16dp inner padding. */
     fun card(build: Col.() -> Unit): LinearLayout {
         val c = Col(ctx)
-        c.root.background = ripple(ctx, roundBg(Palette.CARD, 12f, ctx), Palette.ON_SURFACE)
+        c.root.background = ripple(ctx, roundBg(Palette.CARD, Shape.CARD, ctx, Palette.HAIR), Palette.ON_SURFACE)
         c.build()
         return add(c.root, 12)
     }
@@ -867,7 +938,10 @@ class Col(val ctx: Context, padding: Int = 16) {
                 if (!expanded && summary.isNotBlank()) addView(text(ctx, summary, 13f, color = Palette.MUTED))
             }
             addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            addView(text(ctx, if (expanded) "▴" else "▾", 18f, color = Palette.MUTED))
+            addView(text(ctx, if (expanded) "–" else "+", 18f, bold = true, color = Palette.ON_TONAL).apply {
+                gravity = Gravity.CENTER
+                background = roundBg(Palette.TONAL, 12f, ctx)
+            }, LinearLayout.LayoutParams(ctx.dp(32), ctx.dp(32)))
             contentDescription = title + ". " + if (expanded) t("Свернуть", "Collapse") else t("Развернуть", "Expand")
             setOnClickListener { onToggle(!expanded) }
         }
@@ -879,8 +953,8 @@ class Col(val ctx: Context, padding: Int = 16) {
     fun steps(current: Int, total: Int) {
         val bar = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         for (i in 0 until total) {
-            val seg = View(ctx).apply { background = roundBg(if (i <= current) Palette.ACCENT else Palette.ACCENT_SOFT, 2f, ctx) }
-            val lp = LinearLayout.LayoutParams(0, ctx.dp(4), 1f)
+            val seg = View(ctx).apply { background = roundBg(if (i <= current) Palette.ACCENT else Palette.TONAL, 3f, ctx) }
+            val lp = LinearLayout.LayoutParams(0, ctx.dp(6), 1f)
             if (i > 0) lp.marginStart = ctx.dp(4)
             bar.addView(seg, lp)
         }
@@ -891,7 +965,7 @@ class Col(val ctx: Context, padding: Int = 16) {
     fun empty(title: String, body: String, action: String? = null, onAction: (() -> Unit)? = null) {
         val box = Col(ctx, 24)
         box.root.gravity = Gravity.CENTER_HORIZONTAL
-        box.root.background = roundBg(Palette.CARD, 16f, ctx)
+        box.root.background = roundBg(Palette.CARD, Shape.CARD, ctx, Palette.HAIR)
         box.add(text(ctx, title, Type.TITLE_M, bold = true).apply { gravity = Gravity.CENTER }, 0)
         box.add(text(ctx, body, Type.BODY, color = Palette.MUTED).apply { gravity = Gravity.CENTER }, 8)
         if (action != null && onAction != null) {
@@ -906,10 +980,97 @@ class Col(val ctx: Context, padding: Int = 16) {
     }
 
     fun clear() = root.removeAllViews()
+
+    /** List row that leads somewhere: a glyph in a soft square, a title with a line under it, a chevron. */
+    fun nav(glyph: String, title: String, sub: String = "", badge: String = "", onClick: () -> Unit): View {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = ctx.dp(64)
+            background = ripple(ctx, roundBg(Palette.CARD, 18f, ctx, Palette.HAIR), Palette.ON_SURFACE)
+            setPadding(ctx.dp(12), ctx.dp(10), ctx.dp(14), ctx.dp(10))
+            addView(text(ctx, glyph, 18f).apply {
+                gravity = Gravity.CENTER
+                background = roundBg(Palette.TONAL, 12f, ctx)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(ctx.dp(40), ctx.dp(40)).apply { marginEnd = ctx.dp(12) })
+            val texts = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(text(ctx, title, 15f, bold = true))
+                if (sub.isNotBlank()) addView(text(ctx, sub, 12.5f, color = Palette.MUTED).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+            }
+            addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (badge.isNotBlank()) addView(text(ctx, badge, 12f, bold = true, color = Palette.ON_SOFT).apply {
+                background = roundBg(Palette.ACCENT_SOFT, 10f, ctx)
+                setPadding(ctx.dp(8), ctx.dp(3), ctx.dp(8), ctx.dp(3))
+            })
+            addView(text(ctx, "›", 20f, color = Palette.MUTED).apply { setPadding(ctx.dp(10), 0, 0, 0) })
+            contentDescription = title + (if (sub.isNotBlank()) ". $sub" else "") + (if (badge.isNotBlank()) ". $badge" else "")
+            setOnClickListener { onClick() }
+        }
+        return add(row, 8)
+    }
+
+    /** Grid of big tappable tiles, [columns] in a row (the last row is padded with empty cells). */
+    fun tiles(items: List<Tile>, columns: Int = 2) {
+        items.chunked(columns).forEach { line ->
+            val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
+            for (i in 0 until columns) {
+                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
+                if (i > 0) lp.marginStart = ctx.dp(10)
+                row.addView(line.getOrNull(i)?.let { tileView(ctx, it) } ?: View(ctx), lp)
+            }
+            add(row, 10)
+        }
+    }
+}
+
+/** View of one [Tile]; an accent tile is filled with the accent colour. */
+fun tileView(ctx: Context, tile: Tile): View {
+    val bg = if (tile.accent) Palette.ACCENT else Palette.CARD
+    val fg = if (tile.accent) Palette.ON_ACCENT else Palette.ON_SURFACE
+    val sub = if (tile.accent) Palette.ON_ACCENT else Palette.MUTED
+    return LinearLayout(ctx).apply {
+        orientation = LinearLayout.VERTICAL
+        background = ripple(ctx, roundBg(bg, Shape.CARD, ctx, if (tile.accent) 0 else Palette.HAIR), fg)
+        setPadding(ctx.dp(14), ctx.dp(14), ctx.dp(14), ctx.dp(14))
+        minimumHeight = ctx.dp(112)
+        val top = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(text(ctx, tile.glyph, 20f, color = fg).apply {
+                gravity = Gravity.CENTER
+                background = roundBg(if (tile.accent) 0x22000000 else Palette.TONAL, 14f, ctx)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }, LinearLayout.LayoutParams(ctx.dp(44), ctx.dp(44)))
+            addView(View(ctx), LinearLayout.LayoutParams(0, 1, 1f))
+            if (tile.badge.isNotBlank()) addView(text(ctx, tile.badge, 12f, bold = true, color = Palette.ON_SOFT).apply {
+                background = roundBg(Palette.ACCENT_SOFT, 10f, ctx)
+                setPadding(ctx.dp(8), ctx.dp(3), ctx.dp(8), ctx.dp(3))
+            })
+        }
+        addView(top)
+        addView(text(ctx, tile.title, 15f, bold = true, color = fg).apply {
+            maxLines = 2
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, ctx.dp(12), 0, 0)
+        })
+        if (tile.sub.isNotBlank()) addView(text(ctx, tile.sub, 12.5f, color = sub).apply {
+            maxLines = 3
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, ctx.dp(2), 0, 0)
+            if (tile.accent) alpha = 0.8f
+        })
+        contentDescription = tile.title + (if (tile.sub.isNotBlank()) ". " + tile.sub else "") + (if (tile.badge.isNotBlank()) ". " + tile.badge else "")
+        setOnClickListener { tile.onClick() }
+    }
 }
 
 /**
- * M3 primary tabs (scrollable): label + 3dp active indicator, bottom divider.
+ * Scrollable tabs as blocks: the open one is inverted (text colour as background).
  * The selected tab is scrolled into view, so tabs far to the right are never hidden.
  */
 fun tabBar(ctx: Context, tabs: List<String>, selected: Int, onSelect: (Int) -> Unit): View {
@@ -918,13 +1079,18 @@ fun tabBar(ctx: Context, tabs: List<String>, selected: Int, onSelect: (Int) -> U
     val marks = mutableListOf<View>()
     val scroller = HorizontalScrollView(ctx).apply {
         isHorizontalScrollBarEnabled = false
-        setPadding(ctx.dp(8), 0, ctx.dp(8), 0)
+        setPadding(ctx.dp(12), 0, ctx.dp(12), 0)
         clipToPadding = false
         addView(row)
     }
     fun paint(sel: Int) {
-        labels.forEachIndexed { i, l -> l.setTextColor(if (i == sel) Palette.ACCENT else Palette.MUTED) }
-        marks.forEachIndexed { i, m -> m.background = if (i == sel) roundBg(Palette.ACCENT, 3f, ctx) else null }
+        labels.forEachIndexed { i, l ->
+            l.setTextColor(if (i == sel) Palette.SURFACE else Palette.MUTED)
+            l.isSelected = i == sel
+        }
+        marks.forEachIndexed { i, m ->
+            m.background = ripple(ctx, roundBg(if (i == sel) Palette.ON_SURFACE else 0x00000000, Shape.CHIP, ctx), Palette.ON_SURFACE)
+        }
     }
     fun reveal(i: Int) = scroller.post {
         val v = row.getChildAt(i) ?: return@post
@@ -935,15 +1101,9 @@ fun tabBar(ctx: Context, tabs: List<String>, selected: Int, onSelect: (Int) -> U
             gravity = Gravity.CENTER
             isSingleLine = true
         }
-        val mark = View(ctx)
-        val cell = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            minimumHeight = ctx.dp(48)
-            setPadding(ctx.dp(16), 0, ctx.dp(16), 0)
-            background = ripple(ctx, roundBg(0x00000000, 0f, ctx), Palette.ON_SURFACE)
-            addView(label, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 0, 1f))
-            addView(mark, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(3)))
+        val cell = FrameLayout(ctx).apply {
+            setPadding(ctx.dp(14), 0, ctx.dp(14), 0)
+            addView(label, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
             contentDescription = s
             setOnClickListener {
                 paint(i)
@@ -952,16 +1112,15 @@ fun tabBar(ctx: Context, tabs: List<String>, selected: Int, onSelect: (Int) -> U
             }
         }
         labels.add(label)
-        marks.add(mark)
-        row.addView(cell, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ctx.dp(48)))
+        marks.add(cell)
+        row.addView(cell, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ctx.dp(40)).apply { marginEnd = ctx.dp(4) })
     }
     paint(selected)
     reveal(selected)
     return LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
+        setPadding(0, ctx.dp(2), 0, ctx.dp(8))
         addView(scroller)
-        addView(View(ctx).apply { setBackgroundColor((Palette.OUTLINE and 0x00FFFFFF) or 0x40000000) },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ctx.dp(1)))
     }
 }
 
@@ -1138,14 +1297,14 @@ abstract class LumenBase : Activity() {
         }
         hideSnack(timeout = true)
         val content = findViewById<ViewGroup>(android.R.id.content) ?: return
-        val inverse = if (isNight()) 0xFFE6E0E9.toInt() else 0xFF322F35.toInt()
-        val onInverse = if (isNight()) 0xFF322F35.toInt() else 0xFFF5EFF7.toInt()
-        val actionColor = if (isNight()) 0xFF6750A4.toInt() else 0xFFD0BCFF.toInt()
+        val inverse = if (isNight()) 0xFFF1F2F4.toInt() else 0xFF1B1D22.toInt()
+        val onInverse = if (isNight()) 0xFF15161A.toInt() else 0xFFF5F3EE.toInt()
+        val actionColor = if (isNight()) 0xFF3D5200.toInt() else 0xFFC8F03C.toInt()
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             minimumHeight = dp(48)
-            background = roundBg(inverse, 4f, this@LumenBase)
+            background = roundBg(inverse, 16f, this@LumenBase)
             elevation = dp(6).toFloat()
             setPadding(dp(16), dp(4), dp(8), dp(4))
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
@@ -1310,27 +1469,40 @@ abstract class LumenBase : Activity() {
     /** Help section opened by the "?" in the top bar of this screen. */
     open val helpTopic: String get() = HelpMap.topicFor(javaClass.simpleName)
 
-    /** M3 small top app bar: navigation icon, title, trailing action icons. */
+    /** Top bar: the back arrow in a soft square, a bold display title (larger on root screens), action icons. */
     private fun appBar(title: String, back: Boolean, actions: List<Pair<String, () -> Unit>>): LinearLayout {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            minimumHeight = dp(64)
-            setPadding(dp(4), 0, dp(4), 0)
+            minimumHeight = dp(if (back) 64 else 76)
+            setPadding(dp(if (back) 12 else 8), 0, dp(6), 0)
             if (Palette.gradient == null) setBackgroundColor(Palette.SURFACE)
         }
         val size = dp(48)
-        if (back) bar.addView(iconBtn(this, "←") { navigateUp() }, LinearLayout.LayoutParams(size, size))
-        val tv = text(this, title, Type.TITLE_L).apply {
+        if (back) {
+            val arrow = ImageView(this).apply {
+                setImageDrawable(IconDrawable(Ic.BACK, Palette.ON_TONAL))
+                contentDescription = glyphLabel("←")
+                background = ripple(this@LumenBase, android.graphics.drawable.InsetDrawable(roundBg(Palette.TONAL, 14f, this@LumenBase), dp(3)), Palette.ON_TONAL)
+                // after the background: an inset drawable brings its own padding
+                val p = dp(12)
+                setPadding(p, p, p, p)
+                setOnClickListener { navigateUp() }
+            }
+            bar.addView(arrow, LinearLayout.LayoutParams(size, size))
+        }
+        val tv = text(this, title, if (back) 20f else 30f).apply {
+            typeface = Type.display
             isSingleLine = true
             ellipsize = android.text.TextUtils.TruncateAt.END
-            setPadding(if (back) dp(4) else dp(12), 0, 0, 0)
+            setPadding(if (back) dp(10) else dp(12), 0, 0, 0)
+            heading()
         }
         bar.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         actions.forEach { (glyph, cb) -> bar.addView(iconBtn(this, glyph, onClick = cb), LinearLayout.LayoutParams(size, size)) }
         // every screen gets its help; the help screen itself does not need one
         if (this !is HelpActivity && actions.none { it.first == "?" }) {
-            bar.addView(iconBtn(this, "?") { HelpActivity.open(this, helpTopic) }, LinearLayout.LayoutParams(size, size))
+            bar.addView(iconBtn(this, "?", Palette.MUTED) { HelpActivity.open(this, helpTopic) }, LinearLayout.LayoutParams(size, size))
         }
         return bar
     }
@@ -1380,12 +1552,13 @@ abstract class LumenBase : Activity() {
                 gravity = Gravity.CENTER
                 minHeight = dp(56)
                 setPadding(dp(20), 0, dp(20), 0)
-                background = ripple(this@LumenBase, roundBg(Palette.FAB, 16f, this@LumenBase), Palette.ON_FAB)
+                typeface = Type.display
+                background = ripple(this@LumenBase, roundBg(Palette.FAB, 20f, this@LumenBase), Palette.ON_FAB)
                 elevation = dp(6).toFloat()
                 setOnClickListener { fab.second() }
             }
             val lp = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(56), Gravity.BOTTOM or Gravity.END)
-            lp.setMargins(dp(16), dp(16), dp(16), dp(16) + if (footer != null) dp(80) + footerExtra else 0)
+            lp.setMargins(dp(16), dp(16), dp(16), dp(16) + if (footer != null) dp(88) + footerExtra else 0)
             frame.addView(f, lp)
             // leave room so the FAB never covers the last item
             if (scroll) (content as? ViewGroup)?.let { it.setPadding(it.paddingLeft, it.paddingTop, it.paddingRight, it.paddingBottom + dp(88)) }
@@ -1405,8 +1578,14 @@ abstract class LumenBase : Activity() {
         val dialog = android.app.Dialog(this)
         dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE)
         val c = Col(this, 20)
-        c.root.background = roundBg(Palette.SURFACE, 28f, this)
-        c.add(text(this, title, Type.TITLE_L), 0)
+        c.root.background = GradientDrawable().apply {
+            setColor(Palette.SURFACE)
+            val r = dp(1) * Shape.SHEET
+            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+        }
+        c.root.addView(View(this).apply { background = roundBg(Palette.OUTLINE, 2f, this@LumenBase) },
+            LinearLayout.LayoutParams(dp(40), dp(4)).apply { gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(14) })
+        c.add(text(this, title, 20f).apply { typeface = Type.display; heading() }, 0)
         c.build { dialog.dismiss() }
         val scroll = ScrollView(this).apply { addView(c.root) }
         dialog.setContentView(scroll)
@@ -1466,13 +1645,13 @@ fun videoListRow(ctx: Context, thumb: String, title: String, sub: String, meta: 
     val row = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        background = ripple(ctx, roundBg(Palette.CARD, 12f, ctx), Palette.ON_SURFACE)
+        background = ripple(ctx, roundBg(Palette.CARD, 18f, ctx, Palette.HAIR), Palette.ON_SURFACE)
         setPadding(ctx.dp(8), ctx.dp(8), ctx.dp(12), ctx.dp(8))
         setOnClickListener { onClick() }
     }
     val img = ImageView(ctx).apply {
         scaleType = ImageView.ScaleType.CENTER_CROP
-        background = roundBg(Palette.ACCENT_SOFT, 8f, ctx)
+        background = roundBg(Palette.TONAL, 12f, ctx)
         clipToOutline = true
         contentDescription = title
     }
@@ -1550,7 +1729,7 @@ fun busyBar(ctx: Context): ProgressBar = ProgressBar(ctx, null, android.R.attr.p
     isIndeterminate = true
     indeterminateTintList = ColorStateList.valueOf(Palette.ACCENT)
     progressTintList = ColorStateList.valueOf(Palette.ACCENT)
-    progressBackgroundTintList = ColorStateList.valueOf(Palette.ACCENT_SOFT)
+    progressBackgroundTintList = ColorStateList.valueOf(Palette.TONAL)
     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
 }
 

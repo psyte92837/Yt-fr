@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Lumen: Material 3 framework theme (colours are refined in code via Palette, incl. Material You) -->
+<!-- Lumen Next: framework theme under the code-drawn UI (graphite and lime at night) -->
 <resources>
     <style name="LumenTheme" parent="android:Theme.Material.NoActionBar">
-        <item name="android:colorPrimary">#FFD0BCFF</item>
-        <item name="android:colorAccent">#FFD0BCFF</item>
-        <item name="android:colorControlActivated">#FFD0BCFF</item>
-        <item name="android:windowBackground">#FF141218</item>
-        <item name="android:statusBarColor">#FF141218</item>
-        <item name="android:navigationBarColor">#FF141218</item>
+        <item name="android:colorPrimary">#FFC8F03C</item>
+        <item name="android:colorAccent">#FFC8F03C</item>
+        <item name="android:colorControlActivated">#FFC8F03C</item>
+        <item name="android:windowBackground">#FF0E0F12</item>
+        <item name="android:statusBarColor">#FF0E0F12</item>
+        <item name="android:navigationBarColor">#FF0E0F12</item>
     </style>
 </resources>

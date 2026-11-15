@@ -22,6 +22,9 @@ import kotlin.math.sin
 enum class StudioTask(val id: String) {
     SHORTS("shorts"), VIDEO("video"), VOICE("voice"), CUTS("cuts"), CARTOON("cartoon");
 
+    /** The voice-over leads (own recording, clips under a voice): sound effects of captions and blocks are off unless asked. */
+    val voiceFirst: Boolean get() = this == VOICE || this == CUTS
+
     companion object {
         fun of(id: String): StudioTask = entries.firstOrNull { it.id == id } ?: SHORTS
     }

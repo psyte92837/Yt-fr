@@ -1,8 +1,8 @@
 {
  "protocol": "lumen.freeai v1",
- "version": "2026.11.09",
- "upstream": "freellmapi snapshot monthly 2026.11.07.3db98c",
- "hash": "e026f2fde1536b94",
+ "version": "2026.11.16",
+ "upstream": "freellmapi snapshot monthly 2026.11.15",
+ "hash": "67221253a00f4b74",
  "providers": [
   {
    "id": "agnes",
@@ -190,6 +190,20 @@
    "tpm": 0,
    "tpd": 0,
    "vision": true,
+   "tools": true
+  },
+  {
+   "p": "nvidia",
+   "id": "z-ai/glm-5.3-flash",
+   "name": "GLM 5.3 Flash (NV)",
+   "intel": 23,
+   "speed": 10,
+   "ctx": 1000000,
+   "rpm": 40,
+   "rpd": 0,
+   "tpm": 0,
+   "tpd": 0,
+   "vision": false,
    "tools": true
   },
   {
@@ -429,6 +443,76 @@
    "tpd": 0,
    "vision": false,
    "tools": true
+  },
+  {
+   "p": "kilo",
+   "id": "nvidia/nemotron-3.5-super-vl:free",
+   "name": "Nemotron 3.5 Super VL (Free)",
+   "intel": 50,
+   "speed": 10,
+   "ctx": 1000000,
+   "rpm": 0,
+   "rpd": 0,
+   "tpm": 0,
+   "tpd": 0,
+   "vision": false,
+   "tools": false
+  },
+  {
+   "p": "llm7",
+   "id": "gpt-oss:20b",
+   "name": "gpt-oss:20b (LLM7)",
+   "intel": 50,
+   "speed": 10,
+   "ctx": 128000,
+   "rpm": 0,
+   "rpd": 0,
+   "tpm": 0,
+   "tpd": 0,
+   "vision": false,
+   "tools": false
+  },
+  {
+   "p": "nvidia",
+   "id": "stepfun-ai/step-5-preview",
+   "name": "Step 5 Preview",
+   "intel": 50,
+   "speed": 10,
+   "ctx": 0,
+   "rpm": 0,
+   "rpd": 0,
+   "tpm": 0,
+   "tpd": 0,
+   "vision": false,
+   "tools": false
+  },
+  {
+   "p": "openrouter",
+   "id": "nvidia/nemotron-3.5-super-vl:free",
+   "name": "Nemotron 3.5 Super VL (Free)",
+   "intel": 50,
+   "speed": 10,
+   "ctx": 1000000,
+   "rpm": 0,
+   "rpd": 0,
+   "tpm": 0,
+   "tpd": 0,
+   "vision": false,
+   "tools": false
+  },
+  {
+   "p": "requesty",
+   "id": "novita/ling-3.1-flash",
+   "name": "Ling 3.1 Flash (Requesty)",
+   "intel": 50,
+   "speed": 10,
+   "ctx": 262144,
+   "rpm": 0,
+   "rpd": 0,
+   "tpm": 0,
+   "tpd": 0,
+   "vision": false,
+   "tools": false
   },
   {
    "p": "xkiro",
@@ -1243,20 +1327,6 @@
    "tools": true
   },
   {
-   "p": "requesty",
-   "id": "nvidia/nemotron-3-super-120b-a12b",
-   "name": "Nemotron 3 Super 120B (Requesty)",
-   "intel": 81,
-   "speed": 9,
-   "ctx": 1048576,
-   "rpm": 0,
-   "rpd": 200,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "sealion",
    "id": "aisingapore/Nemotron-SEA-LION-v4.8-120B-A12B",
    "name": "Nemotron 3 Super 120B (NV)",
@@ -1615,20 +1685,6 @@
    "ctx": 131072,
    "rpm": 2,
    "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "openrouter",
-   "id": "liquid/lfm-2.5-2.6b:free",
-   "name": "LFM2.5 2.6B (free)",
-   "intel": 90,
-   "speed": 3,
-   "ctx": 32768,
-   "rpm": 20,
-   "rpd": 50,
    "tpm": 0,
    "tpd": 0,
    "vision": false,
@@ -2234,20 +2290,6 @@
    "tpm": 0,
    "tpd": 0,
    "vision": false,
-   "tools": false
-  },
-  {
-   "p": "requesty",
-   "id": "nvidia/nemotron-3.5-content-safety",
-   "name": "Nemotron 3.5 Content Safety (Requesty)",
-   "intel": 103,
-   "speed": 9,
-   "ctx": 131072,
-   "rpm": 0,
-   "rpd": 200,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
    "tools": false
   },
   {

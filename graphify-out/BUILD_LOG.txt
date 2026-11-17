@@ -1,6 +1,6 @@
 # graphify build log
 Name: graphifyy
-Version: 0.9.109
+Version: 0.9.111
 Summary: AI coding assistant skill (Claude Code, CodeBuddy, Codex, OpenCode, Kilo Code, Cursor, Gemini CLI, Aider, OpenClaw, Factory Droid, Trae, Hermes, Kiro, Pi, Devin CLI, Google Antigravity) - turn any folder of code, docs, papers, images, or videos into a queryable knowledge graph
 ERROR: Pipe to stdout was broken
 Usage: graphify <command>
@@ -16,6 +16,10 @@ Commands:
     --undirected            ignore edge direction
   explain "X"             plain-language explanation of a node and its neighbors
     --all                   list every connection (default: the 20 most connected)
+    --graph <path>          path to graph.json (default graphify-out/graph.json)
+  section "X"             print the text of a Markdown section (heading and subsections)
+                            "docs/api.md#X" picks X in one file when several share it
+    --max-chars N           cap on printed characters (default 8000)
     --graph <path>          path to graph.json (default graphify-out/graph.json)
   diagnose multigraph    report same-endpoint edge collapse risk in graph.json
     --graph <path>          path to graph/extraction JSON
@@ -59,10 +63,6 @@ Commands:
     --model=<name>          model to use for community naming (claude-cli also reads GRAPHIFY_CLAUDE_CLI_MODEL)
     --max-concurrency=N     parallel labeling LLM calls (default 4; forced to 1 for ollama/claude-cli)
     --batch-size=N          communities per labeling LLM call (default 100)
-  query "<question>"       BFS traversal of graph.json for a question
-    --dfs                   use depth-first instead of breadth-first
-    --context C             explicit edge-context filter (repeatable)
-    --seed X                start at node X (id, label or file path; repeatable)
 [graphify extract] scanning /home/runner/work/_temp/src
 [graphify extract] found 296 code, 0 docs, 0 papers, 0 images
 [graphify extract] AST extraction on 296 code files...
@@ -71,24 +71,24 @@ Commands:
   AST extraction: 200/296 uncached files (67%) [4 workers]
   AST extraction: 296/296 uncached files (100%) [4 workers]
   warning: 15 file(s) had syntax errors and may be partially extracted: app/src/main/java/org/schabi/newpipe/lumen/AudioEditorActivity.kt (error region at line 1, 64 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/AudioEngine.kt (error region at line 397, 47 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/Board.kt (error region at line 116, 36 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/BoardActivity.kt (error region at line 1, 63 symbol(s) extracted), app/src/main/java/org/schabi/newpipe/lumen/ChannelActivity.kt (error region at line 15, 6 symbol(s) extracted) (+10 more)
-[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 8631 nodes, 29994 edges, 249 communities
+[graphify extract] wrote /home/runner/work/_temp/src/graphify-out/graph.json: 8606 nodes, 29883 edges, 260 communities
 [graphify extract] wrote /home/runner/work/_temp/src/graphify-out/.graphify_analysis.json
 [graphify extract] next: run `graphify cluster-only /home/runner/work/_temp/src` to generate GRAPH_REPORT.md and name communities
 exit=0
 Loading existing graph...
-Graph: 8631 nodes, 29994 edges
+Graph: 8606 nodes, 29883 edges
 Re-clustering...
-Done - 249 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
+Done - 260 communities. GRAPH_REPORT.md and graph.json updated (--no-viz; graph.html removed).
 cluster exit=0
-graph_map: 249 communities named, 296 files mapped
+graph_map: 260 communities named, 296 files mapped
 map exit=0
-total 15840
-drwxr-xr-x 3 runner runner     4096 Nov 15 13:16 .
-drwxr-xr-x 4 runner runner     4096 Nov 15 13:16 ..
--rw-r--r-- 1 runner runner   714403 Nov 15 13:16 .graphify_analysis.json
--rw-r--r-- 1 runner runner       27 Nov 15 13:16 .graphify_root
--rw-r--r-- 1 runner runner     6799 Nov 15 13:16 BUILD_LOG.txt
--rw-r--r-- 1 runner runner    87551 Nov 15 13:16 GRAPH_REPORT.md
-drwxr-xr-x 3 runner runner     4096 Nov 15 13:16 cache
--rw-r--r-- 1 runner runner 15310893 Nov 15 13:16 graph.json
--rw-r--r-- 1 runner runner    71839 Nov 15 13:16 manifest.json
+total 16220
+drwxr-xr-x 3 runner runner     4096 Nov 17 13:15 .
+drwxr-xr-x 4 runner runner     4096 Nov 17 13:15 ..
+-rw-r--r-- 1 runner runner   719537 Nov 17 13:15 .graphify_analysis.json
+-rw-r--r-- 1 runner runner       27 Nov 17 13:15 .graphify_root
+-rw-r--r-- 1 runner runner     6834 Nov 17 13:15 BUILD_LOG.txt
+-rw-r--r-- 1 runner runner    86676 Nov 17 13:15 GRAPH_REPORT.md
+drwxr-xr-x 3 runner runner     4096 Nov 17 13:15 cache
+-rw-r--r-- 1 runner runner 15699190 Nov 17 13:15 graph.json
+-rw-r--r-- 1 runner runner    71860 Nov 17 13:15 manifest.json

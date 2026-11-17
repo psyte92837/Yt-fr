@@ -113,7 +113,8 @@ object Regions {
     fun languageOk(want: String, text: String): Boolean {
         if (want.isBlank()) return true
         val g = LangGuess.guess(text)
-        return g.isEmpty() || g == want
+        // kanji-only Japanese titles read as Chinese
+        return g.isEmpty() || g == want || (want == "ja" && g == "zh")
     }
 }
 

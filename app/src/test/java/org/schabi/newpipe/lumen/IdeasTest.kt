@@ -120,4 +120,18 @@ class IdeasTest {
         assertEquals(30, IdeasLogic.windowDays("month"))
         assertEquals(7, IdeasLogic.windowDays("week"))
     }
+
+    @Test
+    fun checksAreNeverSilentAndOverdueIsCaughtUp() {
+        val text = IdeasLogic.plainDigest(listOf(Triple("Low", "A", 10L), Triple("Top video", "B", 5000L)), "no AI")
+        assertTrue(text.contains("no AI"))
+        assertTrue(text.indexOf("Top video") in 0 until text.indexOf("Low"))
+        val r = IdeasLogic.RunInfo(5, found = 12, added = 3, dropped = 4, note = "x")
+        assertEquals(r, IdeasLogic.RunInfo.from(JSONObject(r.toJson().toString())))
+        assertEquals(null, IdeasLogic.RunInfo.from(JSONObject()))
+        val h = 3_600_000L
+        assertTrue(IdeasLogic.overdue(0, 24, 100))
+        assertEquals(false, IdeasLogic.overdue(1000, 24, 1000 + 30 * h))
+        assertTrue(IdeasLogic.overdue(1000, 24, 1000 + 37 * h))
+    }
 }

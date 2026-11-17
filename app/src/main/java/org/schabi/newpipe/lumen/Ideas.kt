@@ -197,6 +197,46 @@ object IdeasLogic {
     /** Newest first, at most [keep]. */
     fun addDigest(list: List<Digest>, d: Digest, keep: Int = 30): List<Digest> = (listOf(d) + list).sortedByDescending { it.at }.take(keep)
 
+    /**
+     * Digest without AI (no provider or the AI call failed): the new videos by views, so a check is never silent.
+     * [why] is shown on top (the reason the AI digest is missing).
+     */
+    fun plainDigest(videos: List<Triple<String, String, Long>>, why: String, max: Int = 12): String {
+        val sb = StringBuilder()
+        sb.append(t("Новые видео: ", "New videos: ")).append(videos.size).append('\n')
+        if (why.isNotBlank()) sb.append(why.trim()).append('\n')
+        sb.append('\n')
+        videos.sortedByDescending { it.third }.take(max).forEach { (title, channel, views) ->
+            sb.append("• ").append(title.trim().take(140))
+            if (channel.isNotBlank()) sb.append(" — ").append(channel.trim())
+            if (views > 0) sb.append(" · ").append(Fmt.num(views))
+            sb.append('\n')
+        }
+        if (videos.size > max) sb.append(t("…и ещё ", "…and ")).append(videos.size - max).append('\n')
+        return sb.toString().trimEnd()
+    }
+
+    /** Outcome of the last check (shown on the dashboard): found by search, new, rejected by the topic filter, digest. */
+    data class RunInfo(val at: Long, val found: Int, val added: Int, val dropped: Int, val note: String = "") {
+        fun toJson(): JSONObject = JSONObject().put("at", at).put("found", found).put("added", added).put("dropped", dropped).put("note", note)
+
+        fun line(): String = buildString {
+            append(t("найдено ", "found ")).append(found).append(t(", новых ", ", new ")).append(added)
+            if (dropped > 0) append(t(", не по теме ", ", off-topic ")).append(dropped)
+            if (note.isNotBlank()) append(" · ").append(note)
+        }
+
+        companion object {
+            fun from(o: JSONObject?): RunInfo? = o?.takeIf { it.has("at") }?.let {
+                RunInfo(it.optLong("at"), it.optInt("found"), it.optInt("added"), it.optInt("dropped"), it.optString("note"))
+            }
+        }
+    }
+
+    /** The scheduled check is overdue (the system postponed the job): the screen catches up when opened. */
+    fun overdue(lastRunAt: Long, hours: Int, now: Long): Boolean =
+        lastRunAt <= 0 || now - lastRunAt > maxOf(1, hours) * 3_600_000L * 3 / 2
+
     /** First meaningful line of a digest for the home card / notification title. */
     fun headline(text: String, max: Int = 120): String {
         val line = text.lines().map { it.trim().trimStart('#', '*', '-', '•', ' ').replace("**", "").trim() }.firstOrNull { it.length > 3 } ?: ""
@@ -384,10 +424,37 @@ object Ideas {
      */
     fun afterRun(ctx: Context, pid: String, fresh: List<Video>, notify: Boolean = true): IdeasLogic.Digest? {
         val c = byProject(pid) ?: return null
-        val d = digest(c, fresh) ?: return null
+        if (fresh.isEmpty()) return null
+        val d = digest(c, fresh) ?: plain(c, fresh)
         remember(c.id, d)
         if (notify) notify(ctx, c, d)
         return d
+    }
+
+    /** Videos list when the AI digest is unavailable: the check still reports what it found. */
+    private fun plain(c: IdeasConfig, fresh: List<Video>): IdeasLogic.Digest {
+        val why = if (Provider.active() == null) t("Сводку пишет ИИ — подключите его в настройках.", "The digest is written by AI — connect it in Settings.")
+        else t("Сводка ИИ не получилась: ", "AI digest failed: ") + lastError.ifBlank { "?" }.take(160)
+        val text = IdeasLogic.plainDigest(fresh.map { Triple(it.title, it.channel, it.views) }, why)
+        return IdeasLogic.Digest(System.currentTimeMillis(), fresh.size, 0, text)
+    }
+
+    @Volatile private var lastError = ""
+
+    private fun runKey(id: String) = "ideas_run_$id"
+
+    /** Remembers how the last check went (called by [Monitoring.runOnce] for ideas projects, also with nothing new). */
+    fun noteRun(pid: String, found: Int, added: Int, dropped: Int, note: String = "") {
+        val c = byProject(pid) ?: return
+        val r = IdeasLogic.RunInfo(System.currentTimeMillis(), found, added, dropped, note)
+        Lumen.prefs.edit().putString(runKey(c.id), r.toJson().toString()).apply()
+        L.i("ideas", "check ${c.id}: ${r.line()}")
+    }
+
+    fun lastRun(id: String): IdeasLogic.RunInfo? = try {
+        IdeasLogic.RunInfo.from(Lumen.prefs.getString(runKey(id), null)?.let { JSONObject(it) })
+    } catch (e: Exception) {
+        null
     }
 
     /** Manual "Update now": monitoring run; when nothing new arrived, a digest of the last week's videos. Blocking. */
@@ -405,6 +472,7 @@ object Ideas {
     }
 
     private fun digest(c: IdeasConfig, fresh: List<Video>): IdeasLogic.Digest? {
+        lastError = ""
         val prov = Provider.active() ?: return null
         val pid = c.projectId
         val items = fresh.sortedByDescending { it.views }.take(40).map { v -> v to IdeasLogic.topComments(Store.comments(pid, v.id)) }
@@ -417,9 +485,10 @@ object Ideas {
             .replace("{data}", IdeasLogic.dataBlock(items))
         return try {
             val text = Llm.complete(prov, prov.fastModel, Prompts.SYSTEM, prompt, maxTokens = 2500, task = "ideas_digest", pid = pid).text.trim()
-            if (text.isBlank()) null else IdeasLogic.Digest(System.currentTimeMillis(), items.size, items.sumOf { it.second.size }, text)
+            if (text.isBlank()) null.also { lastError = t("пустой ответ", "empty reply") } else IdeasLogic.Digest(System.currentTimeMillis(), items.size, items.sumOf { it.second.size }, text)
         } catch (e: Exception) {
             L.w("ideas", "digest failed: ${e.message}")
+            lastError = e.message.orEmpty()
             null
         }
     }

@@ -455,8 +455,13 @@ object Monitoring {
             it.runs.add(RunRecord(it.lastRunAt, "monitor", found.size, added))
             Store.save(it)
         }
-        if (added > 0 && Ideas.byProject(pid) != null) {
-            Ideas.afterRun(ctx, pid, fresh)
+        if (Ideas.byProject(pid) != null) {
+            Ideas.noteRun(pid, found.size + dropped, added, dropped)
+            if (added > 0) try {
+                Ideas.afterRun(ctx, pid, fresh)
+            } catch (e: Exception) {
+                L.w("ideas", "after run: ${e.message}")
+            }
         } else if (added > 0) {
             val title = WatchDigest.title(p.name, added, fresh)
             val body = WatchDigest.body(fresh, summary, dropped)
@@ -498,6 +503,7 @@ class MonitorJob : JobService() {
                 L.i("monitor", "project $pid: new videos $n")
             } catch (e: Exception) {
                 L.e("monitor", "project $pid failed, will retry", e)
+                Ideas.noteRun(pid, 0, 0, 0, t("ошибка: ", "error: ") + e.message.orEmpty().take(120))
                 retry = true
             }
             jobFinished(params, retry)

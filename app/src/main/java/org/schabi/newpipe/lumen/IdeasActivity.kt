@@ -5,7 +5,10 @@
 package org.schabi.newpipe.lumen
 
 import android.content.Context
+import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.EditText
 
@@ -67,6 +70,48 @@ class IdeasActivity : LumenBase() {
     override fun onResume() {
         super.onResume()
         render()
+        catchUp()
+    }
+
+    private var caughtUp = false
+
+    /** The system may postpone the scheduled check for days (battery saver, rarely used app): catch up on opening. */
+    private fun catchUp() {
+        if (caughtUp || editing) return
+        val cfg = Ideas.config(current)?.takeIf { it.enabled } ?: return
+        val p = Store.project(cfg.projectId) ?: return
+        caughtUp = true
+        if (IdeasLogic.overdue(p.lastRunAt, cfg.hours, System.currentTimeMillis())) refresh()
+    }
+
+    private fun notificationsBlocked(): Boolean {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) return true
+        val nm = getSystemService(NotificationManager::class.java)
+        if (!nm.areNotificationsEnabled()) return true
+        Notify.channels(this)
+        return Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(Notify.CH_MONITOR)?.importance == NotificationManager.IMPORTANCE_NONE
+    }
+
+    private fun askNotifications() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
+            return
+        }
+        val i = if (Build.VERSION.SDK_INT >= 26) Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, packageName)
+        else Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:$packageName"))
+        try {
+            startActivity(i)
+        } catch (e: Exception) {
+            toast(t("Откройте настройки уведомлений Lumen вручную", "Open Lumen's notification settings manually"))
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        @Suppress("DEPRECATION")
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 7) render()
     }
 
     private fun readFields() {
@@ -249,8 +294,12 @@ class IdeasActivity : LumenBase() {
             current = it.id
             editing = false
             busy = ""
+            caughtUp = true
             render()
             refresh()
+            if (notificationsBlocked() && Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED
+            ) askNotifications()
         }
     }
 
@@ -266,8 +315,10 @@ class IdeasActivity : LumenBase() {
         }) { d ->
             busy = ""
             expanded = 0
-            if (d == null) toast(if (Provider.active() == null) t("Видео собраны. Для сводки подключите AI.", "Videos collected. Connect AI for a digest.")
-            else t("Новых видео пока нет", "No new videos yet"))
+            if (d == null) toast(Ideas.lastRun(id)?.takeIf { it.found > 0 }?.let {
+                t("Нового по теме нет: ", "Nothing new on topic: ") + it.line()
+            } ?: t("Свежих видео, которых ещё нет в сборе, YouTube не нашёл. Попробуйте период «за месяц» или другие запросы.",
+                "YouTube found no fresh videos not collected yet. Try the \"last month\" period or other queries."))
             render()
         }
     }
@@ -284,6 +335,9 @@ class IdeasActivity : LumenBase() {
             if (cfg.userQueries.isNotEmpty() && cfg.userQueries != cfg.queries) muted(t("Ваши запросы: ", "Your queries: ") + cfg.userQueries.joinToString(", "))
             if (p != null) muted(t("Видео: ", "Videos: ") + p.videoCount + " · " + t("последняя проверка: ", "last check: ") +
                 if (p.lastRunAt > 0) Fmt.dateTime(p.lastRunAt) else "—")
+            Ideas.lastRun(cfg.id)?.let { r -> muted(t("Итог проверки: ", "Last check result: ") + r.line()) }
+            if (cfg.enabled && p != null && p.lastRunAt > 0) muted(t("Следующая проверка ≈ ", "Next check ≈ ") +
+                Fmt.dateTime(p.lastRunAt + cfg.hours * 3_600_000L) + t(" (система может отложить)", " (the system may postpone it)"))
             add(btn(ctx, t("Обновить сейчас", "Update now"), style = BtnStyle.FILLED) { refresh() }, 12)
             row(
                 btn(ctx, t("Настроить", "Edit"), style = BtnStyle.TONAL) {
@@ -294,6 +348,22 @@ class IdeasActivity : LumenBase() {
                 btn(ctx, if (cfg.enabled) t("Пауза", "Pause") else t("Возобновить", "Resume"), style = BtnStyle.OUTLINED) { toggle(cfg) }
             )
             if (p != null) button(t("Все собранные видео →", "All collected videos →"), style = BtnStyle.TEXT) { openProjectScreen(p) }
+        }
+        if (cfg.enabled && (notificationsBlocked() || !Settings.monitoringAllowed)) {
+            c.card {
+                add(text(ctx, t("⚠ Сводки не придут", "⚠ Digests won't arrive"), Type.TITLE_M, bold = true), 0)
+                if (!Settings.monitoringAllowed) {
+                    muted(t("Фоновые проверки выключены в настройках приложения.", "Background checks are off in the app settings."))
+                    button(t("Включить фоновые проверки", "Turn on background checks"), style = BtnStyle.TONAL) {
+                        Settings.monitoringAllowed = true
+                        bgTask(t("Идеи: расписание", "Ideas: schedule"), { Ideas.apply(Lumen.app, cfg) }, onError = { err(it) }) { render() }
+                    }
+                } else {
+                    muted(t("Уведомления Lumen выключены — проверка пройдёт, но сообщить о сводке будет нельзя.",
+                        "Lumen notifications are off — checks run, but the digest can't be announced."))
+                    button(t("Разрешить уведомления", "Allow notifications"), style = BtnStyle.TONAL) { askNotifications() }
+                }
+            }
         }
         if (Provider.active() == null) {
             c.card {

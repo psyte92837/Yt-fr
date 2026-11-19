@@ -1,8 +1,8 @@
 {
  "protocol": "lumen.freeai v1",
- "version": "2026.11.16",
- "upstream": "freellmapi snapshot monthly 2026.11.15",
- "hash": "67221253a00f4b74",
+ "version": "2026.11.19",
+ "upstream": "freellmapi snapshot monthly 2026.11.18",
+ "hash": "eb2c339d8ca78fd1",
  "providers": [
   {
    "id": "agnes",
@@ -66,14 +66,6 @@
    "base": "https://api.mistral.ai/v1",
    "api": "openai",
    "key": "https://console.mistral.ai/api-keys/",
-   "keyless": false
-  },
-  {
-   "id": "nara",
-   "title": "NaraRouter (free key)",
-   "base": "https://router.bynara.id/v1",
-   "api": "openai",
-   "key": "https://router.bynara.id",
    "keyless": false
   },
   {
@@ -165,20 +157,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3.8-max:free",
-   "name": "Qwen3.8 Max (xKiro)",
-   "intel": 17,
-   "speed": 9,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "unorouter",
    "id": "glm-5.3-flash:free",
    "name": "GLM 5.3 Flash (UnoRouter free)",
@@ -263,20 +241,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3.8-omni-flash:free",
-   "name": "Qwen3.8 Omni Flash (xKiro)",
-   "intel": 31,
-   "speed": 6,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
-   "tools": true
-  },
-  {
    "p": "kilo",
    "id": "dots-studio/dots-3-note-preview:free",
    "name": "Dots3 Note Preview (Kilo)",
@@ -309,20 +273,6 @@
    "id": "agnes-3.0-flash",
    "name": "Agnes 3.0 Flash (Agnes AI)",
    "intel": 35,
-   "speed": 10,
-   "ctx": 0,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": false
-  },
-  {
-   "p": "agnes",
-   "id": "agnes-2.5-pro",
-   "name": "Agnes 2.5 Pro (Agnes AI)",
-   "intel": 37,
    "speed": 10,
    "ctx": 0,
    "rpm": 0,
@@ -403,48 +353,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3.7-max:free",
-   "name": "Qwen3.7 Max (xKiro)",
-   "intel": 49,
-   "speed": 9,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "nara",
-   "id": "nex-n2.5-pro",
-   "name": "Nex-N2.5-Pro (OpenRouter)",
-   "intel": 49,
-   "speed": 10,
-   "ctx": 262000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.6-max-preview:free",
-   "name": "Qwen3.6 Max Preview (xKiro)",
-   "intel": 50,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "kilo",
    "id": "nvidia/nemotron-3.5-super-vl:free",
    "name": "Nemotron 3.5 Super VL (Free)",
@@ -515,48 +423,6 @@
    "tools": false
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3.6-plus:free",
-   "name": "Qwen3.6 Plus (xKiro)",
-   "intel": 53,
-   "speed": 9,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "agnes",
-   "id": "agnes-2.5-pro-alpha",
-   "name": "Agnes 2.5 Pro Alpha (Agnes AI)",
-   "intel": 53,
-   "speed": 10,
-   "ctx": 0,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": false
-  },
-  {
-   "p": "nara",
-   "id": "ling-3.0-flash-vl-free",
-   "name": "Ling 3.0 Flash VL (OpenRouter)",
-   "intel": 57,
-   "speed": 4,
-   "ctx": 262000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "google",
    "id": "gemini-robotics-er-2-preview",
    "name": "Gemini Robotics-ER 2 Preview",
@@ -571,34 +437,6 @@
    "tools": false
   },
   {
-   "p": "nara",
-   "id": "laguna-s-2.1",
-   "name": "Laguna S 2.1 (NaraRouter free)",
-   "intel": 57,
-   "speed": 7,
-   "ctx": 262144,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.7-plus:free",
-   "name": "Qwen3.7 Plus (xKiro)",
-   "intel": 57,
-   "speed": 9,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "radeon",
    "id": "DeepSeek-V4-Flash",
    "name": "DeepSeek V4 Flash (AMD Radeon Cloud)",
@@ -611,34 +449,6 @@
    "tpd": 0,
    "vision": false,
    "tools": true
-  },
-  {
-   "p": "nara",
-   "id": "ling-3.0-flash-fin-free",
-   "name": "Ling 3.0 Flash Free (OpenCode Zen)",
-   "intel": 61,
-   "speed": 4,
-   "ctx": 262000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "nara",
-   "id": "nemotron-3-ultra-free",
-   "name": "Nemotron 3 Ultra Free (OpenCode Zen)",
-   "intel": 61,
-   "speed": 4,
-   "ctx": 1000000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
-   "tools": false
   },
   {
    "p": "nvidia",
@@ -725,20 +535,6 @@
    "tools": true
   },
   {
-   "p": "nara",
-   "id": "agnes-2.5-flash",
-   "name": "Agnes 2.5 Flash (NaraRouter)",
-   "intel": 63,
-   "speed": 5,
-   "ctx": 262144,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": true,
-   "tools": true
-  },
-  {
    "p": "google",
    "id": "gemini-flash-lite-latest",
    "name": "Gemini Flash Lite (latest alias) (Google AI Studio)",
@@ -750,20 +546,6 @@
    "tpm": 250000,
    "tpd": 0,
    "vision": true,
-   "tools": true
-  },
-  {
-   "p": "nara",
-   "id": "ling-3.0-flash-sante-free",
-   "name": "Ling 3.0 Flash Sante (OpenRouter free)",
-   "intel": 65,
-   "speed": 4,
-   "ctx": 262000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
    "tools": true
   },
   {
@@ -788,20 +570,6 @@
    "speed": 9,
    "ctx": 131072,
    "rpm": 2,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.6-27b:free",
-   "name": "Qwen3.6 27B (xKiro)",
-   "intel": 65,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
    "rpd": 0,
    "tpm": 0,
    "tpd": 0,
@@ -851,20 +619,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3.5-omni-plus:free",
-   "name": "Qwen3.5 Omni Plus (xKiro)",
-   "intel": 67,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
-   "tools": true
-  },
-  {
    "p": "google",
    "id": "gemma-4-31b-it",
    "name": "Gemma 4 31B IT",
@@ -887,20 +641,6 @@
    "ctx": 262144,
    "rpm": 10,
    "rpd": 50,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.7-flash:free",
-   "name": "Qwen3.7 Flash (xKiro)",
-   "intel": 69,
-   "speed": 6,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
    "tpm": 0,
    "tpd": 0,
    "vision": false,
@@ -963,20 +703,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3.5-plus:free",
-   "name": "Qwen3.5 Plus (xKiro)",
-   "intel": 69,
-   "speed": 9,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "google",
    "id": "gemini-3-flash-preview",
    "name": "Gemini 3 Flash Preview",
@@ -998,34 +724,6 @@
    "speed": 9,
    "ctx": 262144,
    "rpm": 2,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.5-397b-a17b:free",
-   "name": "Qwen3.5 397B A17B (xKiro)",
-   "intel": 71,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.6-35b-a3b:free",
-   "name": "Qwen3.6 35B A3B (xKiro)",
-   "intel": 71,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
    "rpd": 0,
    "tpm": 0,
    "tpd": 0,
@@ -1117,34 +815,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3-max:free",
-   "name": "Qwen3 Max (xKiro)",
-   "intel": 76,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.5-flash:free",
-   "name": "Qwen3.5 Flash (xKiro)",
-   "intel": 77,
-   "speed": 6,
-   "ctx": 1000000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "nvidia",
    "id": "poolside/laguna-xs-2.1",
    "name": "Poolside Laguna XS 2.1 (NV)",
@@ -1156,20 +826,6 @@
    "tpm": 0,
    "tpd": 0,
    "vision": false,
-   "tools": true
-  },
-  {
-   "p": "agnes",
-   "id": "agnes-2.0-flash",
-   "name": "Agnes 2.0 Flash",
-   "intel": 79,
-   "speed": 6,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
    "tools": true
   },
   {
@@ -1225,20 +881,6 @@
    "rpd": 0,
    "tpm": 0,
    "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "nara",
-   "id": "nemotron-3.5-lightning-free",
-   "name": "Nemotron 3.5 Lightning (free)",
-   "intel": 81,
-   "speed": 2,
-   "ctx": 1000000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
    "vision": false,
    "tools": true
   },
@@ -1299,20 +941,6 @@
    "tools": true
   },
   {
-   "p": "nara",
-   "id": "nemotron-3-super-free",
-   "name": "Nemotron 3 Super (NavyAI)",
-   "intel": 81,
-   "speed": 7,
-   "ctx": 262000,
-   "rpm": 10,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 7000000,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "nvidia",
    "id": "nvidia/nemotron-3-super-120b-a12b",
    "name": "Nemotron 3 Super 120B (NV)",
@@ -1366,20 +994,6 @@
    "tpm": 8000,
    "tpd": 200000,
    "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3.5-omni-flash:free",
-   "name": "Qwen3.5 Omni Flash (xKiro)",
-   "intel": 83,
-   "speed": 6,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
    "tools": true
   },
   {
@@ -1439,20 +1053,6 @@
    "tools": true
   },
   {
-   "p": "xkiro",
-   "id": "qwen/qwen3-coder-plus:free",
-   "name": "Qwen3 Coder Plus (xKiro)",
-   "intel": 85,
-   "speed": 9,
-   "ctx": 1048576,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
    "p": "llm7",
    "id": "default",
    "name": "Default (LLM7)",
@@ -1492,34 +1092,6 @@
    "tpm": 0,
    "tpd": 0,
    "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen-plus-2025-07-28:free",
-   "name": "Qwen Plus 2025-07-28 (xKiro)",
-   "intel": 87,
-   "speed": 9,
-   "ctx": 131072,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3-vl-plus:free",
-   "name": "Qwen3 VL Plus (xKiro)",
-   "intel": 87,
-   "speed": 9,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
    "tools": true
   },
   {
@@ -1702,20 +1274,6 @@
    "tpm": 8000,
    "tpd": 200000,
    "vision": false,
-   "tools": true
-  },
-  {
-   "p": "xkiro",
-   "id": "qwen/qwen3-omni-flash:free",
-   "name": "Qwen3 Omni Flash (xKiro)",
-   "intel": 91,
-   "speed": 6,
-   "ctx": 262144,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
    "tools": true
   },
   {

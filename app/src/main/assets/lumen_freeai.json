@@ -1,8 +1,8 @@
 {
  "protocol": "lumen.freeai v1",
- "version": "2026.11.19",
- "upstream": "freellmapi snapshot monthly 2026.11.18",
- "hash": "eb2c339d8ca78fd1",
+ "version": "2026.11.23",
+ "upstream": "freellmapi snapshot monthly 2026.11.22",
+ "hash": "1e67eb831d10d229",
  "providers": [
   {
    "id": "agnes",
@@ -236,34 +236,6 @@
    "rpm": 10,
    "rpd": 20,
    "tpm": 250000,
-   "tpd": 0,
-   "vision": true,
-   "tools": true
-  },
-  {
-   "p": "kilo",
-   "id": "dots-studio/dots-3-note-preview:free",
-   "name": "Dots3 Note Preview (Kilo)",
-   "intel": 35,
-   "speed": 7,
-   "ctx": 512000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": true,
-   "tools": true
-  },
-  {
-   "p": "openrouter",
-   "id": "dots-studio/dots-3-note-preview:free",
-   "name": "Dots3 Note Preview (free)",
-   "intel": 35,
-   "speed": 7,
-   "ctx": 512000,
-   "rpm": 20,
-   "rpd": 50,
-   "tpm": 0,
    "tpd": 0,
    "vision": true,
    "tools": true
@@ -1065,34 +1037,6 @@
    "tpd": 0,
    "vision": false,
    "tools": false
-  },
-  {
-   "p": "kilo",
-   "id": "cohere/north-mini-code:free",
-   "name": "North Mini Code (Kilo)",
-   "intel": 87,
-   "speed": 8,
-   "ctx": 256000,
-   "rpm": 0,
-   "rpd": 0,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
-  },
-  {
-   "p": "openrouter",
-   "id": "cohere/north-mini-code:free",
-   "name": "North Mini Code (free)",
-   "intel": 87,
-   "speed": 8,
-   "ctx": 256000,
-   "rpm": 20,
-   "rpd": 50,
-   "tpm": 0,
-   "tpd": 0,
-   "vision": false,
-   "tools": true
   },
   {
    "p": "nvidia",
